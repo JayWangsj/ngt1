@@ -610,6 +610,7 @@ function Complete-NgtStudioManualInstall(
     }
     $previousVersion = [string]$marker.previousVersion
     $finalStatus = if ($archived -and
+      [string]$archived.status -notin @("idle", "superseded") -and
       ([string]$archived.status -ne "complete" -or [string]$archived.targetVersion -ne $VerifiedVersion)) {
       [pscustomobject]@{
         status = "superseded"

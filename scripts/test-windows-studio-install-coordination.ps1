@@ -141,6 +141,16 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $active.installRoot ".local\update-history\$oldUpdateId.json"))) {
     throw "The prior task's diagnostic state was not archived."
   }
+  $sameVersionRepair = Start-NgtStudioManualInstall -InstallRoot $active.installRoot -TargetVersion "2.0.15"
+  if ($sameVersionRepair.mode -ne "repair") { throw "A completed upgrade could not enter same-version repair." }
+  Complete-NgtStudioManualInstall -InstallRoot $active.installRoot `
+    -ReleaseRoot $active.newRelease -VerifiedVersion "2.0.15" -HealthVerified
+  $repairedStatus = Get-NgtInstallJson (Join-Path $active.installRoot "update-status.json")
+  if ($repairedStatus.status -ne "idle" -or $repairedStatus.installMode -ne "repair" -or
+      (Test-Path -LiteralPath (Join-Path $active.installRoot "update.lock")) -or
+      (Test-Path -LiteralPath (Join-Path $active.installRoot ".local\update-maintenance.json"))) {
+    throw "A verified same-version repair did not clear the prior superseded state."
+  }
 
   $rollback = New-NgtInstallFixture (Join-Path $testRoot "rollback")
   $script:InstallerTestExecutorState = $false
