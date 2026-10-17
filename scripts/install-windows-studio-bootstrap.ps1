@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Nu
 Start-Transcript -LiteralPath $LogPath -Force
 try {
   & (Join-Path $PSScriptRoot "install-windows-studio.ps1") `
-    -DataRoot $DataRoot -InstallRoot $InstallRoot -InPlace
+    -DataRoot $DataRoot -InstallRoot $InstallRoot
 } catch {
   Write-Error $_
   exit 1

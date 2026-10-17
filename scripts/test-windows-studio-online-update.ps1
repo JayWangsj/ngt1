@@ -458,6 +458,9 @@ try {
       Write-Output "NGT startup task was not registered."
     }
     $diagnosticSources = @()
+    if ($ManualInstaller) {
+      $diagnosticSources += @(@($installerLog, $repairLog) | Where-Object { $_ })
+    }
     if (Test-Path -LiteralPath $updateLog -PathType Leaf) { $diagnosticSources += $updateLog }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }
     $diagnosticSources += @(

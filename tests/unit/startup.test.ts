@@ -636,7 +636,7 @@ describe("Windows persistent startup", () => {
     expect(bootstrap).not.toContain("Expand-Archive");
     expect(bootstrap).not.toContain("PackagePath");
     expect(bootstrap).toContain("install-windows-studio.ps1");
-    expect(bootstrap).toContain("-InPlace");
+    expect(bootstrap).not.toContain("-InPlace");
     expect(bootstrap).toContain("Start-Transcript");
     expect(definition).toContain("install.log");
     expect(bootstrap).toContain("Start-Transcript");
@@ -658,6 +658,7 @@ describe("Windows persistent startup", () => {
     expect(service).toContain("studioConfig.activeRelease");
     expect(startup).toContain('"service\\windows-studio-launcher.vbs"');
     expect(installerScript).toContain("activeRelease = $projectRoot");
+    expect(installerScript).toContain("-InPlace -OnlineUpdate:$OnlineUpdate");
     expect(icon.readUInt16LE(0)).toBe(0);
     expect(icon.readUInt16LE(2)).toBe(1);
     const iconCount = icon.readUInt16LE(4);

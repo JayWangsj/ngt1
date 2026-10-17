@@ -198,7 +198,7 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
         -ReleaseRoot $stableRoot -ExpectedVersion ([string]$release.version) | Out-Null
     }
     & (Join-Path $stableRoot "scripts\install-windows-studio.ps1") `
-      -DataRoot $DataRoot -InstallRoot $InstallRoot -InPlace
+      -DataRoot $DataRoot -InstallRoot $InstallRoot -InPlace -OnlineUpdate:$OnlineUpdate
     return
   }
 }
