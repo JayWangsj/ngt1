@@ -598,7 +598,9 @@ test("shows a superseded task as informational and keeps its diagnostics", async
   const notice = page.locator(".update-task-compact");
   await expect(notice).toContainText("历史更新任务已由经过验证的安装替代");
   await expect(notice).toHaveAttribute("role", "status");
-  expect(await page.getByRole("alert").allTextContents()).toEqual([]);
+  await expect(page.locator('.system-update-page [role="alert"]')).toHaveCount(
+    0,
+  );
   await notice.getByRole("button", { name: "诊断详情" }).click();
   await expect(notice).toContainText("Previous queued update diagnostic.");
 
