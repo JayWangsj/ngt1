@@ -52,7 +52,7 @@ foreach ($sourcePath in $SourcePaths) {
     "online-update" {
       if ((Split-Path -Leaf $sourcePath) -eq "online-update.log") { "online-update.log" }
       elseif ((Split-Path -Leaf $sourcePath) -eq "update-status.json") { "update-status.json" }
-      elseif ((Split-Path -Leaf $sourcePath) -in @("install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
+      elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
       else { $null }
     }
     "installer-acceptance" {
@@ -61,9 +61,13 @@ foreach ($sourcePath in $SourcePaths) {
     }
   }
   if (-not $name) { continue }
-  $text = Protect-DiagnosticText ([System.IO.File]::ReadAllText($sourcePath))
-  [System.IO.File]::WriteAllText((Join-Path $OutputDirectory $name), $text, [System.Text.UTF8Encoding]::new($false))
-  if ($EmitToConsole) { Write-NgtDiagnosticExcerpt -Name $name -Text $text }
+  try {
+    $text = Protect-DiagnosticText ([System.IO.File]::ReadAllText($sourcePath))
+    [System.IO.File]::WriteAllText((Join-Path $OutputDirectory $name), $text, [System.Text.UTF8Encoding]::new($false))
+    if ($EmitToConsole) { Write-NgtDiagnosticExcerpt -Name $name -Text $text }
+  } catch {
+    Write-Warning ("Could not read diagnostic {0}: {1}" -f $name, $_.Exception.Message)
+  }
 }
 $summary = [ordered]@{
   stage = $Stage

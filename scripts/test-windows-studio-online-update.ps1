@@ -464,6 +464,7 @@ try {
     if (Test-Path -LiteralPath $updateLog -PathType Leaf) { $diagnosticSources += $updateLog }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }
     $diagnosticSources += @(
+      (Join-Path $installRoot "install-preflight.log"),
       (Join-Path $installRoot "install.log"),
       (Join-Path $installRoot "install-stages.log"),
       (Join-Path $installRoot ".local\supervisor.error.log"),

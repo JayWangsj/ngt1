@@ -5,6 +5,8 @@ param(
   [switch]$InPlace,
   [switch]$OnlineUpdate
 )
+# v2.0.15 passes these two arguments without -OnlineUpdate.
+if ($InPlace -and $PreviousReleaseRoot -and -not $OnlineUpdate) { $OnlineUpdate = $true }
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "studio-runtime.ps1")
 

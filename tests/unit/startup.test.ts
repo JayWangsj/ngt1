@@ -659,6 +659,9 @@ describe("Windows persistent startup", () => {
     expect(startup).toContain('"service\\windows-studio-launcher.vbs"');
     expect(installerScript).toContain("activeRelease = $projectRoot");
     expect(installerScript).toContain("-InPlace -OnlineUpdate:$OnlineUpdate");
+    expect(installerScript).toContain(
+      "if ($InPlace -and $PreviousReleaseRoot -and -not $OnlineUpdate) { $OnlineUpdate = $true }",
+    );
     expect(icon.readUInt16LE(0)).toBe(0);
     expect(icon.readUInt16LE(2)).toBe(1);
     const iconCount = icon.readUInt16LE(4);
