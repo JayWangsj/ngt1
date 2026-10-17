@@ -604,7 +604,10 @@ test("shows a superseded task as informational and keeps its diagnostics", async
   await notice.getByRole("button", { name: "诊断详情" }).click();
   await expect(notice).toContainText("Previous queued update diagnostic.");
 
-  await switchToItalian(page);
+  await page.evaluate(() => {
+    document.cookie = "ngt-locale=it; Path=/; SameSite=Lax";
+  });
+  await page.reload();
   await expect(notice).toContainText("La vecchia attività è stata sostituita");
 });
 
