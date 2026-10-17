@@ -519,7 +519,7 @@ describe("Windows persistent startup", () => {
       "node scripts/windows-studio-release.mjs publish release-assets",
     );
     expect(workflow).toMatch(
-      /needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,?\s*\]/,
+      /needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,?\s*\]/,
     );
     expect(workflow).toContain("innosetup --version=6.7.1");
     expect(workflow).toContain("$installedInnoSetup[0].DisplayVersion");
