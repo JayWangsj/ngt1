@@ -4,12 +4,22 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedCommitSha,
   [Parameter(Mandatory = $true)]
-  [string]$ExpectedManifestPath
+  [string]$ExpectedManifestPath,
+  [switch]$ManualInstaller
 )
 $ErrorActionPreference = "Stop"
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
+}
+
+function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$Description) {
+  if (-not $Process.WaitForExit(1800000)) {
+    & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $Process.Id /T /F | Out-Null
+    throw "$Description exceeded 30 minutes."
+  }
+  $Process.Refresh()
+  if ($Process.ExitCode -ne 0) { throw "$Description exited with code $($Process.ExitCode)." }
 }
 
 $repository = "JayWangsj/ngt1"
@@ -93,7 +103,7 @@ if (Test-Path -LiteralPath $installRoot) {
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-online-update-" + [guid]::NewGuid().ToString("N"))
 $downloadRoot = Join-Path $testRoot "downloads"
 $baselineRoot = Join-Path $testRoot "baseline"
-$dataRoot = Join-Path $testRoot "data-store"
+$dataRoot = if ($ManualInstaller) { Join-Path $installRoot "data-store" } else { Join-Path $testRoot "data-store" }
 $updateLock = Join-Path $installRoot "update.lock"
 $updateStatus = Join-Path $installRoot "update-status.json"
 $updateLog = Join-Path $installRoot "logs\online-update.log"
@@ -335,39 +345,60 @@ try {
     throw "The baseline release is not the configured active release."
   }
   $updateId = [guid]::NewGuid().ToString()
-  New-Item -ItemType Directory -Path (Split-Path -Parent $updateLog) -Force | Out-Null
-  @{ updateId = $updateId; createdAt = (Get-Date).ToUniversalTime().ToString("o") } |
-    ConvertTo-Json | Set-Content -LiteralPath $updateLock -Encoding utf8
+  if ($ManualInstaller) {
+    @{
+      updateId = $updateId
+      status = "queued"
+      previousVersion = ($oldTag -replace "^v", "")
+      targetVersion = $targetVersion
+      createdAt = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString("o")
+    } | ConvertTo-Json | Set-Content -LiteralPath $updateStatus -Encoding utf8
 
-  $updaterPath = Join-Path $taskRoot "scripts\update-windows-studio.ps1"
-  $arguments = @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $updaterPath,
-    "-UpdateId", $updateId, "-ExpectedTargetVersion", $TargetTag,
-    "-StatusFile", $updateStatus, "-UpdateLockFile", $updateLock, "-LogFile", $updateLog
-  )
-  $argumentLine = ($arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join " "
-  $updateProcess = Start-Process -FilePath (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe") `
-    -ArgumentList $argumentLine -WindowStyle Hidden -PassThru
-
-  $deadline = (Get-Date).AddMinutes(50)
-  $finalStatus = $null
-  do {
-    if (Test-Path -LiteralPath $updateStatus) {
-      $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-      if ($finalStatus.status -eq "failed") {
-        if (-not $updateProcess.HasExited) { [void]$updateProcess.WaitForExit(30000) }
-        throw "Online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
-      }
+    $installerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-$TargetTag.exe"
+    $installerLog = Join-Path $testRoot "manual-upgrade-installer.log"
+    $installer = Start-Process -FilePath $installerPath `
+      -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installerLog") `
+      -WindowStyle Hidden -PassThru
+    Wait-NgtManualInstaller -Process $installer -Description "Manual upgrade installer"
+    $manualStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+    if ($manualStatus.status -ne "superseded" -or $manualStatus.actualVersion -ne $targetVersion) {
+      throw "Manual upgrade did not supersede the old queued update task."
     }
-    if ($updateProcess.HasExited -and -not (Test-Path -LiteralPath $updateLock)) { break }
-    Start-Sleep -Seconds 2
-  } while ((Get-Date) -lt $deadline)
-  if (-not $updateProcess.HasExited) { throw "Online update executor exceeded its 50-minute limit." }
-  $updateProcess.WaitForExit()
-  if ($updateProcess.ExitCode -ne 0) { throw "Online update executor exited with code $($updateProcess.ExitCode)." }
-  if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
-      $finalStatus.actualVersion -ne $targetVersion -or $finalStatus.cleanupWarning) {
-    throw "Online update did not reach a clean completed state for $TargetTag."
+  } else {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $updateLog) -Force | Out-Null
+    @{ updateId = $updateId; createdAt = (Get-Date).ToUniversalTime().ToString("o") } |
+      ConvertTo-Json | Set-Content -LiteralPath $updateLock -Encoding utf8
+
+    $updaterPath = Join-Path $taskRoot "scripts\update-windows-studio.ps1"
+    $arguments = @(
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $updaterPath,
+      "-UpdateId", $updateId, "-ExpectedTargetVersion", $TargetTag,
+      "-StatusFile", $updateStatus, "-UpdateLockFile", $updateLock, "-LogFile", $updateLog
+    )
+    $argumentLine = ($arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join " "
+    $updateProcess = Start-Process -FilePath (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe") `
+      -ArgumentList $argumentLine -WindowStyle Hidden -PassThru
+
+    $deadline = (Get-Date).AddMinutes(50)
+    $finalStatus = $null
+    do {
+      if (Test-Path -LiteralPath $updateStatus) {
+        $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+        if ($finalStatus.status -eq "failed") {
+          if (-not $updateProcess.HasExited) { [void]$updateProcess.WaitForExit(30000) }
+          throw "Online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+        }
+      }
+      if ($updateProcess.HasExited -and -not (Test-Path -LiteralPath $updateLock)) { break }
+      Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    if (-not $updateProcess.HasExited) { throw "Online update executor exceeded its 50-minute limit." }
+    $updateProcess.WaitForExit()
+    if ($updateProcess.ExitCode -ne 0) { throw "Online update executor exited with code $($updateProcess.ExitCode)." }
+    if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
+        $finalStatus.actualVersion -ne $targetVersion -or $finalStatus.cleanupWarning) {
+      throw "Online update did not reach a clean completed state for $TargetTag."
+    }
   }
   if (Test-Path -LiteralPath $updateLock) { throw "Online update lock was not released." }
   $maintenanceFile = Join-Path $installRoot ".local\update-maintenance.json"
@@ -383,6 +414,21 @@ try {
   $newOrders = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($newOrders.StatusCode -ne 200) { throw "The new release orders page did not load." }
   Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode
+  if ($ManualInstaller) {
+    $repairLog = Join-Path $testRoot "manual-repair-installer.log"
+    $repair = Start-Process -FilePath $installerPath `
+      -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$repairLog") `
+      -WindowStyle Hidden -PassThru
+    Wait-NgtManualInstaller -Process $repair -Description "Manual repair installer"
+    $repairHealth = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health" -TimeoutSec 15
+    if ([string]$repairHealth.currentVersion -ne $targetVersion) { throw "Manual repair health version is incorrect." }
+    $repairStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+    if ($repairStatus.status -ne "idle" -or $repairStatus.actualVersion -ne $targetVersion -or
+        $repairStatus.installMode -ne "repair" -or (Test-Path -LiteralPath $maintenanceFile)) {
+      throw "Manual repair did not finish with a clean verified status."
+    }
+    Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode
+  }
   $node = Join-Path $activeReleaseRoot "runtime\node.exe"
   $prisma = Join-Path $activeReleaseRoot "node_modules\prisma\build\index.js"
   Push-Location -LiteralPath $activeReleaseRoot
@@ -395,7 +441,11 @@ try {
   $backup = Get-ChildItem -LiteralPath $backupDirectory -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
   if (-not $backup) { throw "Online update did not create a database and service backup." }
   & (Join-Path $activeReleaseRoot "scripts\test-windows-studio-backup.ps1") -BackupRoot $backup.FullName | Out-Null
-  Write-Output "Windows online update acceptance passed: $oldTag -> $TargetTag."
+  if ($ManualInstaller) {
+    Write-Output "Windows manual installer upgrade and repair acceptance passed: $oldTag -> $TargetTag."
+  } else {
+    Write-Output "Windows online update acceptance passed: $oldTag -> $TargetTag."
+  }
 } catch {
   try {
     $startupTask = Get-ScheduledTask -TaskName "NGT Management System" -ErrorAction SilentlyContinue

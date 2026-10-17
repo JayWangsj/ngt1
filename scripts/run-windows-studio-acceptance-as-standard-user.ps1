@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("online-update", "installer")]
+  [ValidateSet("online-update", "installer", "manual-installer")]
   [string]$Acceptance,
   [switch]$Child,
   [string]$RequestPath
@@ -46,6 +46,7 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hoste
 
 $scriptPath = switch ($Acceptance) {
   "online-update" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
+  "manual-installer" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
   "installer" { Join-Path $PSScriptRoot "test-windows-studio-installer.ps1" }
 }
 $parameters = switch ($Acceptance) {
@@ -54,6 +55,14 @@ $parameters = switch ($Acceptance) {
       TargetTag = $env:GITHUB_REF_NAME
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
+    }
+  }
+  "manual-installer" {
+    @{
+      TargetTag = $env:GITHUB_REF_NAME
+      ExpectedCommitSha = $env:GITHUB_SHA
+      ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
+      ManualInstaller = $true
     }
   }
   "installer" {

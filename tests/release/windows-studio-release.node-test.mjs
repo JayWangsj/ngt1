@@ -590,6 +590,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     release,
+    /manual-installer-acceptance:[\s\S]*needs: \[qualify, build\]/,
+  );
+  assert.match(
+    release,
     /online-update-acceptance:[\s\S]*?permissions:\s*\n\s*# GitHub exposes draft releases only to users with push access\.\s*\n\s*contents: write/,
   );
   assert.match(
@@ -598,7 +602,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     release,
-    /publish:[\s\S]*needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,?\s*\]/,
+    /publish:[\s\S]*needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,?\s*\]/,
   );
   assert.doesNotMatch(release, /continue-on-error:/);
   assert.doesNotMatch(release, /--clobber/);
@@ -625,6 +629,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /ExpectedCommitSha = \$env:GITHUB_SHA/);
   assert.match(standardUserAcceptance, /ExpectedManifestPath = Join-Path/);
   assert.match(standardUserAcceptance, /InstallerPath = Join-Path/);
+  assert.match(standardUserAcceptance, /"manual-installer"/);
+  assert.match(online, /if \(\$ManualInstaller\)/);
+  assert.match(online, /\$manualStatus\.status -ne "superseded"/);
+  assert.match(online, /\$repairStatus\.installMode -ne "repair"/);
   assert.match(installerAcceptance, /function Wait-NgtInstallerProcess/);
   assert.match(installerAcceptance, /\.WaitForExit\(15000\)/);
   assert.match(
@@ -664,5 +672,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(
     release,
     /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance installer/,
+  );
+  assert.match(
+    release,
+    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance manual-installer/,
   );
 });
