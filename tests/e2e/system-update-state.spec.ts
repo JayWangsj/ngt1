@@ -539,6 +539,10 @@ test("keeps queued task stages separate from the installed version", async ({
   );
 
   await page.goto("/settings/system-update");
+  await page.evaluate(() => {
+    document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
+  });
+  await page.reload();
   const version = page.locator(".update-version-block strong");
   await expect(version).toHaveText("v2.0.15");
   await expect(page.locator(".update-task-compact")).toContainText(
@@ -593,7 +597,8 @@ test("shows a superseded task as informational and keeps its diagnostics", async
   await page.reload();
   const notice = page.locator(".update-task-compact");
   await expect(notice).toContainText("历史更新任务已由经过验证的安装替代");
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(notice).toHaveAttribute("role", "status");
+  expect(await page.getByRole("alert").allTextContents()).toEqual([]);
   await notice.getByRole("button", { name: "诊断详情" }).click();
   await expect(notice).toContainText("Previous queued update diagnostic.");
 
