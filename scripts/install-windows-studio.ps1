@@ -30,6 +30,9 @@ function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
 $manualInstall = $false
 $script:NgtInstallStage = "preflight"
 function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [string]$FailureMessage, [string]$FailedStage) {
+  if (-not (Get-Command Stop-NgtStudioProcesses -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
+  }
   $markerPath = Join-Path $InstallRoot ".local\update-maintenance.json"
   $reservation = Get-NgtManualInstallReservation $InstallRoot
   $marker = $reservation.marker
@@ -153,6 +156,7 @@ trap {
 }
 
 $sourceRoot = Split-Path -Parent $PSScriptRoot
+$stableInstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 $releaseFile = Join-Path $sourceRoot "studio-release.json"
 $release = if (Test-Path -LiteralPath $releaseFile) {
   Get-Content -LiteralPath $releaseFile -Raw | ConvertFrom-Json
@@ -170,8 +174,11 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
     & (Join-Path $sourceRoot "scripts\verify-windows-studio-release.ps1") `
       -ReleaseRoot $sourceRoot -ExpectedVersion ([string]$release.version) | Out-Null
     if (Test-Path -LiteralPath $stableRoot) {
+      $manualReservation = if ($manualInstall) { Get-NgtManualInstallReservation $stableInstallRoot } else { $null }
+      $previousRepairRelease = if ($manualReservation) { [string]$manualReservation.marker.previousRelease } else { "" }
       if (-not $manualInstall -or $manualInstallPlan.mode -ne "repair" -or
-          [System.IO.Path]::GetFullPath([string]$manualInstallPlan.previousRelease) -ine [System.IO.Path]::GetFullPath($stableRoot)) {
+          -not $previousRepairRelease -or
+          [System.IO.Path]::GetFullPath($previousRepairRelease) -ine [System.IO.Path]::GetFullPath($stableRoot)) {
         if (-not $manualInstall -or $manualInstallPlan.mode -notin @("first-install", "upgrade")) {
           throw "Studio release is already installed: $stableRoot"
         }
@@ -182,7 +189,6 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
             -UpdateId ([string](Get-NgtManualInstallReservation $stableInstallRoot).marker.updateId) | Out-Null
         }
       } else {
-        $manualReservation = Get-NgtManualInstallReservation $stableInstallRoot
         Invoke-NgtInstallStage "release-backup" {
           Move-NgtStudioRepairReleaseToBackup `
             -InstallRoot $stableInstallRoot `
@@ -209,7 +215,6 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
 Set-Location -LiteralPath $script:NgtProjectRoot
 $projectRoot = [System.IO.Path]::GetFullPath($script:NgtProjectRoot)
 $stableDataRoot = [System.IO.Path]::GetFullPath($DataRoot)
-$stableInstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 if ($stableDataRoot.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
   throw "Studio data must be stored outside the application release directory."
 }

@@ -129,9 +129,10 @@ begin
   if (not Exec(PowerShellPath, Parameters, ExpandConstant('{tmp}\NGTStudioPackage'),
     SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
   begin
-    MsgBox('系统初始化失败。详细原因已保存到：' + #13#10 +
-      ExpandConstant('{localappdata}\NGT\install.log'),
-      mbError, MB_OK);
+    if not WizardSilent then
+      MsgBox('系统初始化失败。详细原因已保存到：' + #13#10 +
+        ExpandConstant('{localappdata}\NGT\install.log'),
+        mbError, MB_OK);
     RaiseException('系统初始化失败，退出代码：' + IntToStr(ResultCode));
   end;
 end;

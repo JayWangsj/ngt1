@@ -639,6 +639,7 @@ describe("Windows persistent startup", () => {
     expect(bootstrap).not.toContain("-InPlace");
     expect(bootstrap).toContain("Start-Transcript");
     expect(definition).toContain("install.log");
+    expect(definition).toContain("if not WizardSilent then");
     expect(bootstrap).toContain("Start-Transcript");
     expect(
       await readFile("scripts/install-windows-studio.ps1", "utf8"),
@@ -659,6 +660,16 @@ describe("Windows persistent startup", () => {
     expect(startup).toContain('"service\\windows-studio-launcher.vbs"');
     expect(installerScript).toContain("activeRelease = $projectRoot");
     expect(installerScript).toContain("-InPlace -OnlineUpdate:$OnlineUpdate");
+    expect(installerScript).toContain(
+      "$manualReservation.marker.previousRelease",
+    );
+    expect(
+      installerScript.indexOf(
+        "$stableInstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)",
+      ),
+    ).toBeLessThan(
+      installerScript.indexOf('Invoke-NgtInstallStage "release-backup"'),
+    );
     expect(installerScript).toContain(
       "if ($InPlace -and $PreviousReleaseRoot -and -not $OnlineUpdate) { $OnlineUpdate = $true }",
     );

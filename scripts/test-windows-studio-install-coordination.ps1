@@ -174,6 +174,10 @@ try {
   $repair = New-NgtInstallFixture (Join-Path $testRoot "repair")
   $repairPlan = Start-NgtStudioManualInstall -InstallRoot $repair.installRoot -TargetVersion "2.0.11"
   if ($repairPlan.mode -ne "repair") { throw "A same-version installer was not classified as a repair." }
+  $repairResumePlan = Start-NgtStudioManualInstall -InstallRoot $repair.installRoot -TargetVersion "2.0.11"
+  if ($repairResumePlan.mode -ne "repair" -or $repairResumePlan.previousRelease -ne $repair.oldRelease) {
+    throw "A repair could not resume with its original release path."
+  }
   $repairMarker = Get-NgtInstallJson (Join-Path $repair.installRoot ".local\update-maintenance.json")
   $repairBackup = Join-Path $repair.installRoot "data-store\backups\verified-repair-fixture"
   New-Item -ItemType Directory -Path (Join-Path $repairBackup "postgres-data"), (Join-Path $repair.oldRelease "scripts") -Force | Out-Null
@@ -184,6 +188,13 @@ try {
     -Destination (Join-Path $repair.oldRelease "scripts\test-windows-studio-backup.ps1")
   Set-NgtStudioManualInstallBackup -InstallRoot $repair.installRoot `
     -UpdateId ([string]$repairMarker.updateId) -BackupRoot $repairBackup
+  function Protect-NgtRepairInstallation([string]$InstallRoot, [object]$Plan) {
+    & $script:ProductionProtectNgtRepairInstallation -InstallRoot $InstallRoot -Plan $Plan
+  }
+  $verifiedRepairResume = Start-NgtStudioManualInstall -InstallRoot $repair.installRoot -TargetVersion "2.0.11"
+  if ($verifiedRepairResume.mode -ne "repair" -or $verifiedRepairResume.previousRelease -ne $repair.oldRelease) {
+    throw "A verified repair backup changed the resuming release plan."
+  }
   Set-Content -LiteralPath (Join-Path $repair.oldRelease "previous-release.txt") -Value "previous release" -NoNewline
   Move-NgtStudioRepairReleaseToBackup -InstallRoot $repair.installRoot `
     -ReleaseRoot $repair.oldRelease -UpdateId ([string]$repairMarker.updateId) | Out-Null
