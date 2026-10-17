@@ -73,7 +73,7 @@ function Get-NgtUpdateExecutorState(
   } catch {
     return $null
   }
-  $pid = if ($Lock.executorPid) { [int]$Lock.executorPid } elseif ($Status.executorPid) { [int]$Status.executorPid } else { 0 }
+  $executorPid = if ($Lock.executorPid) { [int]$Lock.executorPid } elseif ($Status.executorPid) { [int]$Status.executorPid } else { 0 }
   $updateId = if ($Lock.updateId) { [string]$Lock.updateId } else { [string]$Status.updateId }
   $scriptPath = if ($Lock.executorScriptPath) {
     [string]$Lock.executorScriptPath
@@ -84,7 +84,7 @@ function Get-NgtUpdateExecutorState(
   }
   $target = [System.IO.Path]::GetFullPath($scriptPath)
   foreach ($process in $processes) {
-    if ($pid -gt 0 -and [int]$process.ProcessId -ne $pid) { continue }
+    if ($executorPid -gt 0 -and [int]$process.ProcessId -ne $executorPid) { continue }
     $commandLine = [string]$process.CommandLine
     if (-not $commandLine -or $commandLine.IndexOf($target, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
     if ($updateId -and $commandLine.IndexOf($updateId, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }

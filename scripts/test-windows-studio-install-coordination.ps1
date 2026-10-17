@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-install-coordination-" + [guid]::NewGuid().ToString("N"))
 . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
 $script:InstallerTestExecutorState = $false
+$script:ProductionGetNgtUpdateExecutorState = (Get-Command Get-NgtUpdateExecutorState).ScriptBlock
 $script:ProductionProtectNgtRepairInstallation = (Get-Command Protect-NgtRepairInstallation).ScriptBlock
 function Get-NgtUpdateExecutorState([object]$Lock, [object]$Status, [string]$ActiveRelease) {
   return $script:InstallerTestExecutorState
@@ -27,6 +28,10 @@ function New-NgtInstallFixture([string]$Root) {
 }
 
 try {
+  $staleExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
+    updateId = [guid]::NewGuid().ToString()
+  }) $testRoot
+  if ($staleExecutor -ne $false) { throw "A queued task without an executor was not recognized as inactive." }
   $freshRoot = Join-Path $testRoot "fresh"
   New-Item -ItemType Directory -Path $freshRoot -Force | Out-Null
   $freshPlan = Get-NgtStudioInstallPlan -InstallRoot $freshRoot -TargetVersion "2.0.15"
