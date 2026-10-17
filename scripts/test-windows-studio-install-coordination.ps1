@@ -38,6 +38,16 @@ try {
   if ($upgradePlan.mode -ne "upgrade" -or $repairPlan.mode -ne "repair") {
     throw "Upgrade and same-version repair modes were not distinguished."
   }
+  $queued = New-NgtInstallFixture (Join-Path $testRoot "queued-without-lock")
+  Write-NgtInstallJsonAtomic (Join-Path $queued.installRoot "update-status.json") ([pscustomobject]@{
+    status = "queued"
+    updateId = [guid]::NewGuid().ToString()
+    previousVersion = "2.0.11"
+    targetVersion = "2.0.15"
+  })
+  Start-NgtStudioManualInstall -InstallRoot $queued.installRoot -TargetVersion "2.0.15" | Out-Null
+  $queuedResume = Start-NgtStudioManualInstall -InstallRoot $queued.installRoot -TargetVersion "2.0.15"
+  if ($queuedResume.mode -ne "upgrade") { throw "The queued update could not be superseded and resumed." }
   $downgradeBlocked = $false
   try { Get-NgtStudioInstallPlan -InstallRoot $fixture.installRoot -TargetVersion "2.0.10" | Out-Null }
   catch { $downgradeBlocked = $_.Exception.Message -like "Downgrade blocked:*" }
