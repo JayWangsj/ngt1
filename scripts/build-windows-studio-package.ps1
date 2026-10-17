@@ -134,10 +134,12 @@ $runtimeScripts = @(
   "check-windows-credential-store.ps1",
   "download-public-release-asset.ps1",
   "test-windows-studio-backup.ps1",
+  "test-windows-studio-install-coordination.ps1",
   "test-windows-studio-update-safety.ps1",
   "install-windows-startup.ps1",
   "install-windows-studio.ps1",
   "install-windows-studio-bootstrap.ps1",
+  "prepare-windows-studio-install.ps1",
   "retain-windows-studio-releases.ps1",
   "studio-runtime.ps1",
   "start.mjs",
@@ -148,7 +150,8 @@ $runtimeScripts = @(
   "windows-db.mjs",
   "windows-service.ps1",
   "windows-studio-launcher.vbs",
-  "windows-studio-common.ps1"
+  "windows-studio-common.ps1",
+  "windows-studio-install-coordination.ps1"
 )
 $stageScripts = Join-Path $stage "scripts"
 New-Item -ItemType Directory -Path $stageScripts -Force | Out-Null

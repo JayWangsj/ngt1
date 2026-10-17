@@ -88,7 +88,8 @@ function taskSummary(
   phase: string,
   it: ReturnType<typeof useMessages>,
 ) {
-  if (phase === "starting" || phase === "queued") return it.updateTaskStarting;
+  if (phase === "starting") return it.updateTaskStarting;
+  if (phase === "queued") return it.updateTaskQueued;
   if (phase === "reconnecting") return it.updateReconnecting;
   if (phase === "verifying") return it.updateVerifyingTask;
   if (phase === "interrupted") return it.updateInterrupted;
@@ -97,6 +98,7 @@ function taskSummary(
   if (phase === "rollback-failed") return it.updateRollbackFailed;
   if (phase === "failed") return it.updateFailed;
   if (phase === "succeeded") return it.updateSuccess;
+  if (phase === "superseded") return it.updateSuperseded;
   if (phase === "running")
     return stageLabel(status?.stage || "reading-release", it);
   return "";
@@ -472,8 +474,9 @@ export function SystemUpdate({
             {taskStatus?.manualReview
               ? it.updateManualReview
               : it.updateInterrupted}
-            {taskStatus?.stage
-              ? ` ${it.currentVersion}: ${stageLabel(taskStatus.stage, it)}`
+            {taskStatus?.stage &&
+            !["starting", "queued"].includes(taskStatus.stage)
+              ? ` ${it.updateCurrentStage}: ${stageLabel(taskStatus.stage, it)}`
               : ""}
           </span>
           <button
@@ -500,6 +503,25 @@ export function SystemUpdate({
         >
           {it.updateReconnecting}
         </p>
+      )}
+
+      {taskPhase === "superseded" && taskStatus && (
+        <div className="message success update-task-compact" role="status">
+          <span>{it.updateSuperseded}</span>
+          <button
+            type="button"
+            className="update-diagnostics-toggle"
+            aria-expanded={diagnosticsOpen}
+            onClick={() => void loadDiagnostics()}
+          >
+            {it.updateLogDetails}
+          </button>
+          {diagnosticsOpen && (
+            <pre className="update-diagnostics">
+              {diagnosticsLoading ? it.loading : diagnostics || ""}
+            </pre>
+          )}
+        </div>
       )}
 
       <div className="system-update-feedback" aria-live="polite">

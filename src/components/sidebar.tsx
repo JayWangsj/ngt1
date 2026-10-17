@@ -142,6 +142,8 @@ export function Sidebar() {
         return sidebarStatus.rollingBack;
       case "succeeded":
         return it.updateSuccess;
+      case "superseded":
+        return it.updateSuperseded;
       case "failed":
         return sidebarStatus.updateFailed;
       case "rollback-succeeded":

@@ -72,6 +72,7 @@ export type StudioUpdateStatus = {
     | "validating"
     | "rolling-back"
     | "complete"
+    | "superseded"
     | "failed"
     | "interrupted"
     | "verifying-task"
@@ -98,6 +99,10 @@ export type StudioUpdateStatus = {
   recoveryMessage?: string;
   manualReview?: boolean;
   previousStatus?: string;
+  previousUpdateId?: string;
+  manualInstallId?: string;
+  operation?: "manual-install";
+  installMode?: "first-install" | "upgrade" | "repair";
   bytesDownloaded?: number;
   totalBytes?: number;
   bytesPerSecond?: number;
@@ -1002,7 +1007,7 @@ export async function getStudioUpdateLog(root?: string) {
   if (!status.updateId) return "";
   try {
     const contents = await readFile(
-      updateLogPath(installRoot, status.updateId),
+      updateLogPath(installRoot, status.previousUpdateId || status.updateId),
       "utf8",
     );
     return redactUpdateLog(contents.slice(-20_000));

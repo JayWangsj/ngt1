@@ -486,6 +486,39 @@ describe("studio update", () => {
     });
   });
 
+  it("keeps a verified manual-install supersession informational and opens the old task log", async () => {
+    const { root, installRoot } = await studioRoot();
+    const previousUpdateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
+    await mkdir(path.join(installRoot, "logs"), { recursive: true });
+    await Promise.all([
+      writeFile(
+        path.join(installRoot, "update-status.json"),
+        JSON.stringify({
+          status: "superseded",
+          updateId: previousUpdateId,
+          previousUpdateId,
+          previousStatus: "queued",
+          manualInstallId: "ce931cdf-1b06-40a2-a356-14c17e08dfb2",
+          currentVersion: "1.11.57",
+          actualVersion: "1.11.57",
+        }),
+      ),
+      writeFile(
+        path.join(installRoot, "logs", `update-${previousUpdateId}.log`),
+        "old queued task was superseded after a verified manual install",
+      ),
+    ]);
+
+    await expect(getStudioUpdateStatus(root)).resolves.toMatchObject({
+      status: "superseded",
+      previousStatus: "queued",
+      currentVersion: "1.11.57",
+    });
+    await expect(getStudioUpdateLog(root)).resolves.toContain(
+      "old queued task was superseded",
+    );
+  });
+
   it("keeps a stale lock while its updater identity is still alive", async () => {
     const { root, installRoot } = await studioRoot();
     const updateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
@@ -507,6 +540,36 @@ describe("studio update", () => {
       startStudioUpdate({ root, inspect: async () => true }),
     ).rejects.toThrow("studio_update_in_progress");
     await expect(readFile(lockFile, "utf8")).resolves.toContain(updateId);
+  });
+
+  it("fails closed on a queued v2.0.11-era task after the active release advances", async () => {
+    const { root, installRoot } = await studioRoot();
+    const updateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
+    await Promise.all([
+      writeFile(
+        path.join(root, "studio-release.json"),
+        JSON.stringify({ version: "2.0.15" }),
+      ),
+      writeFile(
+        path.join(installRoot, "update-status.json"),
+        JSON.stringify({
+          status: "queued",
+          updateId,
+          previousVersion: "2.0.11",
+          targetVersion: "2.0.12",
+        }),
+      ),
+    ]);
+
+    await expect(
+      getStudioUpdateStatus(root, { inspect: async () => false }),
+    ).resolves.toMatchObject({
+      status: "interrupted",
+      stage: "queued",
+      currentVersion: "2.0.15",
+      previousVersion: "2.0.11",
+      manualReview: true,
+    });
   });
 
   it("starts only one updater when concurrent requests reclaim the same stale lock", async () => {

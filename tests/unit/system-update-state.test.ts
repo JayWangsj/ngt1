@@ -82,5 +82,6 @@ describe("system update state", () => {
       classifyUpdateTask({ status: "failed", recoveryStatus: "failed" }),
     ).toBe("rollback-failed");
     expect(classifyUpdateTask({ status: "complete" })).toBe("succeeded");
+    expect(classifyUpdateTask({ status: "superseded" })).toBe("superseded");
   });
 });

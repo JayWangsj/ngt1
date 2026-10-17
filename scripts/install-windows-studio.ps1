@@ -2,12 +2,14 @@ param(
   [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "NGT\data-store"),
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "NGT"),
   [string]$PreviousReleaseRoot,
-  [switch]$InPlace
+  [switch]$InPlace,
+  [switch]$OnlineUpdate
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "studio-runtime.ps1")
 
 function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
+  $script:NgtInstallStage = $Name
   $logPath = Join-Path $env:LOCALAPPDATA "NGT\install-stages.log"
   New-Item -ItemType Directory -Path (Split-Path -Parent $logPath) -Force | Out-Null
   $startedAt = Get-Date
@@ -23,18 +25,177 @@ function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
   }
 }
 
+$manualInstall = $false
+$script:NgtInstallStage = "preflight"
+function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [string]$FailureMessage, [string]$FailedStage) {
+  $markerPath = Join-Path $InstallRoot ".local\update-maintenance.json"
+  $reservation = Get-NgtManualInstallReservation $InstallRoot
+  $marker = $reservation.marker
+  if (-not $marker -or -not $marker.backupVerified -or -not $marker.backupRoot) {
+    return $false
+  }
+  if ($marker.operation -ne "manual-install" -or
+      [string]$marker.updateId -ne [string]$reservation.lock.updateId -or
+      [string]$marker.updateId -ne [string]$reservation.status.manualInstallId) {
+    throw "The failed installer no longer owns the maintenance marker and lock."
+  }
+  $backupRoot = [System.IO.Path]::GetFullPath([string]$marker.backupRoot)
+  if (-not $marker.dataRoot) { throw "The installer did not record a data root for rollback verification." }
+  $allowedBackupRoot = [System.IO.Path]::GetFullPath((Join-Path ([string]$marker.dataRoot) "backups")).TrimEnd("\") + "\"
+  if (-not $backupRoot.StartsWith($allowedBackupRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "The rollback backup is outside the installer-recorded backup directory."
+  }
+  & (Join-Path $PSScriptRoot "test-windows-studio-backup.ps1") -BackupRoot $backupRoot | Out-Null
+  if ($marker.installMode -eq "repair" -and $marker.releaseBackupRoot) {
+    Restore-NgtStudioRepairReleaseBackup `
+      -InstallRoot $InstallRoot `
+      -ReleaseRoot ([string]$marker.previousRelease) `
+      -UpdateId ([string]$marker.updateId) | Out-Null
+  }
+  $backupConfigurationPath = Join-Path $backupRoot "config\studio.json"
+  $previousConfig = Get-NgtInstallJson $backupConfigurationPath
+  if (-not $previousConfig.activeRelease -or -not $previousConfig.dataRoot) {
+    throw "The verified backup does not contain the previous Studio configuration."
+  }
+  if ([System.IO.Path]::GetFullPath([string]$previousConfig.dataRoot) -ine [System.IO.Path]::GetFullPath([string]$marker.dataRoot) -or
+      [System.IO.Path]::GetFullPath([string]$previousConfig.activeRelease) -ine [System.IO.Path]::GetFullPath([string]$marker.previousRelease)) {
+    throw "The rollback backup does not match the installer-recorded data root and previous release."
+  }
+  $previousRelease = [System.IO.Path]::GetFullPath([string]$previousConfig.activeRelease)
+  $previousReleaseMetadata = Get-NgtInstallJson (Join-Path $previousRelease "studio-release.json")
+  if (-not $previousReleaseMetadata.version) {
+    throw "The previous application release is not available for rollback."
+  }
+  $startupScript = Join-Path $previousRelease "scripts\install-windows-startup.ps1"
+  if (-not (Test-Path -LiteralPath $startupScript -PathType Leaf)) {
+    throw "The previous application startup script is missing."
+  }
+
+  $script:NgtInstallStage = "rolling-back"
+  Stop-NgtStudioProcesses
+  $dataDirectory = Join-Path ([string]$previousConfig.dataRoot) "data"
+  if (Test-Path -LiteralPath $dataDirectory -PathType Container) {
+    $failedDataDirectory = $dataDirectory + ".failed-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + [guid]::NewGuid().ToString("N")
+    Move-Item -LiteralPath $dataDirectory -Destination $failedDataDirectory
+  }
+  $databaseBackup = Join-Path $backupRoot "postgres-data"
+  New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
+  Get-ChildItem -LiteralPath $databaseBackup -Force | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $dataDirectory -Recurse -Force
+  }
+  $backupSecrets = Join-Path $backupRoot "config\local-secrets.json"
+  if (Test-Path -LiteralPath $backupSecrets -PathType Leaf) {
+    Copy-Item -LiteralPath $backupSecrets -Destination ([string]$previousConfig.dataRoot) -Force
+  }
+  $backupEnvironment = Join-Path $backupRoot "config\.env"
+  if (Test-Path -LiteralPath $backupEnvironment -PathType Leaf) {
+    Copy-Item -LiteralPath $backupEnvironment -Destination $previousRelease -Force
+  }
+  $stableServiceDirectory = Join-Path $InstallRoot "service"
+  foreach ($fileName in @(
+    "windows-service.ps1",
+    "windows-studio-common.ps1",
+    "windows-studio-launcher.vbs",
+    "uninstall-windows-studio.ps1",
+    "uninstall-windows-startup.ps1"
+  )) {
+    $source = Join-Path $backupRoot ("service\" + $fileName)
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+      throw "The verified backup is missing service file $fileName."
+    }
+    Copy-Item -LiteralPath $source -Destination $stableServiceDirectory -Force
+    if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath (Join-Path $stableServiceDirectory $fileName) -Algorithm SHA256).Hash) {
+      throw "The restored service file could not be verified: $fileName"
+    }
+  }
+  $previousConfig.installRoot = $InstallRoot
+  $previousConfig.activeRelease = $previousRelease
+  Set-NgtStudioConfig -Path (Join-Path $InstallRoot ".local\studio.json") -Configuration $previousConfig
+  Set-NgtStudioConfig -Path (Join-Path $previousRelease ".local\studio.json") -Configuration $previousConfig
+  $env:NGT_DATA_ROOT = [System.IO.Path]::GetFullPath([string]$previousConfig.dataRoot)
+  & $startupScript -InstallRoot $InstallRoot
+  Wait-NgtStudioHealth -ExpectedVersion ([string]$previousReleaseMetadata.version)
+  Complete-NgtStudioManualInstallRollback -InstallRoot $InstallRoot `
+    -PreviousReleaseRoot $previousRelease `
+    -VerifiedVersion ([string]$previousReleaseMetadata.version) `
+    -FailureMessage ("Manual installation failed and the previous release and database backup were restored and health-checked. " + $FailureMessage) `
+    -FailedStage $FailedStage `
+    -HealthVerified
+  return $true
+}
+
+trap {
+  $installFailure = $_.Exception.Message
+  $failedInstallStage = $script:NgtInstallStage
+  if ($manualInstall -and (Get-Command Set-NgtStudioManualInstallFailure -ErrorAction SilentlyContinue)) {
+    $recoveryStatus = "not-started"
+    $restored = $false
+    try {
+      $restored = Restore-NgtStudioAfterManualInstallFailure `
+        -InstallRoot $InstallRoot -FailureMessage $installFailure -FailedStage $failedInstallStage
+    } catch {
+      $recoveryStatus = "failed"
+      $installFailure += " Rollback verification failed: " + $_.Exception.Message
+    }
+    if ($restored) {
+      throw "Manual installation failed; the prior release and database were restored and verified."
+    }
+    try {
+      Set-NgtStudioManualInstallFailure -InstallRoot $InstallRoot `
+        -Stage $failedInstallStage -Message $installFailure `
+        -RecoveryStatus $recoveryStatus
+    } catch { }
+  }
+  throw
+}
+
 $sourceRoot = Split-Path -Parent $PSScriptRoot
 $releaseFile = Join-Path $sourceRoot "studio-release.json"
+$release = if (Test-Path -LiteralPath $releaseFile) {
+  Get-Content -LiteralPath $releaseFile -Raw | ConvertFrom-Json
+} else { $null }
+if ((Test-Path -LiteralPath $releaseFile) -and -not $OnlineUpdate) {
+  . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
+  $incomingRelease = Get-Content -LiteralPath $releaseFile -Raw | ConvertFrom-Json
+  $manualInstallPlan = Start-NgtStudioManualInstall `
+    -InstallRoot $InstallRoot -TargetVersion ([string]$incomingRelease.version)
+  $manualInstall = $true
+}
 if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
-  $release = Get-Content -LiteralPath $releaseFile -Raw | ConvertFrom-Json
   $stableRoot = Join-Path ([System.IO.Path]::GetFullPath($InstallRoot)) ("releases\v" + $release.version)
   if ([System.IO.Path]::GetFullPath($sourceRoot) -ne [System.IO.Path]::GetFullPath($stableRoot)) {
+    & (Join-Path $sourceRoot "scripts\verify-windows-studio-release.ps1") `
+      -ReleaseRoot $sourceRoot -ExpectedVersion ([string]$release.version) | Out-Null
     if (Test-Path -LiteralPath $stableRoot) {
-      throw "Studio release is already installed: $stableRoot"
+      if (-not $manualInstall -or $manualInstallPlan.mode -ne "repair" -or
+          [System.IO.Path]::GetFullPath([string]$manualInstallPlan.previousRelease) -ine [System.IO.Path]::GetFullPath($stableRoot)) {
+        if (-not $manualInstall -or $manualInstallPlan.mode -notin @("first-install", "upgrade")) {
+          throw "Studio release is already installed: $stableRoot"
+        }
+        Invoke-NgtInstallStage "incomplete-release-recovery" {
+          Move-NgtStudioIncompleteCandidateRelease `
+            -InstallRoot $stableInstallRoot `
+            -ReleaseRoot $stableRoot `
+            -UpdateId ([string](Get-NgtManualInstallReservation $stableInstallRoot).marker.updateId) | Out-Null
+        }
+      } else {
+        $manualReservation = Get-NgtManualInstallReservation $stableInstallRoot
+        Invoke-NgtInstallStage "release-backup" {
+          Move-NgtStudioRepairReleaseToBackup `
+            -InstallRoot $stableInstallRoot `
+            -ReleaseRoot $stableRoot `
+            -UpdateId ([string]$manualReservation.marker.updateId) | Out-Null
+        }
+      }
     }
     New-Item -ItemType Directory -Path $stableRoot -Force | Out-Null
-    Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object {
-      Copy-Item -LiteralPath $_.FullName -Destination $stableRoot -Recurse -Force
+    Invoke-NgtInstallStage "release-deployment" {
+      Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $stableRoot -Recurse -Force
+      }
+      & (Join-Path $stableRoot "scripts\verify-windows-studio-release.ps1") `
+        -ReleaseRoot $stableRoot -ExpectedVersion ([string]$release.version) | Out-Null
     }
     & (Join-Path $stableRoot "scripts\install-windows-studio.ps1") `
       -DataRoot $DataRoot -InstallRoot $InstallRoot -InPlace
@@ -65,16 +226,32 @@ if (Test-Path -LiteralPath $existingStableConfig) {
   if (-not $previousActiveRelease) {
     $previousActiveRelease = [string](Get-Content -LiteralPath $existingStableConfig -Raw | ConvertFrom-Json).activeRelease
   }
-  $sourceStateDirectory = $script:NgtStateDirectory
-  Invoke-NgtInstallStage "stop-existing" {
-    $script:NgtStateDirectory = $stableStateDirectory
-    try {
-      Stop-NgtStudioProcesses
-    } finally {
-      $script:NgtStateDirectory = $sourceStateDirectory
+  if ($manualInstall) {
+    Copy-Item -LiteralPath $existingStableConfig `
+      -Destination (Join-Path $script:NgtStateDirectory "studio.json") -Force
+  }
+}
+
+if ((Test-Path -LiteralPath $existingStableConfig) -and -not $OnlineUpdate) {
+  Invoke-NgtInstallStage "database-backup" {
+    $manualMarker = Get-NgtInstallJson (Join-Path $stableInstallRoot ".local\update-maintenance.json")
+    if ($manualMarker -and $manualMarker.backupVerified -and $manualMarker.backupRoot) {
+      & (Join-Path $PSScriptRoot "test-windows-studio-backup.ps1") `
+        -BackupRoot ([string]$manualMarker.backupRoot) | Out-Null
+    } else {
+      $backupOutput = @(& (Join-Path $PSScriptRoot "backup-windows-studio.ps1") -LeaveStopped)
+      $backupLine = @($backupOutput | Where-Object { [string]$_ -like "Studio backup created: *" } | Select-Object -Last 1)
+      if (-not $backupLine) { throw "Studio backup did not return its destination." }
+      $backupRoot = [string]$backupLine[0].Substring("Studio backup created: ".Length)
+      & (Join-Path $PSScriptRoot "test-windows-studio-backup.ps1") -BackupRoot $backupRoot | Out-Null
+      if ($manualInstall) {
+        Set-NgtStudioManualInstallBackup -InstallRoot $stableInstallRoot `
+          -UpdateId ([string]$manualMarker.updateId) -BackupRoot $backupRoot
+      }
     }
   }
 }
+
 Copy-Item -LiteralPath (Join-Path $script:NgtProjectRoot "scripts\windows-service.ps1") `
   -Destination $stableServiceDirectory -Force
 Copy-Item -LiteralPath (Join-Path $script:NgtProjectRoot "scripts\windows-studio-common.ps1") `
@@ -85,8 +262,6 @@ Copy-Item -LiteralPath (Join-Path $script:NgtProjectRoot "scripts\uninstall-wind
   -Destination $stableServiceDirectory -Force
 Copy-Item -LiteralPath (Join-Path $script:NgtProjectRoot "scripts\uninstall-windows-startup.ps1") `
   -Destination $stableServiceDirectory -Force
-Copy-Item -LiteralPath (Join-Path $script:NgtProjectRoot "assets\ngt-studio.ico") `
-  -Destination $stableAssetDirectory -Force
 $previousActiveRelease = if ($PreviousReleaseRoot) { $PreviousReleaseRoot } else { $previousActiveRelease }
 $studioConfig = [pscustomobject]@{
   dataRoot = $stableDataRoot
@@ -139,7 +314,24 @@ Invoke-NgtInstallStage "application-start" {
   & (Join-Path $PSScriptRoot "install-windows-startup.ps1") -InstallRoot $stableInstallRoot
 }
 Invoke-NgtInstallStage "health-validation" {
-  Wait-NgtStudioHealth
+  $expectedVersion = if ($isRelease) { [string]$release.version } else { "" }
+  Wait-NgtStudioHealth -ExpectedVersion $expectedVersion
+}
+if ($manualInstall) {
+  Invoke-NgtInstallStage "install-state-validation" {
+    Complete-NgtStudioManualInstall -InstallRoot $stableInstallRoot `
+      -ReleaseRoot $projectRoot -VerifiedVersion ([string]$release.version) `
+      -HealthVerified
+  }
+}
+try {
+  Copy-Item -LiteralPath (Join-Path $script:NgtProjectRoot "assets\ngt-studio.ico") `
+    -Destination $stableAssetDirectory -Force
+} catch {
+  $assetWarning = "The studio is healthy, but the shortcut icon could not be refreshed: " + $_.Exception.Message
+  Write-Warning $assetWarning
+  Add-Content -LiteralPath (Join-Path $env:LOCALAPPDATA "NGT\install-stages.log") `
+    -Value ("{0:o} WARNING icon-refresh reason={1}" -f (Get-Date).ToUniversalTime(), $assetWarning)
 }
 try {
   & (Join-Path $PSScriptRoot "retain-windows-studio-releases.ps1") `

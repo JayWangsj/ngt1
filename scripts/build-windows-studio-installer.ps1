@@ -10,6 +10,7 @@ $package = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
 $version = [string]$package.version
 $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
 $installerDefinition = Join-Path $projectRoot "installer\windows-studio.iss"
+$installerSupportDirectory = $PSScriptRoot
 $iconPath = Join-Path $projectRoot "assets\ngt-studio.ico"
 $packageDirectory = Join-Path $projectRoot ".local\studio-package"
 
@@ -63,6 +64,7 @@ try {
     ("/DAppVersion=" + $version) `
     ("/DPackageDirectory=" + $packageDrive) `
     ("/DIconPath=" + $iconPath) `
+    ("/DInstallerSupportDirectory=" + $installerSupportDirectory) `
     ("/DOutputDir=" + $outputRoot) `
     $installerDefinition
   if ($LASTEXITCODE -ne 0) {

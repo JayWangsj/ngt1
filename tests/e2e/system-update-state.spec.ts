@@ -508,6 +508,99 @@ test("localizes the manual-review guidance for an interrupted update", async ({
   );
 });
 
+test("keeps queued task stages separate from the installed version", async ({
+  page,
+}) => {
+  await page.route("**/api/system-update", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        installed: true,
+        currentVersion: "2.0.15",
+        authRequired: false,
+        updateAvailable: false,
+        latestVersion: "2.0.15",
+      }),
+    }),
+  );
+  await page.route("**/api/system-update/status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "interrupted",
+        stage: "queued",
+        previousStatus: "queued",
+        currentVersion: "2.0.15",
+        manualReview: true,
+      }),
+    }),
+  );
+
+  await page.goto("/settings/system-update");
+  const version = page.locator(".update-version-block strong");
+  await expect(version).toHaveText("v2.0.15");
+  await expect(page.locator(".update-task-compact")).toContainText(
+    "上次更新的恢复状态无法确认",
+  );
+  await expect(page.locator(".update-task-compact")).not.toContainText(
+    "当前版本: queued",
+  );
+});
+
+test("shows a superseded task as informational and keeps its diagnostics", async ({
+  page,
+}) => {
+  await page.route("**/api/system-update", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        installed: true,
+        currentVersion: "2.0.15",
+        authRequired: false,
+        updateAvailable: false,
+        latestVersion: "2.0.15",
+      }),
+    }),
+  );
+  await page.route("**/api/system-update/status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "superseded",
+        currentVersion: "2.0.15",
+        actualVersion: "2.0.15",
+        previousStatus: "queued",
+        previousUpdateId: "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16",
+      }),
+    }),
+  );
+  await page.route("**/api/system-update/status/log", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ log: "Previous queued update diagnostic." }),
+    }),
+  );
+
+  await page.goto("/settings/system-update");
+  await page.evaluate(() => {
+    document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
+  });
+  await page.reload();
+  const notice = page.locator(".update-task-compact");
+  await expect(notice).toContainText("历史更新任务已由经过验证的安装替代");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await notice.getByRole("button", { name: "诊断详情" }).click();
+  await expect(notice).toContainText("Previous queued update diagnostic.");
+
+  await switchToItalian(page);
+  await expect(notice).toContainText("La vecchia attività è stata sostituita");
+});
+
 test("keeps the version link and red dot usable when the sidebar is collapsed", async ({
   page,
 }) => {

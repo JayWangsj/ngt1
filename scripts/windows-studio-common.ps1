@@ -67,7 +67,7 @@ function Set-NgtStudioConfig([string]$Path, [object]$Configuration) {
     } else {
       [System.IO.File]::Move($temporaryPath, $fullPath)
     }
-    $written = Get-Content -LiteralPath $fullPath -Raw | ConvertFrom-Json
+    $written = [System.IO.File]::ReadAllText($fullPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     if ([string]$written.activeRelease -ne [string]$Configuration.activeRelease -or
         [string]$written.dataRoot -ne [string]$Configuration.dataRoot -or
         [string]$written.installRoot -ne [string]$Configuration.installRoot) {

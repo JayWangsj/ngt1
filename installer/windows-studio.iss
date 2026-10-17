@@ -10,6 +10,9 @@
 #ifndef OutputDir
   #error OutputDir is required
 #endif
+#ifndef InstallerSupportDirectory
+  #error InstallerSupportDirectory is required
+#endif
 
 #define AppName "NGT 工作室管理系统"
 #define AppId "{{D7F74E80-B49C-4C3D-B6FC-18C04DAA9D31}"
@@ -19,7 +22,7 @@ AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=NGT
-DefaultDirName={localappdata}\NGT\releases\v{#AppVersion}
+DefaultDirName={localappdata}\NGT
 UninstallFilesDir={localappdata}\NGT\uninstall
 UsePreviousAppDir=no
 DisableDirPage=yes
@@ -42,13 +45,9 @@ UninstallDisplayIcon={localappdata}\NGT\assets\ngt-studio.ico
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#PackageDirectory}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#PackageDirectory}\assets\ngt-studio.ico"; DestDir: "{localappdata}\NGT\assets"; Flags: ignoreversion uninsneveruninstall
-Source: "{#PackageDirectory}\scripts\windows-service.ps1"; DestDir: "{localappdata}\NGT\service"; Flags: ignoreversion uninsneveruninstall
-Source: "{#PackageDirectory}\scripts\windows-studio-common.ps1"; DestDir: "{localappdata}\NGT\service"; Flags: ignoreversion uninsneveruninstall
-Source: "{#PackageDirectory}\scripts\windows-studio-launcher.vbs"; DestDir: "{localappdata}\NGT\service"; Flags: ignoreversion uninsneveruninstall
-Source: "{#PackageDirectory}\scripts\uninstall-windows-studio.ps1"; DestDir: "{localappdata}\NGT\service"; Flags: ignoreversion uninsneveruninstall
-Source: "{#PackageDirectory}\scripts\uninstall-windows-startup.ps1"; DestDir: "{localappdata}\NGT\service"; Flags: ignoreversion uninsneveruninstall
+Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\NGTStudioPackage"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#InstallerSupportDirectory}\prepare-windows-studio-install.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "{#InstallerSupportDirectory}\windows-studio-install-coordination.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 
 [Icons]
 Name: "{autodesktop}\NGT 工作室管理系统"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
@@ -77,6 +76,30 @@ begin
   SaveStringToFile(LogPath, Line, True);
 end;
 
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  PowerShellPath: String;
+  Parameters: String;
+  PreflightLogPath: String;
+begin
+  ExtractTemporaryFile('prepare-windows-studio-install.ps1');
+  ExtractTemporaryFile('windows-studio-install-coordination.ps1');
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  PreflightLogPath := ExpandConstant('{localappdata}\NGT\install-preflight.log');
+  Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\prepare-windows-studio-install.ps1') +
+    '" -InstallRoot "' + ExpandConstant('{localappdata}\NGT') +
+    '" -TargetVersion "{#AppVersion}" -LogPath "' + PreflightLogPath + '"';
+  if (not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
+    (ResultCode <> 0) then
+  begin
+    Result := '安装前安全检查失败。请查看日志：' + PreflightLogPath;
+  end
+  else
+    Result := '';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -95,15 +118,15 @@ begin
 
   WriteInstallStage('install-files', 'COMPLETE durationSeconds=' +
     FloatToStr((GetTickCount - InstallFilesStartedAt) / 1000));
-  WizardForm.StatusLabel.Caption := '正在准备运行环境、数据库并启动系统…';
+  WizardForm.StatusLabel.Caption := '正在验证安装模式、备份数据并执行数据库迁移…';
   PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\scripts\install-windows-studio-bootstrap.ps1') +
+    ExpandConstant('{tmp}\NGTStudioPackage\scripts\install-windows-studio-bootstrap.ps1') +
     '" -DataRoot "' + ExpandConstant('{localappdata}\NGT\data-store') +
     '" -InstallRoot "' + ExpandConstant('{localappdata}\NGT') +
     '" -LogPath "' + ExpandConstant('{localappdata}\NGT\install.log') + '"';
 
-  if (not Exec(PowerShellPath, Parameters, ExpandConstant('{app}'),
+  if (not Exec(PowerShellPath, Parameters, ExpandConstant('{tmp}\NGTStudioPackage'),
     SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
   begin
     MsgBox('系统初始化失败。详细原因已保存到：' + #13#10 +

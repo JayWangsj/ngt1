@@ -16,6 +16,7 @@ export type UpdateTaskPhase =
   | "reconnecting"
   | "verifying"
   | "succeeded"
+  | "superseded"
   | "failed"
   | "rolling-back"
   | "rollback-succeeded"
@@ -52,6 +53,10 @@ export type UpdateStatus = {
   logAvailable?: boolean;
   manualReview?: boolean;
   previousStatus?: string;
+  previousUpdateId?: string;
+  manualInstallId?: string;
+  operation?: "manual-install";
+  installMode?: "first-install" | "upgrade" | "repair";
 };
 
 export type UpdateInfo = {
@@ -98,6 +103,8 @@ export function classifyUpdateTask(status?: UpdateStatus): UpdateTaskPhase {
       return "rolling-back";
     case "complete":
       return "succeeded";
+    case "superseded":
+      return "superseded";
     case "failed":
       return status.recoveryStatus === "succeeded"
         ? "rollback-succeeded"

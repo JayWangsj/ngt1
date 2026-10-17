@@ -654,7 +654,7 @@ try {
     -DataRoot ([string]$config.dataRoot) `
     -InstallRoot $installRoot `
     -PreviousReleaseRoot $previousReleaseRoot `
-    -InPlace
+    -InPlace -OnlineUpdate
   if ($LASTEXITCODE -ne 0) {
     throw "New studio release installer failed."
   }

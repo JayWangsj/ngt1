@@ -85,7 +85,9 @@ function taskFromStatus(status: UpdateStatus): TaskState {
     status: safeStatus,
     lastTrustedStatus:
       safeStatus.executorAlive === true ||
-      ["complete", "failed", "interrupted"].includes(safeStatus.status || "")
+      ["complete", "superseded", "failed", "interrupted"].includes(
+        safeStatus.status || "",
+      )
         ? safeStatus
         : undefined,
     message: safeStatus.message,

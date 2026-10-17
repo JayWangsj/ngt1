@@ -615,6 +615,10 @@ export const it = {
   viewUpdate: "Dettagli aggiornamento",
   later: "Più tardi",
   updateTaskStarting: "Avvio dell'attività di aggiornamento…",
+  updateTaskQueued: "Attività di aggiornamento in coda.",
+  updateCurrentStage: "Fase corrente",
+  updateSuperseded:
+    "La vecchia attività è stata sostituita da un'installazione verificata.",
   updateVerifyingTask: "Verifica dell'attività di aggiornamento precedente…",
   updateReconnecting: "Riconnessione al servizio di aggiornamento…",
   updateNoRecentProgress:
