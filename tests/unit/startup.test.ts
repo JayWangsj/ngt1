@@ -52,6 +52,10 @@ describe("Windows persistent startup", () => {
       ".github/workflows/windows-studio-release.yml",
       "utf8",
     );
+    const acceptanceAction = await readFile(
+      ".github/actions/windows-studio-acceptance/action.yml",
+      "utf8",
+    );
     expect(runner).toContain("New-LocalUser -Name $userName");
     expect(runner).toContain(
       '-Description "NGT release acceptance standard account"',
@@ -69,13 +73,13 @@ describe("Windows persistent startup", () => {
       "$childExitCode -ne 0 -or ($null -ne $processExitCode -and $processExitCode -ne 0)",
     );
     expect(runner).toContain("Remove-LocalUser -Name $userName");
-    expect(workflow).toContain(
-      "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update",
+    expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
+    expect(workflow).toContain("acceptance: online-update");
+    expect(workflow).toContain("acceptance: installer");
+    expect(acceptanceAction).toContain(
+      "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}",
     );
-    expect(workflow).toContain(
-      "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance installer",
-    );
-    expect(workflow).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(acceptanceAction).toContain("GH_TOKEN: ${{ github.token }}");
   });
 
   it("adapts only legacy baseline startup for the non-interactive hosted runner", async () => {
@@ -369,6 +373,14 @@ describe("Windows persistent startup", () => {
     const workflow = (
       await readFile(".github/workflows/windows-studio-release.yml", "utf8")
     ).replace(/\r\n/g, "\n");
+    const acceptanceAction = await readFile(
+      ".github/actions/windows-studio-acceptance/action.yml",
+      "utf8",
+    );
+    const buildAction = await readFile(
+      ".github/actions/build-windows-studio-candidate/action.yml",
+      "utf8",
+    );
     const packageSmokeTest = await readFile(
       "scripts/test-windows-studio-package.ps1",
       "utf8",
@@ -509,10 +521,11 @@ describe("Windows persistent startup", () => {
     expect(workflow).toContain(
       "node scripts/windows-studio-release.mjs prepare-draft",
     );
-    expect(workflow).toContain(
+    expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
+    expect(acceptanceAction).toContain(
       "node scripts/windows-studio-release.mjs download-draft release-assets",
     );
-    expect(workflow).toContain(
+    expect(acceptanceAction).toContain(
       "node scripts/windows-studio-release.mjs verify-artifact release-assets",
     );
     expect(workflow).toContain(
@@ -521,9 +534,12 @@ describe("Windows persistent startup", () => {
     expect(workflow).toMatch(
       /needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,?\s*\]/,
     );
-    expect(workflow).toContain("innosetup --version=6.7.1");
-    expect(workflow).toContain("$installedInnoSetup[0].DisplayVersion");
-    expect(workflow).toContain("$compilerDirectory");
+    expect(workflow).toContain(
+      "./.github/actions/build-windows-studio-candidate",
+    );
+    expect(buildAction).toContain("innosetup --version=6.7.1");
+    expect(buildAction).toContain("$installedInnoSetup[0].DisplayVersion");
+    expect(buildAction).toContain("$compilerDirectory");
     expect(workflow).toContain("windows-studio-release-metrics.mjs");
     expect(workflow).not.toContain("--clobber");
     expect(workflow).not.toContain("continue-on-error");
@@ -584,6 +600,10 @@ describe("Windows persistent startup", () => {
       ".github/workflows/windows-studio-release.yml",
       "utf8",
     );
+    const buildAction = await readFile(
+      ".github/actions/build-windows-studio-candidate/action.yml",
+      "utf8",
+    );
     const uninstaller = await readFile(
       "scripts/uninstall-windows-studio.ps1",
       "utf8",
@@ -628,10 +648,15 @@ describe("Windows persistent startup", () => {
     expect(packager).toContain('"assets\\ngt-studio.ico"');
     expect(packager).toContain('(Join-Path $runtimeDirectory "gh.exe")');
     expect(packager).toContain('"licenses\\github-cli.txt"');
-    expect(workflow).toContain("build-windows-studio-installer.ps1");
-    expect(workflow).toContain("prepare-windows-studio-update-assets.ps1");
-    expect(workflow.indexOf("build-windows-studio-installer.ps1")).toBeLessThan(
-      workflow.indexOf("prepare-windows-studio-update-assets.ps1"),
+    expect(workflow).toContain(
+      "./.github/actions/build-windows-studio-candidate",
+    );
+    expect(buildAction).toContain("build-windows-studio-installer.ps1");
+    expect(buildAction).toContain("prepare-windows-studio-update-assets.ps1");
+    expect(
+      buildAction.indexOf("build-windows-studio-installer.ps1"),
+    ).toBeLessThan(
+      buildAction.indexOf("prepare-windows-studio-update-assets.ps1"),
     );
     expect(bootstrap).not.toContain("Expand-Archive");
     expect(bootstrap).not.toContain("PackagePath");
