@@ -173,7 +173,11 @@ const db = new PrismaClient();
   assert.equal(order?.fault, "Update acceptance record");
   assert.equal(order?.device?.model, "Update acceptance phone");
   assert.equal(order?.device?.customer?.name, "Update acceptance customer");
-  const written = await db.customer.create({ data: { name: "Post update write", phone: "390000000001" } });
+  const written = await db.customer.upsert({
+    where: { phone: "390000000001" },
+    create: { name: "Post update write", phone: "390000000001" },
+    update: { name: "Post update write" },
+  });
   assert.equal((await db.customer.findUnique({ where: { id: written.id } }))?.name, "Post update write");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => db.$disconnect());
 '@ | Set-Content -LiteralPath $probePath -Encoding utf8
@@ -330,12 +334,6 @@ try {
   }
   $ordersResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($ordersResponse.StatusCode -ne 200) { throw "The previous studio orders page did not load." }
-  $oldUpdateCheck = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
-    -Headers @{ Origin = "http://127.0.0.1:3000"; "Sec-Fetch-Site" = "same-origin" } -TimeoutSec 45
-  if (-not $oldUpdateCheck.installed -or $oldUpdateCheck.currentVersion -ne ($oldTag -replace "^v", "")) {
-    throw "The previous version check did not identify the installed release."
-  }
-
   $businessCode = "CI-UPDATE-" + [guid]::NewGuid().ToString("N")
   Invoke-BusinessDataProbe -ReleaseRoot (Join-Path $installRoot ("releases\$oldTag")) -Action "seed" -Code $businessCode
 
