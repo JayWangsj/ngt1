@@ -16,6 +16,21 @@ describe("Windows persistent startup", () => {
     expect(service).not.toContain("D:\\NGT");
   });
 
+  it("waits for database initialization before starting the application", async () => {
+    const service = await readFile("scripts/windows-service.ps1", "utf8");
+    expect(service).toContain(
+      'Join-Path $projectRoot ".local\\database-ready.pid"',
+    );
+    expect(service).toContain('Join-Path $stateDirectory "database.pid"');
+    expect(service).toContain("$readyProcessId -eq $databaseProcessId");
+    expect(service.indexOf('Start-NgtProcess -Name "database"')).toBeLessThan(
+      service.indexOf("\n    Wait-NgtDatabaseReady\n"),
+    );
+    expect(service.indexOf("\n    Wait-NgtDatabaseReady\n")).toBeLessThan(
+      service.indexOf('Start-NgtProcess -Name "application"'),
+    );
+  });
+
   it("installs a logon task with restart settings and has a matching uninstaller", async () => {
     const installer = await readFile(
       "scripts/install-windows-startup.ps1",

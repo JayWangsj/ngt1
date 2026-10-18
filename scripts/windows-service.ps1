@@ -33,6 +33,28 @@ function Test-ListeningPort([int]$Port) {
   return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
+function Test-NgtDatabaseReady {
+  if (-not (Test-ListeningPort 55432)) { return $false }
+  $readyFile = Join-Path $projectRoot ".local\database-ready.pid"
+  $pidFile = Join-Path $stateDirectory "database.pid"
+  if (-not (Test-Path -LiteralPath $readyFile -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $pidFile -PathType Leaf)) { return $false }
+  [int]$readyProcessId = 0
+  [int]$databaseProcessId = 0
+  if (-not [int]::TryParse((Get-Content -LiteralPath $readyFile -Raw).Trim(), [ref]$readyProcessId) -or
+      -not [int]::TryParse((Get-Content -LiteralPath $pidFile -Raw).Trim(), [ref]$databaseProcessId)) { return $false }
+  return $readyProcessId -eq $databaseProcessId -and
+    [bool](Get-Process -Id $databaseProcessId -ErrorAction SilentlyContinue)
+}
+
+function Wait-NgtDatabaseReady {
+  for ($attempt = 0; $attempt -lt 120; $attempt++) {
+    if (Test-NgtDatabaseReady) { return }
+    Start-Sleep -Milliseconds 250
+  }
+  throw "Database did not finish initialization before application startup."
+}
+
 function Start-NgtProcess(
   [string]$Name,
   [string]$Script,
@@ -72,6 +94,7 @@ while ($true) {
   try {
     Start-NgtProcess -Name "database" `
       -Script (Join-Path $projectRoot "scripts\windows-db.mjs") -Port 55432
+    Wait-NgtDatabaseReady
     Start-NgtProcess -Name "application" `
       -Script (Join-Path $projectRoot "scripts\start.mjs") -Port 3000
   } catch {
