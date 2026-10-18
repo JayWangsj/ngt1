@@ -2,8 +2,16 @@ $ErrorActionPreference = "Stop"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-install-coordination-" + [guid]::NewGuid().ToString("N"))
 . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
 $script:InstallerTestExecutorState = $false
+$script:InstallerTestProcesses = @()
+$script:InstallerTestProcessQueryFails = $false
 $script:ProductionGetNgtUpdateExecutorState = (Get-Command Get-NgtUpdateExecutorState).ScriptBlock
 $script:ProductionProtectNgtRepairInstallation = (Get-Command Protect-NgtRepairInstallation).ScriptBlock
+function Get-CimInstance {
+  [CmdletBinding()]
+  param([string]$ClassName, [string]$Filter)
+  if ($script:InstallerTestProcessQueryFails) { throw "Simulated process query failure." }
+  return $script:InstallerTestProcesses
+}
 function Get-NgtUpdateExecutorState([object]$Lock, [object]$Status, [string]$ActiveRelease) {
   return $script:InstallerTestExecutorState
 }
@@ -28,10 +36,30 @@ function New-NgtInstallFixture([string]$Root) {
 }
 
 try {
+  $executorId = [guid]::NewGuid().ToString()
+  $executorScript = Join-Path $testRoot "scripts\update-windows-studio.ps1"
   $staleExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
-    updateId = [guid]::NewGuid().ToString()
+    updateId = $executorId
+    executorScriptPath = $executorScript
   }) $testRoot
   if ($staleExecutor -ne $false) { throw "A queued task without an executor was not recognized as inactive." }
+  $script:InstallerTestProcesses = @([pscustomobject]@{
+    Name = "powershell.exe"
+    ProcessId = 45678
+    CommandLine = "powershell.exe -File `"$executorScript`" -UpdateId $executorId"
+  })
+  $activeExecutor = & $script:ProductionGetNgtUpdateExecutorState `
+    ([pscustomobject]@{ executorPid = 45678; updateId = $executorId; executorScriptPath = $executorScript }) `
+    ([pscustomobject]@{ updateId = $executorId }) $testRoot
+  if ($activeExecutor -ne $true) { throw "A matching online update executor was not recognized as active." }
+  $script:InstallerTestProcessQueryFails = $true
+  $unverifiedExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
+    updateId = $executorId
+    executorScriptPath = $executorScript
+  }) $testRoot
+  if ($null -ne $unverifiedExecutor) { throw "A failed process query was not kept in the unverified state." }
+  $script:InstallerTestProcessQueryFails = $false
+  $script:InstallerTestProcesses = @()
   $freshRoot = Join-Path $testRoot "fresh"
   New-Item -ItemType Directory -Path $freshRoot -Force | Out-Null
   $freshPlan = Get-NgtStudioInstallPlan -InstallRoot $freshRoot -TargetVersion "2.0.15"
@@ -150,6 +178,37 @@ try {
       (Test-Path -LiteralPath (Join-Path $active.installRoot "update.lock")) -or
       (Test-Path -LiteralPath (Join-Path $active.installRoot ".local\update-maintenance.json"))) {
     throw "A verified same-version repair did not clear the prior superseded state."
+  }
+
+  $legacyRecovery = New-NgtInstallFixture (Join-Path $testRoot "legacy-v2.0.15-recovery")
+  $installedRelease = $legacyRecovery.newRelease
+  $legacyConfigPath = Join-Path $legacyRecovery.installRoot ".local\studio.json"
+  $legacyConfig = Get-NgtInstallJson $legacyConfigPath
+  $legacyConfig.activeRelease = $installedRelease
+  Write-NgtInstallJsonAtomic $legacyConfigPath $legacyConfig
+  $legacyUpdateId = [guid]::NewGuid().ToString()
+  Write-NgtInstallJsonAtomic (Join-Path $legacyRecovery.installRoot "update-status.json") ([pscustomobject]@{
+    status = "queued"
+    stage = "queued"
+    updateId = $legacyUpdateId
+    previousVersion = "2.0.11"
+    targetVersion = "2.0.12"
+  })
+  $legacyRepairPlan = Start-NgtStudioManualInstall `
+    -InstallRoot $legacyRecovery.installRoot -TargetVersion "2.0.15"
+  if ($legacyRepairPlan.mode -ne "repair") {
+    throw "An already-installed v2.0.15 instance with a queued legacy task was not repairable."
+  }
+  Complete-NgtStudioManualInstall -InstallRoot $legacyRecovery.installRoot `
+    -ReleaseRoot $installedRelease -VerifiedVersion "2.0.15" -HealthVerified
+  $legacyRecoveredStatus = Get-NgtInstallJson (Join-Path $legacyRecovery.installRoot "update-status.json")
+  if ($legacyRecoveredStatus.status -ne "superseded" -or
+      $legacyRecoveredStatus.previousStatus -ne "queued" -or
+      $legacyRecoveredStatus.previousUpdateId -ne $legacyUpdateId -or
+      $legacyRecoveredStatus.actualVersion -ne "2.0.15" -or
+      (Test-Path -LiteralPath (Join-Path $legacyRecovery.installRoot "update.lock")) -or
+      (Test-Path -LiteralPath (Join-Path $legacyRecovery.installRoot ".local\update-maintenance.json"))) {
+    throw "A health-verified v2.0.15 repair did not safely resolve its queued v2.0.11-era task."
   }
 
   $rollback = New-NgtInstallFixture (Join-Path $testRoot "rollback")
