@@ -1,0 +1,55 @@
+name: Windows Studio acceptance
+description: Verify candidate bytes and exercise the real installer as an isolated standard user.
+inputs:
+  mode:
+    description: draft or ready
+    required: true
+  acceptance:
+    description: installer, online-update, or manual-installer
+    required: true
+  failure_probe:
+    description: Release Ready only; simulate an isolated installer acceptance failure.
+    required: false
+    default: none
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 24
+        package-manager-cache: false
+    - name: Download exact-SHA Draft Release assets
+      if: inputs.mode == 'draft'
+      shell: powershell
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node scripts/windows-studio-release.mjs download-draft release-assets
+    - name: Download exact-SHA Release Ready candidate assets
+      if: inputs.mode == 'ready'
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-candidate-${{ github.sha }}
+        path: release-assets
+    - name: Verify exact artifact SHA and manifest
+      shell: powershell
+      env:
+        NGT_RELEASE_READY: ${{ inputs.mode == 'ready' }}
+      run: node scripts/windows-studio-release.mjs verify-artifact release-assets
+    - name: Simulate isolated installer acceptance failure
+      if: inputs.mode == 'ready' && inputs.acceptance == 'installer' && inputs.failure_probe == 'installer'
+      shell: powershell
+      run: throw "Injected Release Ready installer acceptance failure; publication must remain blocked."
+    - name: Exercise verified Windows candidate
+      shell: powershell
+      env:
+        GH_TOKEN: ${{ github.token }}
+        NGT_RELEASE_READY: ${{ inputs.mode == 'ready' }}
+      run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}
+    - name: Keep sanitized failure diagnostics
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-${{ inputs.mode }}-${{ inputs.acceptance }}-diagnostics-${{ github.sha }}
+        path: ${{ runner.temp }}/ngt-acceptance-diagnostics/
+        if-no-files-found: warn
+        retention-days: 7

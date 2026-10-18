@@ -10,7 +10,10 @@ test("release database probe uses Prisma unique keys and survives repeated write
   const schema = await readFile("prisma/schema.prisma", "utf8");
   assert.match(schema, /model Customer\s*\{[^}]*\bid\s+String\s+@id/s);
   assert.match(schema, /model WorkOrder\s*\{[^}]*\bcode\s+String\s+@unique/s);
-  assert.doesNotMatch(schema, /model Customer\s*\{[^}]*\bphone\s+String\s+@unique/s);
+  assert.doesNotMatch(
+    schema,
+    /model Customer\s*\{[^}]*\bphone\s+String\s+@unique/s,
+  );
 
   const customers = [];
   const devices = [];
@@ -18,12 +21,15 @@ test("release database probe uses Prisma unique keys and survives repeated write
   const db = {
     customer: {
       async create({ data }) {
-        if (customers.some((item) => item.phone === data.phone)) throw new Error("duplicate phone");
+        if (customers.some((item) => item.phone === data.phone))
+          throw new Error("duplicate phone");
         const record = { id: String(customers.length + 1), ...data };
         customers.push(record);
         return record;
       },
-      async findFirst({ where }) { return customers.find((item) => item.phone === where.phone) ?? null; },
+      async findFirst({ where }) {
+        return customers.find((item) => item.phone === where.phone) ?? null;
+      },
       async findUnique({ where }) {
         assert.deepEqual(Object.keys(where), ["id"]);
         return customers.find((item) => item.id === where.id) ?? null;
@@ -43,12 +49,22 @@ test("release database probe uses Prisma unique keys and survives repeated write
       },
     },
     workOrder: {
-      async create({ data }) { orders.push(data); },
+      async create({ data }) {
+        orders.push(data);
+      },
       async findUnique({ where }) {
         assert.deepEqual(Object.keys(where), ["code"]);
         const order = orders.find((item) => item.code === where.code);
         const device = devices.find((item) => item.id === order?.deviceId);
-        return order && { ...order, device: { ...device, customer: customers.find((item) => item.id === device.customerId) } };
+        return (
+          order && {
+            ...order,
+            device: {
+              ...device,
+              customer: customers.find((item) => item.id === device.customerId),
+            },
+          }
+        );
       },
     },
   };
@@ -57,5 +73,8 @@ test("release database probe uses Prisma unique keys and survives repeated write
   await runProbe(db, "verify-and-write", "CI-TEST");
   assert.equal(customers.length, 2);
   assert.equal(customers[1].name, "Post update write");
-  await assert.rejects(runProbe(db, "invalid", "CI-TEST"), /Unknown business probe action/);
+  await assert.rejects(
+    runProbe(db, "invalid", "CI-TEST"),
+    /Unknown business probe action/,
+  );
 });

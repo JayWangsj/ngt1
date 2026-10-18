@@ -62,7 +62,11 @@ foreach ($sourcePath in $SourcePaths) {
   }
   if (-not $name) { continue }
   try {
-    $text = Protect-DiagnosticText ([System.IO.File]::ReadAllText($sourcePath))
+    $stream = [System.IO.File]::Open($sourcePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try {
+      $reader = [System.IO.StreamReader]::new($stream)
+      try { $text = Protect-DiagnosticText $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
     [System.IO.File]::WriteAllText((Join-Path $OutputDirectory $name), $text, [System.Text.UTF8Encoding]::new($false))
     if ($EmitToConsole) { Write-NgtDiagnosticExcerpt -Name $name -Text $text }
   } catch {

@@ -1,0 +1,122 @@
+name: Windows Studio Release Ready
+
+on:
+  workflow_dispatch:
+    inputs:
+      failure_probe:
+        description: Isolated gate regression; never used by the formal release.
+        type: choice
+        required: true
+        default: none
+        options: [none, installer]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: windows-studio-release-ready-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Release Ready qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Require master and exact-SHA Verify MVP before candidate build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NGT_RELEASE_READY: "true"
+        run: node scripts/windows-studio-release.mjs qualify-candidate
+
+  build:
+    name: Release Ready candidate build
+    needs: qualify
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/build-windows-studio-candidate
+        env:
+          NGT_RELEASE_READY: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/ngt-windows-release-assets/
+          if-no-files-found: error
+          retention-days: 3
+
+  installer-acceptance:
+    name: Release Ready installer acceptance
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/windows-studio-acceptance
+        with:
+          mode: ready
+          acceptance: installer
+          failure_probe: ${{ inputs.failure_probe }}
+
+  online-update-acceptance:
+    name: Release Ready online-update acceptance
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/windows-studio-acceptance
+        with:
+          mode: ready
+          acceptance: online-update
+
+  manual-installer-acceptance:
+    name: Release Ready manual upgrade and repair acceptance
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/windows-studio-acceptance
+        with:
+          mode: ready
+          acceptance: manual-installer
+
+  release-ready:
+    name: Release Ready
+    needs: [qualify, build, installer-acceptance, online-update-acceptance, manual-installer-acceptance]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all isolated Windows acceptance jobs
+        env:
+          QUALIFY: ${{ needs.qualify.result }}
+          BUILD: ${{ needs.build.result }}
+          INSTALLER: ${{ needs.installer-acceptance.result }}
+          ONLINE: ${{ needs.online-update-acceptance.result }}
+          MANUAL: ${{ needs.manual-installer-acceptance.result }}
+        run: |
+          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$MANUAL"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::Release Ready requires every candidate build and acceptance job to succeed."
+              exit 1
+            fi
+          done

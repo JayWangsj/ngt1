@@ -5,6 +5,7 @@ param(
   [string]$ExpectedCommitSha,
   [Parameter(Mandatory = $true)]
   [string]$ExpectedManifestPath,
+  [string]$CandidateDirectory = "",
   [switch]$ManualInstaller
 )
 $ErrorActionPreference = "Stop"
@@ -36,13 +37,16 @@ if ($targetVersion -notmatch '^\d+\.\d+\.\d+$' -or
   throw "Online update acceptance artifact identity does not match the target tag and triggering Commit SHA."
 }
 
-$candidateOutput = & $githubCli release view $TargetTag --repo $repository --json tagName,isDraft,assets,body
-if ($LASTEXITCODE -ne 0) { throw "Candidate release assets are not readable: $TargetTag" }
-$candidate = ($candidateOutput | Out-String) | ConvertFrom-Json
-$expectedMarker = "<!-- ngt-release-build:v1 tag=$TargetTag sha=$ExpectedCommitSha version=$targetVersion identity=$($manifest.buildIdentity) -->"
-if ($candidate.tagName -ne $TargetTag -or -not $candidate.isDraft -or
-    -not ([string]$candidate.body).Contains($expectedMarker)) {
-  throw "Online update acceptance requires the exact verified candidate to remain a Draft Release."
+$candidate = $null
+if (-not $CandidateDirectory) {
+  $candidateOutput = & $githubCli release view $TargetTag --repo $repository --json tagName,isDraft,assets,body
+  if ($LASTEXITCODE -ne 0) { throw "Candidate release assets are not readable: $TargetTag" }
+  $candidate = ($candidateOutput | Out-String) | ConvertFrom-Json
+  $expectedMarker = "<!-- ngt-release-build:v1 tag=$TargetTag sha=$ExpectedCommitSha version=$targetVersion identity=$($manifest.buildIdentity) -->"
+  if ($candidate.tagName -ne $TargetTag -or -not $candidate.isDraft -or
+      -not ([string]$candidate.body).Contains($expectedMarker)) {
+    throw "Online update acceptance requires the exact verified candidate to remain a Draft Release."
+  }
 }
 
 $candidateRequired = @($manifest.assets | ForEach-Object name | Sort-Object)
@@ -57,23 +61,37 @@ $expectedNames = @(
 if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $candidateRequired) {
   throw "Online update acceptance manifest has an incomplete candidate asset set."
 }
-$candidateAssetNames = @($candidate.assets | ForEach-Object name | Sort-Object)
-if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $candidateAssetNames) {
-  throw "Candidate Draft asset names do not match the verified build."
-}
 $candidateNeedsContentCheck = $false
-foreach ($asset in $manifest.assets) {
-  $remoteAsset = @($candidate.assets | Where-Object name -eq $asset.name)
-  if ($remoteAsset.Count -ne 1 -or [long]$remoteAsset[0].size -ne [long]$asset.size) {
-    throw "Candidate Draft asset size or inventory does not match the verified build: $($asset.name)"
+if ($CandidateDirectory) {
+  $candidateAssetNames = @(Get-ChildItem -LiteralPath $CandidateDirectory -File | Where-Object Name -ne "release-manifest.json" | ForEach-Object Name | Sort-Object)
+  if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $candidateAssetNames) {
+    throw "Local candidate asset names do not match the verified build."
   }
-  $digest = [string]$remoteAsset[0].digest
-  if ($digest) {
-    if ($digest.ToLowerInvariant() -ne "sha256:$($asset.sha256)") {
-      throw "Candidate Draft asset SHA256 does not match the verified build: $($asset.name)"
+  foreach ($asset in $manifest.assets) {
+    $assetPath = Join-Path $CandidateDirectory $asset.name
+    if ((Get-Item -LiteralPath $assetPath).Length -ne [long]$asset.size -or
+        (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$asset.sha256) {
+      throw "Local candidate asset SHA256 does not match the verified build: $($asset.name)"
     }
-  } else {
-    $candidateNeedsContentCheck = $true
+  }
+} else {
+  $candidateAssetNames = @($candidate.assets | ForEach-Object name | Sort-Object)
+  if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $candidateAssetNames) {
+    throw "Candidate Draft asset names do not match the verified build."
+  }
+  foreach ($asset in $manifest.assets) {
+    $remoteAsset = @($candidate.assets | Where-Object name -eq $asset.name)
+    if ($remoteAsset.Count -ne 1 -or [long]$remoteAsset[0].size -ne [long]$asset.size) {
+      throw "Candidate Draft asset size or inventory does not match the verified build: $($asset.name)"
+    }
+    $digest = [string]$remoteAsset[0].digest
+    if ($digest) {
+      if ($digest.ToLowerInvariant() -ne "sha256:$($asset.sha256)") {
+        throw "Candidate Draft asset SHA256 does not match the verified build: $($asset.name)"
+      }
+    } else {
+      $candidateNeedsContentCheck = $true
+    }
   }
 }
 
@@ -110,6 +128,7 @@ $updateLog = Join-Path $installRoot "logs\online-update.log"
 $updateProcess = $null
 $installationAttempted = $false
 $cleanupSafe = $true
+$acceptanceFailed = $false
 
 function Invoke-GhDownload([string]$Tag, [string]$Directory, [string[]]$AssetNames) {
   New-Item -ItemType Directory -Path $Directory -Force | Out-Null
@@ -161,6 +180,17 @@ function Invoke-BusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string
 
 try {
   New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+  if ($CandidateDirectory) {
+    $shimRoot = Join-Path $testRoot "candidate-gh"
+    New-Item -ItemType Directory -Path $shimRoot -Force | Out-Null
+    $shimScript = Join-Path $PSScriptRoot "windows-studio-ready-gh.cjs"
+    $shimCommand = Join-Path $shimRoot "gh.cmd"
+    "@echo off`r`nnode `"$shimScript`" %*`r`n" | Set-Content -LiteralPath $shimCommand -Encoding ascii
+    $env:NGT_READY_GH_ORIGINAL = $githubCli
+    $env:NGT_READY_CANDIDATE_DIR = [System.IO.Path]::GetFullPath($CandidateDirectory)
+    $env:NGT_READY_CANDIDATE_TAG = $TargetTag
+    $env:PATH = "$shimRoot;$env:PATH"
+  }
   if ($candidateNeedsContentCheck) {
     $candidateVerifyRoot = Join-Path $testRoot "candidate-assets"
     Invoke-GhDownload -Tag $TargetTag -Directory $candidateVerifyRoot -AssetNames $candidateRequired
@@ -417,6 +447,7 @@ try {
     Write-Output "Windows online update acceptance passed: $oldTag -> $TargetTag."
   }
 } catch {
+  $acceptanceFailed = $true
   try {
     $startupTask = Get-ScheduledTask -TaskName "NGT Management System" -ErrorAction SilentlyContinue
     if ($startupTask) {
@@ -459,8 +490,11 @@ try {
   throw
 } finally {
   if ($updateProcess -and -not $updateProcess.HasExited) {
-    $cleanupSafe = $false
-    Write-Warning "The update executor is still running; retained the isolated test files until the hosted runner is discarded."
+    & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $updateProcess.Id /T /F | Out-Null
+    if (-not $updateProcess.WaitForExit(5000)) {
+      $cleanupSafe = $false
+      Write-Warning "The update executor could not be stopped; retained isolated test files."
+    }
   }
   if ($cleanupSafe -and $installationAttempted -and (Test-Path -LiteralPath (Join-Path $installRoot ".local\studio.json"))) {
     try {
@@ -480,9 +514,24 @@ try {
     }
   }
   if ($cleanupSafe -and (Test-Path -LiteralPath $testRoot)) {
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+      $listeners = @(Get-NetTCPConnection -LocalPort 3000, 55432 -State Listen -ErrorAction SilentlyContinue)
+      if ($listeners.Count -eq 0 -or (Get-Date) -ge $deadline) { break }
+      Start-Sleep -Milliseconds 500
+    } while ($true)
+    if ($listeners.Count -gt 0) {
+      $cleanupSafe = $false
+      Write-Warning ("Acceptance cleanup left listeners: " + (($listeners | ForEach-Object { "$($_.LocalPort)/PID $($_.OwningProcess)" }) -join ", "))
+    }
+  }
+  if ($cleanupSafe -and (Test-Path -LiteralPath $testRoot)) {
     Set-Location -LiteralPath ([System.IO.Path]::GetTempPath())
     Remove-Item -LiteralPath $testRoot -Recurse -Force
   } elseif (Test-Path -LiteralPath $testRoot) {
     Write-Warning "Retained the isolated test data at $testRoot because its services could not be verified stopped."
+  }
+  if (-not $cleanupSafe -and -not $acceptanceFailed) {
+    throw "Windows update acceptance cleanup could not be verified."
   }
 }

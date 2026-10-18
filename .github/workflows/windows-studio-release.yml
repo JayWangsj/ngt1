@@ -46,78 +46,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.19.0
-          run_install: false
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Install pinned dependencies
-        run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy
-      - name: Build Windows application from qualified source
-        run: pnpm build
-        env:
-          DATABASE_URL: postgresql://ngt:ci-only@127.0.0.1:55432/ngt?schema=public
-          AUTH_SECRET: ci-only-secret-for-studio-smoke
-          AUTH_URL: http://127.0.0.1:3000
-          AUTH_TRUST_HOST: "true"
-          NEXT_TELEMETRY_DISABLED: "1"
-          NODE_OPTIONS: --max-old-space-size=2048
-      - name: Package and verify exact-commit Windows application
-        shell: powershell
-        run: |
-          ./scripts/build-windows-studio-package.ps1
-          ./scripts/test-windows-studio-package.ps1 -IntegrityOnly
-          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
-          ./scripts/verify-windows-studio-release.ps1 -ReleaseRoot ".local/studio-package" -ExpectedVersion ("v" + $version) | Out-Null
-      - name: Install pinned Inno Setup and build installer
-        shell: powershell
-        run: |
-          choco install innosetup --version=6.7.1 --no-progress --yes
-          if ($LASTEXITCODE -ne 0) { throw "Pinned Inno Setup installation failed." }
-          $compiler = @(
-            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-            "C:\Program Files\Inno Setup 6\ISCC.exe"
-          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-          if (-not $compiler) { throw "Pinned Inno Setup compiler was not installed." }
-          $compilerDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($compiler))
-          $installedInnoSetup = @(
-            foreach ($registryRoot in @(
-              "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-            )) {
-              if (Test-Path -LiteralPath $registryRoot) {
-                Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue | ForEach-Object {
-                  $entry = Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
-                  if ($entry.DisplayName -like "Inno Setup*" -and $entry.InstallLocation) {
-                    $installDirectory = [System.IO.Path]::GetFullPath([string]$entry.InstallLocation).TrimEnd('\')
-                    if ([string]::Equals($installDirectory, $compilerDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
-                      $entry
-                    }
-                  }
-                }
-              }
-            }
-          )
-          if ($installedInnoSetup.Count -ne 1) { throw "Could not identify the Inno Setup installation that owns $compiler." }
-          $compilerVersion = [string]$installedInnoSetup[0].DisplayVersion
-          if ($compilerVersion -notlike "6.7.1*") { throw "Expected Inno Setup 6.7.1; found $compilerVersion." }
-          ./scripts/build-windows-studio-installer.ps1
-      - name: Generate candidate runtime archives and checksums
-        shell: powershell
-        run: ./scripts/prepare-windows-studio-update-assets.ps1
-      - name: Create verified Release asset manifest
-        shell: powershell
-        run: |
-          $artifactDirectory = Join-Path $env:RUNNER_TEMP "ngt-windows-release-assets"
-          New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
-          Get-ChildItem -LiteralPath dist -File | Copy-Item -Destination $artifactDirectory
-          $env:NGT_RELEASE_ASSET_DIR = $artifactDirectory
-          node scripts/windows-studio-release.mjs manifest
-          if ($LASTEXITCODE -ne 0) { throw "Release artifact manifest creation failed." }
+      - uses: ./.github/actions/build-windows-studio-candidate
       - name: Upload verified assets directly to a Draft Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -138,21 +67,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/windows-studio-acceptance
         with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Download and verify exact-SHA Draft Release assets
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/windows-studio-release.mjs download-draft release-assets
-      - name: Verify exact artifact SHA and manifest
-        run: node scripts/windows-studio-release.mjs verify-artifact release-assets
-      - name: Exercise real online upgrade through the isolated Draft candidate channel
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update
+          mode: draft
+          acceptance: online-update
 
   installer-acceptance:
     name: Disposable Windows installer acceptance
@@ -166,20 +84,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/windows-studio-acceptance
         with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Download and verify exact-SHA Draft Release assets
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/windows-studio-release.mjs download-draft release-assets
-      - name: Verify exact artifact SHA and manifest
-        run: node scripts/windows-studio-release.mjs verify-artifact release-assets
-      - name: Install the exact installer from the verified artifact
-        shell: powershell
-        run: |
-          ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance installer
+          mode: draft
+          acceptance: installer
 
   manual-installer-acceptance:
     name: Disposable Windows manual upgrade and repair acceptance
@@ -193,21 +101,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/windows-studio-acceptance
         with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Download and verify exact-SHA Draft Release assets
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/windows-studio-release.mjs download-draft release-assets
-      - name: Verify exact artifact SHA and manifest
-        run: node scripts/windows-studio-release.mjs verify-artifact release-assets
-      - name: Exercise manual upgrade and repair with the verified installer
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance manual-installer
+          mode: draft
+          acceptance: manual-installer
 
   publish:
     name: Publish verified Release

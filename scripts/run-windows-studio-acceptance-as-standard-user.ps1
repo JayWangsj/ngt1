@@ -49,27 +49,30 @@ $scriptPath = switch ($Acceptance) {
   "manual-installer" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
   "installer" { Join-Path $PSScriptRoot "test-windows-studio-installer.ps1" }
 }
+$candidateVersion = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "package.json") -Raw | ConvertFrom-Json).version
+$targetTag = if ($env:NGT_RELEASE_READY -eq "true") { "v$candidateVersion" } else { $env:GITHUB_REF_NAME }
 $parameters = switch ($Acceptance) {
   "online-update" {
     @{
-      TargetTag = $env:GITHUB_REF_NAME
+      TargetTag = $targetTag
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
+      CandidateDirectory = if ($env:NGT_RELEASE_READY -eq "true") { Join-Path $env:GITHUB_WORKSPACE "release-assets" } else { "" }
     }
   }
   "manual-installer" {
     @{
-      TargetTag = $env:GITHUB_REF_NAME
+      TargetTag = $targetTag
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
+      CandidateDirectory = if ($env:NGT_RELEASE_READY -eq "true") { Join-Path $env:GITHUB_WORKSPACE "release-assets" } else { "" }
       ManualInstaller = $true
     }
   }
   "installer" {
-    $version = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "package.json") -Raw | ConvertFrom-Json).version
     @{
-      InstallerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-v$version.exe"
-      ExpectedVersion = $version
+      InstallerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-v$candidateVersion.exe"
+      ExpectedVersion = $candidateVersion
     }
   }
 }
@@ -129,6 +132,7 @@ try {
       RUNNER_OS = $env:RUNNER_OS
       GITHUB_SHA = $env:GITHUB_SHA
       GITHUB_REF_NAME = $env:GITHUB_REF_NAME
+      NGT_RELEASE_READY = $env:NGT_RELEASE_READY
       GITHUB_WORKSPACE = $workspace
       RUNNER_TEMP = $isolatedTemp
       GH_TOKEN = $env:GH_TOKEN
@@ -166,6 +170,18 @@ try {
   if ($process -and -not $process.HasExited) {
     & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
     [void]$process.WaitForExit(5000)
+  }
+  try {
+    $sanitizedDiagnostics = Get-ChildItem -LiteralPath $isolatedTemp -Directory -Filter "ngt-*-diagnostics" -ErrorAction SilentlyContinue
+    if ($sanitizedDiagnostics) {
+      $retainedDiagnostics = Join-Path $env:RUNNER_TEMP "ngt-acceptance-diagnostics"
+      New-Item -ItemType Directory -Path $retainedDiagnostics -Force | Out-Null
+      foreach ($directory in $sanitizedDiagnostics) {
+        Copy-Item -LiteralPath $directory.FullName -Destination $retainedDiagnostics -Recurse -Force
+      }
+    }
+  } catch {
+    Write-Warning ("Sanitized acceptance diagnostics could not be retained: " + $_.Exception.Message)
   }
   foreach ($entry in $workspaceAclPaths) {
     $icaclsArguments = @($entry.Path, "/remove", $account)

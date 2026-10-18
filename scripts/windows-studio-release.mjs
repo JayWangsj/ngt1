@@ -844,6 +844,20 @@ export class GitHubReleaseApi {
     return this.json(this.repoPath("/actions/runs?" + query.toString()));
   }
 
+  async listReadyRuns(sha) {
+    const query = new URLSearchParams({
+      head_sha: sha,
+      branch: "master",
+      event: "workflow_dispatch",
+      per_page: "100",
+    });
+    return this.json(
+      this.repoPath(
+        "/actions/workflows/windows-studio-release-ready.yml/runs?" + query,
+      ),
+    );
+  }
+
   async listRunJobs(runId) {
     return this.json(
       this.repoPath("/actions/runs/" + runId + "/jobs?per_page=100"),
@@ -904,13 +918,14 @@ export async function qualifyRelease({
   timeoutMs = 20 * 60 * 1000,
   now = Date.now,
   sleep = delay,
+  requireTag = true,
 }) {
   if (tag !== "v" + version || !/^[a-f0-9]{40}$/i.test(sha)) {
     throw new Error(
       "Release tag, package version, and Commit SHA are not qualified.",
     );
   }
-  if ((await api.resolveTagCommit(tag)) !== sha.toLowerCase()) {
+  if (requireTag && (await api.resolveTagCommit(tag)) !== sha.toLowerCase()) {
     throw new Error(
       "Release tag does not resolve to the triggering Commit SHA.",
     );
@@ -988,6 +1003,46 @@ export async function qualifyRelease({
   throw new Error("Timed out before Windows build: " + lastState);
 }
 
+export async function requireReleaseReady(api, sha) {
+  const response = await api.listReadyRuns(sha);
+  const runs = (response.workflow_runs || [])
+    .filter(
+      (run) =>
+        run.path === ".github/workflows/windows-studio-release-ready.yml" &&
+        run.head_sha === sha.toLowerCase() &&
+        run.head_branch === "master" &&
+        run.event === "workflow_dispatch",
+    )
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const run = runs[0];
+  if (!run || run.status !== "completed" || run.conclusion !== "success") {
+    throw new Error(
+      "Exact-SHA Release Ready has not passed for this Commit SHA.",
+    );
+  }
+  const jobs = (await api.listRunJobs(run.id)).jobs || [];
+  const required = [
+    "Release Ready qualification",
+    "Release Ready candidate build",
+    "Release Ready installer acceptance",
+    "Release Ready online-update acceptance",
+    "Release Ready manual upgrade and repair acceptance",
+    "Release Ready",
+  ];
+  if (
+    required.some(
+      (name) =>
+        jobs.filter((job) => job.name === name && job.conclusion === "success")
+          .length !== 1,
+    )
+  ) {
+    throw new Error(
+      "Exact-SHA Release Ready is missing a successful required Windows acceptance job.",
+    );
+  }
+  return run;
+}
+
 async function readExpectedPackageEnvironment() {
   const sha = process.env.GITHUB_SHA?.toLowerCase();
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -1001,11 +1056,14 @@ async function readExpectedPackageEnvironment() {
   }
   return { sha, version: packageJson.version };
 }
-async function readExpectedEnvironment() {
-  const tag = process.env.GITHUB_REF_NAME;
+async function readExpectedEnvironment(allowCandidate = false) {
   const sha = process.env.GITHUB_SHA?.toLowerCase();
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const version = packageJson.version;
+  const tag =
+    allowCandidate && process.env.NGT_RELEASE_READY === "true"
+      ? "v" + version
+      : process.env.GITHUB_REF_NAME;
   if (tag !== "v" + version)
     throw new Error(
       "Tag " + tag + " does not match package version " + version + ".",
@@ -1033,7 +1091,7 @@ async function main() {
     const directory = directoryArg || process.env.NGT_RELEASE_ASSET_DIR;
     if (!directory)
       throw new Error("manifest requires the Windows release asset directory.");
-    const { tag, sha, version } = await readExpectedEnvironment();
+    const { tag, sha, version } = await readExpectedEnvironment(true);
     const manifest = await createLocalManifest(directory, tag, sha, version);
     console.log("Verified build identity " + manifest.buildIdentity);
     return;
@@ -1097,7 +1155,9 @@ async function main() {
     const manifest = JSON.parse(
       await readFile(path.join(directory, "release-manifest.json"), "utf8"),
     );
-    const { tag, sha, version } = await readExpectedEnvironment();
+    const { tag, sha, version } = await readExpectedEnvironment(
+      command === "verify-artifact",
+    );
     await verifyArtifact(directory, manifest, { tag, sha, version });
     if (command === "verify-artifact") {
       console.log(
@@ -1136,6 +1196,7 @@ async function main() {
       timeoutMs:
         Number(process.env.NGT_VERIFY_TIMEOUT_MINUTES || 20) * 60 * 1000,
     });
+    const ready = await requireReleaseReady(api, sha);
     if (process.env.GITHUB_OUTPUT) {
       const { appendFile } = await import("node:fs/promises");
       await appendFile(
@@ -1145,7 +1206,37 @@ async function main() {
       );
     }
     console.log(
-      "Exact-SHA Verify MVP gates passed for run " + result.run.id + ".",
+      "Exact-SHA Verify MVP gates passed for run " +
+        result.run.id +
+        "; Release Ready passed for run " +
+        ready.id +
+        ".",
+    );
+    return;
+  }
+  if (command === "qualify-candidate") {
+    if (
+      process.env.GITHUB_REF !== "refs/heads/master" ||
+      process.env.GITHUB_EVENT_NAME !== "workflow_dispatch"
+    ) {
+      throw new Error(
+        "Release Ready must be dispatched for the master commit before tagging.",
+      );
+    }
+    const { tag, sha, version } = await readExpectedEnvironment(true);
+    const api = new GitHubReleaseApi({
+      token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
+    });
+    const result = await qualifyRelease({
+      api,
+      tag,
+      sha,
+      version,
+      requireTag: false,
+    });
+    console.log(
+      "Exact-SHA Verify MVP passed for Release Ready candidate: " +
+        result.run.id,
     );
     return;
   }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,7 @@ import {
   prepareDraft,
   publishRelease,
   qualifyRelease,
+  requireReleaseReady,
   verifyArtifact,
   verifyWindowsPackageArtifact,
 } from "../../scripts/windows-studio-release.mjs";
@@ -491,6 +493,107 @@ test("same-SHA qualification requires all named Verify MVP gates to succeed", as
   );
 });
 
+test("Release Ready rejects missing, stale, and incomplete exact-SHA Windows runs", async () => {
+  const required = [
+    "Release Ready qualification",
+    "Release Ready candidate build",
+    "Release Ready installer acceptance",
+    "Release Ready online-update acceptance",
+    "Release Ready manual upgrade and repair acceptance",
+    "Release Ready",
+  ];
+  const run = {
+    id: 501,
+    path: ".github/workflows/windows-studio-release-ready.yml",
+    head_sha: sourceSha,
+    head_branch: "master",
+    event: "workflow_dispatch",
+    status: "completed",
+    conclusion: "success",
+    created_at: "2026-10-18T00:00:00Z",
+  };
+  const api = {
+    listReadyRuns: async () => ({
+      workflow_runs: [{ ...run, head_sha: "b".repeat(40) }],
+    }),
+    listRunJobs: async () => ({
+      jobs: required.map((name) => ({ name, conclusion: "success" })),
+    }),
+  };
+  await assert.rejects(requireReleaseReady(api, sourceSha), /has not passed/);
+  api.listReadyRuns = async () => ({ workflow_runs: [run] });
+  assert.equal((await requireReleaseReady(api, sourceSha)).id, run.id);
+  api.listRunJobs = async () => ({
+    jobs: required
+      .filter((name) => name !== "Release Ready online-update acceptance")
+      .map((name) => ({ name, conclusion: "success" })),
+  });
+  await assert.rejects(
+    requireReleaseReady(api, sourceSha),
+    /missing a successful/,
+  );
+  api.listReadyRuns = async () => ({
+    workflow_runs: [
+      run,
+      {
+        ...run,
+        id: 502,
+        conclusion: "failure",
+        created_at: "2026-10-18T01:00:00Z",
+      },
+    ],
+  });
+  await assert.rejects(requireReleaseReady(api, sourceSha), /has not passed/);
+});
+
+test("Release Ready verifies local candidate bytes without a version tag", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ngt-ready-artifact-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const currentVersion = JSON.parse(
+    await readFile("package.json", "utf8"),
+  ).version;
+  const candidateTag = "v" + currentVersion;
+  for (const name of expectedAssetNames(candidateTag).filter(
+    (item) => !item.endsWith(".sha256"),
+  )) {
+    const bytes = Buffer.from("candidate " + name);
+    await writeFile(path.join(root, name), bytes);
+    await writeFile(
+      path.join(root, name + ".sha256"),
+      sha256(bytes) + "  " + name + "\n",
+    );
+  }
+  const env = {
+    ...process.env,
+    GITHUB_REF_NAME: "master",
+    GITHUB_SHA: sourceSha,
+    NGT_RELEASE_READY: "true",
+  };
+  execFileSync(
+    process.execPath,
+    ["scripts/windows-studio-release.mjs", "manifest", root],
+    { env },
+  );
+  execFileSync(
+    process.execPath,
+    ["scripts/windows-studio-release.mjs", "verify-artifact", root],
+    { env },
+  );
+  await writeFile(
+    path.join(root, expectedAssetNames(candidateTag)[0]),
+    "tampered",
+  );
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        ["scripts/windows-studio-release.mjs", "verify-artifact", root],
+        { env, stdio: "pipe" },
+      ),
+    /failed SHA256 verification/,
+  );
+});
+
 test("Windows Smoke package provenance detects mutation and source mismatch", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "ngt-package-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -542,6 +645,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   const release = (
     await readText(".github/workflows/windows-studio-release.yml", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const ready = (
+    await readText(".github/workflows/windows-studio-release-ready.yml", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const acceptanceAction = (
+    await readText(
+      ".github/actions/windows-studio-acceptance/action.yml",
+      "utf8",
+    )
   ).replace(/\r\n/g, "\n");
   const updater = (
     await readText("scripts/update-windows-studio.ps1", "utf8")
@@ -607,7 +719,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.doesNotMatch(release, /continue-on-error:/);
   assert.doesNotMatch(release, /--clobber/);
   assert.match(release, /windows-studio-release\.mjs prepare-draft/);
-  assert.match(release, /windows-studio-release\.mjs download-draft/);
+  assert.match(release, /\.\/\.github\/actions\/windows-studio-acceptance/);
+  assert.match(acceptanceAction, /windows-studio-release\.mjs download-draft/);
+  assert.match(acceptanceAction, /windows-studio-release\.mjs verify-artifact/);
+  assert.match(ready, /workflow_dispatch:/);
+  assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
+  assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
+  assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.doesNotMatch(release, /actions\/(?:upload|download)-artifact@v4/);
   assert.doesNotMatch(ci, /actions\/upload-artifact@v4/);
   assert.doesNotMatch(release, /prepare-candidate:/);
@@ -625,7 +743,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.doesNotMatch(online, /\$githubCli (?:api|release list).*releases/);
   assert.match(online, /\$ExpectedCommitSha/);
   assert.match(online, /\$ExpectedManifestPath/);
-  assert.match(standardUserAcceptance, /TargetTag = \$env:GITHUB_REF_NAME/);
+  assert.match(standardUserAcceptance, /TargetTag = \$targetTag/);
   assert.match(standardUserAcceptance, /ExpectedCommitSha = \$env:GITHUB_SHA/);
   assert.match(standardUserAcceptance, /ExpectedManifestPath = Join-Path/);
   assert.match(standardUserAcceptance, /InstallerPath = Join-Path/);
@@ -666,15 +784,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(diagnostics, /"application\.log", "application\.error\.log"/);
   assert.match(diagnostics, /studio-database\.error\.log/);
   assert.match(
-    release,
-    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance online-update/,
+    acceptanceAction,
+    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance/,
   );
-  assert.match(
-    release,
-    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance installer/,
-  );
-  assert.match(
-    release,
-    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance manual-installer/,
-  );
+  assert.match(release, /mode: draft\s+acceptance: online-update/);
+  assert.match(release, /mode: draft\s+acceptance: installer/);
+  assert.match(release, /mode: draft\s+acceptance: manual-installer/);
+  assert.match(ready, /mode: ready\s+acceptance: online-update/);
+  assert.match(ready, /mode: ready\s+acceptance: installer/);
+  assert.match(ready, /mode: ready\s+acceptance: manual-installer/);
 });
