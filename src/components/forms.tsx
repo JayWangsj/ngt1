@@ -1951,7 +1951,7 @@ export function ItemsEditor({
                           update(index, {
                             requiredProductId: "",
                             requiredQuantity: 1,
-                            requiredProductRemoved: false,
+                            requiredProductRemoved: true,
                             priceOptionId: "",
                             priceOptionName: "",
                             suggestedAfterSwitch: undefined,

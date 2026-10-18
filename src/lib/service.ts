@@ -177,13 +177,17 @@ export async function updateBusinessClock(actorInput: Actor, raw: unknown) {
 }
 
 type SnapshotItem = Awaited<ReturnType<typeof snapshots>>[number];
-async function requiredPartLines(tx: Tx, items: SnapshotItem[]) {
+async function requiredPartLines(
+  tx: Tx,
+  items: SnapshotItem[],
+  allowInactiveProductIds = new Set<string>(),
+) {
   const productIds = items.flatMap((item) =>
     item.requiredProductId ? [item.requiredProductId] : [],
   );
   if (!productIds.length) return [];
   const products = await tx.product.findMany({
-    where: { id: { in: productIds }, enabled: true },
+    where: { id: { in: productIds } },
   });
   const quantities = new Map<
     string,
@@ -193,10 +197,16 @@ async function requiredPartLines(tx: Tx, items: SnapshotItem[]) {
     }
   >();
   for (const item of items) {
+    if (!item.requiredProductId) continue;
     const product = products.find(
       (candidate) => candidate.id === item.requiredProductId,
     );
-    if (!product) continue;
+    if (
+      !product ||
+      ((!product.enabled || product.usage !== "REPAIR") &&
+        !allowInactiveProductIds.has(product.id))
+    )
+      throw new BusinessError("Ricambio non disponibile.");
     const current = quantities.get(product.id);
     quantities.set(product.id, {
       product,
@@ -363,8 +373,12 @@ async function snapshots(
     ruleId: string | null;
     priceOptionId: string | null;
     priceOptionName: string;
+    suggested: { toString(): string } | null;
+    matchLevel: string;
+    minutes: number;
     requiredProductId: string | null;
     requiredProductName: string;
+    requiredQuantity: number;
     warrantyStart: Date | null;
     warrantyDays: number;
     warrantyExpiresAt: Date | null;
@@ -488,7 +502,48 @@ async function snapshots(
         },
       });
     }
-    const options = effectiveRule?.options ?? [];
+    const options = (effectiveRule?.options ?? []).filter(
+      (option) => option.product.enabled && option.product.usage === "REPAIR",
+    );
+    const historicalOption =
+      oldItem?.priceOptionId && oldItem.ruleId
+        ? await tx.priceRuleOption.findFirst({
+            where: {
+              id: oldItem.priceOptionId,
+              ruleId: oldItem.ruleId,
+            },
+            include: { product: true },
+          })
+        : null;
+    const preservesHistoricalOption = Boolean(
+      historicalOption &&
+      !item.requiredProductRemoved &&
+      (item.priceOptionId === oldItem?.priceOptionId ||
+        (!item.priceOptionId &&
+          item.requiredProductId === oldItem?.requiredProductId)),
+    );
+    const preservesHistoricalPart = Boolean(
+      oldItem?.requiredProductId &&
+      !oldItem.priceOptionId &&
+      !item.requiredProductRemoved &&
+      item.requiredProductId === oldItem.requiredProductId,
+    );
+    const preservesHistoricalNoPart = Boolean(
+      oldItem &&
+      !oldItem.requiredProductId &&
+      !oldItem.priceOptionId &&
+      !item.requiredProductId &&
+      !item.priceOptionId,
+    );
+    const preservesHistoricalSelection =
+      preservesHistoricalOption ||
+      preservesHistoricalPart ||
+      preservesHistoricalNoPart;
+    if (
+      item.requiredProductRemoved &&
+      (item.priceOptionId || item.requiredProductId)
+    )
+      throw new BusinessError("Selezione ricambio non valida.");
     let selectedOption = item.requiredProductRemoved
       ? null
       : item.priceOptionId
@@ -498,51 +553,78 @@ async function snapshots(
               (option) => option.productId === item.requiredProductId,
             )
           : (options.find((option) => option.isDefault) ?? options[0]);
+    if (preservesHistoricalOption)
+      selectedOption = historicalOption ?? undefined;
+    else if (preservesHistoricalNoPart) selectedOption = null;
     if (item.priceOptionId && !selectedOption)
       throw new BusinessError(
         "L'opzione ricambio non appartiene all'intervento selezionato.",
       );
-    if (item.saveRule && item.requiredProductId) {
-      selectedOption = await tx.priceRuleOption.findUnique({
-        where: {
-          ruleId_productId: {
-            ruleId: effectiveRule!.id,
-            productId: item.requiredProductId,
-          },
-        },
-        include: { product: true },
-      });
-    }
-    const requiredProductId = item.requiredProductRemoved
-      ? null
-      : item.requiredProductId ||
-        selectedOption?.productId ||
-        effectiveRule?.requiredProductId ||
-        null;
+    if (
+      selectedOption &&
+      item.requiredProductId &&
+      item.requiredProductId !== selectedOption.productId
+    )
+      throw new BusinessError(
+        "Il ricambio non corrisponde all'opzione selezionata.",
+      );
+    const requiredProductId =
+      item.requiredProductRemoved || preservesHistoricalNoPart
+        ? null
+        : selectedOption?.productId ||
+          item.requiredProductId ||
+          effectiveRule?.requiredProductId ||
+          null;
     const requiredProduct = requiredProductId
       ? await tx.product.findUnique({ where: { id: requiredProductId } })
       : null;
+    if (
+      requiredProductId &&
+      (!requiredProduct ||
+        ((!requiredProduct.enabled || requiredProduct.usage !== "REPAIR") &&
+          !preservesHistoricalSelection))
+    )
+      throw new BusinessError("Ricambio non disponibile.");
     results.push({
       project: item.project,
       final: decimal(final),
       discount: decimal(cents(item.discount)),
-      suggested: selectedOption?.suggested ?? effectiveRule?.suggested ?? null,
-      ruleId: effectiveRule?.id ?? oldItem?.ruleId ?? null,
-      priceOptionId: selectedOption?.id ?? null,
-      priceOptionName: selectedOption?.name ?? "",
-      matchLevel: match?.level ?? "MANUAL",
+      suggested: preservesHistoricalSelection
+        ? oldItem?.suggested
+          ? decimal(cents(oldItem.suggested.toString()))
+          : null
+        : (selectedOption?.suggested ?? effectiveRule?.suggested ?? null),
+      ruleId: preservesHistoricalSelection
+        ? oldItem?.ruleId
+        : (effectiveRule?.id ?? oldItem?.ruleId ?? null),
+      priceOptionId: preservesHistoricalOption
+        ? oldItem?.priceOptionId
+        : (selectedOption?.id ?? null),
+      priceOptionName: preservesHistoricalSelection
+        ? (oldItem?.priceOptionName ?? "")
+        : (selectedOption?.name ?? ""),
+      matchLevel: preservesHistoricalSelection
+        ? (oldItem?.matchLevel ?? "MANUAL")
+        : (match?.level ?? "MANUAL"),
       adjustmentReason: item.adjustmentReason,
-      minutes: selectedOption?.minutes ?? effectiveRule?.minutes ?? 0,
+      minutes: preservesHistoricalSelection
+        ? (oldItem?.minutes ?? 0)
+        : (selectedOption?.minutes ?? effectiveRule?.minutes ?? 0),
       requiredProductId,
-      requiredProductName: requiredProduct?.name ?? "",
-      requiredQuantity:
-        item.requiredProductId ||
-        selectedOption ||
-        !effectiveRule?.requiredProductId
-          ? item.requiredQuantity
-          : effectiveRule.requiredQuantity,
+      requiredProductName: preservesHistoricalSelection
+        ? (oldItem?.requiredProductName ?? "")
+        : (requiredProduct?.name ?? ""),
+      requiredQuantity: preservesHistoricalSelection
+        ? (oldItem?.requiredQuantity ?? 1)
+        : selectedOption
+          ? selectedOption.quantity
+          : item.requiredProductId || !effectiveRule?.requiredProductId
+            ? item.requiredQuantity
+            : effectiveRule.requiredQuantity,
       warrantyStart: oldItem?.warrantyStart ?? null,
-      warrantyDays: oldItem?.warrantyDays ?? selectedOption?.warrantyDays ?? 0,
+      warrantyDays: preservesHistoricalSelection
+        ? (oldItem?.warrantyDays ?? 0)
+        : (selectedOption?.warrantyDays ?? oldItem?.warrantyDays ?? 0),
       warrantyExpiresAt: oldItem?.warrantyExpiresAt ?? null,
       warrantyNotes: oldItem?.warrantyNotes ?? "",
     });
@@ -1098,7 +1180,62 @@ export async function replaceQuote(
       order.items,
     );
     const options = parsed ?? order;
-    const requiredParts = await requiredPartLines(tx, items);
+    const unchangedRequirements = new Map<string, number>();
+    for (const item of items) {
+      const previous = order.items.find(
+        (candidate) =>
+          candidate.project.trim().toLowerCase() ===
+          item.project.trim().toLowerCase(),
+      );
+      if (
+        previous &&
+        previous.requiredProductId === item.requiredProductId &&
+        previous.priceOptionId === item.priceOptionId
+      )
+        unchangedRequirements.set(
+          item.requiredProductId ?? "",
+          (unchangedRequirements.get(item.requiredProductId ?? "") ?? 0) +
+            item.requiredQuantity,
+        );
+    }
+    const itemRequirements = new Map<string, number>();
+    for (const item of items)
+      if (item.requiredProductId)
+        itemRequirements.set(
+          item.requiredProductId,
+          (itemRequirements.get(item.requiredProductId) ?? 0) +
+            item.requiredQuantity,
+        );
+    const requiredProducts = itemRequirements.size
+      ? await tx.product.findMany({
+          where: { id: { in: [...itemRequirements.keys()] } },
+        })
+      : [];
+    const preservedInactiveProductIds = new Set<string>();
+    for (const product of requiredProducts) {
+      if (product.enabled && product.usage === "REPAIR") continue;
+      const quantity = itemRequirements.get(product.id) ?? 0;
+      if (unchangedRequirements.get(product.id) !== quantity)
+        throw new BusinessError("Ricambio non disponibile.");
+      if (order.status !== "READY") {
+        const reservedQuantity = order.products
+          .filter(
+            (line) =>
+              line.kind === "REPAIR_PART" &&
+              line.productId === product.id &&
+              !line.consumedAt,
+          )
+          .reduce((sum, line) => sum + line.quantity, 0);
+        if (reservedQuantity !== quantity)
+          throw new BusinessError("Ricambio non disponibile.");
+      }
+      preservedInactiveProductIds.add(product.id);
+    }
+    const requiredParts = await requiredPartLines(
+      tx,
+      items,
+      preservedInactiveProductIds,
+    );
     if (order.status === "READY") {
       const previousRequirements = new Map<string, number>();
       for (const item of order.items)
@@ -1172,7 +1309,14 @@ export async function replaceQuote(
     });
     await tx.workOrderItem.deleteMany({ where: { orderId: id } });
     await tx.workOrderProduct.deleteMany({
-      where: { orderId: id, kind: "REPAIR_PART", consumedAt: null },
+      where: {
+        orderId: id,
+        kind: "REPAIR_PART",
+        consumedAt: null,
+        ...(preservedInactiveProductIds.size
+          ? { productId: { notIn: [...preservedInactiveProductIds] } }
+          : {}),
+      },
     });
     const existingPartContexts = requiredParts.length
       ? await tx.workOrderProduct.findMany({
@@ -1186,6 +1330,7 @@ export async function replaceQuote(
       : [];
     const requiredPartContexts = new Map<string, string>();
     for (const { product } of requiredParts) {
+      if (preservedInactiveProductIds.has(product.id)) continue;
       const used = new Set(
         existingPartContexts
           .filter((line) => line.productId === product.id)
@@ -1212,17 +1357,25 @@ export async function replaceQuote(
         confirmationNote: "",
         ...(order.status === "READY" ? {} : { status: nextStatus }),
         products:
-          order.status !== "READY" && requiredParts.length
+          order.status !== "READY" &&
+          requiredParts.some(
+            ({ product }) => !preservedInactiveProductIds.has(product.id),
+          )
             ? {
-                create: requiredParts.map(({ product, quantity }) => ({
-                  productId: product.id,
-                  productName: product.name,
-                  category: product.category,
-                  kind: "REPAIR_PART" as const,
-                  contextKey: requiredPartContexts.get(product.id),
-                  unitPrice: decimal(0),
-                  quantity,
-                })),
+                create: requiredParts
+                  .filter(
+                    ({ product }) =>
+                      !preservedInactiveProductIds.has(product.id),
+                  )
+                  .map(({ product, quantity }) => ({
+                    productId: product.id,
+                    productName: product.name,
+                    category: product.category,
+                    kind: "REPAIR_PART" as const,
+                    contextKey: requiredPartContexts.get(product.id),
+                    unitPrice: decimal(0),
+                    quantity,
+                  })),
               }
             : undefined,
       },
@@ -1728,7 +1881,11 @@ async function syncPriceOptionCompatibility(
 
 async function syncLegacyDefaultPriceOption(tx: Tx, ruleId: string) {
   const fallback = await tx.priceRuleOption.findFirst({
-    where: { ruleId, enabled: true },
+    where: {
+      ruleId,
+      enabled: true,
+      product: { enabled: true, usage: "REPAIR" },
+    },
     orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
   });
   if (!fallback) {
@@ -1750,9 +1907,6 @@ async function syncLegacyDefaultPriceOption(tx: Tx, ruleId: string) {
   await tx.priceRule.update({
     where: { id: ruleId },
     data: {
-      suggested: fallback.suggested,
-      cost: fallback.cost,
-      minutes: fallback.minutes,
       requiredProductId: fallback.productId,
       requiredQuantity: fallback.quantity,
     },
@@ -2268,10 +2422,20 @@ export async function deleteProducts(actorInput: Actor, raw: unknown) {
   const ids = z.array(z.string().min(1)).min(1).max(500).parse(raw);
   return transact(async (tx) => {
     const actor = await currentActor(tx, actorInput);
+    const affectedOptions = await tx.priceRuleOption.findMany({
+      where: { productId: { in: ids }, enabled: true },
+      select: { ruleId: true },
+    });
     await tx.product.updateMany({
       where: { id: { in: ids } },
       data: { enabled: false },
     });
+    await tx.priceRuleOption.updateMany({
+      where: { productId: { in: ids }, enabled: true },
+      data: { enabled: false, isDefault: false },
+    });
+    for (const ruleId of new Set(affectedOptions.map(({ ruleId }) => ruleId)))
+      await syncLegacyDefaultPriceOption(tx, ruleId);
     for (const id of ids) await audit(tx, actor, id, "PRODUCT_DELETED");
   });
 }
@@ -3654,7 +3818,7 @@ export async function deletePriceRules(actorInput: Actor, raw: unknown) {
     const rules = await tx.priceRule.findMany({ where: { id: { in: ids } } });
     await tx.workOrderItem.updateMany({
       where: { ruleId: { in: ids } },
-      data: { ruleId: null },
+      data: { ruleId: null, priceOptionId: null },
     });
     await tx.priceRule.deleteMany({ where: { id: { in: ids } } });
     for (const rule of rules)

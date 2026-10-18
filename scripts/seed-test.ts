@@ -251,6 +251,15 @@ async function main() {
       },
     ],
   });
+  await db.productCompatibility.createMany({
+    data: ["Display LCD Test", "Display OLED Test"].map((name) => ({
+      productId: productsByName.get(name)!,
+      category: "PHONE",
+      brand: "Apple",
+      model: "iPhone 13",
+      project: "sostituzione display",
+    })),
+  });
   await db.priceRule.update({
     where: { id: displayRule.id },
     data: {

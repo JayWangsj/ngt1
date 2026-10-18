@@ -260,10 +260,12 @@ export default async function Detail({
           },
         ]
       : []),
-    ...order.products.map((product) => ({
-      label: `${product.productName} × ${product.quantity}`,
-      amount: money(cents(product.unitPrice) * product.quantity),
-    })),
+    ...order.products
+      .filter((product) => product.kind !== "REPAIR_PART")
+      .map((product) => ({
+        label: `${product.productName} × ${product.quantity}`,
+        amount: money(cents(product.unitPrice) * product.quantity),
+      })),
     ...(totals.afterSalesTotal > 0
       ? [
           {

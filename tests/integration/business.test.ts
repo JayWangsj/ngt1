@@ -85,6 +85,43 @@ function input(patch: Record<string, unknown> = {}) {
     ...patch,
   };
 }
+async function configureRepairOption(
+  name: string,
+  quantity = 1,
+  suggested = "79",
+) {
+  const product = await createProduct(owner, {
+    requestId: randomUUID(),
+    name,
+    category: "Ricambi",
+    usage: "REPAIR",
+    costPrice: "32",
+    salePrice: "0",
+    initialStock: 5,
+    minStock: 0,
+  });
+  const rule = await db.priceRule.findFirstOrThrow({
+    where: { project: "display" },
+  });
+  await savePriceRule(owner, rule.id, {
+    category: rule.category,
+    brand: rule.brand,
+    series: rule.series,
+    model: rule.model,
+    project: rule.project,
+    suggested,
+    cost: "32",
+    minutes: 60,
+    enabled: true,
+    notes: "",
+    requiredProductId: product.id,
+    requiredQuantity: quantity,
+  });
+  const option = await db.priceRuleOption.findUniqueOrThrow({
+    where: { ruleId_productId: { ruleId: rule.id, productId: product.id } },
+  });
+  return { product, rule, option };
+}
 beforeAll(async () => {
   if (!new URL(process.env.DATABASE_URL || "").pathname.endsWith("_test"))
     throw new Error("Integration tests require an isolated *_test database.");
@@ -309,11 +346,16 @@ describe("PostgreSQL workflow", () => {
         })
       ).suggested.toString(),
     ).toBe("79");
-    expect(
-      (
-        await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
-      ).suggested.toString(),
-    ).toBe("119");
+    const baseRule = await db.priceRule.findUniqueOrThrow({
+      where: { id: rule.id },
+    });
+    expect(baseRule).toMatchObject({
+      requiredProductId: oled.id,
+      requiredQuantity: 1,
+      minutes: 60,
+    });
+    expect(baseRule.suggested.toString()).toBe("79");
+    expect(baseRule.cost?.toString()).toBe("32");
 
     await deletePriceRuleOption(owner, rule.id, lcdOption.id);
     expect(
@@ -353,6 +395,318 @@ describe("PostgreSQL workflow", () => {
         await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
       ).suggested.toString(),
     ).toBe("84");
+  });
+
+  it("keeps an explicit no-part choice after saving and allows a later selection", async () => {
+    await configureRepairOption("No part default test");
+    const order = await createOrder(staff, input({ deposit: "0" }));
+
+    await replaceQuote(staff, order.id, {
+      items: [
+        {
+          project: "Display",
+          final: "100",
+          requiredProductRemoved: true,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+
+    let saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0]).toMatchObject({
+      requiredProductId: null,
+      priceOptionId: null,
+    });
+    expect(
+      saved.products.filter(
+        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
+      ),
+    ).toHaveLength(0);
+
+    await replaceQuote(staff, order.id, {
+      items: [{ project: "Display", final: "100" }],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+    saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0]).toMatchObject({
+      requiredProductId: null,
+      priceOptionId: null,
+    });
+
+    const manuallySelected = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Manual part after no part test",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "12",
+      salePrice: "0",
+      initialStock: 3,
+      minStock: 0,
+    });
+    await replaceQuote(staff, order.id, {
+      items: [
+        {
+          project: "Display",
+          final: "100",
+          requiredProductId: manuallySelected.id,
+          requiredQuantity: 1,
+          requiredProductRemoved: false,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+
+    saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0]).toMatchObject({
+      requiredProductId: manuallySelected.id,
+      requiredProductName: manuallySelected.name,
+      priceOptionId: null,
+    });
+    expect(
+      saved.products.find(
+        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
+      ),
+    ).toMatchObject({ productId: manuallySelected.id, quantity: 1 });
+  });
+
+  it("allows unlinked quote items alongside required repair parts", async () => {
+    const { product, option } = await configureRepairOption(
+      "Mixed required and optional part test",
+    );
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "79",
+            priceOptionId: option.id,
+            requiredProductId: product.id,
+          },
+          { project: "Optional cleaning", final: "10" },
+        ],
+      }),
+    );
+    const saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items).toHaveLength(2);
+    expect(
+      saved.products.filter((line) => line.kind === "REPAIR_PART"),
+    ).toMatchObject([{ productId: product.id, quantity: 1 }]);
+  });
+
+  it("preserves a disabled price option's historical snapshot when editing its order", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "Historical part test",
+    );
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "79",
+            priceOptionId: option.id,
+            requiredProductId: product.id,
+          },
+        ],
+      }),
+    );
+    await db.priceRuleOption.update({
+      where: { id: option.id },
+      data: { name: "Current part label", suggested: "149", quantity: 2 },
+    });
+    await deletePriceRuleOption(owner, rule.id, option.id);
+
+    await expect(
+      replaceQuote(staff, order.id, {
+        items: [
+          {
+            project: "Display",
+            final: "85",
+            priceOptionId: option.id,
+            requiredProductId: product.id,
+            requiredQuantity: 1,
+          },
+        ],
+        orderDiscount: "0",
+        includeVat: false,
+      }),
+    ).resolves.toBeUndefined();
+
+    const saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0]).toMatchObject({
+      priceOptionId: option.id,
+      priceOptionName: "Historical part test",
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+      requiredQuantity: 1,
+    });
+    expect(saved.items[0].suggested?.toString()).toBe("79");
+    expect(
+      saved.products.find(
+        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
+      ),
+    ).toMatchObject({ productId: product.id, quantity: 1 });
+  });
+
+  it("disables new choices for a removed part without dropping its existing reservation", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "Disabled stock part test",
+    );
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "79",
+            priceOptionId: option.id,
+            requiredProductId: product.id,
+          },
+        ],
+      }),
+    );
+
+    await deleteProducts(owner, [product.id]);
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({ where: { id: option.id } }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    await expect(
+      createOrder(
+        staff,
+        input({
+          phone: "3335554444",
+          deposit: "0",
+          items: [
+            {
+              project: "Display",
+              final: "79",
+              priceOptionId: option.id,
+              requiredProductId: product.id,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await replaceQuote(staff, order.id, {
+      items: [
+        {
+          project: "Display",
+          final: "85",
+          priceOptionId: option.id,
+          requiredProductId: product.id,
+          requiredQuantity: 1,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+
+    const saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0]).toMatchObject({
+      priceOptionId: option.id,
+      requiredProductId: product.id,
+    });
+    expect(
+      saved.products.filter(
+        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
+      ),
+    ).toMatchObject([{ productId: product.id, quantity: 1 }]);
+    expect(rule.id).toBe(saved.items[0].ruleId);
+  });
+
+  it("rejects a submitted part that does not belong to the selected option", async () => {
+    const { option } = await configureRepairOption(
+      "Selected option part test",
+      2,
+    );
+    const unrelated = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Unrelated selected part test",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "20",
+      salePrice: "0",
+      initialStock: 5,
+      minStock: 0,
+    });
+
+    await expect(
+      createOrder(
+        staff,
+        input({
+          deposit: "0",
+          items: [
+            {
+              project: "Display",
+              final: "79",
+              priceOptionId: option.id,
+              requiredProductId: unrelated.id,
+              requiredQuantity: 8,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(await db.workOrder.count()).toBe(0);
+    expect(await db.workOrderProduct.count()).toBe(0);
+  });
+
+  it("uses the selected option quantity for its repair reservation", async () => {
+    const { product, option } = await configureRepairOption(
+      "Authoritative quantity part test",
+      2,
+    );
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "79",
+            priceOptionId: option.id,
+            requiredProductId: product.id,
+            requiredQuantity: 1,
+          },
+        ],
+      }),
+    );
+    const saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0].requiredQuantity).toBe(2);
+    expect(
+      saved.products.find(
+        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
+      ),
+    ).toMatchObject({ productId: product.id, quantity: 2 });
   });
 
   it("registers, quotes, receives balance, delivers and audits every change", async () => {
@@ -1593,6 +1947,47 @@ describe("1.2 customer and catalog management", () => {
     });
     await deletePriceRules(owner, [manual.id]);
     expect(await db.priceRule.count()).toBe(0);
+  });
+  it("deletes a price rule without losing an order's part quote snapshot", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "Deleted rule part test",
+    );
+    const order = await createOrder(
+      owner,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "79",
+            priceOptionId: option.id,
+            requiredProductId: product.id,
+          },
+        ],
+      }),
+    );
+
+    await deletePriceRules(owner, [rule.id]);
+
+    const saved = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(saved.items[0]).toMatchObject({
+      ruleId: null,
+      priceOptionId: null,
+      priceOptionName: "Deleted rule part test",
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+      requiredQuantity: 1,
+    });
+    expect(saved.items[0].suggested?.toString()).toBe("79");
+    expect(saved.items[0].final.toString()).toBe("79");
+    expect(
+      saved.products.find(
+        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
+      ),
+    ).toMatchObject({ productId: product.id, quantity: 1 });
   });
   it("persists fault deletion for presets and saved faults without changing existing orders", async () => {
     const order = await createOrder(

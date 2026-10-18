@@ -8866,6 +8866,7 @@ details.secondary-actions {
   display: grid;
   gap: 16px;
   margin-top: 0;
+  scroll-padding-bottom: 112px;
 }
 .price-rule-editor > .dialog-actions {
   position: sticky;

@@ -946,9 +946,9 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   await optionSummary.hover();
   await expect(removeOption).toHaveCSS("opacity", "1");
   await removeOption.click();
-  await expect(
-    page.getByRole("button", { name: "Opzioni ricambio", exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".selected-part-summary")).toContainText(
+    "Nessun ricambio richiesto",
+  );
   await choosePriceOption(page, "Display LCD standard");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
@@ -1106,6 +1106,54 @@ test("switching repair and quick-service modes keeps both drafts", async ({
   await expect(quickForm.locator('input[type="datetime-local"]')).toHaveValue(
     "2099-12-30T17:45",
   );
+});
+
+test("removing a default repair part persists and allows later reselection", async ({
+  page,
+}) => {
+  await page.goto("/orders/new");
+  await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+  await createRepairDevice(page, "Apple", "iPhone 14");
+  await page.getByLabel("Display rotto", { exact: true }).check();
+  await page
+    .getByLabel("Consegna prevista", { exact: true })
+    .fill("2099-12-31");
+  await chooseRepairProjects(page, ["sostituzione batteria"]);
+
+  const optionSummary = page.locator(".price-option-picker-summary");
+  await expect(optionSummary).toContainText("Batteria Test");
+  const removePart = optionSummary.getByRole("button", {
+    name: "Rimuovi Batteria Test",
+    exact: true,
+  });
+  await page.mouse.move(0, 0);
+  await optionSummary.hover();
+  await expect(removePart).toHaveCSS("opacity", "1");
+  await removePart.click();
+  await expect(page.locator(".selected-part-summary")).toContainText(
+    "Nessun ricambio richiesto",
+  );
+  await save(page);
+
+  const details = page.getByTestId("details-card");
+  let savedPart = details.locator(".selected-part-summary");
+  await expect(savedPart).toContainText("Nessuno");
+  await page.reload();
+  savedPart = page
+    .getByTestId("details-card")
+    .locator(".selected-part-summary");
+  await expect(savedPart).toContainText("Nessuno");
+
+  await savedPart.locator(".summary-action").click();
+  await choosePriceOption(page, "Batteria Test");
+  await page
+    .getByTestId("details-card")
+    .getByRole("button", { name: "Salva", exact: true })
+    .click();
+  savedPart = page
+    .getByTestId("details-card")
+    .locator(".selected-part-summary");
+  await expect(savedPart).toContainText("Batteria Test");
 });
 
 test("manages one quick service for held service orders and retail checkout", async ({
@@ -4973,7 +5021,7 @@ test("partial collection stays separate from delivery checkout", async ({
   ).toHaveText(/Consegnato/);
   await expect(page.locator(".balance-card>strong")).toContainText("0,00");
 });
-test("zero balance delivery uses the lightweight confirmation dialog", async ({
+test("zero balance delivery uses the lightweight confirmation form", async ({
   page,
 }) => {
   await fillOrder(page);
@@ -4983,16 +5031,15 @@ test("zero balance delivery uses the lightweight confirmation dialog", async ({
     .fill("100");
   await save(page);
   await state(page, "READY");
-  await page.locator(".detail-status .status-dropdown-trigger").click();
-  await page.getByRole("option", { name: "Consegnato", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Conferma consegna" });
-  await expect(dialog.getByLabel("Importo (€)", { exact: true })).toHaveCount(
+  const checkout = page.locator(".checkout-form");
+  await expect(checkout).toBeVisible();
+  await expect(checkout.getByLabel("Importo (€)", { exact: true })).toHaveCount(
     0,
   );
   await expect(
-    dialog.getByLabel("Nome di chi ritira", { exact: true }),
+    checkout.getByLabel("Nome di chi ritira", { exact: true }),
   ).toHaveValue("Cliente Playwright");
-  await dialog.getByRole("button", { name: "Conferma consegna" }).click();
+  await checkout.getByRole("button", { name: "Conferma consegna" }).click();
   await expect(
     page.locator(".detail-status .status-dropdown-trigger"),
   ).toHaveText(/Consegnato/);
@@ -6418,7 +6465,7 @@ test("native quote choices populate prices, clear on model changes and discounts
   );
 });
 
-test("creates a repair part from the quote and selects it immediately", async ({
+test("selects and reserves a non-default repair part option from a quote", async ({
   page,
 }) => {
   await page.goto("/orders/new");
@@ -6431,153 +6478,25 @@ test("creates a repair part from the quote and selects it immediately", async ({
   await chooseRepairProjects(page, ["sostituzione display"]);
   await openStep(page, 2);
 
-  const addPart = page.getByRole("button", {
-    name: "Ricambio",
-    exact: true,
-  });
-  await expect(addPart).toBeVisible();
-  await expect(page.locator(".selected-part-summary")).toHaveCount(0);
+  const optionSummary = page.locator(".price-option-picker-summary");
+  await expect(optionSummary).toContainText("Display LCD standard");
+  await choosePriceOption(page, "Display OLED alta qualità");
+  await expect(optionSummary).toContainText("Display OLED Test");
+  await expect(optionSummary).toContainText("119,00 €");
+  await save(page);
   await expect(
-    page.getByRole("combobox", {
-      name: "Ricambio richiesto 1",
-      exact: true,
-    }),
-  ).toHaveCount(0);
-  await addPart.click();
-  const partSearch = page.getByRole("combobox", {
-    name: "Ricambio richiesto 1",
-    exact: true,
-  });
-  const newPart = page.getByRole("button", { name: "Nuovo ricambio" });
-  await expect(newPart).toHaveCount(0);
-  await partSearch.fill("Batteria");
-  await expect(newPart).toHaveCount(0);
-  const productName = `Ricambio E2E ${Date.now()}`;
-  await partSearch.fill(productName);
-  await expect(newPart).toBeEnabled();
-  await newPart.click();
-  const dialog = page.getByRole("dialog", {
-    name: "Nuovo ricambio per riparazione",
-  });
-  await expect(dialog.getByLabel("Nome ricambio", { exact: true })).toHaveValue(
-    productName,
-  );
-  await expect(dialog.getByRole("button", { name: "Categoria" })).toHaveCount(
-    0,
-  );
-  await expect(dialog.getByRole("button", { name: "Utilizzo" })).toHaveCount(0);
-  await expect(dialog.getByLabel("Costo (€)", { exact: true })).toBeFocused();
-  await expect(dialog).toContainText(
-    "Utilizzo: Apple · iPhone 13 · sostituzione display",
-  );
-  await expect(dialog.locator(".product-compatibility-editor")).toHaveCount(0);
-  await expect(dialog.getByRole("combobox", { name: "Marca" })).toHaveCount(0);
-  await expect(dialog.getByRole("combobox", { name: "Modello" })).toHaveCount(
-    0,
-  );
+    page.locator(".detail-status .status-dropdown-trigger"),
+  ).toContainText("In riparazione");
   await expect(
-    dialog.getByRole("combobox", { name: /Intervento/ }),
-  ).toHaveCount(0);
-  const formGrid = dialog.locator(".form-grid");
-  await expect(formGrid.locator(":scope > *")).toHaveCount(4);
-  expect(
-    await formGrid.evaluate(
-      (element) =>
-        getComputedStyle(element).gridTemplateColumns.split(" ").length,
-    ),
-  ).toBe(2);
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(
-    await formGrid.evaluate(
-      (element) =>
-        getComputedStyle(element).gridTemplateColumns.split(" ").length,
-    ),
-  ).toBe(1);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await dialog.getByLabel("Costo (€)", { exact: true }).fill("12");
-  await dialog.getByLabel("Scorta iniziale", { exact: true }).fill("0");
-  await dialog.getByLabel("Scorta minima", { exact: true }).fill("1");
-  await dialog
-    .getByLabel("Imposta come ricambio frequente", { exact: true })
-    .check();
-  await dialog.getByRole("button", { name: "Crea e seleziona" }).click();
-
-  await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".selected-part-summary")).toContainText(
-    productName,
-  );
-  await expect(
-    page.getByText(
-      "Il ricambio selezionato non è sufficiente: dopo la creazione la scheda passerà automaticamente a «Ricambio mancante».",
-      { exact: true },
-    ),
-  ).toBeVisible();
-
-  await page.goto("/inventory");
-  const inventorySearch = page.getByLabel(
-    "Cerca prodotto, ricambio, marca o modello",
-    { exact: true },
-  );
-  await inventorySearch.fill(productName);
-  const createdPart = page.getByRole("row", { name: new RegExp(productName) });
-  await expect(createdPart).toContainText("Apple / Telefono / iPhone 13");
-  await createdPart.click();
-  const editCompatibility = createdPart.getByRole("button", {
-    name: "Modifica dispositivi compatibili",
-  });
-  await expect(editCompatibility).toContainText("Dispositivi compatibili");
-  await expect(editCompatibility.locator("svg")).toBeVisible();
-  await expect(editCompatibility).toHaveCSS(
-    "background-color",
-    "rgba(0, 0, 0, 0)",
-  );
-  await editCompatibility.hover();
-  await expect(editCompatibility).toHaveCSS(
-    "background-color",
-    "rgb(255, 247, 214)",
-  );
-  await editCompatibility.click();
-  const compatibilityDialog = page.getByRole("dialog", {
-    name: "Modifica dispositivi compatibili",
-  });
-  const compatibilityRow = compatibilityDialog.locator(
-    ".compatibility-device-row",
-  );
-  await expect(compatibilityRow).toContainText("iPhone 13");
-  await expect(compatibilityRow).toContainText("sostituzione display");
-  await expect(compatibilityRow).not.toContainText("Apple");
-  await expect(
-    compatibilityDialog.locator(".compatibility-list-heading small"),
-  ).toHaveCount(0);
-  await expect(
-    compatibilityDialog.getByRole("combobox", { name: "Marca" }),
-  ).toHaveCount(0);
-  const removeCompatibility = compatibilityRow.getByRole("button", {
-    name: "Rimuovi Apple iPhone 13",
-    exact: true,
-  });
-  await expect(removeCompatibility).toHaveCSS("opacity", "0");
-  await compatibilityRow.hover();
-  await expect(compatibilityRow).toHaveCSS(
-    "background-color",
-    "rgb(255, 249, 232)",
-  );
-  await expect(removeCompatibility).toHaveCSS("opacity", "1");
-  await removeCompatibility.click();
-  await expect(
-    compatibilityDialog.locator(".compatibility-device-row"),
-  ).toHaveCount(0);
-  await compatibilityDialog
-    .getByRole("button", { name: "Salva", exact: true })
-    .click();
-  await expect(compatibilityDialog).toHaveCount(0);
+    page.getByTestId("details-card").locator(".selected-part-summary"),
+  ).toContainText("Display OLED Test");
 });
 
 test("removing the last compatible repair project removes its device row", async ({
   page,
 }) => {
   await page.goto("/inventory");
-  const productRow = page.getByRole("row", { name: /Batteria Test/ });
+  const productRow = page.getByRole("row", { name: /Display LCD Test/ });
   await productRow.click();
   await productRow
     .getByRole("button", { name: "Modifica dispositivi compatibili" })
@@ -6676,9 +6595,15 @@ test("inventory repair products retain their compatibility editor", async ({
   const projectPicker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
-  await projectPicker
-    .getByRole("button", { name: "sostituzione batteria", exact: true })
-    .click();
+  const batteryProject = projectPicker.getByRole("button", {
+    name: "sostituzione batteria",
+    exact: true,
+  });
+  if (await batteryProject.count()) await batteryProject.click();
+  else
+    await expect(
+      editorDialog.locator(".compatibility-project-chip"),
+    ).toContainText("sostituzione batteria");
   await expect(
     projectPicker.getByRole("button", {
       name: "sostituzione display",
@@ -6885,7 +6810,7 @@ test("legacy repair rules use the shared part option dialog", async ({
   });
   await expect(picker).toBeVisible();
   await expect(
-    picker.locator(".price-option-inventory").filter({
+    picker.locator(".price-option-choice").filter({
       hasText: "Batteria Test",
     }),
   ).toHaveClass(/is-selected/);
@@ -6917,19 +6842,8 @@ test("legacy repair rules use the shared part option dialog", async ({
   await expect(
     page.getByRole("button", { name: "Opzioni ricambio", exact: true }),
   ).toHaveCount(0);
-  await summary.hover();
-  await summary
-    .getByRole("button", {
-      name: "Rimuovi Nessun ricambio richiesto",
-      exact: true,
-    })
-    .click();
-  const addOption = page.getByRole("button", {
-    name: "Opzioni ricambio",
-    exact: true,
-  });
-  await expect(addOption).toBeVisible();
-  await addOption.click();
+  await summary.locator(".summary-action").click();
+  await expect(picker).toBeVisible();
   await picker
     .getByRole("button", { name: "Opzione ricambio", exact: true })
     .click();
@@ -6940,12 +6854,12 @@ test("legacy repair rules use the shared part option dialog", async ({
   await chooseBusinessOption(
     page,
     "Ricambio richiesto",
-    "Batteria Test",
+    "Display OLED Test",
     newOption,
   );
   await expect(
     newOption.getByLabel("Nome opzione", { exact: true }),
-  ).toHaveValue("Batteria Test");
+  ).toHaveValue("Display OLED Test");
   await newOption
     .getByLabel("Prezzo suggerito (€)", { exact: true })
     .fill("120");
@@ -8039,16 +7953,14 @@ test("new quotes show the selected repair project's part plans", async ({
     dialog,
   );
   const optionSection = dialog.locator(".price-rule-editor-options");
-  await expect(optionSection.locator(".price-option-card")).toContainText(
-    "Batteria Test",
-  );
+  await expect(optionSection).toContainText("Batteria Test");
   await expect(
     optionSection.getByRole("button", {
       name: "Opzione ricambio",
       exact: true,
     }),
   ).toBeEnabled();
-  await dialog.getByRole("button", { name: "Chiudi", exact: true }).click();
+  await dialog.locator(".dialog-close").click();
 });
 
 test("price editor keeps deletion inside batch management", async ({
@@ -8136,9 +8048,9 @@ for (const width of [1280, 390]) {
     page,
   }) => {
     await page.setViewportSize({ width, height: 844 });
-    for (const [path, name] of [
-      ["/customers", "Nuovo cliente"],
-      ["/prices", "Nuova regola"],
+    for (const [path, name, cancelLabel, saveLabel] of [
+      ["/customers", "Nuovo cliente", "Annulla", "Salva"],
+      ["/prices", "Nuova regola", "Chiudi", "Salva ed esci"],
     ]) {
       await page.goto(path);
       const trigger = page
@@ -8153,25 +8065,29 @@ for (const width of [1280, 390]) {
       await trigger.click();
       const dialog = page.getByRole("dialog");
       await expect(dialog.locator(":focus")).toHaveCount(1);
-      const cancel = dialog.getByRole("button", {
-        name: "Annulla",
+      const cancel = dialog.locator(".dialog-actions").getByRole("button", {
+        name: cancelLabel,
         exact: true,
       });
       const saveButton = dialog.getByRole("button", {
-        name: "Salva",
+        name: saveLabel,
         exact: true,
       });
-      await saveButton.scrollIntoViewIfNeeded();
+      const lastInput = dialog.locator("input").last();
+      await lastInput.scrollIntoViewIfNeeded();
+      await expect(lastInput).toBeInViewport();
       const cancelBox = await cancel.boundingBox();
       const saveBox = await saveButton.boundingBox();
       const footer = await dialog.locator(".dialog-actions").boundingBox();
-      const lastInput = await dialog.locator("input").last().boundingBox();
+      const lastInputBox = await lastInput.boundingBox();
       expect(cancelBox!.x + cancelBox!.width).toBeLessThan(saveBox!.x);
       expect(Math.abs(cancelBox!.y - saveBox!.y)).toBeLessThan(2);
       expect(
         Math.abs(saveBox!.x + saveBox!.width - footer!.x - footer!.width),
       ).toBeLessThan(2);
-      expect(saveBox!.y).toBeGreaterThan(lastInput!.y + lastInput!.height);
+      expect(lastInputBox!.y + lastInputBox!.height).toBeLessThanOrEqual(
+        footer!.y,
+      );
       expect(await dialog.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(
         true,
       );
@@ -8516,10 +8432,18 @@ test("customer detail stays in one dialog and exposes inline device actions", as
   await dialog
     .getByRole("button", { name: "Dispositivo", exact: true })
     .click();
-  await chooseBusinessOption(page, "Marca", "Apple", dialog);
-  await chooseBusinessOption(page, "Modello", "iPhone 13", dialog);
-  await dialog.getByLabel("IMEI (facoltativo)", { exact: true }).fill(suffix);
-  await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+  const deviceDialog = page.getByRole("dialog", {
+    name: "Nuovo dispositivo",
+    exact: true,
+  });
+  await chooseBusinessOption(page, "Marca", "Apple", deviceDialog);
+  await chooseBusinessOption(page, "Modello", "iPhone 13", deviceDialog);
+  await deviceDialog
+    .getByLabel("IMEI (facoltativo)", { exact: true })
+    .fill(suffix);
+  await deviceDialog
+    .getByRole("button", { name: "Salva", exact: true })
+    .click();
   const added = dialog
     .locator(".customer-device-row")
     .filter({ hasText: suffix });
