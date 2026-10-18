@@ -4738,18 +4738,9 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .compatibility-project-selector {
   display: flex;
-  min-height: 46px;
   align-items: center;
   flex-wrap: wrap;
   gap: 7px;
-  padding: 6px 8px;
-  border: 1px solid #d8dddb;
-  border-radius: 8px;
-  background: #fff;
-}
-.compatibility-project-selector:focus-within {
-  border-color: #d2ae21;
-  box-shadow: 0 0 0 3px rgb(235 196 39 / 12%);
 }
 .compatibility-project-chip {
   display: inline-flex;
@@ -4795,6 +4786,9 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .compatibility-new-project .message {
   grid-column: 1 / -1;
+}
+.form-dialog:has(.compatibility-new-project-dialog) {
+  width: min(520px, calc(100vw - 32px));
 }
 @media (max-width: 760px) {
   .compatibility-device-fields {

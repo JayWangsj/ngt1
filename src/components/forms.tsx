@@ -83,6 +83,7 @@ import {
   type Category,
   normalizeBrand,
   normalizeDeviceModel,
+  modelKey,
 } from "@/lib/catalog";
 import { isDiagnosticFault, settlement } from "@/lib/domain";
 import { useBusinessDay } from "./business-date";
@@ -553,6 +554,7 @@ export function ProductCompatibilityFields({
               value={draft}
               onChange={setDraft}
               options={options}
+              associated={value}
             />
             <div className="dialog-actions">
               <Button
@@ -571,7 +573,13 @@ export function ProductCompatibilityFields({
                 }
                 onClick={() => {
                   onChange([
-                    ...value,
+                    ...value.filter(
+                      (entry) =>
+                        entry.category !== draft.category ||
+                        entry.brand.toLocaleLowerCase("it") !==
+                          draft.brand.toLocaleLowerCase("it") ||
+                        modelKey(entry.model) !== modelKey(draft.model),
+                    ),
                     ...draft.projects.map((project) => ({
                       category: draft.category,
                       brand: draft.brand,

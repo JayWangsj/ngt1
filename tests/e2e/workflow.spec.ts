@@ -6610,6 +6610,9 @@ test("inventory repair products retain their compatibility editor", async ({
   });
   await expect(openProjects).toBeEnabled();
   await openProjects.click();
+  await expect(
+    editorDialog.locator(".compatibility-project-selector"),
+  ).toHaveCSS("border-top-width", "0px");
   const projectPicker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
@@ -6628,12 +6631,34 @@ test("inventory repair products retain their compatibility editor", async ({
   await expect(editorDialog.locator(".compatibility-project-chip")).toHaveText([
     "sostituzione batteria",
   ]);
+  await openProjects.click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Seleziona interventi" })
+      .getByRole("button", {
+        name: "sostituzione batteria",
+        exact: true,
+      }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("dialog", { name: "Seleziona interventi" })
+    .getByRole("button", { name: "Annulla" })
+    .click();
   await editorDialog.getByRole("button", { name: "Registra conferma" }).click();
   const summary = dialog.locator(".compatibility-device-row", {
     hasText: "iPhone 14",
   });
   await expect(summary).toContainText("sostituzione batteria");
   await expect(summary).not.toContainText("sostituzione display");
+  await compatibilityAdd.click();
+  const existingModelDialog = page.getByRole("dialog", {
+    name: "Aggiungi dispositivo compatibile",
+  });
+  await chooseBusinessOption(page, "Marca", "Apple", existingModelDialog);
+  await chooseBusinessOption(page, "Modello", "iPhone 14", existingModelDialog);
+  await expect(
+    existingModelDialog.locator(".compatibility-project-chip"),
+  ).toHaveText(["sostituzione batteria"]);
 });
 
 test("new repair products add compatible devices in a modal", async ({
@@ -6684,13 +6709,22 @@ test("new repair products add compatible devices in a modal", async ({
     .click();
   const newProject = `progetto compatibilita ${Date.now()}`;
   await projectPicker.getByRole("button", { name: "Nuovo intervento" }).click();
-  await projectPicker
+  let newProjectDialog = page.getByRole("dialog", {
+    name: "Nuovo intervento",
+  });
+  await newProjectDialog.getByRole("button", { name: "Annulla" }).click();
+  await expect(newProjectDialog).toHaveCount(0);
+  await expect(projectPicker).toBeVisible();
+  await projectPicker.getByRole("button", { name: "Nuovo intervento" }).click();
+  newProjectDialog = page.getByRole("dialog", { name: "Nuovo intervento" });
+  await newProjectDialog
     .getByLabel("Intervento", { exact: true })
     .fill(newProject);
-  await projectPicker.getByLabel("Prezzo suggerito (€)").fill("49");
-  await projectPicker
+  await newProjectDialog.getByLabel("Prezzo suggerito (€)").fill("49");
+  await newProjectDialog
     .getByRole("button", { name: "Salva", exact: true })
     .click();
+  await expect(newProjectDialog).toHaveCount(0);
   await expect(
     projectPicker.getByRole("button", { name: newProject }),
   ).toBeVisible();

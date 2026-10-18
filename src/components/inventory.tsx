@@ -22,7 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { deleteProductsAction, updateProductAction } from "@/app/actions";
-import { categories as deviceCategories, type Category } from "@/lib/catalog";
+import {
+  categories as deviceCategories,
+  modelKey,
+  type Category,
+} from "@/lib/catalog";
 import { decimal, inventoryStatus, money } from "@/lib/domain";
 import { useLanguage, useMessages } from "./language";
 import {
@@ -163,7 +167,13 @@ function ProductCompatibilityDialog({
     setValue((current) => [
       ...new Map(
         [
-          ...current,
+          ...current.filter(
+            (entry) =>
+              entry.category !== adding.category ||
+              entry.brand.toLocaleLowerCase("it") !==
+                adding.brand.toLocaleLowerCase("it") ||
+              modelKey(entry.model) !== modelKey(adding.model),
+          ),
           ...adding.projects.map((project) => ({
             category: adding.category,
             brand: adding.brand,
@@ -200,6 +210,7 @@ function ProductCompatibilityDialog({
             value={adding}
             onChange={setAdding}
             options={options}
+            associated={value}
             deletions={catalogDeletions}
           />
         ) : (
