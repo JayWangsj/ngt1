@@ -321,6 +321,7 @@ small {
 }
 .sidebar-update-entry {
   display: flex;
+  overflow: clip;
   min-width: 0;
   min-height: 48px;
   align-items: center;
