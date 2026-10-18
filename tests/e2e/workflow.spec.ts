@@ -52,6 +52,28 @@ async function chooseRequiredPart(
   option: string,
   scope: Page | Locator = page,
 ) {
+  const priceOptionSummary = scope.locator(".price-option-picker-summary");
+  const priceOptionAdd = scope.getByRole("button", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  if (
+    (await priceOptionSummary.first().isVisible()) ||
+    (await priceOptionAdd.first().isVisible())
+  ) {
+    if (await priceOptionSummary.first().isVisible())
+      await priceOptionSummary.first().locator(".summary-action").click();
+    else await priceOptionAdd.first().click();
+    const picker = page
+      .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+      .last();
+    await picker
+      .locator(".price-option-choice")
+      .filter({ hasText: option })
+      .first()
+      .click();
+    return;
+  }
   const combobox = scope.getByRole("combobox", {
     name: "Ricambio richiesto 1",
     exact: true,
@@ -66,6 +88,35 @@ async function chooseRequiredPart(
         .click();
   }
   await chooseBusinessOption(page, "Ricambio richiesto 1", option, scope);
+}
+
+async function choosePriceOption(
+  page: Page,
+  option: string,
+  scope: Page | Locator = page,
+) {
+  let picker = page
+    .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+    .last();
+  if (!(await picker.isVisible())) {
+    const summary = scope.locator(
+      ".price-option-picker-summary .summary-action",
+    );
+    if (await summary.first().isVisible()) await summary.first().click();
+    else
+      await scope
+        .getByRole("button", { name: "Opzioni ricambio", exact: true })
+        .first()
+        .click();
+    picker = page
+      .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+      .last();
+  }
+  await picker
+    .locator(".price-option-choice")
+    .filter({ hasText: option })
+    .first()
+    .click();
 }
 
 async function chooseRepairDevice(page: Page, name: string) {
@@ -767,27 +818,32 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   await page
     .getByRole("searchbox", { name: "Cerca" })
     .fill("sostituzione display");
+  await page.getByRole("button", { name: "Apple", exact: true }).click();
   const row = page
     .locator(".price-rule-row")
     .filter({ hasText: "sostituzione display" })
     .first();
+  await expect(row).toBeVisible();
   await row
     .getByRole("button", { name: "Gestisci opzioni ricambio", exact: true })
     .click();
-  const options = page.locator(".price-option-panel");
+  const options = page.getByRole("dialog", {
+    name: /sostituzione display · Opzioni ricambio/,
+  });
   await expect(
     options.getByText("Display LCD standard", { exact: true }),
   ).toBeVisible();
   await expect(
     options.getByText("Display OLED alta qualità", { exact: true }),
   ).toBeVisible();
+  await expect(
+    options.getByRole("button", { name: "Ricambio", exact: true }),
+  ).toBeVisible();
 
   await fillOrder(page);
-  const optionSummary = page.locator(".price-option-current-summary");
+  const optionSummary = page.locator(".price-option-picker-summary");
   await expect(optionSummary).toContainText("Prezzo di listino");
   await expect(optionSummary).toContainText("100,00 €");
-  await expect(optionSummary).toContainText("60");
-  await expect(optionSummary).toContainText("90");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
@@ -796,11 +852,7 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   ).toBe(true);
   await expect(optionSummary).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 844 });
-  await chooseBusinessOption(
-    page,
-    "Opzione ricambio 1",
-    "Display OLED alta qualità",
-  );
+  await choosePriceOption(page, "Display OLED alta qualità");
   const quote = page.getByRole("button", {
     name: "Modifica dati Preventivo attuale",
     exact: true,
@@ -810,11 +862,7 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   const input = page.getByLabel("Prezzo originale (€) 1", { exact: true });
   await input.fill("105");
   await input.press("Enter");
-  await chooseBusinessOption(
-    page,
-    "Opzione ricambio 1",
-    "Display LCD standard",
-  );
+  await choosePriceOption(page, "Display LCD standard");
   await expect(quote).toContainText("105,00");
   await expect(page.getByText(/nuovo suggerito è 100,00/)).toBeVisible();
   await page
@@ -841,13 +889,7 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   await expect(rework.locator(".selected-part-summary")).toContainText(
     "Prezzo di listino 100,00 €",
   );
-  await rework.locator(".selected-part-summary .summary-action").click();
-  await chooseBusinessOption(
-    page,
-    "Ricambio richiesto sostituzione display",
-    "Display OLED alta qualità",
-    rework,
-  );
+  await choosePriceOption(page, "Display OLED alta qualità", rework);
   await expect(rework.locator(".selected-part-summary")).toContainText(
     "Display OLED alta qualità",
   );
@@ -3615,24 +3657,19 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
   await expect(dialog.locator(".selected-project-summary")).toContainText(
     "100,00 €",
   );
-  await expect(dialog.locator(".price-option-current-summary")).toContainText(
+  await expect(dialog.locator(".price-option-picker-summary")).toContainText(
     "Prezzo di listino",
   );
-  await expect(dialog.locator(".price-option-current-summary")).toContainText(
-    "90",
+  await expect(dialog.locator(".price-option-picker-summary")).toContainText(
+    "Display LCD standard",
   );
   await expect(dialog.locator(".quote-item")).toHaveCount(1);
   await dialog.locator(".selected-project-summary").hover();
   await expect(
     dialog.locator(".selected-project-summary .summary-action"),
   ).toBeVisible();
-  await chooseBusinessOption(
-    page,
-    "Opzione ricambio 1",
-    "Display OLED alta qualità",
-    dialog,
-  );
-  await expect(dialog.locator(".price-option-current-summary")).toContainText(
+  await choosePriceOption(page, "Display OLED alta qualità", dialog);
+  await expect(dialog.locator(".price-option-picker-summary")).toContainText(
     "119,00 €",
   );
   const projectActions = dialog.locator(
@@ -3669,11 +3706,12 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
   );
   await details.locator(".selected-part-summary .summary-action").click();
   await expect(
-    details.getByRole("combobox", {
-      name: "Opzione ricambio 1",
-      exact: true,
-    }),
-  ).toBeFocused();
+    page.getByRole("dialog", { name: "Opzioni ricambio", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+    .getByRole("button", { name: "Chiudi", exact: true })
+    .click();
   await details.getByRole("button", { name: "Annulla", exact: true }).click();
   await quote.locator(".order-card-heading").click();
   await expect(quote).toContainText("Costo diagnosi (IVA esclusa)");
@@ -4957,31 +4995,17 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     details.locator(".detail-repair-summary .selected-project-summary"),
   ).toContainText("Fotocamera");
   await details.locator(".selected-part-summary .summary-action").click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("dialog", { name: "Opzioni ricambio", exact: true }),
+  ).toBeVisible();
   await expect(
     details.locator(".detail-repair-summary .selected-project-summary"),
   ).toBeVisible();
-  await expect(
-    details.locator(".detail-repair-summary .selected-part-summary"),
-  ).toHaveCount(0);
-  await expect(
-    details.getByRole("combobox", {
-      name: "Opzione ricambio 1",
-      exact: true,
-    }),
-  ).toBeFocused();
+  await expect(details.locator(".price-option-picker-summary")).toBeVisible();
   await expect(details.locator(".quote-required-part-label")).toHaveCount(1);
-  await chooseBusinessOption(
-    page,
-    "Opzione ricambio 1",
-    "Batteria Test",
-    details,
-  );
+  await choosePriceOption(page, "Batteria Test", details);
   await expect(
-    details.getByRole("combobox", {
-      name: "Opzione ricambio 1",
-      exact: true,
-    }),
+    page.getByRole("dialog", { name: "Opzioni ricambio", exact: true }),
   ).toHaveCount(0);
   await expect(
     details.locator(".detail-repair-summary .selected-part-summary"),
@@ -4991,15 +5015,16 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     ".detail-repair-summary .selected-part-summary",
   );
   await editablePart.locator(".summary-action").click();
-  const requiredPartSearch = details.getByRole("combobox", {
-    name: "Opzione ricambio 1",
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
     exact: true,
   });
-  await requiredPartSearch.fill("");
-  await expect(requiredPartSearch).toHaveValue("");
+  await optionPicker
+    .getByRole("button", { name: "Nessun ricambio richiesto", exact: true })
+    .click();
   await expect(
     details.locator(".detail-repair-summary .selected-part-summary"),
-  ).toHaveCount(0);
+  ).toContainText("Nessuno");
   await history.locator(".order-card-heading").click();
   await expect(details).not.toHaveClass(/is-editing/);
   await expect(details.locator(".order-card-heading")).toHaveAttribute(
@@ -5013,12 +5038,7 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   await details
     .locator(".detail-repair-summary .selected-part-summary .summary-action")
     .click();
-  await chooseBusinessOption(
-    page,
-    "Opzione ricambio 1",
-    "Batteria Test",
-    details,
-  );
+  await choosePriceOption(page, "Batteria Test", details);
   await details.getByRole("button", { name: "Salva", exact: true }).click();
   await expect(
     details.locator(".detail-repair-summary .selected-part-summary"),
@@ -5233,7 +5253,9 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   await page
     .getByRole("button", { name: "Riparazione in garanzia", exact: true })
     .click();
-  let dialog = page.getByRole("dialog");
+  let dialog = page.getByRole("dialog", {
+    name: "Apri riparazione post-vendita",
+  });
   await expect(dialog).toContainText(
     "Avvia una nuova lavorazione per il dispositivo",
   );
@@ -5268,24 +5290,21 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     }),
   ).toBeGreaterThanOrEqual(18);
   await dialogPartSummary.locator(".selection-summary-copy").click();
-  const dialogPartSearch = dialog.getByRole("combobox", {
-    name: /Ricambio richiesto/,
+  const partOptions = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
   });
-  await expect(dialogPartSearch).toBeFocused();
-  const dialogNewPart = dialog.getByRole("button", {
-    name: "Nuovo ricambio",
-  });
-  await expect(dialogNewPart).toHaveCount(0);
-  await dialogPartSearch.fill("Batteria");
-  await expect(dialogNewPart).toHaveCount(0);
-  await dialogPartSearch.fill(`Ricambio assente ${Date.now()}`);
-  await expect(dialogNewPart).toBeVisible();
-  await dialogPartSearch.fill("");
-  await expect(dialogPartSearch).toBeVisible();
-  await dialogPartSearch.press("Enter");
-  await expect(dialog.locator(".selected-part-summary")).toContainText(
-    "Nessuno",
-  );
+  await expect(partOptions).toContainText("Prezzo suggerito");
+  await expect(partOptions).toContainText("Disponibile");
+  await expect(
+    partOptions.getByRole("button", { name: "Ricambio", exact: true }),
+  ).toBeVisible();
+  await partOptions
+    .getByRole("button", { name: "Nessun ricambio richiesto", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Opzioni ricambio", exact: true }),
+  ).toBeVisible();
   await expect(dialog.getByLabel("Costo aggiuntivo (€)")).toHaveCount(0);
   await expect(
     dialog.getByRole("button", { name: "Chiudi", exact: true }),
@@ -5302,7 +5321,9 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   await page
     .getByRole("button", { name: "Riparazione in garanzia", exact: true })
     .click();
-  dialog = page.getByRole("dialog");
+  dialog = page.getByRole("dialog", {
+    name: "Apri riparazione post-vendita",
+  });
   await dialog.getByRole("button", { name: "Annulla", exact: true }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(
@@ -5312,18 +5333,18 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   await page
     .getByRole("button", { name: "Riparazione in garanzia", exact: true })
     .click();
-  dialog = page.getByRole("dialog");
+  dialog = page.getByRole("dialog", {
+    name: "Apri riparazione post-vendita",
+  });
   await dialog.getByRole("radio", { name: /Riparazione a pagamento/ }).check();
   await dialog.locator(".selected-part-summary .summary-action").click();
-  const paidPartSearch = dialog.getByRole("combobox", {
-    name: /Ricambio richiesto/,
-  });
-  await paidPartSearch.fill("");
-  await expect(paidPartSearch).toBeVisible();
-  await dialog.getByLabel("Note post-vendita (facoltative)").click();
-  await expect(dialog.locator(".selected-part-summary")).toContainText(
-    "Nessuno",
-  );
+  await page
+    .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+    .getByRole("button", { name: "Nessun ricambio richiesto", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Opzioni ricambio", exact: true }),
+  ).toBeVisible();
   await dialog
     .getByLabel("Note post-vendita (facoltative)")
     .fill("Difetto ricomparso");
@@ -5403,36 +5424,29 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     "row-gap",
     "12px",
   );
+  const emptyReworkPart = warranty.getByRole("button", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await expect(emptyReworkPart).toBeVisible();
+  await emptyReworkPart.click();
+  const reworkOptions = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await expect(reworkOptions).toBeVisible();
+  await reworkOptions.getByRole("button", { name: "Chiudi" }).click();
+  await choosePriceOption(page, "Batteria Test", warranty);
   const detailPartSummary = warranty.locator(
     ".active-rework-summary .selected-part-summary",
   );
-  await expect(detailPartSummary).toContainText("Nessuno");
-  await detailPartSummary.locator(".selection-summary-copy").click();
-  const detailPartSearch = warranty.getByRole("combobox", {
-    name: "Ricambio richiesto",
-    exact: true,
-  });
-  await expect(detailPartSearch).toBeFocused();
-  await detailPartSearch.press("Escape");
-  await expect(detailPartSummary).toContainText("Nessuno");
-  await detailPartSummary.locator(".selection-summary-copy").click();
-  await chooseBusinessOption(
-    page,
-    "Ricambio richiesto",
-    "Batteria Test",
-    warranty,
-  );
   await expect(detailPartSummary).toContainText("Batteria Test");
-  const removeReworkPart = detailPartSummary.getByRole("button", {
-    name: "Rimuovi Batteria Test",
-    exact: true,
-  });
-  await page.mouse.move(0, 0);
-  await expect(removeReworkPart).toHaveCSS("opacity", "0");
-  await detailPartSummary.hover();
-  await expect(removeReworkPart).toHaveCSS("opacity", "1");
-  await removeReworkPart.click();
-  await expect(detailPartSummary).toContainText("Nessuno");
+  await detailPartSummary.locator(".summary-action").click();
+  await page
+    .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+    .getByRole("button", { name: "Nessun ricambio richiesto", exact: true })
+    .click();
+  await expect(emptyReworkPart).toBeVisible();
   await expect(
     details.getByRole("button", { name: "Modifica dati", exact: true }),
   ).toHaveCount(0);

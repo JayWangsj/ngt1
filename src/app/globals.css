@@ -5192,28 +5192,6 @@ details.secondary-actions {
 .selection-summary.selected-part-summary.has-quote {
   grid-template-columns: auto minmax(0, 1fr) 104px auto;
 }
-.price-option-current-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 8px;
-}
-.price-option-current-summary > span {
-  display: grid;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid #ebe7d9;
-  border-radius: 8px;
-  background: #fffdf7;
-}
-.price-option-current-summary small {
-  color: var(--muted);
-  font-size: 10px;
-}
-.price-option-current-summary strong {
-  color: var(--ink);
-  font-size: 12px;
-}
 .selection-summary-value > small {
   color: var(--muted);
   font-size: 10px;
@@ -5778,9 +5756,6 @@ details.secondary-actions {
   .selection-summary.selected-part-summary.has-quote .selected-part-actions {
     grid-column: 3;
     grid-row: 1 / span 2;
-  }
-  .price-option-current-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .selected-customer-summary .button {
     grid-column: 1 / -1;
@@ -8706,7 +8681,7 @@ details.secondary-actions {
 
 .price-rule-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 72px;
+  grid-template-columns: minmax(0, 1fr) 112px 190px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -8717,7 +8692,7 @@ details.secondary-actions {
     box-shadow 150ms ease-out;
 }
 .price-rule-row.is-batch {
-  grid-template-columns: 18px minmax(0, 1fr) 112px 72px;
+  grid-template-columns: 18px minmax(0, 1fr) 112px 190px;
 }
 .price-rule-row:last-child {
   border-bottom: 0;
@@ -8737,7 +8712,7 @@ details.secondary-actions {
 }
 .price-rule-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 72px;
+  grid-template-columns: minmax(0, 1fr) 112px 190px;
   align-items: center;
   gap: 8px;
   min-height: 36px;
@@ -8747,7 +8722,7 @@ details.secondary-actions {
   font-size: 12px;
 }
 .price-rule-header.is-batch {
-  grid-template-columns: 18px minmax(0, 1fr) 112px 72px;
+  grid-template-columns: 18px minmax(0, 1fr) 112px 190px;
   padding-left: 10px;
 }
 .price-rule-header strong {
@@ -8798,70 +8773,125 @@ details.secondary-actions {
   min-width: 0;
 }
 .price-row-actions {
-  width: 72px;
+  width: 190px;
   min-height: 40px;
   justify-content: flex-end;
   flex-wrap: nowrap;
 }
-.record-icon-button {
-  display: inline-grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.record-icon-button:hover,
-.record-icon-button:focus-visible {
-  background: var(--surface-hover, #f5f7f7);
-  color: var(--ink);
-}
-.price-option-panel {
-  padding: 14px 16px 16px 24px;
-  border-bottom: 1px solid var(--line);
-  background: #fffdf5;
-}
-.price-option-panel-header,
-.price-option-row,
+.price-option-summary,
 .price-option-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
 }
-.price-option-panel-header {
-  justify-content: space-between;
-  margin-bottom: 10px;
+.price-option-summary {
+  min-width: 0;
+  max-width: 148px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px dashed #d9c67e;
+  border-radius: 8px;
+  background: #fffdf5;
+  color: #755900;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
 }
-.price-option-panel-header div,
-.price-option-row > div:first-child {
+.price-option-summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.price-option-summary.has-options {
+  border-style: solid;
+  background: #fff8d8;
+}
+.price-option-summary:hover,
+.price-option-summary:focus-visible {
+  border-color: #c99a00;
+  background: #fff3bd;
+}
+.form-dialog:has(.price-option-dialog) {
+  width: min(760px, calc(100vw - 32px));
+}
+.price-option-dialog {
   display: grid;
-  gap: 2px;
-}
-.price-option-panel small {
-  color: var(--muted);
+  gap: 14px;
 }
 .price-option-list {
   display: grid;
-  gap: 7px;
+  gap: 10px;
 }
-.price-option-row {
-  min-height: 54px;
-  padding: 9px 10px;
+.price-option-card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 12px;
   background: var(--surface);
+  color: var(--ink);
+  text-align: left;
 }
-.price-option-row > div:first-child {
-  flex: 1;
-}
-.price-option-row.is-disabled {
+.price-option-card.is-disabled {
   opacity: 0.58;
+}
+.price-option-choice {
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+.price-option-choice:hover,
+.price-option-choice:focus-visible,
+.price-option-choice.is-selected {
+  border-color: #d5aa20;
+  background: #fffbee;
+}
+.price-option-choice.is-selected {
+  box-shadow: inset 3px 0 #e4ad00;
+}
+.price-option-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.price-option-card-heading > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.price-option-card small {
+  color: var(--muted);
+}
+.price-option-data {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.price-option-data > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.price-option-data strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.price-option-card-status {
+  color: #806000 !important;
 }
 .price-option-actions {
   margin-left: auto;
+}
+.price-option-add,
+.price-option-clear {
+  justify-self: start;
+}
+.price-option-picker-summary {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
 .quote-price-switch-notice {
   display: flex;
@@ -8932,17 +8962,17 @@ details.secondary-actions {
 }
 @media (max-width: 600px) {
   .price-rule-row {
-    grid-template-columns: minmax(0, 1fr) 82px 36px;
+    grid-template-columns: minmax(0, 1fr) 82px 132px;
     gap: 6px;
   }
   .price-rule-row.is-batch {
-    grid-template-columns: 18px minmax(0, 1fr) 82px 36px;
+    grid-template-columns: 18px minmax(0, 1fr) 82px 132px;
   }
   .price-rule-header {
-    grid-template-columns: minmax(0, 1fr) 82px 36px;
+    grid-template-columns: minmax(0, 1fr) 82px 132px;
   }
   .price-rule-header.is-batch {
-    grid-template-columns: 18px minmax(0, 1fr) 82px 36px;
+    grid-template-columns: 18px minmax(0, 1fr) 82px 132px;
   }
   .price-list-controls > .grow {
     min-width: 100%;
@@ -8968,6 +8998,25 @@ details.secondary-actions {
   }
   .price-rule-row .rule-price {
     font-size: 12px;
+  }
+  .price-row-actions {
+    width: 132px;
+  }
+  .price-option-summary {
+    max-width: 96px;
+  }
+  .price-option-data {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .price-option-picker-summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .price-option-picker-summary .selection-summary-value {
+    grid-column: 2;
+  }
+  .price-option-picker-summary .summary-action {
+    grid-column: 3;
+    grid-row: 1 / span 2;
   }
 }
 

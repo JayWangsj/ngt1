@@ -10,7 +10,6 @@ import {
   Children,
   isValidElement,
   cloneElement,
-  Fragment,
   type ReactElement,
   type FormEvent,
   type ReactNode,
@@ -35,7 +34,6 @@ import {
   ShieldCheck,
   X,
   ChevronRight,
-  ChevronDown,
   Package,
   Pencil,
   Smartphone,
@@ -915,6 +913,186 @@ function Section({
   );
 }
 
+function PriceOptionPicker({
+  options,
+  selected,
+  customProduct,
+  currentPrice,
+  open,
+  disabled = false,
+  ariaLabel,
+  onOpenChange,
+  onSelect,
+  onAdd,
+}: {
+  options: PriceRuleOptionView[];
+  selected?: PriceRuleOptionView | null;
+  customProduct?: CreatedProduct;
+  currentPrice?: string;
+  open: boolean;
+  disabled?: boolean;
+  ariaLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (optionId: string) => void;
+  onAdd?: () => void;
+}) {
+  const it = useMessages();
+  const product = selected?.product ?? customProduct;
+  const available = product?.available ?? product?.stock ?? 0;
+  return (
+    <>
+      {product ? (
+        <div
+          className={`selection-summary selected-part-summary price-option-picker-summary${disabled ? "" : " is-actionable"}`}
+          onClick={() => !disabled && onOpenChange(true)}
+        >
+          <span className="selection-summary-icon is-part">
+            <Package size={18} aria-hidden="true" />
+          </span>
+          <div className="selection-summary-copy">
+            <strong>{selected?.name ?? product.name}</strong>
+            <small>
+              {selected ? (
+                <>
+                  {product.name} · {it.priceListPrice}{" "}
+                  {money(cents(selected.suggested))} ·{" "}
+                </>
+              ) : (
+                <>{product.category} · </>
+              )}
+              {it.actualStock} {product.stock} · {it.reservedStock}{" "}
+              {product.reserved ?? 0} · {it.availableStock} {available} ·{" "}
+              <span
+                className={`part-stock ${available >= (selected?.quantity ?? 1) ? "is-available" : "is-empty"}`}
+              >
+                ●{" "}
+                {available >= (selected?.quantity ?? 1)
+                  ? it.partInStock
+                  : it.partOutOfStock}
+              </span>
+            </small>
+          </div>
+          {currentPrice !== undefined && (
+            <div className="selection-summary-value">
+              <small>{it.currentQuote}</small>
+              <strong>{money(cents(currentPrice))}</strong>
+            </div>
+          )}
+          <button
+            type="button"
+            className="summary-action"
+            disabled={disabled}
+            onClick={() => onOpenChange(true)}
+          >
+            <span>{it.change}</span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="quick-service-service-add quote-required-part-add"
+          disabled={disabled}
+          onClick={() => onOpenChange(true)}
+        >
+          <Plus size={18} /> {it.partPriceOptions}
+        </button>
+      )}
+      {open && (
+        <FormDialog
+          title={it.partPriceOptions}
+          onClose={() => onOpenChange(false)}
+        >
+          <div className="price-option-dialog" aria-label={ariaLabel}>
+            <div className="price-option-list">
+              {options.map((option) => (
+                <button
+                  type="button"
+                  className={`price-option-card price-option-choice${option.id === selected?.id ? " is-selected" : ""}`}
+                  key={option.id}
+                  disabled={disabled}
+                  onClick={() => {
+                    onSelect(option.id);
+                    onOpenChange(false);
+                  }}
+                >
+                  <div className="price-option-card-heading">
+                    <div>
+                      <strong>{option.name}</strong>
+                      <small>{option.product.name}</small>
+                    </div>
+                    {option.isDefault && (
+                      <small className="price-option-card-status">
+                        {it.defaultRecommended}
+                      </small>
+                    )}
+                  </div>
+                  <div className="price-option-data">
+                    <span>
+                      <small>{it.suggested}</small>
+                      <strong>{money(cents(option.suggested))}</strong>
+                    </span>
+                    <span>
+                      <small>{it.cost}</small>
+                      <strong>
+                        {option.cost ? money(cents(option.cost)) : "—"}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>{it.quantity}</small>
+                      <strong>{option.quantity}</strong>
+                    </span>
+                    <span>
+                      <small>{it.durationMinutes}</small>
+                      <strong>{option.minutes}</strong>
+                    </span>
+                    <span>
+                      <small>{it.warrantyDays}</small>
+                      <strong>{option.warrantyDays}</strong>
+                    </span>
+                    <span>
+                      <small>{it.availableStock}</small>
+                      <strong>
+                        {option.product.available} / {option.product.stock}
+                      </strong>
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="price-option-clear"
+              disabled={disabled}
+              onClick={() => {
+                onSelect("");
+                onOpenChange(false);
+              }}
+            >
+              {it.noRequiredPart}
+            </Button>
+            {onAdd && (
+              <Button
+                type="button"
+                variant="outline"
+                className="price-option-add"
+                disabled={disabled}
+                onClick={() => {
+                  onOpenChange(false);
+                  onAdd();
+                }}
+              >
+                <Plus size={16} /> {it.repairPart}
+              </Button>
+            )}
+          </div>
+        </FormDialog>
+      )}
+    </>
+  );
+}
+
 export function ItemsEditor({
   items,
   onChange,
@@ -1600,65 +1778,24 @@ export function ItemsEditor({
                       </strong>
                     )}
                     {priceOptions.length ? (
-                      <>
-                        <SearchableCombobox
-                          className="repair-part-combobox"
-                          value={selectedPriceOption?.id ?? ""}
-                          onChange={switchPriceOption}
-                          autoFocusQuery={
-                            editingPart ? selectedPriceOption?.name : undefined
-                          }
-                          ariaLabel={`${it.partPriceOption} ${index + 1}`}
-                          placeholder={it.partPriceOption}
-                          searchPlaceholder={it.searchInventoryPart}
-                          emptyText={it.noMatches}
-                          clearable
-                          commitEmptyOnClose
-                          groups={[
-                            {
-                              options: priceOptions.map((option) => ({
-                                value: option.id,
-                                label: option.name,
-                                secondary: `${it.suggested}: ${money(cents(option.suggested))}${option.isDefault ? ` · ${it.recommended}` : ""}`,
-                                trailing: (
-                                  <span
-                                    className={`part-stock ${option.product.available >= option.quantity ? "is-available" : "is-empty"}`}
-                                  >
-                                    {it.actualStock} {option.product.stock} ·{" "}
-                                    {it.reservedStock} {option.product.reserved}{" "}
-                                    · {it.availableStock}{" "}
-                                    {option.product.available}
-                                  </span>
-                                ),
-                              })),
-                            },
-                          ]}
-                        />
-                        {selectedPriceOption && (
-                          <div className="price-option-current-summary">
-                            <span>
-                              <small>{it.priceListPrice}</small>
-                              <strong>
-                                {money(cents(selectedPriceOption.suggested))}
-                              </strong>
-                            </span>
-                            <span>
-                              <small>{it.currentQuote}</small>
-                              <strong>{money(cents(item.final))}</strong>
-                            </span>
-                            <span>
-                              <small>{it.minutes}</small>
-                              <strong>{selectedPriceOption.minutes}</strong>
-                            </span>
-                            <span>
-                              <small>{it.warrantyDays}</small>
-                              <strong>
-                                {selectedPriceOption.warrantyDays}
-                              </strong>
-                            </span>
-                          </div>
-                        )}
-                      </>
+                      <PriceOptionPicker
+                        options={priceOptions}
+                        selected={selectedPriceOption}
+                        customProduct={selectedProduct}
+                        currentPrice={item.final}
+                        open={Boolean(editingPart)}
+                        ariaLabel={`${it.partPriceOption} ${index + 1}`}
+                        onOpenChange={(open) => {
+                          if (focusedEdit && !open) onFocusedEditComplete?.();
+                          else
+                            setEditingParts((current) => ({
+                              ...current,
+                              [index]: open,
+                            }));
+                        }}
+                        onSelect={switchPriceOption}
+                        onAdd={() => setCreatingPart({ index, query: "" })}
+                      />
                     ) : selectedProduct && !editingPart ? (
                       <div
                         className="selection-summary selected-part-summary is-actionable"
@@ -3614,7 +3751,24 @@ export function ReworkPartEditor({
   };
   return (
     <div className="rework-part-editor">
-      {editing ? (
+      {options.length ? (
+        <PriceOptionPicker
+          options={options.filter((option) => option.enabled)}
+          selected={selectedOption}
+          customProduct={selectedProduct}
+          open={editing}
+          disabled={pending}
+          ariaLabel={`${it.requiredPart} ${project}`}
+          onOpenChange={setEditing}
+          onSelect={(optionId) => {
+            const option = options.find(
+              (candidate) => candidate.id === optionId,
+            );
+            select(option?.productId ?? "");
+          }}
+          onAdd={() => setCreatingPart("")}
+        />
+      ) : editing ? (
         <SearchableCombobox
           value={selected}
           disabled={pending}
@@ -3880,7 +4034,37 @@ export function AfterSalesForm({
                   )}
                   <div className="after-sales-part-field">
                     <span>{it.requiredPart}</span>
-                    {editingParts[project.id] ? (
+                    {options.length ? (
+                      <PriceOptionPicker
+                        options={options}
+                        selected={selectedOption}
+                        customProduct={selectedProduct}
+                        open={Boolean(editingParts[project.id])}
+                        ariaLabel={`${it.requiredPart} ${project.name}`}
+                        onOpenChange={(open) =>
+                          setEditingParts((current) => ({
+                            ...current,
+                            [project.id]: open,
+                          }))
+                        }
+                        onSelect={(optionId) => {
+                          const option = options.find(
+                            (candidate) => candidate.id === optionId,
+                          );
+                          setItemValues((current) => ({
+                            ...current,
+                            [project.id]: {
+                              ...value,
+                              requiredProductId: option?.productId ?? "",
+                              requiredQuantity: option?.quantity ?? 1,
+                            },
+                          }));
+                        }}
+                        onAdd={() =>
+                          setCreatingPart({ projectId: project.id, query: "" })
+                        }
+                      />
+                    ) : editingParts[project.id] ? (
                       <SearchableCombobox
                         value={value.requiredProductId}
                         autoFocusQuery={
@@ -4895,9 +5079,7 @@ export function PriceList({
   const [expanded, setExpanded] = useState<string[]>([]);
   const [batchMode, setBatchMode] = useState(false);
   const [activeRuleId, setActiveRuleId] = useState("");
-  const [expandedOptionRuleIds, setExpandedOptionRuleIds] = useState<string[]>(
-    [],
-  );
+  const [optionRuleId, setOptionRuleId] = useState("");
   const [creating, setCreating] = useState<Partial<RuleView> | null>(null);
   const [editing, setEditing] = useState<RuleView | null>(null);
   const [editingOption, setEditingOption] = useState<{
@@ -4905,6 +5087,7 @@ export function PriceList({
     option?: PriceRuleOptionView;
   } | null>(null);
   const [saved, setSaved] = useState(false);
+  const optionRule = rules.find((rule) => rule.id === optionRuleId) ?? null;
   const reveal = useRef("");
   const groups = groupPriceRules(rules, query);
   const visibleIds = groups.flatMap((b) =>
@@ -5109,6 +5292,129 @@ export function PriceList({
           />
         </FormDialog>
       )}
+      {optionRule && !editingOption && (
+        <FormDialog
+          title={`${optionRule.project} · ${it.partPriceOptions}`}
+          onClose={() => setOptionRuleId("")}
+        >
+          <div className="price-option-dialog">
+            <p className="muted">{it.partOptionsHelp}</p>
+            {optionRule.options?.length ? (
+              <div className="price-option-list">
+                {optionRule.options.map((option) => (
+                  <article
+                    className={`price-option-card${option.enabled ? "" : " is-disabled"}`}
+                    key={option.id}
+                  >
+                    <div className="price-option-card-heading">
+                      <div>
+                        <strong>{option.name}</strong>
+                        <small>{option.product.name}</small>
+                      </div>
+                      <div className="price-option-actions">
+                        {!option.isDefault && option.enabled && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={pending}
+                            onClick={async () => {
+                              setPending(true);
+                              setError("");
+                              const result = await priceRuleOptionAction(
+                                optionRule.id,
+                                option.id,
+                                {
+                                  ...option,
+                                  isDefault: true,
+                                  cost: option.cost ?? "",
+                                },
+                              );
+                              setPending(false);
+                              if (!result.ok) setError(result.error);
+                              else router.refresh();
+                            }}
+                          >
+                            {it.setDefault}
+                          </Button>
+                        )}
+                        <RecordIcon
+                          kind="edit"
+                          label={it.editPartOption}
+                          disabled={pending}
+                          onClick={() =>
+                            setEditingOption({ rule: optionRule, option })
+                          }
+                        />
+                        <RecordIcon
+                          kind="delete"
+                          label={it.remove}
+                          disabled={pending}
+                          onClick={async () => {
+                            setPending(true);
+                            setError("");
+                            const result = await deletePriceRuleOptionAction(
+                              optionRule.id,
+                              option.id,
+                            );
+                            setPending(false);
+                            if (!result.ok) setError(result.error);
+                            else router.refresh();
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="price-option-data">
+                      <span>
+                        <small>{it.suggested}</small>
+                        <strong>{money(cents(option.suggested))}</strong>
+                      </span>
+                      <span>
+                        <small>{it.cost}</small>
+                        <strong>
+                          {option.cost ? money(cents(option.cost)) : "—"}
+                        </strong>
+                      </span>
+                      <span>
+                        <small>{it.quantity}</small>
+                        <strong>{option.quantity}</strong>
+                      </span>
+                      <span>
+                        <small>{it.durationMinutes}</small>
+                        <strong>{option.minutes}</strong>
+                      </span>
+                      <span>
+                        <small>{it.warrantyDays}</small>
+                        <strong>{option.warrantyDays}</strong>
+                      </span>
+                      <span>
+                        <small>{it.availableStock}</small>
+                        <strong>
+                          {option.product.available} / {option.product.stock}
+                        </strong>
+                      </span>
+                    </div>
+                    <small className="price-option-card-status">
+                      {option.isDefault ? it.defaultRecommended : ""}
+                      {option.isDefault && !option.enabled ? " · " : ""}
+                      {!option.enabled ? it.disabled : ""}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty">{it.noPartOptions}</p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              className="price-option-add"
+              onClick={() => setEditingOption({ rule: optionRule })}
+            >
+              <Plus size={16} /> {it.repairPart}
+            </Button>
+          </div>
+        </FormDialog>
+      )}
       {editingOption && (
         <FormDialog
           title={editingOption.option ? it.editPartOption : it.newPartOption}
@@ -5191,213 +5497,93 @@ export function PriceList({
                               <span aria-hidden="true" />
                             </div>
                             {group.rules.map((rule) => (
-                              <Fragment key={rule.id}>
-                                <article
-                                  className={`price-rule-row business-list-row${batchMode ? " is-batch" : ""}${!batchMode && activeRuleId === rule.id ? " order-row-active" : ""}`}
-                                  data-price-rule={rule.id}
-                                  onClick={() => {
-                                    if (!batchMode) setActiveRuleId(rule.id);
-                                  }}
-                                >
-                                  {batchMode && (
-                                    <input
-                                      type="checkbox"
-                                      aria-label={
-                                        it.selectOption +
-                                        " " +
-                                        rule.project +
-                                        " " +
-                                        rule.brand +
-                                        " " +
-                                        rule.model
-                                      }
-                                      checked={selected.includes(rule.id)}
-                                      onChange={(event) =>
-                                        updateSelection(
-                                          [rule.id],
-                                          event.target.checked,
-                                        )
-                                      }
-                                    />
-                                  )}
-                                  <InlineRuleFields
-                                    key={`${rule.id}:${rule.project}:${rule.suggested}`}
-                                    rule={rule}
-                                    active={
-                                      !batchMode && activeRuleId === rule.id
+                              <article
+                                key={rule.id}
+                                className={`price-rule-row business-list-row${batchMode ? " is-batch" : ""}${!batchMode && activeRuleId === rule.id ? " order-row-active" : ""}`}
+                                data-price-rule={rule.id}
+                                onClick={() => {
+                                  if (!batchMode) setActiveRuleId(rule.id);
+                                }}
+                              >
+                                {batchMode && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={
+                                      it.selectOption +
+                                      " " +
+                                      rule.project +
+                                      " " +
+                                      rule.brand +
+                                      " " +
+                                      rule.model
                                     }
-                                    disabled={pending}
-                                    projectLabel={it.project}
-                                    quoteLabel={it.quote}
-                                    onClose={() =>
-                                      setActiveRuleId((current) =>
-                                        current === rule.id ? "" : current,
+                                    checked={selected.includes(rule.id)}
+                                    onChange={(event) =>
+                                      updateSelection(
+                                        [rule.id],
+                                        event.target.checked,
                                       )
                                     }
-                                    onError={setError}
-                                    onSaved={() => setSaved(true)}
                                   />
-                                  <span className="price-row-actions record-actions">
-                                    {!batchMode && activeRuleId !== rule.id && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          className="record-icon-button"
-                                          aria-label={it.managePartOptions}
-                                          aria-expanded={expandedOptionRuleIds.includes(
-                                            rule.id,
-                                          )}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            setExpandedOptionRuleIds(
-                                              (current) =>
-                                                current.includes(rule.id)
-                                                  ? current.filter(
-                                                      (id) => id !== rule.id,
-                                                    )
-                                                  : [...current, rule.id],
-                                            );
-                                          }}
-                                        >
-                                          {expandedOptionRuleIds.includes(
-                                            rule.id,
-                                          ) ? (
-                                            <ChevronDown size={17} />
-                                          ) : (
-                                            <ChevronRight size={17} />
-                                          )}
-                                        </button>
-                                        <RecordIcon
-                                          kind="edit"
-                                          label={it.editQuote}
-                                          disabled={pending}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            setEditing(rule);
-                                          }}
-                                        />
-                                      </>
-                                    )}
-                                  </span>
-                                </article>
-                                {!batchMode &&
-                                  expandedOptionRuleIds.includes(rule.id) && (
-                                    <div className="price-option-panel">
-                                      <div className="price-option-panel-header">
-                                        <div>
-                                          <strong>{it.partPriceOptions}</strong>
-                                          <small>{it.partOptionsHelp}</small>
-                                        </div>
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          onClick={() =>
-                                            setEditingOption({ rule })
-                                          }
-                                        >
-                                          <Plus size={16} /> {it.newPartOption}
-                                        </Button>
-                                      </div>
-                                      {rule.options?.length ? (
-                                        <div className="price-option-list">
-                                          {rule.options.map((option) => (
-                                            <div
-                                              className={`price-option-row${option.enabled ? "" : " is-disabled"}`}
-                                              key={option.id}
-                                            >
-                                              <div>
-                                                <strong>{option.name}</strong>
-                                                <small>
-                                                  {money(
-                                                    cents(option.suggested),
-                                                  )}
-                                                  {option.isDefault
-                                                    ? ` · ${it.defaultRecommended}`
-                                                    : ""}
-                                                </small>
-                                              </div>
-                                              <small>
-                                                {it.actualStock}{" "}
-                                                {option.product.stock} ·{" "}
-                                                {it.reservedStock}{" "}
-                                                {option.product.reserved} ·{" "}
-                                                {it.availableStock}{" "}
-                                                {option.product.available}
-                                              </small>
-                                              <div className="price-option-actions">
-                                                {!option.isDefault &&
-                                                  option.enabled && (
-                                                    <Button
-                                                      type="button"
-                                                      variant="outline"
-                                                      disabled={pending}
-                                                      onClick={async () => {
-                                                        setPending(true);
-                                                        setError("");
-                                                        const result =
-                                                          await priceRuleOptionAction(
-                                                            rule.id,
-                                                            option.id,
-                                                            {
-                                                              ...option,
-                                                              isDefault: true,
-                                                              cost:
-                                                                option.cost ??
-                                                                "",
-                                                            },
-                                                          );
-                                                        setPending(false);
-                                                        if (!result.ok)
-                                                          setError(
-                                                            result.error,
-                                                          );
-                                                        else router.refresh();
-                                                      }}
-                                                    >
-                                                      {it.setDefault}
-                                                    </Button>
-                                                  )}
-                                                <RecordIcon
-                                                  kind="edit"
-                                                  label={it.editPartOption}
-                                                  disabled={pending}
-                                                  onClick={() =>
-                                                    setEditingOption({
-                                                      rule,
-                                                      option,
-                                                    })
-                                                  }
-                                                />
-                                                <RecordIcon
-                                                  kind="delete"
-                                                  label={it.remove}
-                                                  disabled={pending}
-                                                  onClick={async () => {
-                                                    setPending(true);
-                                                    setError("");
-                                                    const result =
-                                                      await deletePriceRuleOptionAction(
-                                                        rule.id,
-                                                        option.id,
-                                                      );
-                                                    setPending(false);
-                                                    if (!result.ok)
-                                                      setError(result.error);
-                                                    else router.refresh();
-                                                  }}
-                                                />
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <p className="empty">
-                                          {it.noPartOptions}
-                                        </p>
-                                      )}
-                                    </div>
+                                )}
+                                <InlineRuleFields
+                                  key={`${rule.id}:${rule.project}:${rule.suggested}`}
+                                  rule={rule}
+                                  active={
+                                    !batchMode && activeRuleId === rule.id
+                                  }
+                                  disabled={pending}
+                                  projectLabel={it.project}
+                                  quoteLabel={it.quote}
+                                  onClose={() =>
+                                    setActiveRuleId((current) =>
+                                      current === rule.id ? "" : current,
+                                    )
+                                  }
+                                  onError={setError}
+                                  onSaved={() => setSaved(true)}
+                                />
+                                <span className="price-row-actions record-actions">
+                                  {!batchMode && activeRuleId !== rule.id && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className={`price-option-summary${rule.options?.length ? " has-options" : ""}`}
+                                        aria-label={
+                                          rule.options?.length
+                                            ? it.managePartOptions
+                                            : it.newPartOption
+                                        }
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setOptionRuleId(rule.id);
+                                        }}
+                                      >
+                                        {!rule.options?.length && (
+                                          <Plus size={15} />
+                                        )}
+                                        <span>
+                                          {rule.options?.length
+                                            ? `${rule.options.length} ${it.partPriceOptions}`
+                                            : it.partPriceOptions}
+                                        </span>
+                                        {rule.options?.length ? (
+                                          <ChevronRight size={15} />
+                                        ) : null}
+                                      </button>
+                                      <RecordIcon
+                                        kind="edit"
+                                        label={it.editQuote}
+                                        disabled={pending}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setEditing(rule);
+                                        }}
+                                      />
+                                    </>
                                   )}
-                              </Fragment>
+                                </span>
+                              </article>
                             ))}
                           </div>
                         </div>
