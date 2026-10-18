@@ -9,6 +9,32 @@ function Get-NgtInstallJson([string]$Path) {
   }
 }
 
+function Get-NgtUpdateLock([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+  try {
+    $contents = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF)
+    try {
+      return $contents | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+      $legacyTimestamp = $contents.Trim()
+      $parsedTimestamp = [System.DateTimeOffset]::MinValue
+      $isLegacyTimestamp = [System.DateTimeOffset]::TryParseExact(
+        $legacyTimestamp,
+        "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AssumeUniversal,
+        [ref]$parsedTimestamp
+      )
+      if ($isLegacyTimestamp) {
+        return [pscustomobject]@{ createdAt = $legacyTimestamp }
+      }
+      throw "Expected JSON or a legacy ISO-8601 UTC timestamp. $($_.Exception.Message)"
+    }
+  } catch {
+    throw "Install state is unreadable: $Path. $($_.Exception.Message)"
+  }
+}
+
 function Write-NgtInstallJsonAtomic([string]$Path, [object]$Value) {
   $directory = Split-Path -Parent $Path
   New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -212,7 +238,7 @@ function Test-NgtSafeStaleUpdate([object]$Status, [string]$CurrentVersion) {
 
 function Get-NgtManualInstallReservation([string]$InstallRoot) {
   $root = [System.IO.Path]::GetFullPath($InstallRoot)
-  $lock = Get-NgtInstallJson (Join-Path $root "update.lock")
+  $lock = Get-NgtUpdateLock (Join-Path $root "update.lock")
   $status = Get-NgtInstallJson (Join-Path $root "update-status.json")
   $marker = Get-NgtInstallJson (Join-Path $root ".local\update-maintenance.json")
   return [pscustomobject]@{ lock = $lock; status = $status; marker = $marker }

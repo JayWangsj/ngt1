@@ -86,6 +86,54 @@ try {
   catch { $downgradeBlocked = $_.Exception.Message -like "Downgrade blocked:*" }
   if (-not $downgradeBlocked) { throw "An older installer was not blocked." }
 
+  $legacyLock = New-NgtInstallFixture (Join-Path $testRoot "legacy-timestamp-lock")
+  $legacyLockTimestamp = "2026-10-15T00:31:53.000Z"
+  [System.IO.File]::WriteAllText(
+    (Join-Path $legacyLock.installRoot "update.lock"),
+    $legacyLockTimestamp,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  Write-NgtInstallJsonAtomic (Join-Path $legacyLock.installRoot "update-status.json") ([pscustomobject]@{
+    status = "complete"
+    updateId = [guid]::NewGuid().ToString()
+    actualVersion = "2.0.11"
+    previousVersion = "2.0.11"
+  })
+  $legacyLockPlan = Start-NgtStudioManualInstall -InstallRoot $legacyLock.installRoot -TargetVersion "2.0.15"
+  $legacyLockReservation = Get-NgtManualInstallReservation $legacyLock.installRoot
+  $legacyLockHistory = Get-NgtInstallJson ([string](Get-NgtInstallJson (Join-Path $legacyLock.installRoot ".local\update-maintenance.json")).historyPath)
+  if ($legacyLockPlan.mode -ne "upgrade" -or
+      $legacyLockReservation.lock.operation -ne "manual-install" -or
+      $legacyLockHistory.previousLock.createdAt -ne $legacyLockTimestamp) {
+    throw "A safe legacy timestamp lock was not archived and replaced by the manual installer."
+  }
+
+  $unsafeLegacyLock = New-NgtInstallFixture (Join-Path $testRoot "unsafe-legacy-timestamp-lock")
+  $unsafeLegacyLockPath = Join-Path $unsafeLegacyLock.installRoot "update.lock"
+  [System.IO.File]::WriteAllText($unsafeLegacyLockPath, $legacyLockTimestamp, [System.Text.UTF8Encoding]::new($false))
+  Write-NgtInstallJsonAtomic (Join-Path $unsafeLegacyLock.installRoot "update-status.json") ([pscustomobject]@{
+    status = "failed"
+    recoveryStatus = "running"
+    updateId = [guid]::NewGuid().ToString()
+    previousVersion = "2.0.11"
+    targetVersion = "2.0.15"
+  })
+  $unsafeLegacyBlocked = $false
+  try { Start-NgtStudioManualInstall -InstallRoot $unsafeLegacyLock.installRoot -TargetVersion "2.0.15" | Out-Null }
+  catch { $unsafeLegacyBlocked = $_.Exception.Message -like "The previous update may have changed the database*" }
+  if (-not $unsafeLegacyBlocked -or
+      [System.IO.File]::ReadAllText($unsafeLegacyLockPath) -ne $legacyLockTimestamp -or
+      (Test-Path -LiteralPath (Join-Path $unsafeLegacyLock.installRoot ".local\update-maintenance.json"))) {
+    throw "An unsafe legacy timestamp lock was modified instead of remaining blocked."
+  }
+
+  $invalidLegacyLockPath = Join-Path $unsafeLegacyLock.installRoot "invalid-update.lock"
+  [System.IO.File]::WriteAllText($invalidLegacyLockPath, "2026-10-15T00", [System.Text.UTF8Encoding]::new($false))
+  $invalidLegacyLockBlocked = $false
+  try { Get-NgtUpdateLock $invalidLegacyLockPath | Out-Null }
+  catch { $invalidLegacyLockBlocked = $_.Exception.Message -like "Install state is unreadable:*legacy ISO-8601 UTC timestamp*" }
+  if (-not $invalidLegacyLockBlocked) { throw "An unsupported legacy lock value was not rejected with a format diagnostic." }
+
   $firstInstall = Join-Path $testRoot "first-install-resume"
   New-Item -ItemType Directory -Path $firstInstall -Force | Out-Null
   Start-NgtStudioManualInstall -InstallRoot $firstInstall -TargetVersion "2.0.15" | Out-Null
