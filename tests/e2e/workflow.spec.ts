@@ -5713,17 +5713,39 @@ test("price editor and mobile yellow layout support both languages", async ({
   const form = page.getByRole("dialog");
   await enterBusinessValue(page, "Intervento", `pulizia ${Date.now()}`, form);
   await form.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("15");
-  await chooseBusinessOption(page, "Ricambio richiesto", "Batteria Test", form);
-  const requiredQuantity = form.getByRole("spinbutton", {
-    name: "Quantità",
+  await form.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(form.locator(".price-rule-editor-options")).toBeVisible();
+  await form
+    .getByRole("button", { name: "Opzione ricambio", exact: true })
+    .click();
+  const newPriceOption = page.getByRole("dialog", {
+    name: "Nuova opzione ricambio",
     exact: true,
   });
-  await requiredQuantity.fill("");
-  await expect(requiredQuantity).toHaveValue("");
-  await requiredQuantity.fill("12");
-  await requiredQuantity.press("Tab");
-  await expect(requiredQuantity).toHaveValue("12");
-  await form.getByRole("button", { name: "Salva", exact: true }).click();
+  await chooseBusinessOption(
+    page,
+    "Ricambio richiesto",
+    "Batteria Test",
+    newPriceOption,
+  );
+  const optionQuantity = newPriceOption.getByRole("spinbutton", {
+    name: "Quantità ricambio",
+    exact: true,
+  });
+  await optionQuantity.fill("12");
+  await optionQuantity.press("Tab");
+  await expect(optionQuantity).toHaveValue("12");
+  await newPriceOption
+    .getByLabel("Prezzo suggerito (€)", { exact: true })
+    .fill("18");
+  await newPriceOption
+    .getByRole("button", { name: "Salva", exact: true })
+    .click();
+  await expect(newPriceOption).toHaveCount(0);
+  await expect(form.locator(".price-option-card")).toContainText(
+    "Batteria Test",
+  );
+  await form.locator(".dialog-actions button").first().click();
   await expect(form).not.toBeVisible();
   await expect(page.getByRole("main").getByRole("status")).toBeVisible();
   await page.goto("/");
@@ -6568,12 +6590,12 @@ test("replaces a repair item with a custom item without submitting the order", a
   await rule.hover();
   await rule.getByRole("button", { name: "Modifica preventivo" }).click();
   const editDialog = page.getByRole("dialog", { name: "Modifica preventivo" });
+  await expect(editDialog.locator(".price-rule-editor-options")).toBeVisible();
   await expect(
-    editDialog.getByRole("combobox", {
-      name: "Ricambio richiesto",
-      exact: true,
+    editDialog.locator(".price-option-card").filter({
+      hasText: "Batteria Test",
     }),
-  ).toHaveValue("Batteria Test");
+  ).toBeVisible();
 });
 
 test("customer list searches instantly, preserves navigation and supports compact editing", async ({
@@ -6862,6 +6884,8 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
   ).toHaveValue("Watch Modal");
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("40");
   await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(dialog.locator(".price-rule-editor-options")).toBeVisible();
+  await dialog.locator(".dialog-actions button").first().click();
   await expect(dialog).not.toBeVisible();
   await expect(page).toHaveURL(/prices$/);
   const model = page
@@ -6883,6 +6907,8 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
   await enterBusinessValue(page, "Intervento", "Test screen", dialog);
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("70");
   await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(dialog.locator(".price-rule-editor-options")).toBeVisible();
+  await dialog.locator(".dialog-actions button").first().click();
   await expect(dialog).not.toBeVisible();
   await expect(model.locator("article")).toHaveCount(2);
   await page.getByLabel("Cerca", { exact: true }).fill("Test battery");
@@ -7190,6 +7216,10 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await createDialog
     .getByRole("button", { name: "Salva", exact: true })
     .click();
+  await expect(
+    createDialog.locator(".price-rule-editor-options"),
+  ).toBeVisible();
+  await createDialog.locator(".dialog-actions button").first().click();
   await expect(createDialog).not.toBeVisible();
   await page.getByLabel("Cerca", { exact: true }).fill("iPhone 13");
   await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
@@ -7389,7 +7419,7 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await expect(page.getByRole("checkbox")).toHaveCount(0);
 });
 
-test("quote repair part waits for commit and supports creating a new part", async ({
+test("part plan management stays in the quote editor and supports creating a new part", async ({
   page,
 }) => {
   await page.goto("/prices");
@@ -7399,36 +7429,36 @@ test("quote repair part waits for commit and supports creating a new part", asyn
     .filter({ hasText: "sostituzione batteria" });
   await row.hover();
   await row
-    .getByRole("button", { name: "Modifica preventivo", exact: true })
+    .getByRole("button", { name: "Gestisci opzioni ricambio", exact: true })
     .click();
 
-  let editDialog = page.getByRole("dialog", {
+  const editDialog = page.getByRole("dialog", {
     name: "Modifica preventivo",
     exact: true,
   });
-  let partSearch = editDialog.getByRole("combobox", {
+  await expect(
+    editDialog.getByRole("button", { name: "Tipo dispositivo", exact: true }),
+  ).toBeVisible();
+  const optionSection = editDialog.locator(".price-rule-editor-options");
+  await expect(optionSection).toBeVisible();
+  await expect(optionSection.locator(".price-option-card")).toContainText(
+    "Batteria Test",
+  );
+  await optionSection
+    .getByRole("button", { name: "Opzione ricambio", exact: true })
+    .click();
+  const newOption = page.getByRole("dialog", {
+    name: "Nuova opzione ricambio",
+    exact: true,
+  });
+  const partSearch = newOption.getByRole("combobox", {
     name: "Ricambio richiesto",
     exact: true,
   });
-  await expect(partSearch).toHaveValue("Batteria Test");
-  await partSearch.fill("");
-  await expect(partSearch).toHaveValue("");
-  await expect(
-    editDialog.getByLabel("Quantità", { exact: true }),
-  ).toBeVisible();
-
-  await editDialog.locator('input[name="notes"]').click();
-  await expect(partSearch).toHaveValue("Nessun ricambio richiesto");
-  await expect(editDialog.getByLabel("Quantità", { exact: true })).toHaveCount(
-    0,
-  );
-
   const productName = `Ricambio preventivo ${Date.now()}`;
   await partSearch.fill(productName);
-  const newPart = editDialog.getByRole("button", {
-    name: "Nuovo ricambio per riparazione",
-    exact: true,
-  });
+  const newPart = newOption.locator(".business-select-create");
+  await expect(newPart).toContainText("Ricambio");
   await expect(newPart).toBeEnabled();
   await newPart.click();
   const productDialog = page.getByRole("dialog", {
@@ -7449,29 +7479,37 @@ test("quote repair part waits for commit and supports creating a new part", asyn
   await expect(productDialog).toHaveCount(0);
   await expect(partSearch).toHaveValue(productName);
   await expect(
-    editDialog.getByLabel("Quantità", { exact: true }),
+    newOption.getByLabel("Nome opzione", { exact: true }),
+  ).toHaveValue(productName);
+  await newOption
+    .getByLabel("Prezzo suggerito (€)", { exact: true })
+    .fill("95");
+  await newOption.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(newOption).toHaveCount(0);
+  await expect(editDialog).toBeVisible();
+  await expect(
+    optionSection.locator(".price-option-card").filter({
+      hasText: productName,
+    }),
   ).toBeVisible();
-
-  await partSearch.fill("");
-  await editDialog.getByRole("button", { name: "Salva", exact: true }).click();
-  await expect(editDialog).toHaveCount(0);
+  await editDialog.locator(".dialog-actions button").first().click();
+  await expect(editDialog).not.toBeVisible();
 
   await row.hover();
   await row
-    .getByRole("button", { name: "Modifica preventivo", exact: true })
+    .getByRole("button", { name: "Gestisci opzioni ricambio", exact: true })
     .click();
-  editDialog = page.getByRole("dialog", {
+  const reopenedDialog = page.getByRole("dialog", {
     name: "Modifica preventivo",
     exact: true,
   });
-  partSearch = editDialog.getByRole("combobox", {
-    name: "Ricambio richiesto",
-    exact: true,
-  });
-  await expect(partSearch).toHaveValue("Nessun ricambio richiesto");
-  await expect(editDialog.getByLabel("Quantità", { exact: true })).toHaveCount(
-    0,
-  );
+  await expect(
+    reopenedDialog.locator(".price-option-card").filter({
+      hasText: productName,
+    }),
+  ).toBeVisible();
+  await reopenedDialog.locator(".dialog-actions button").first().click();
+  await expect(reopenedDialog).not.toBeVisible();
 });
 
 test("price editor keeps deletion inside batch management", async ({
@@ -7489,6 +7527,8 @@ test("price editor keeps deletion inside batch management", async ({
   await enterBusinessValue(page, "Intervento", "Da eliminare", dialog);
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("25");
   await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+  await dialog.locator(".dialog-actions button").first().click();
+  await expect(dialog).not.toBeVisible();
   const removable = page
     .locator(".price-rule-row")
     .filter({ hasText: "Da eliminare" });

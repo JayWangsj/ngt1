@@ -1641,7 +1641,10 @@ export async function savePriceRule(
     const rule = id
       ? await tx.priceRule.update({ where: { id }, data })
       : await tx.priceRule.create({ data });
-    if (input.requiredProductId) {
+    if (
+      input.requiredProductId &&
+      (!before || before.requiredProductId !== input.requiredProductId)
+    ) {
       const product = await tx.product.findFirst({
         where: {
           id: input.requiredProductId,

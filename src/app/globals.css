@@ -8814,12 +8814,57 @@ details.secondary-actions {
   border-color: #c99a00;
   background: #fff3bd;
 }
-.form-dialog:has(.price-option-dialog) {
-  width: min(760px, calc(100vw - 32px));
+.form-dialog:has(.price-rule-editor) {
+  width: min(920px, calc(100vw - 32px));
 }
-.price-option-dialog {
+.price-rule-editor {
+  display: grid;
+  gap: 16px;
+  margin-top: 0;
+}
+.price-rule-editor-section {
   display: grid;
   gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffefa;
+}
+.price-rule-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.price-rule-editor-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.price-rule-editor-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.price-rule-editor-count {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff3bd;
+  color: #755900;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.price-rule-editor-options > .empty,
+.price-rule-editor-options > .muted {
+  margin: 0;
 }
 .price-option-list {
   display: grid;

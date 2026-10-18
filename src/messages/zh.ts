@@ -892,6 +892,8 @@ export const zh: typeof it = {
   disabled: "停用",
   partPriceOptions: "配件报价方案",
   partOptionsHelp: "同一维修项目可按配件设置不同的维修总报价。",
+  priceProjectSection: "维修项目与基础报价",
+  saveQuoteBeforeOptions: "先保存维修项目，然后即可在此添加配件报价方案。",
   managePartOptions: "管理配件报价方案",
   newPartOption: "新增配件方案",
   addPartOption: "配件方案",

@@ -170,8 +170,8 @@ async function main() {
     });
     const created = await db.product.create({ data: product });
     productsByName.set(product.name, created.id);
-    if (product.name === "Batteria Test")
-      await db.priceRule.create({
+    if (product.name === "Batteria Test") {
+      const rule = await db.priceRule.create({
         data: {
           category: "PHONE",
           brand: "Apple",
@@ -183,6 +183,20 @@ async function main() {
           requiredProductId: created.id,
         },
       });
+      await db.priceRuleOption.create({
+        data: {
+          ruleId: rule.id,
+          productId: created.id,
+          name: created.name,
+          suggested: "120",
+          cost: created.costPrice,
+          quantity: 1,
+          minutes: 60,
+          enabled: true,
+          isDefault: true,
+        },
+      });
+    }
     if (product.stockQuantity > 0)
       await db.inventoryMovement.create({
         data: {

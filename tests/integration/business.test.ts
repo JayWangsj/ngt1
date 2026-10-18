@@ -326,6 +326,33 @@ describe("PostgreSQL workflow", () => {
         where: { id: oledOption.id },
       }),
     ).toMatchObject({ enabled: true, isDefault: true });
+
+    await savePriceRule(owner, rule.id, {
+      category: rule.category,
+      brand: rule.brand,
+      series: rule.series,
+      model: rule.model,
+      project: rule.project,
+      suggested: "84",
+      cost: "32",
+      minutes: 60,
+      enabled: true,
+      notes: "",
+      requiredProductId: oled.id,
+      requiredQuantity: 1,
+    });
+    expect(
+      (
+        await db.priceRuleOption.findUniqueOrThrow({
+          where: { id: oledOption.id },
+        })
+      ).suggested.toString(),
+    ).toBe("119");
+    expect(
+      (
+        await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
+      ).suggested.toString(),
+    ).toBe("84");
   });
 
   it("registers, quotes, receives balance, delivers and audits every change", async () => {

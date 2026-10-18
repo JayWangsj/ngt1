@@ -3243,21 +3243,23 @@ export function QuoteSummary({
   );
 }
 
-type ActionResult = { ok: boolean; error?: string };
+type ActionResult = { ok: boolean; error?: string; id?: string };
 function ActionForm({
   action,
   children,
   submit,
   onSuccess,
   onCancel,
+  cancelLabel,
   disabled = false,
   className = "",
 }: {
   action: (data: FormData) => Promise<ActionResult>;
   children: ReactNode;
   submit: string;
-  onSuccess?: () => void;
+  onSuccess?: (result: ActionResult) => void;
   onCancel?: () => void;
+  cancelLabel?: string;
   disabled?: boolean;
   className?: string;
 }) {
@@ -3311,7 +3313,7 @@ function ActionForm({
           }
           initial.current = current;
           setSuccess(true);
-          onSuccess?.();
+          onSuccess?.(result);
           router.refresh();
           return true;
         } catch {
@@ -3363,7 +3365,7 @@ function ActionForm({
             disabled={pending}
             onClick={closeDialog}
           >
-            {it.cancel}
+            {cancelLabel ?? it.cancel}
           </Button>
           <Button disabled={pending || disabled}>
             {pending ? it.saving : submit}
@@ -4687,218 +4689,363 @@ export function RuleForm({
   rules = [],
   repairProducts = [],
   initial,
+  focusOptions = false,
   onSuccess,
+  onOptionSaved,
 }: {
   rule?: RuleView;
   rules?: RuleView[];
-  repairProducts?: { id: string; name: string; stockQuantity: number }[];
-  initial?: Partial<RuleView>;
-  onSuccess?: (device: {
+  repairProducts?: {
+    id: string;
+    name: string;
     category: string;
-    brand: string;
-    model: string;
-  }) => void;
+    stockQuantity: number;
+    costPrice: string;
+  }[];
+  initial?: Partial<RuleView>;
+  onSuccess?: (
+    device: {
+      category: string;
+      brand: string;
+      model: string;
+    },
+    id?: string,
+  ) => void;
+  focusOptions?: boolean;
+  onOptionSaved?: () => void;
 }) {
   const it = useMessages();
   const { locale } = useLanguage();
+  const router = useRouter();
   const [category, setCategory] = useState<Category>(
     ((rule?.category ?? initial?.category) as Category) ?? "PHONE",
   );
   const [brand, setBrand] = useState(rule?.brand ?? initial?.brand ?? "");
   const [model, setModel] = useState(rule?.model ?? initial?.model ?? "");
   const [project, setProject] = useState(rule?.project ?? "");
-  const [requiredProductId, setRequiredProductId] = useState(
-    rule?.requiredProductId ?? "",
-  );
-  const [requiredProductCleared, setRequiredProductCleared] = useState(false);
-  const [createdRepairProducts, setCreatedRepairProducts] = useState<
-    { id: string; name: string; stockQuantity: number }[]
-  >([]);
-  const [creatingPart, setCreatingPart] = useState<string | null>(null);
-  const availableRepairProducts = [
-    ...repairProducts,
-    ...createdRepairProducts.filter(
-      (created) => !repairProducts.some((product) => product.id === created.id),
-    ),
-  ];
+  const [createdRuleId, setCreatedRuleId] = useState("");
+  const [editingOption, setEditingOption] = useState<{
+    option?: PriceRuleOptionView;
+  } | null>(null);
+  const [optionPending, setOptionPending] = useState(false);
+  const [optionError, setOptionError] = useState("");
+  const optionSection = useRef<HTMLElement>(null);
+  const ruleId = rule?.id ?? createdRuleId;
+  const currentRule =
+    rules.find((candidate) => candidate.id === ruleId) ?? rule ?? null;
+  const optionRule: RuleView | null =
+    currentRule ??
+    (ruleId
+      ? {
+          id: ruleId,
+          category,
+          brand,
+          series: "",
+          model,
+          project,
+          suggested: "",
+          cost: null,
+          minutes: 60,
+          notes: "",
+          enabled: true,
+          options: [],
+        }
+      : null);
+  useEffect(() => {
+    if (focusOptions)
+      optionSection.current?.scrollIntoView({ block: "nearest" });
+  }, [focusOptions]);
   return (
     <ActionForm
       submit={it.save}
-      onSuccess={() =>
-        onSuccess?.({
-          category,
-          brand: normalizeBrand(brand),
-          model: normalizeDeviceModel(brand, model),
-        })
-      }
+      cancelLabel={it.close}
+      className="price-rule-editor"
+      onSuccess={(result) => {
+        if (!rule && result.id) setCreatedRuleId(result.id);
+        onSuccess?.(
+          {
+            category,
+            brand: normalizeBrand(brand),
+            model: normalizeDeviceModel(brand, model),
+          },
+          result.id,
+        );
+      }}
       action={(data) =>
-        ruleAction(rule?.id ?? null, {
+        ruleAction(ruleId || null, {
           ...Object.fromEntries(data),
           category,
           brand,
           model,
           project,
-          requiredProductId: requiredProductCleared ? "" : requiredProductId,
-          series: model ? "" : (rule?.series ?? ""),
-          minutes: rule?.minutes ?? 60,
+          requiredProductId: currentRule?.requiredProductId ?? "",
+          requiredQuantity: currentRule?.requiredQuantity ?? 1,
+          series: model ? "" : (currentRule?.series ?? ""),
+          minutes: currentRule?.minutes ?? 60,
           enabled: true,
         })
       }
     >
-      <div className="form-grid three">
-        <Field label={it.deviceType}>
-          <SimpleSelect
-            value={category}
-            onChange={(value) => {
-              setCategory(value as Category);
-              setBrand("");
+      <section className="price-rule-editor-section">
+        <header className="price-rule-editor-heading">
+          <div>
+            <h3>{it.priceProjectSection}</h3>
+            <p>{it.ruleHelp}</p>
+          </div>
+        </header>
+        <div className="form-grid three">
+          <Field label={it.deviceType}>
+            <SimpleSelect
+              value={category}
+              onChange={(value) => {
+                setCategory(value as Category);
+                setBrand("");
+                setModel("");
+              }}
+              placeholder={it.selectOption}
+              ariaLabel={it.deviceType}
+              options={Object.entries(categories).map(([key, names]) => ({
+                value: key,
+                label: names[locale === "zh" ? 1 : 0],
+              }))}
+            />
+          </Field>
+          <EditableSelect
+            label={it.brand}
+            createLabel={it.customBrand}
+            value={brand}
+            onChange={(v) => {
+              setBrand(v);
               setModel("");
             }}
-            placeholder={it.selectOption}
-            ariaLabel={it.deviceType}
-            options={Object.entries(categories).map(([key, names]) => ({
-              value: key,
-              label: names[locale === "zh" ? 1 : 0],
-            }))}
+            options={uniqueOptions([
+              ...brands[category],
+              ...rules
+                .filter((r) => r.category === category)
+                .map((r) => r.brand),
+            ])}
+            normalize={normalizeBrand}
           />
-        </Field>
+          <EditableSelect
+            label={it.model}
+            createLabel={it.customModel}
+            value={model}
+            onChange={setModel}
+            options={uniqueOptions(
+              rules
+                .filter(
+                  (r) =>
+                    r.category === category &&
+                    r.brand.toLowerCase() === brand.toLowerCase(),
+                )
+                .map((r) => r.model),
+            )}
+            normalize={(value) => normalizeDeviceModel(brand, value)}
+          />
+        </div>
         <EditableSelect
-          label={it.brand}
-          createLabel={it.customBrand}
-          value={brand}
-          onChange={(v) => {
-            setBrand(v);
-            setModel("");
-          }}
-          options={uniqueOptions([
-            ...brands[category],
-            ...rules.filter((r) => r.category === category).map((r) => r.brand),
-          ])}
-          normalize={normalizeBrand}
-        />
-        <EditableSelect
-          label={it.model}
-          createLabel={it.customModel}
-          value={model}
-          onChange={setModel}
+          label={it.project}
+          createLabel={it.afterSales.addCustomProject}
+          value={project}
+          onChange={setProject}
           options={uniqueOptions(
             rules
               .filter(
                 (r) =>
                   r.category === category &&
-                  r.brand.toLowerCase() === brand.toLowerCase(),
+                  r.brand.toLowerCase() === brand.toLowerCase() &&
+                  r.model.toLowerCase() === model.toLowerCase(),
               )
-              .map((r) => r.model),
+              .map((r) => r.project),
           )}
-          normalize={(value) => normalizeDeviceModel(brand, value)}
+          required
         />
-      </div>
-      <EditableSelect
-        label={it.project}
-        createLabel={it.afterSales.addCustomProject}
-        value={project}
-        onChange={setProject}
-        options={uniqueOptions(
-          rules
-            .filter(
-              (r) =>
-                r.category === category &&
-                r.brand.toLowerCase() === brand.toLowerCase() &&
-                r.model.toLowerCase() === model.toLowerCase(),
-            )
-            .map((r) => r.project),
-        )}
-        required
-      />
-      <div className="form-grid">
-        <Field label={it.suggested + " (€)"}>
-          <input
-            name="suggested"
-            required
-            inputMode="decimal"
-            defaultValue={rule?.suggested}
-          />
-        </Field>
-        <Field label={it.cost}>
-          <input
-            name="cost"
-            inputMode="decimal"
-            defaultValue={rule?.cost ?? ""}
-          />
-        </Field>
-      </div>
-      <div className="form-grid">
-        <Field label={it.requiredPart}>
-          <SearchableCombobox
-            value={requiredProductId}
-            onChange={(value) => {
-              setRequiredProductId(value);
-              setRequiredProductCleared(false);
-            }}
-            onQueryChange={(query) =>
-              setRequiredProductCleared(query.trim() === "")
-            }
-            groups={[
-              {
-                options: [
-                  { value: "", label: it.noRequiredPart },
-                  ...availableRepairProducts.map((product) => ({
-                    value: product.id,
-                    label: product.name,
-                    secondary: `${it.inventory.currentStock}: ${product.stockQuantity}`,
-                  })),
-                ],
-              },
-            ]}
-            placeholder={it.noRequiredPart}
-            ariaLabel={it.requiredPart}
-            searchPlaceholder={it.search}
-            emptyText={it.noMatches}
-            clearable
-            commitEmptyOnClose
-            customLabel={it.newRepairPart}
-            onCustom={setCreatingPart}
-          />
-        </Field>
-        {requiredProductId && (
-          <Field label={it.orderProducts.quantity}>
-            <QuantityStepper
-              name="requiredQuantity"
-              ariaLabel={it.orderProducts.quantity}
-              min={1}
-              max={999}
-              defaultValue={rule?.requiredQuantity ?? 1}
+        <div className="form-grid">
+          <Field label={it.suggested + " (€)"}>
+            <input
+              name="suggested"
+              required
+              inputMode="decimal"
+              defaultValue={rule?.suggested}
             />
           </Field>
+          <Field label={it.cost}>
+            <input
+              name="cost"
+              inputMode="decimal"
+              defaultValue={rule?.cost ?? ""}
+            />
+          </Field>
+        </div>
+        <Field label={it.notes}>
+          <input name="notes" defaultValue={rule?.notes} maxLength={2000} />
+        </Field>
+      </section>
+      <section
+        className="price-rule-editor-section price-rule-editor-options"
+        ref={optionSection}
+      >
+        <header className="price-rule-editor-heading">
+          <div>
+            <h3>{it.partPriceOptions}</h3>
+            <p>{it.partOptionsHelp}</p>
+          </div>
+          {optionRule && (
+            <span className="price-rule-editor-count">
+              {optionRule.options?.length ?? 0}
+            </span>
+          )}
+        </header>
+        {optionRule?.options?.length ? (
+          <div className="price-option-list">
+            {optionRule.options.map((option) => (
+              <article
+                className={`price-option-card${option.enabled ? "" : " is-disabled"}`}
+                key={option.id}
+              >
+                <div className="price-option-card-heading">
+                  <div>
+                    <strong>{option.name}</strong>
+                    <small>{option.product.name}</small>
+                  </div>
+                  <div className="price-option-actions">
+                    {!option.isDefault && option.enabled && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={optionPending}
+                        onClick={async () => {
+                          setOptionPending(true);
+                          setOptionError("");
+                          try {
+                            const result = await priceRuleOptionAction(
+                              optionRule.id,
+                              option.id,
+                              {
+                                ...option,
+                                isDefault: true,
+                                cost: option.cost ?? "",
+                              },
+                            );
+                            if (!result.ok) setOptionError(result.error);
+                            else {
+                              onOptionSaved?.();
+                              router.refresh();
+                            }
+                          } catch {
+                            setOptionError(
+                              "Connessione non disponibile. Riprova.",
+                            );
+                          } finally {
+                            setOptionPending(false);
+                          }
+                        }}
+                      >
+                        {it.setDefault}
+                      </Button>
+                    )}
+                    <RecordIcon
+                      kind="edit"
+                      label={it.editPartOption}
+                      disabled={optionPending}
+                      onClick={() => setEditingOption({ option })}
+                    />
+                    <RecordIcon
+                      kind="delete"
+                      label={it.remove}
+                      disabled={optionPending}
+                      onClick={async () => {
+                        setOptionPending(true);
+                        setOptionError("");
+                        try {
+                          const result = await deletePriceRuleOptionAction(
+                            optionRule.id,
+                            option.id,
+                          );
+                          if (!result.ok) setOptionError(result.error);
+                          else {
+                            onOptionSaved?.();
+                            router.refresh();
+                          }
+                        } catch {
+                          setOptionError(
+                            "Connessione non disponibile. Riprova.",
+                          );
+                        } finally {
+                          setOptionPending(false);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="price-option-data">
+                  <span>
+                    <small>{it.suggested}</small>
+                    <strong>{money(cents(option.suggested))}</strong>
+                  </span>
+                  <span>
+                    <small>{it.cost}</small>
+                    <strong>
+                      {option.cost ? money(cents(option.cost)) : "—"}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>{it.quantity}</small>
+                    <strong>{option.quantity}</strong>
+                  </span>
+                  <span>
+                    <small>{it.durationMinutes}</small>
+                    <strong>{option.minutes}</strong>
+                  </span>
+                  <span>
+                    <small>{it.warrantyDays}</small>
+                    <strong>{option.warrantyDays}</strong>
+                  </span>
+                  <span>
+                    <small>{it.availableStock}</small>
+                    <strong>
+                      {option.product.available} / {option.product.stock}
+                    </strong>
+                  </span>
+                </div>
+                <small className="price-option-card-status">
+                  {option.isDefault ? it.defaultRecommended : ""}
+                  {option.isDefault && !option.enabled ? " · " : ""}
+                  {!option.enabled ? it.disabled : ""}
+                </small>
+              </article>
+            ))}
+          </div>
+        ) : optionRule ? (
+          <p className="empty">{it.noPartOptions}</p>
+        ) : (
+          <p className="muted">{it.saveQuoteBeforeOptions}</p>
         )}
-      </div>
-      <Field label={it.notes}>
-        <input name="notes" defaultValue={rule?.notes} maxLength={2000} />
-      </Field>
-      {creatingPart !== null && (
+        <Message error={optionError} />
+        {optionRule && (
+          <button
+            type="button"
+            className="quick-service-picker-add price-option-add"
+            onClick={() => setEditingOption({})}
+          >
+            <Plus size={16} /> {it.addPartOption}
+          </button>
+        )}
+      </section>
+      {editingOption && optionRule && (
         <FormDialog
-          title={it.newRepairPart}
-          onClose={() => setCreatingPart(null)}
+          title={editingOption.option ? it.editPartOption : it.newPartOption}
+          onClose={() => setEditingOption(null)}
         >
-          <ProductForm
-            categories={[]}
-            mode="inventory"
-            initialName={creatingPart}
-            initialUsage="REPAIR"
-            quickRepair
-            initialCompatibility={{ category, brand, model, project }}
-            onClose={() => setCreatingPart(null)}
-            onCreated={(product) => {
-              setCreatedRepairProducts((current) => [
-                ...current,
-                {
-                  id: product.id,
-                  name: product.name,
-                  stockQuantity: product.stock,
-                },
-              ]);
-              setRequiredProductId(product.id);
-              setRequiredProductCleared(false);
+          <PriceRuleOptionForm
+            rule={optionRule}
+            option={editingOption.option}
+            products={repairProducts}
+            compatibility={{ category, brand, model, project }}
+            onSuccess={() => {
+              setEditingOption(null);
+              onOptionSaved?.();
+              router.refresh();
             }}
           />
         </FormDialog>
@@ -5432,15 +5579,10 @@ export function PriceList({
   const [expanded, setExpanded] = useState<string[]>([]);
   const [batchMode, setBatchMode] = useState(false);
   const [activeRuleId, setActiveRuleId] = useState("");
-  const [optionRuleId, setOptionRuleId] = useState("");
   const [creating, setCreating] = useState<Partial<RuleView> | null>(null);
   const [editing, setEditing] = useState<RuleView | null>(null);
-  const [editingOption, setEditingOption] = useState<{
-    rule: RuleView;
-    option?: PriceRuleOptionView;
-  } | null>(null);
+  const [focusOptions, setFocusOptions] = useState(false);
   const [saved, setSaved] = useState(false);
-  const optionRule = rules.find((rule) => rule.id === optionRuleId) ?? null;
   const reveal = useRef("");
   const groups = groupPriceRules(rules, query);
   const visibleIds = groups.flatMap((b) =>
@@ -5519,6 +5661,8 @@ export function PriceList({
           className="price-add-project"
           onClick={() => {
             setSaved(false);
+            setEditing(null);
+            setFocusOptions(false);
             setCreating(initial);
           }}
         >
@@ -5558,6 +5702,8 @@ export function PriceList({
           aria-label={it.newRule}
           onClick={() => {
             setSaved(false);
+            setEditing(null);
+            setFocusOptions(false);
             setCreating({});
           }}
         >
@@ -5609,178 +5755,36 @@ export function PriceList({
           />
         </div>
       </div>
-      {creating && (
-        <FormDialog title={it.newRule} onClose={() => setCreating(null)}>
+      {(creating || editing) && (
+        <FormDialog
+          title={editing ? it.editQuote : it.newRule}
+          onClose={() => {
+            setCreating(null);
+            setEditing(null);
+            setFocusOptions(false);
+          }}
+        >
           <RuleForm
-            initial={creating}
+            rule={editing ?? undefined}
+            initial={creating ?? undefined}
             rules={rules}
             repairProducts={repairProducts}
+            focusOptions={focusOptions}
             onSuccess={(device) => {
-              setCreating(null);
               setSaved(true);
-              setQuery("");
-              setSelected([]);
-              const paths = [
-                pricePath(device.brand),
-                pricePath(device.brand, device.category),
-                pricePath(device.brand, device.category, device.model),
-              ];
-              setExpanded((current) => [...new Set([...current, ...paths])]);
-              reveal.current = "group-" + paths[2];
+              if (creating) {
+                setQuery("");
+                setSelected([]);
+                const paths = [
+                  pricePath(device.brand),
+                  pricePath(device.brand, device.category),
+                  pricePath(device.brand, device.category, device.model),
+                ];
+                setExpanded((current) => [...new Set([...current, ...paths])]);
+                reveal.current = "group-" + paths[2];
+              }
             }}
-          />
-        </FormDialog>
-      )}
-      {editing && (
-        <FormDialog title={it.editQuote} onClose={() => setEditing(null)}>
-          <RuleForm
-            rule={editing}
-            rules={rules}
-            repairProducts={repairProducts}
-            onSuccess={() => {
-              setEditing(null);
-              setSaved(true);
-              router.refresh();
-            }}
-          />
-        </FormDialog>
-      )}
-      {optionRule && !editingOption && (
-        <FormDialog
-          title={`${optionRule.project} · ${it.partPriceOptions}`}
-          onClose={() => setOptionRuleId("")}
-        >
-          <div className="price-option-dialog">
-            <p className="muted">{it.partOptionsHelp}</p>
-            {optionRule.options?.length ? (
-              <div className="price-option-list">
-                {optionRule.options.map((option) => (
-                  <article
-                    className={`price-option-card${option.enabled ? "" : " is-disabled"}`}
-                    key={option.id}
-                  >
-                    <div className="price-option-card-heading">
-                      <div>
-                        <strong>{option.name}</strong>
-                        <small>{option.product.name}</small>
-                      </div>
-                      <div className="price-option-actions">
-                        {!option.isDefault && option.enabled && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={pending}
-                            onClick={async () => {
-                              setPending(true);
-                              setError("");
-                              const result = await priceRuleOptionAction(
-                                optionRule.id,
-                                option.id,
-                                {
-                                  ...option,
-                                  isDefault: true,
-                                  cost: option.cost ?? "",
-                                },
-                              );
-                              setPending(false);
-                              if (!result.ok) setError(result.error);
-                              else router.refresh();
-                            }}
-                          >
-                            {it.setDefault}
-                          </Button>
-                        )}
-                        <RecordIcon
-                          kind="edit"
-                          label={it.editPartOption}
-                          disabled={pending}
-                          onClick={() =>
-                            setEditingOption({ rule: optionRule, option })
-                          }
-                        />
-                        <RecordIcon
-                          kind="delete"
-                          label={it.remove}
-                          disabled={pending}
-                          onClick={async () => {
-                            setPending(true);
-                            setError("");
-                            const result = await deletePriceRuleOptionAction(
-                              optionRule.id,
-                              option.id,
-                            );
-                            setPending(false);
-                            if (!result.ok) setError(result.error);
-                            else router.refresh();
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <div className="price-option-data">
-                      <span>
-                        <small>{it.suggested}</small>
-                        <strong>{money(cents(option.suggested))}</strong>
-                      </span>
-                      <span>
-                        <small>{it.cost}</small>
-                        <strong>
-                          {option.cost ? money(cents(option.cost)) : "—"}
-                        </strong>
-                      </span>
-                      <span>
-                        <small>{it.quantity}</small>
-                        <strong>{option.quantity}</strong>
-                      </span>
-                      <span>
-                        <small>{it.durationMinutes}</small>
-                        <strong>{option.minutes}</strong>
-                      </span>
-                      <span>
-                        <small>{it.warrantyDays}</small>
-                        <strong>{option.warrantyDays}</strong>
-                      </span>
-                      <span>
-                        <small>{it.availableStock}</small>
-                        <strong>
-                          {option.product.available} / {option.product.stock}
-                        </strong>
-                      </span>
-                    </div>
-                    <small className="price-option-card-status">
-                      {option.isDefault ? it.defaultRecommended : ""}
-                      {option.isDefault && !option.enabled ? " · " : ""}
-                      {!option.enabled ? it.disabled : ""}
-                    </small>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="empty">{it.noPartOptions}</p>
-            )}
-            <button
-              type="button"
-              className="quick-service-picker-add price-option-add"
-              onClick={() => setEditingOption({ rule: optionRule })}
-            >
-              <Plus size={16} /> {it.addPartOption}
-            </button>
-          </div>
-        </FormDialog>
-      )}
-      {editingOption && (
-        <FormDialog
-          title={editingOption.option ? it.editPartOption : it.newPartOption}
-          onClose={() => setEditingOption(null)}
-        >
-          <PriceRuleOptionForm
-            rule={editingOption.rule}
-            option={editingOption.option}
-            products={repairProducts}
-            onSuccess={() => {
-              setEditingOption(null);
-              setSaved(true);
-              router.refresh();
-            }}
+            onOptionSaved={() => setSaved(true)}
           />
         </FormDialog>
       )}
@@ -5901,14 +5905,12 @@ export function PriceList({
                                       <button
                                         type="button"
                                         className={`price-option-summary${rule.options?.length ? " has-options" : ""}`}
-                                        aria-label={
-                                          rule.options?.length
-                                            ? it.managePartOptions
-                                            : it.newPartOption
-                                        }
+                                        aria-label={it.managePartOptions}
                                         onClick={(event) => {
                                           event.stopPropagation();
-                                          setOptionRuleId(rule.id);
+                                          setCreating(null);
+                                          setEditing(rule);
+                                          setFocusOptions(true);
                                         }}
                                       >
                                         {!rule.options?.length && (
@@ -5929,7 +5931,9 @@ export function PriceList({
                                         disabled={pending}
                                         onClick={(event) => {
                                           event.stopPropagation();
+                                          setCreating(null);
                                           setEditing(rule);
+                                          setFocusOptions(false);
                                         }}
                                       />
                                     </>
