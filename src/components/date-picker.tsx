@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   Trash2,
 } from "lucide-react";
 import {
@@ -177,6 +178,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
     const controlled = value !== undefined;
     const committedValue = String(controlled ? value : internalValue);
     const [draftValue, setDraftValue] = useState(committedValue);
+    const [draftTime, setDraftTime] = useState(() => timePart(committedValue));
     const [hasDraft, setHasDraft] = useState(false);
     const [open, setOpen] = useState(false);
     const [panelMode, setPanelMode] = useState<PanelMode>(
@@ -347,7 +349,10 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
       setActiveYear(initial.year);
       setYearInput(String(initial.year).padStart(4, "0"));
       const preserveDraft = pickerType === "datetime-local" && hasDraft;
-      if (!preserveDraft) setDraftValue(committedValue);
+      if (!preserveDraft) {
+        setDraftValue(committedValue);
+        setDraftTime(timePart(committedValue));
+      }
       const openingError = preserveDraft ? validationError(draftValue) : "";
       setError(openingError);
       input.current?.setCustomValidity(openingError);
@@ -378,6 +383,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
         input.current?.setCustomValidity("");
         if (pickerType === "datetime-local" && discardDraft) {
           setDraftValue(committedValue);
+          setDraftTime(timePart(committedValue));
           setHasDraft(false);
         }
         if (restoreFocus) {
@@ -400,8 +406,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
     }
 
     function setDraftDate(date: DateParts) {
-      const time = timePart(draftValue || committedValue);
-      const next = `${isoDate(date)}T${time}`;
+      const next = `${isoDate(date)}T${draftTime}`;
       setDraftValue(next);
       setViewToDate(date);
       updateError(next);
@@ -780,6 +785,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
 
     function dateTimeValue(date: string, time: string) {
       const next = `${date}T${time}`;
+      setDraftTime(time);
       setDraftValue(next);
       updateError(next);
     }
@@ -797,7 +803,6 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
       (_, index) => yearStart + index,
     ).filter((year) => year <= 9999);
     const draftDate = dateParts(draftValue.slice(0, 10));
-    const draftTime = timePart(draftValue, "09:00");
     const nowValue = formatRomeDateTimeLocal();
     const draftError =
       pickerType === "datetime-local" ? validationError(draftValue) : "";
@@ -1304,37 +1309,39 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
                   {pickerType === "datetime-local" && (
                     <label className="date-picker-time">
                       <span>{messages.time}</span>
-                      <input
-                        type="time"
-                        lang={language}
-                        value={draftTime}
-                        min={
-                          draftDate &&
-                          typeof min === "string" &&
-                          min.slice(0, 10) === isoDate(draftDate)
-                            ? min.slice(11)
-                            : undefined
-                        }
-                        max={
-                          draftDate &&
-                          typeof max === "string" &&
-                          max.slice(0, 10) === isoDate(draftDate)
-                            ? max.slice(11)
-                            : undefined
-                        }
-                        step={step ?? 60}
-                        disabled={disabled || readOnly || !draftDate}
-                        aria-invalid={Boolean(draftError) || undefined}
-                        onChange={(event) => {
-                          if (!draftDate) return;
-                          if (!event.target.value) {
-                            setDraftValue(`${isoDate(draftDate)}T`);
-                            setError(messages.timeRequired);
-                            return;
+                      <span className="date-picker-time-control">
+                        <input
+                          type="time"
+                          lang={language}
+                          value={draftTime}
+                          min={
+                            draftDate &&
+                            typeof min === "string" &&
+                            min.slice(0, 10) === isoDate(draftDate)
+                              ? min.slice(11)
+                              : undefined
                           }
-                          dateTimeValue(isoDate(draftDate), event.target.value);
-                        }}
-                      />
+                          max={
+                            draftDate &&
+                            typeof max === "string" &&
+                            max.slice(0, 10) === isoDate(draftDate)
+                              ? max.slice(11)
+                              : undefined
+                          }
+                          step={step ?? 60}
+                          disabled={disabled || readOnly}
+                          aria-invalid={Boolean(draftError) || undefined}
+                          onChange={(event) => {
+                            const time = event.target.value;
+                            if (!draftDate) {
+                              setDraftTime(time);
+                              return;
+                            }
+                            dateTimeValue(isoDate(draftDate), time);
+                          }}
+                        />
+                        <Clock3 size={18} aria-hidden="true" />
+                      </span>
                     </label>
                   )}
                 </div>
@@ -1486,6 +1493,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
                       }
                       onClick={() => {
                         setDraftValue(nowValue);
+                        setDraftTime(timePart(nowValue));
                         setHasDraft(true);
                         const date = dateParts(nowValue);
                         if (date) {

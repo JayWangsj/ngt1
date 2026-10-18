@@ -8007,16 +8007,25 @@ details.secondary-actions {
   border-top: 1px solid var(--line);
   color: var(--muted);
 }
-.date-picker-time input {
-  min-height: 36px;
+.date-picker-time-control {
+  position: relative;
+  display: block;
+  min-width: 0;
 }
-.date-picker-time input[type="time"]:hover {
-  background-image: radial-gradient(
-    circle 11px at calc(100% - 24px) 50%,
-    #fff8d9 0%,
-    #fff8d9 82%,
-    transparent 100%
-  );
+.date-picker-time-control input {
+  min-height: 36px;
+  padding-right: 42px;
+}
+.date-picker-time-control input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+.date-picker-time-control svg {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 .date-picker-footer {
   display: flex;
