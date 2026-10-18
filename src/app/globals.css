@@ -7811,11 +7811,12 @@ details.secondary-actions {
     box-shadow 150ms ease-out,
     background-color 150ms ease-out;
 }
-.date-picker-input[type="month"].has-localized-month-value:not(:focus),
-.date-picker.is-open
-  .date-picker-input[type="month"].has-localized-month-value {
+.date-picker-input[type="month"].has-localized-month-value {
   color: transparent;
   caret-color: transparent;
+}
+.date-picker-input[type="month"].has-localized-month-value::selection {
+  background: transparent;
 }
 .date-picker-month-value {
   position: absolute;

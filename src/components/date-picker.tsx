@@ -154,6 +154,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
       onCommit,
       onFocus,
       onKeyDown,
+      onPointerDown,
       quickDays = [0],
       quickTimes = [],
       readOnly = false,
@@ -901,6 +902,11 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
             }
           }}
           onKeyDown={handleInputKeyDown}
+          onPointerDown={(event) => {
+            onPointerDown?.(event);
+            if (!event.defaultPrevented && !disabled && !readOnly)
+              event.preventDefault();
+          }}
         />
         {monthValueLabel && (
           <span className="date-picker-month-value" aria-hidden="true">

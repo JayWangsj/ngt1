@@ -17,6 +17,8 @@ test("shared picker jumps directly to years and months without early filtering",
   const originalMonth = await monthInput.inputValue();
   await monthInput.click();
   await expect(monthValueLabel).toBeVisible();
+  await expect(monthInput).toHaveCSS("color", "rgba(0, 0, 0, 0)");
+  await expect(monthInput).not.toBeFocused();
   await page.locator(".order-month-filter .date-picker").screenshot({
     path: ".local/date-picker-evidence/month-value-italian.png",
   });
@@ -70,4 +72,26 @@ test("shared picker jumps directly to years and months without early filtering",
   await expect(page).toHaveURL(/\/$/);
   await dayPicker.locator('[data-date="2020-04-15"]').click();
   await expect(page).toHaveURL(/day=2020-04-15/);
+
+  await dayInput.click();
+  await expect(dayInput).not.toBeFocused();
+  await expect(page.locator(".date-picker-popover")).toBeVisible();
+});
+
+test("inventory history month picker shows one label without native selection", async ({
+  page,
+}) => {
+  await page.goto("/inventory");
+  await page.locator(".inventory-history-card").click();
+  const dialog = page.getByRole("dialog");
+  const monthInput = dialog.locator('input[type="month"]');
+  await expect(monthInput).toBeVisible();
+  await expect(dialog.locator(".date-picker-month-value")).toBeVisible();
+  await monthInput.click();
+  await expect(monthInput).toHaveCSS("color", "rgba(0, 0, 0, 0)");
+  await expect(monthInput).not.toBeFocused();
+  await expect(dialog.locator(".date-picker-popover")).toBeVisible();
+  await dialog.locator(".retail-period-picker").screenshot({
+    path: ".local/date-picker-evidence/inventory-month-value.png",
+  });
 });
