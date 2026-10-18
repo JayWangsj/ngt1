@@ -152,34 +152,7 @@ function Normalize-LegacyBaselineDocumentationPaths([string]$Root) {
 }
 
 function Invoke-BusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string]$Code) {
-  $probePath = Join-Path $testRoot "business-data-probe.cjs"
-  @'
-const assert = require("node:assert/strict");
-const action = process.argv[2];
-const envFile = process.argv[3];
-const clientPath = process.argv[4];
-const code = process.argv[5];
-process.loadEnvFile(envFile);
-const { PrismaClient } = require(clientPath);
-const db = new PrismaClient();
-(async () => {
-  if (action === "seed") {
-    const customer = await db.customer.create({ data: { name: "Update acceptance customer", phone: "390000000000" } });
-    const device = await db.device.create({ data: { customerId: customer.id, brand: "NGT", model: "Update acceptance phone" } });
-    await db.workOrder.create({ data: { code, deviceId: device.id, fault: "Update acceptance record" } });
-    return;
-  }
-  const order = await db.workOrder.findUnique({ where: { code }, include: { device: { include: { customer: true } } } });
-  assert.equal(order?.fault, "Update acceptance record");
-  assert.equal(order?.device?.model, "Update acceptance phone");
-  assert.equal(order?.device?.customer?.name, "Update acceptance customer");
-  const priorWrite = await db.customer.findFirst({ where: { phone: "390000000001" } });
-  const written = priorWrite
-    ? await db.customer.update({ where: { id: priorWrite.id }, data: { name: "Post update write" } })
-    : await db.customer.create({ data: { name: "Post update write", phone: "390000000001" } });
-  assert.equal((await db.customer.findUnique({ where: { id: written.id } }))?.name, "Post update write");
-})().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => db.$disconnect());
-'@ | Set-Content -LiteralPath $probePath -Encoding utf8
+  $probePath = Join-Path $PSScriptRoot "windows-studio-business-probe.cjs"
   $node = Join-Path $ReleaseRoot "runtime\node.exe"
   $client = Join-Path $ReleaseRoot ".next\standalone\node_modules\@prisma\client"
   & $node $probePath $Action (Join-Path $ReleaseRoot ".env") $client $Code
