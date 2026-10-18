@@ -7818,6 +7818,9 @@ details.secondary-actions {
 .date-picker-input[type="month"].has-localized-month-value::selection {
   background: transparent;
 }
+.date-picker-input[type="month"].has-localized-month-value::-webkit-datetime-edit {
+  opacity: 0;
+}
 .date-picker-month-value {
   position: absolute;
   z-index: 1;

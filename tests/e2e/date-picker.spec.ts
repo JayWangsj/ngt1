@@ -1,10 +1,34 @@
 import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import sharp from "sharp";
+
+test.beforeAll(async () => {
+  await mkdir(".local/date-picker-evidence", { recursive: true });
+});
+
+async function expectNoBlueSelection(
+  picker: import("@playwright/test").Locator,
+) {
+  const { data, info } = await sharp(await picker.screenshot())
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let longestBlueRun = 0;
+  for (let row = 0; row < info.height; row++) {
+    let run = 0;
+    for (let column = 0; column < info.width; column++) {
+      const index = (row * info.width + column) * info.channels;
+      const [red, green, blue] = data.subarray(index, index + info.channels);
+      run = blue > 150 && blue > red * 1.3 && blue > green * 1.15 ? run + 1 : 0;
+      longestBlueRun = Math.max(longestBlueRun, run);
+    }
+  }
+  expect(longestBlueRun).toBeLessThan(10);
+}
 
 test("shared picker jumps directly to years and months without early filtering", async ({
   page,
 }) => {
-  await mkdir(".local/date-picker-evidence", { recursive: true });
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/orders?month=2026-10");
 
@@ -51,6 +75,11 @@ test("shared picker jumps directly to years and months without early filtering",
   await picker.locator('[data-month="2020-05"]').click();
   await expect(monthInput).toHaveValue("2020-05");
   await expect(page).toHaveURL(/month=2020-05/);
+  await expect(monthInput).not.toBeFocused();
+  await page.locator(".order-month-filter .date-picker").screenshot({
+    path: ".local/date-picker-evidence/month-after-selection.png",
+  });
+  await expectNoBlueSelection(page.locator(".order-month-filter .date-picker"));
 
   await page.goto("/");
   const dayInput = page.locator('.dashboard-date-filter input[type="date"]');
@@ -78,20 +107,36 @@ test("shared picker jumps directly to years and months without early filtering",
   await expect(page.locator(".date-picker-popover")).toBeVisible();
 });
 
-test("inventory history month picker shows one label without native selection", async ({
-  page,
-}) => {
-  await page.goto("/inventory");
-  await page.locator(".inventory-history-card").click();
-  const dialog = page.getByRole("dialog");
-  const monthInput = dialog.locator('input[type="month"]');
-  await expect(monthInput).toBeVisible();
-  await expect(dialog.locator(".date-picker-month-value")).toBeVisible();
-  await monthInput.click();
-  await expect(monthInput).toHaveCSS("color", "rgba(0, 0, 0, 0)");
-  await expect(monthInput).not.toBeFocused();
-  await expect(dialog.locator(".date-picker-popover")).toBeVisible();
-  await dialog.locator(".retail-period-picker").screenshot({
-    path: ".local/date-picker-evidence/inventory-month-value.png",
+for (const locale of ["it", "zh"] as const) {
+  test(`inventory history month picker has no native selection in ${locale}`, async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page
+      .context()
+      .addCookies([{ name: "ngt-locale", value: locale, url: page.url() }]);
+    await page.goto("/inventory");
+    await page.locator(".inventory-history-card").click();
+    const dialog = page.getByRole("dialog");
+    const monthInput = dialog.locator('input[type="month"]');
+    await expect(monthInput).toBeVisible();
+    const monthLabel = dialog.locator(".date-picker-month-value");
+    await expect(monthLabel).toBeVisible();
+    await expect(monthLabel).toContainText(locale === "zh" ? "年" : " ");
+    await monthInput.click();
+    await expect(monthInput).toHaveCSS("color", "rgba(0, 0, 0, 0)");
+    await expect(monthInput).not.toBeFocused();
+    await expect(dialog.locator(".date-picker-popover")).toBeVisible();
+    await dialog.locator(".retail-period-picker").screenshot({
+      path: ".local/date-picker-evidence/inventory-month-value.png",
+    });
+    await dialog
+      .locator(`[data-month="${await monthInput.inputValue()}"]`)
+      .click();
+    await expect(dialog.locator(".date-picker-toggle")).toBeFocused();
+    await expectNoBlueSelection(dialog.locator(".retail-period-picker"));
+    await dialog.locator(".retail-period-picker").screenshot({
+      path: `.local/date-picker-evidence/inventory-month-after-selection-${locale}.png`,
+    });
   });
-});
+}

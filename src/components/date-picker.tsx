@@ -380,7 +380,13 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
           setDraftValue(committedValue);
           setHasDraft(false);
         }
-        if (restoreFocus) input.current?.focus({ preventScroll: true });
+        if (restoreFocus) {
+          if (pickerType === "month")
+            root.current
+              ?.querySelector<HTMLButtonElement>(".date-picker-toggle")
+              ?.focus({ preventScroll: true });
+          else input.current?.focus({ preventScroll: true });
+        }
       },
       [committedValue, pickerType],
     );
