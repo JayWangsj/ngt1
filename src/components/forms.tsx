@@ -419,6 +419,17 @@ export type CreatedProduct = {
   costPrice?: string;
 };
 
+function ruleLinkedProducts(
+  products: CreatedProduct[],
+  rule: RuleView | null | undefined,
+  selectedProductId?: string,
+) {
+  const linkedIds = new Set(
+    [rule?.requiredProductId, selectedProductId].filter(Boolean),
+  );
+  return products.filter((product) => linkedIds.has(product.id));
+}
+
 export type ProductCompatibilityDraft = {
   category: string;
   brand: string;
@@ -921,12 +932,14 @@ function PriceOptionPicker({
   selected,
   customProduct,
   currentPrice,
+  noneSelected = false,
   open,
   disabled = false,
   ariaLabel,
   onOpenChange,
   onSelect,
   onSelectProduct,
+  onRemove,
   onAdd,
 }: {
   options: PriceRuleOptionView[];
@@ -934,12 +947,14 @@ function PriceOptionPicker({
   selected?: PriceRuleOptionView | null;
   customProduct?: CreatedProduct;
   currentPrice?: string;
+  noneSelected?: boolean;
   open: boolean;
   disabled?: boolean;
   ariaLabel: string;
   onOpenChange: (open: boolean) => void;
   onSelect: (optionId: string) => void;
   onSelectProduct?: (productId: string) => void;
+  onRemove?: () => void;
   onAdd?: () => void;
 }) {
   const it = useMessages();
@@ -956,35 +971,47 @@ function PriceOptionPicker({
   };
   return (
     <>
-      {product ? (
+      {product || noneSelected ? (
         <div
           className={`selection-summary selected-part-summary price-option-picker-summary${disabled ? "" : " is-actionable"}`}
-          onClick={() => !disabled && openPicker()}
+          onClick={(event) => {
+            if (disabled || (event.target as HTMLElement).closest("button"))
+              return;
+            openPicker();
+          }}
         >
           <span className="selection-summary-icon is-part">
             <Package size={18} aria-hidden="true" />
           </span>
           <div className="selection-summary-copy">
-            <strong>{selected?.name ?? product.name}</strong>
+            <strong>
+              {product ? (selected?.name ?? product.name) : it.noRequiredPart}
+            </strong>
             <small>
-              {selected ? (
+              {product ? (
                 <>
-                  {product.name} · {it.priceListPrice}{" "}
-                  {money(cents(selected.suggested))} ·{" "}
+                  {selected ? (
+                    <>
+                      {product.name} · {it.priceListPrice}{" "}
+                      {money(cents(selected.suggested))} ·{" "}
+                    </>
+                  ) : (
+                    <>{product.category} · </>
+                  )}
+                  {it.actualStock} {product.stock} · {it.reservedStock}{" "}
+                  {product.reserved ?? 0} · {it.availableStock} {available} ·{" "}
+                  <span
+                    className={`part-stock ${available >= (selected?.quantity ?? 1) ? "is-available" : "is-empty"}`}
+                  >
+                    ●{" "}
+                    {available >= (selected?.quantity ?? 1)
+                      ? it.partInStock
+                      : it.partOutOfStock}
+                  </span>
                 </>
               ) : (
-                <>{product.category} · </>
+                it.noPartOptions
               )}
-              {it.actualStock} {product.stock} · {it.reservedStock}{" "}
-              {product.reserved ?? 0} · {it.availableStock} {available} ·{" "}
-              <span
-                className={`part-stock ${available >= (selected?.quantity ?? 1) ? "is-available" : "is-empty"}`}
-              >
-                ●{" "}
-                {available >= (selected?.quantity ?? 1)
-                  ? it.partInStock
-                  : it.partOutOfStock}
-              </span>
             </small>
           </div>
           {currentPrice !== undefined && (
@@ -993,15 +1020,27 @@ function PriceOptionPicker({
               <strong>{money(cents(currentPrice))}</strong>
             </div>
           )}
-          <button
-            type="button"
-            className="summary-action"
-            disabled={disabled}
-            onClick={openPicker}
-          >
-            <span>{it.change}</span>
-            <ChevronRight size={15} aria-hidden="true" />
-          </button>
+          <div className="selected-part-actions">
+            <button
+              type="button"
+              className="summary-action"
+              disabled={disabled}
+              onClick={openPicker}
+            >
+              <span>{it.change}</span>
+              <ChevronRight size={15} aria-hidden="true" />
+            </button>
+            {onRemove && !disabled && (
+              <button
+                type="button"
+                className="quick-service-remove"
+                aria-label={`${it.remove} ${product?.name ?? it.noRequiredPart}`}
+                onClick={onRemove}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <button
@@ -1023,7 +1062,7 @@ function PriceOptionPicker({
               {options.map((option) => (
                 <button
                   type="button"
-                  className={`price-option-card price-option-choice${option.id === draftOptionId ? " is-selected" : ""}`}
+                  className={`price-option-card price-option-choice business-list-row${option.id === draftOptionId ? " is-selected" : ""}`}
                   key={option.id}
                   disabled={disabled}
                   onClick={() => setDraftOptionId(option.id)}
@@ -1081,7 +1120,7 @@ function PriceOptionPicker({
                   return (
                     <button
                       type="button"
-                      className={`price-option-card price-option-choice price-option-inventory${draftOptionId === `product:${entry.id}` ? " is-selected" : ""}`}
+                      className={`price-option-card price-option-choice price-option-inventory business-list-row${draftOptionId === `product:${entry.id}` ? " is-selected" : ""}`}
                       key={entry.id}
                       disabled={disabled}
                       onClick={() => setDraftOptionId(`product:${entry.id}`)}
@@ -1111,7 +1150,7 @@ function PriceOptionPicker({
                 })}
               <button
                 type="button"
-                className={`price-option-card price-option-choice price-option-none${draftOptionId === "" ? " is-selected" : ""}`}
+                className={`price-option-card price-option-choice price-option-none business-list-row${draftOptionId === "" ? " is-selected" : ""}`}
                 disabled={disabled}
                 onClick={() => setDraftOptionId("")}
               >
@@ -1130,7 +1169,6 @@ function PriceOptionPicker({
                 className="quick-service-picker-add price-option-add"
                 disabled={disabled}
                 onClick={() => {
-                  onOpenChange(false);
                   onAdd();
                 }}
               >
@@ -1861,11 +1899,18 @@ export function ItemsEditor({
                       <PriceOptionPicker
                         options={priceOptions}
                         inventoryProducts={
-                          priceOptions.length ? [] : availableProducts
+                          priceOptions.length
+                            ? []
+                            : ruleLinkedProducts(
+                                availableProducts,
+                                match?.rule,
+                                item.requiredProductId,
+                              )
                         }
                         selected={selectedPriceOption}
                         customProduct={selectedProduct}
                         currentPrice={item.final}
+                        noneSelected={Boolean(item.requiredProductRemoved)}
                         open={Boolean(editingPart)}
                         ariaLabel={`${it.partPriceOption} ${index + 1}`}
                         onOpenChange={(open) => {
@@ -1889,6 +1934,16 @@ export function ItemsEditor({
                           });
                           if (focusedEdit) onFocusedEditComplete?.();
                         }}
+                        onRemove={() =>
+                          update(index, {
+                            requiredProductId: "",
+                            requiredQuantity: 1,
+                            requiredProductRemoved: false,
+                            priceOptionId: "",
+                            priceOptionName: "",
+                            suggestedAfterSwitch: undefined,
+                          })
+                        }
                         onAdd={() =>
                           setCreatingPriceOptionRule(match?.rule ?? null)
                         }
@@ -3838,6 +3893,7 @@ export function ReworkPartEditor({
   const it = useMessages();
   const router = useRouter();
   const [selected, setSelected] = useState(value);
+  const [noneSelected, setNoneSelected] = useState(!value);
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -3856,11 +3912,12 @@ export function ReworkPartEditor({
   const selectedOption = options.find(
     (option) => option.enabled && option.productId === selected,
   );
-  const select = (productId: string) => {
+  const select = (productId: string, explicitNoPart = !productId) => {
     const option = options.find(
       (candidate) => candidate.productId === productId,
     );
     setSelected(productId);
+    setNoneSelected(explicitNoPart);
     startTransition(async () => {
       const result = await updateReworkPartAction(orderId, itemId, {
         productId,
@@ -3882,9 +3939,14 @@ export function ReworkPartEditor({
       {rule ? (
         <PriceOptionPicker
           options={options.filter((option) => option.enabled)}
-          inventoryProducts={options.length ? [] : availableProducts}
+          inventoryProducts={
+            options.length
+              ? []
+              : ruleLinkedProducts(availableProducts, rule, selected)
+          }
           selected={selectedOption}
           customProduct={selectedProduct}
+          noneSelected={noneSelected}
           open={editing}
           disabled={pending}
           ariaLabel={`${it.requiredPart} ${project}`}
@@ -3895,7 +3957,8 @@ export function ReworkPartEditor({
             );
             select(option?.productId ?? "");
           }}
-          onSelectProduct={select}
+          onSelectProduct={(productId) => select(productId, false)}
+          onRemove={() => select("", false)}
           onAdd={rule ? () => setCreatingPriceOption(true) : undefined}
         />
       ) : editing ? (
@@ -4032,6 +4095,7 @@ export function AfterSalesForm({
         fee: string;
         requiredProductId: string;
         requiredQuantity: number;
+        requiredProductRemoved: boolean;
       }
     >
   >(() =>
@@ -4046,6 +4110,7 @@ export function AfterSalesForm({
           fee: "0",
           requiredProductId: project.requiredProductId ?? "",
           requiredQuantity: project.requiredQuantity ?? 1,
+          requiredProductRemoved: false,
         },
       ]),
     ),
@@ -4193,10 +4258,17 @@ export function AfterSalesForm({
                       <PriceOptionPicker
                         options={options}
                         inventoryProducts={
-                          options.length ? [] : availableProducts
+                          options.length
+                            ? []
+                            : ruleLinkedProducts(
+                                availableProducts,
+                                rule,
+                                value.requiredProductId,
+                              )
                         }
                         selected={selectedOption}
                         customProduct={selectedProduct}
+                        noneSelected={value.requiredProductRemoved}
                         open={Boolean(editingParts[project.id])}
                         ariaLabel={`${it.requiredPart} ${project.name}`}
                         onOpenChange={(open) =>
@@ -4215,6 +4287,7 @@ export function AfterSalesForm({
                               ...value,
                               requiredProductId: option?.productId ?? "",
                               requiredQuantity: option?.quantity ?? 1,
+                              requiredProductRemoved: !option,
                             },
                           }));
                         }}
@@ -4225,6 +4298,18 @@ export function AfterSalesForm({
                               ...value,
                               requiredProductId,
                               requiredQuantity: 1,
+                              requiredProductRemoved: false,
+                            },
+                          }));
+                        }}
+                        onRemove={() => {
+                          setItemValues((current) => ({
+                            ...current,
+                            [project.id]: {
+                              ...value,
+                              requiredProductId: "",
+                              requiredQuantity: 1,
+                              requiredProductRemoved: false,
                             },
                           }));
                         }}
@@ -5140,7 +5225,7 @@ function PriceRuleOptionForm({
       costPrice?: string;
     }[]
   >([]);
-  const [creatingProduct, setCreatingProduct] = useState(false);
+  const [creatingProduct, setCreatingProduct] = useState<string | null>(null);
   const availableProducts = [
     ...products,
     ...createdProducts.filter(
@@ -5205,14 +5290,10 @@ function PriceRuleOptionForm({
                 })),
               },
             ]}
+            customLabel={it.repairPart}
+            onCustom={setCreatingProduct}
+            creationControls="no-match"
           />
-          <button
-            type="button"
-            className="quick-service-picker-add price-option-product-add"
-            onClick={() => setCreatingProduct(true)}
-          >
-            <Plus size={16} /> {it.repairPart}
-          </button>
         </Field>
         <div className="form-grid two">
           <Field label={it.partOptionName}>
@@ -5288,14 +5369,15 @@ function PriceRuleOptionForm({
           </label>
         </div>
       </ActionForm>
-      {creatingProduct && (
+      {creatingProduct !== null && (
         <FormDialog
           title={it.newRepairPart}
-          onClose={() => setCreatingProduct(false)}
+          onClose={() => setCreatingProduct(null)}
         >
           <ProductForm
             categories={productCategories}
             mode="inventory"
+            initialName={creatingProduct}
             initialUsage="REPAIR"
             quickRepair
             initialCompatibility={
@@ -5306,7 +5388,7 @@ function PriceRuleOptionForm({
                 project: rule.project,
               }
             }
-            onClose={() => setCreatingProduct(false)}
+            onClose={() => setCreatingProduct(null)}
             onCreated={(product) => {
               const created = {
                 id: product.id,

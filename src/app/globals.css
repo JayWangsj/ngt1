@@ -8850,11 +8850,9 @@ details.secondary-actions {
     border-color 150ms ease,
     background-color 150ms ease;
 }
-.price-option-choice:hover,
-.price-option-choice:focus-visible,
 .price-option-choice.is-selected {
-  border-color: #d5aa20;
-  background: #fffbee;
+  border-color: #e8bb15;
+  background: #fffaf0;
 }
 .price-option-choice.is-selected {
   box-shadow: 0 0 0 1px rgb(232 187 21 / 12%);
@@ -8899,20 +8897,16 @@ details.secondary-actions {
 .price-option-clear {
   width: 100%;
 }
-.price-option-picker-summary {
+.selection-summary.selected-part-summary.price-option-picker-summary {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
-.price-option-picker-summary .summary-action {
+.price-option-picker-summary .selected-part-actions {
   justify-self: end;
   flex: 0 0 auto;
   white-space: nowrap;
 }
 .price-option-picker-footer {
   justify-content: flex-end;
-}
-.price-option-product-add {
-  min-height: 42px;
-  margin-top: 8px;
 }
 .quote-price-switch-notice {
   display: flex;
@@ -9029,13 +9023,13 @@ details.secondary-actions {
   .price-option-data {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .price-option-picker-summary {
+  .selection-summary.selected-part-summary.price-option-picker-summary {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
   .price-option-picker-summary .selection-summary-value {
     grid-column: 2;
   }
-  .price-option-picker-summary .summary-action {
+  .price-option-picker-summary .selected-part-actions {
     grid-column: 3;
     grid-row: 1 / span 2;
   }
