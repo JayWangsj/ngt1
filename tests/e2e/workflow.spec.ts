@@ -6930,6 +6930,33 @@ test("replaces a repair item with a custom item without submitting the order", a
   ).toBeVisible();
 });
 
+test("customer detail adds a device from a dialog below existing devices", async ({
+  page,
+}) => {
+  await page.goto("/customers");
+  await page.getByLabel("Cerca", { exact: true }).fill("Cliente Playwright");
+  await page
+    .getByRole("link", { name: "Cliente Playwright", exact: true })
+    .first()
+    .click();
+  const detailDialog = page.getByRole("dialog", { name: "Dettagli cliente" });
+  const deviceRow = detailDialog.locator(".customer-device-row").first();
+  await expect(deviceRow).toBeVisible();
+  const addDevice = detailDialog.getByRole("button", {
+    name: "Dispositivo",
+    exact: true,
+  });
+  expect((await addDevice.boundingBox())!.y).toBeGreaterThan(
+    (await deviceRow.boundingBox())!.y,
+  );
+  await addDevice.click();
+  const createDialog = page.getByRole("dialog", { name: "Nuovo dispositivo" });
+  await expect(createDialog).toBeVisible();
+  await expect(detailDialog.locator(".customer-device-editor")).toHaveCount(0);
+  await createDialog.getByRole("button", { name: "Annulla" }).click();
+  await expect(createDialog).toHaveCount(0);
+});
+
 test("customer list searches instantly, preserves navigation and supports compact editing", async ({
   page,
 }) => {

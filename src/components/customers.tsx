@@ -526,26 +526,6 @@ export function CustomerDevices({
         </h2>
       </div>
       <div className="panel customer-device-list">
-        {!readOnly && !creating && (
-          <Button
-            type="button"
-            variant="outline"
-            className="add-device-action customer-detail-add-device"
-            onClick={() => setCreating(true)}
-          >
-            <Plus size={18} aria-hidden="true" />
-            {it.device}
-          </Button>
-        )}
-        {creating && (
-          <article className="customer-device-editor">
-            <DeviceForm
-              customerId={customerId}
-              onCancel={() => setCreating(false)}
-              onSuccess={() => setCreating(false)}
-            />
-          </article>
-        )}
         {devices.length ? (
           devices.map((device) =>
             editingId === device.id ? (
@@ -568,10 +548,30 @@ export function CustomerDevices({
               />
             ),
           )
-        ) : creating ? null : (
+        ) : (
           <p className="empty">{it.noDevices}</p>
         )}
+        {!readOnly && (
+          <Button
+            type="button"
+            variant="outline"
+            className="add-device-action customer-detail-add-device"
+            onClick={() => setCreating(true)}
+          >
+            <Plus size={18} aria-hidden="true" />
+            {it.device}
+          </Button>
+        )}
       </div>
+      {creating && (
+        <FormDialog title={it.newDevice} onClose={() => setCreating(false)}>
+          <DeviceForm
+            customerId={customerId}
+            onCancel={() => setCreating(false)}
+            onSuccess={() => setCreating(false)}
+          />
+        </FormDialog>
+      )}
       {deleting && (
         <DeleteRecordDialog
           kind="device"
