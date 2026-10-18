@@ -700,7 +700,7 @@ export const zh: typeof it = {
   remove: "移除",
   noMatch: "暂无报价，请填写原价，保存后加入报价表。",
   saveRule: "保存到报价表",
-  confirm: "登记报价确认",
+  confirm: "确认",
   notConfirmed: "报价待确认",
   quoteNotice: "修改原报价会更新报价表；优惠仅记录在本服务单中。",
   deposit: "预付款（€）",

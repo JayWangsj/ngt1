@@ -4706,6 +4706,29 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   color: var(--muted);
   font-size: 0.78rem;
 }
+.compatibility-project-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.compatibility-project-label button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+.compatibility-project-label:hover button,
+.compatibility-project-label:focus-within button {
+  opacity: 1;
+  pointer-events: auto;
+}
 .compatibility-add-device {
   width: 100%;
   margin-top: 6px;

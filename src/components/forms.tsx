@@ -453,10 +453,14 @@ export function ProductCompatibilityFields({
   value,
   onChange,
   options = [],
+  canAdd = true,
+  defaultCost = "",
 }: {
   value: ProductCompatibilityDraft[];
   onChange: (value: ProductCompatibilityDraft[]) => void;
   options?: ProductCompatibilityDraft[];
+  canAdd?: boolean;
+  defaultCost?: string;
 }) {
   const it = useMessages();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -510,7 +514,24 @@ export function ProductCompatibilityFields({
               <span className="compatibility-projects">
                 {device.projects.length ? (
                   device.projects.map((project) => (
-                    <span key={project}>{project}</span>
+                    <span className="compatibility-project-label" key={project}>
+                      {project}
+                      <button
+                        type="button"
+                        aria-label={`${it.remove} ${project}`}
+                        onClick={() =>
+                          onChange(
+                            value.filter(
+                              (entry, index) =>
+                                !device.indices.includes(index) ||
+                                entry.project !== project,
+                            ),
+                          )
+                        }
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
                   ))
                 ) : (
                   <span>{it.inventory.allRepairUses}</span>
@@ -535,6 +556,7 @@ export function ProductCompatibilityFields({
           type="button"
           variant="outline"
           className="add-device-action"
+          disabled={!canAdd}
           onClick={() => {
             setDraft({ category: "PHONE", brand: "", model: "", projects: [] });
             setDialogOpen(true);
@@ -555,6 +577,7 @@ export function ProductCompatibilityFields({
               onChange={setDraft}
               options={options}
               associated={value}
+              defaultCost={defaultCost}
             />
             <div className="dialog-actions">
               <Button
@@ -634,6 +657,8 @@ export function ProductForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [category, setCategory] = useState(quickRepair ? "Ricambi" : "");
+  const [productName, setProductName] = useState(initialName);
+  const [productCost, setProductCost] = useState("0");
   const [usage, setUsage] = useState<"RETAIL" | "REPAIR">(
     quickRepair ? "REPAIR" : (initialUsage ?? "RETAIL"),
   );
@@ -763,7 +788,8 @@ export function ProductForm({
             name="name"
             required
             maxLength={120}
-            defaultValue={initialName}
+            value={productName}
+            onChange={(event) => setProductName(event.target.value)}
           />
         </Field>
         {!quickRepair && (
@@ -810,7 +836,8 @@ export function ProductForm({
             ref={costInput}
             name="costPrice"
             inputMode="decimal"
-            defaultValue="0"
+            value={productCost}
+            onChange={(event) => setProductCost(event.target.value)}
             required
           />
         </Field>
@@ -860,6 +887,8 @@ export function ProductForm({
           value={compatibilities}
           onChange={setCompatibilities}
           options={projectCatalog}
+          canAdd={Boolean(productName.trim() && category.trim())}
+          defaultCost={productCost}
         />
       )}
       <label className="checkbox">

@@ -28,12 +28,14 @@ export function CompatibilityAddEditor({
   onChange,
   options,
   associated = [],
+  defaultCost = "",
   deletions = [],
 }: {
   value: CompatibilityDeviceDraft;
   onChange: (value: CompatibilityDeviceDraft) => void;
   options: ProductCompatibilityDraft[];
   associated?: ProductCompatibilityDraft[];
+  defaultCost?: string;
   deletions?: DeviceCatalogDeletionView[];
 }) {
   const it = useMessages();
@@ -43,6 +45,7 @@ export function CompatibilityAddEditor({
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProject, setNewProject] = useState("");
   const [newPrice, setNewPrice] = useState("");
+  const [newCost, setNewCost] = useState("");
   const [extraProjects, setExtraProjects] = useState<
     ProductCompatibilityDraft[]
   >([]);
@@ -215,6 +218,9 @@ export function CompatibilityAddEditor({
               onClick={() => {
                 setNewProject("");
                 setNewPrice("");
+                setNewCost(
+                  Number(defaultCost.replace(",", ".")) > 0 ? defaultCost : "",
+                );
                 setCreatingProject(true);
               }}
             >
@@ -273,6 +279,14 @@ export function CompatibilityAddEditor({
                   inputMode="decimal"
                 />
               </label>
+              <label>
+                {it.cost}
+                <input
+                  value={newCost}
+                  onChange={(event) => setNewCost(event.target.value)}
+                  inputMode="decimal"
+                />
+              </label>
               {projectError && (
                 <p role="alert" className="message error">
                   {projectError}
@@ -303,7 +317,7 @@ export function CompatibilityAddEditor({
                       series: "",
                       project: newProject,
                       suggested: newPrice,
-                      cost: "",
+                      cost: newCost,
                       notes: "",
                       requiredProductId: "",
                       requiredQuantity: 1,
@@ -322,6 +336,7 @@ export function CompatibilityAddEditor({
                     setCreatingProject(false);
                     setNewProject("");
                     setNewPrice("");
+                    setNewCost("");
                     router.refresh();
                   } catch {
                     setProjectError(it.connectionError);

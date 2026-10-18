@@ -6555,6 +6555,45 @@ test("creates a repair part from the quote and selects it immediately", async ({
   await expect(compatibilityDialog).toHaveCount(0);
 });
 
+test("removing the last compatible repair project removes its device row", async ({
+  page,
+}) => {
+  await page.goto("/inventory");
+  const productRow = page.getByRole("row", { name: /Batteria Test/ });
+  await productRow.click();
+  await productRow
+    .getByRole("button", { name: "Modifica dispositivi compatibili" })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Modifica dispositivi compatibili",
+  });
+  const deviceRow = dialog.locator(".compatibility-device-row").first();
+  const deviceModel = await deviceRow
+    .locator(".compatibility-device-summary strong")
+    .innerText();
+  const projectCount = await deviceRow
+    .locator(".compatibility-project-label")
+    .count();
+  expect(projectCount).toBeGreaterThan(0);
+  await dialog.getByRole("button", { name: "Annulla" }).focus();
+  await page.mouse.move(0, 0);
+  for (let index = 0; index < projectCount; index += 1) {
+    const project = deviceRow.locator(".compatibility-project-label").first();
+    const remove = project.getByRole("button", { name: /Rimuovi/ });
+    if (index === 0) await expect(remove).toHaveCSS("opacity", "0");
+    await project.hover();
+    await expect(remove).toHaveCSS("opacity", "1");
+    await remove.click();
+    if (index < projectCount - 1) await expect(deviceRow).toBeVisible();
+  }
+  await expect(
+    dialog
+      .locator(".compatibility-device-row")
+      .filter({ hasText: deviceModel }),
+  ).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Annulla" }).click();
+});
+
 test("inventory repair products retain their compatibility editor", async ({
   page,
 }) => {
@@ -6644,7 +6683,9 @@ test("inventory repair products retain their compatibility editor", async ({
     .getByRole("dialog", { name: "Seleziona interventi" })
     .getByRole("button", { name: "Annulla" })
     .click();
-  await editorDialog.getByRole("button", { name: "Registra conferma" }).click();
+  await editorDialog
+    .getByRole("button", { name: "Conferma", exact: true })
+    .click();
   const summary = dialog.locator(".compatibility-device-row", {
     hasText: "iPhone 14",
   });
@@ -6674,6 +6715,14 @@ test("new repair products add compatible devices in a modal", async ({
     name: "Compatibilità",
     exact: true,
   });
+  await expect(addCompatibility).toBeDisabled();
+  await productDialog
+    .getByLabel("Prodotto", { exact: true })
+    .fill("Prodotto di prova");
+  await expect(addCompatibility).toBeDisabled();
+  await chooseBusinessOption(page, "Categoria", "Ricambi", productDialog);
+  await productDialog.getByLabel("Costo", { exact: true }).fill("12");
+  await expect(addCompatibility).toBeEnabled();
   await addCompatibility.click();
   const compatibilityDialog = page.getByRole("dialog", {
     name: "Aggiungi dispositivo compatibile",
@@ -6721,6 +6770,9 @@ test("new repair products add compatible devices in a modal", async ({
     .getByLabel("Intervento", { exact: true })
     .fill(newProject);
   await newProjectDialog.getByLabel("Prezzo suggerito (€)").fill("49");
+  await expect(
+    newProjectDialog.getByLabel("Costo (€), facoltativo"),
+  ).toHaveValue("12");
   await newProjectDialog
     .getByRole("button", { name: "Salva", exact: true })
     .click();
@@ -6732,7 +6784,7 @@ test("new repair products add compatible devices in a modal", async ({
     .getByRole("button", { name: "Conferma selezione" })
     .click();
   await reopenedDialog
-    .getByRole("button", { name: "Registra conferma", exact: true })
+    .getByRole("button", { name: "Conferma", exact: true })
     .click();
   await expect(reopenedDialog).toHaveCount(0);
   await expect(addCompatibility).toBeVisible();
@@ -6745,6 +6797,19 @@ test("new repair products add compatible devices in a modal", async ({
   await expect(
     productDialog.locator(".compatibility-device-row"),
   ).toContainText(newProject);
+  const projectChip = productDialog.locator(".compatibility-projects > span", {
+    hasText: newProject,
+  });
+  await projectChip.hover();
+  await projectChip
+    .getByRole("button", { name: `Rimuovi ${newProject}` })
+    .click();
+  await expect(
+    productDialog.locator(".compatibility-device-row"),
+  ).toContainText("sostituzione display");
+  await expect(
+    productDialog.locator(".compatibility-device-row"),
+  ).not.toContainText(newProject);
   await productDialog
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
@@ -6754,6 +6819,13 @@ test("new repair products add compatible devices in a modal", async ({
     .locator(".price-rule-row")
     .filter({ hasText: newProject });
   await expect(createdRow).toHaveCount(1);
+  await createdRow.hover();
+  await createdRow.getByRole("button", { name: "Modifica preventivo" }).click();
+  const savedRule = page.getByRole("dialog", { name: "Modifica preventivo" });
+  await expect(savedRule.getByLabel("Costo (€), facoltativo")).toHaveValue(
+    "12",
+  );
+  await savedRule.locator(".dialog-close").click();
   await page.getByRole("button", { name: "Gestisci selezione" }).click();
   await createdRow.getByRole("checkbox").check();
   page.once("dialog", (dialog) => dialog.accept());

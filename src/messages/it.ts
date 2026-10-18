@@ -833,7 +833,7 @@ export const it = {
   noMatch:
     "Nessun prezzo trovato: inserisci il prezzo. Verrà salvato nel listino.",
   saveRule: "Salva nel listino",
-  confirm: "Registra conferma",
+  confirm: "Conferma",
   notConfirmed: "Preventivo da confermare",
   quoteNotice:
     "I prezzi originali aggiornano il listino; gli sconti restano su questa scheda.",

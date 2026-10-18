@@ -211,6 +211,7 @@ function ProductCompatibilityDialog({
             onChange={setAdding}
             options={options}
             associated={value}
+            defaultCost={decimal(product.costPrice)}
             deletions={catalogDeletions}
           />
         ) : (
@@ -244,7 +245,29 @@ function ProductCompatibilityDialog({
                     <span className="compatibility-projects">
                       {device.projects.length ? (
                         device.projects.map((project) => (
-                          <span key={project}>{project}</span>
+                          <span
+                            className="compatibility-project-label"
+                            key={project}
+                          >
+                            {project}
+                            <button
+                              type="button"
+                              aria-label={`${it.remove} ${project}`}
+                              onClick={() =>
+                                setValue((current) =>
+                                  current.filter(
+                                    (entry) =>
+                                      entry.category !== device.category ||
+                                      entry.brand !== device.brand ||
+                                      entry.model !== device.model ||
+                                      entry.project !== project,
+                                  ),
+                                )
+                              }
+                            >
+                              <X size={13} />
+                            </button>
+                          </span>
                         ))
                       ) : (
                         <span>{it.inventory.allRepairUses}</span>
