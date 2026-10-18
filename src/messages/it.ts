@@ -1023,6 +1023,8 @@ export const it = {
     date: "Data",
   },
   addProject: "Intervento",
+  newRepairProject: "Nuovo intervento",
+  confirmSelection: "Conferma selezione",
   editRule: "Modifica",
   newRule: "Nuova regola",
   newRuleAction: "Preventivo",

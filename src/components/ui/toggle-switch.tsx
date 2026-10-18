@@ -48,6 +48,9 @@ export function ToggleSwitch({
             .catch(() => setVisualState({ checked, source: checked }));
         }}
       />
+      <span className="toggle-switch-track" aria-hidden="true">
+        <span className="toggle-switch-thumb" />
+      </span>
       <span>{visualChecked ? enabledLabel : disabledLabel}</span>
     </label>
   );

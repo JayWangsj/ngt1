@@ -881,6 +881,8 @@ export const zh: typeof it = {
     date: "日期",
   },
   addProject: "维修项目",
+  newRepairProject: "新维修项目",
+  confirmSelection: "确认选择",
   editRule: "编辑",
   newRule: "新增报价",
   newRuleAction: "报价",

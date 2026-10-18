@@ -4791,13 +4791,14 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   const serviceSwitch = firstServiceRow.locator(
     '.fault-enabled-switch input[type="checkbox"]',
   );
-  await expect(serviceSwitch).toHaveCSS("width", "36px");
-  await expect(serviceSwitch).toHaveCSS("height", "20px");
+  const serviceTrack = firstServiceRow.locator(".toggle-switch-track");
+  await expect(serviceTrack).toHaveCSS("width", "40px");
+  await expect(serviceTrack).toHaveCSS("height", "20px");
   expect(
-    await serviceSwitch.evaluate(
-      (input) => getComputedStyle(input, "::before").transitionDuration,
-    ),
-  ).toBe("0.22s");
+    await firstServiceRow
+      .locator(".toggle-switch-thumb")
+      .evaluate((thumb) => getComputedStyle(thumb).transitionDuration),
+  ).toBe("0.28s");
   const serviceInitiallyEnabled = await serviceSwitch.isChecked();
   await serviceSwitch.click();
   await expect(serviceSwitch).toBeChecked({
@@ -5765,10 +5766,29 @@ test("price editor and mobile yellow layout support both languages", async ({
     .first()
     .click();
   const form = page.getByRole("dialog");
-  await enterBusinessValue(page, "Intervento", `pulizia ${Date.now()}`, form);
+  const testProject = `pulizia ${Date.now()}`;
+  await chooseBusinessOption(page, "Marca", "Apple", form);
+  await chooseBusinessOption(page, "Modello", "iPhone 13", form);
+  await enterBusinessValue(page, "Intervento", testProject, form);
   await form.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("15");
-  await form.getByRole("button", { name: "Salva", exact: true }).click();
   await expect(form.locator(".price-rule-editor-options")).toBeVisible();
+  const footer = form.locator(".dialog-actions");
+  await expect(
+    footer.getByRole("button", { name: "Salva ed esci" }),
+  ).toBeVisible();
+  await form
+    .locator(".price-rule-editor-section")
+    .first()
+    .evaluate((section) => section.parentElement?.scrollTo(0, 0));
+  expect(
+    await footer.evaluate((element) => {
+      const footer = element.getBoundingClientRect();
+      const scroller = element
+        .closest(".price-rule-editor")!
+        .getBoundingClientRect();
+      return footer.top >= scroller.top && footer.bottom <= scroller.bottom;
+    }),
+  ).toBe(true);
   await form
     .getByRole("button", { name: "Opzione ricambio", exact: true })
     .click();
@@ -5806,27 +5826,27 @@ test("price editor and mobile yellow layout support both languages", async ({
     name: "Batteria Test: Disattiva",
   });
   await expect(batterySwitch).toBeChecked();
-  const readSwitchThumb = (toggle: typeof batterySwitch) =>
-    toggle.evaluate((input) => {
-      const thumb = getComputedStyle(input, "::before");
+  const readSwitchThumb = () =>
+    batteryOption.locator(".toggle-switch-thumb").evaluate((element) => {
+      const thumb = getComputedStyle(element);
       return {
-        content: thumb.content,
         width: thumb.width,
         transform: thumb.transform,
+        background: thumb.backgroundColor,
+        transition: thumb.transitionDuration,
       };
     });
-  const enabledThumb = await readSwitchThumb(batterySwitch);
-  expect(enabledThumb.content).not.toBe("none");
+  const enabledThumb = await readSwitchThumb();
   expect(enabledThumb.width).toBe("16px");
-  await expect(batterySwitch).toHaveCSS("transition-duration", "0.22s");
+  expect(enabledThumb.background).toBe("rgb(255, 255, 255)");
+  expect(enabledThumb.transition).toBe("0.28s");
   await batterySwitch.click();
   await expect(batteryOption).toHaveClass(/is-disabled/);
   const enableBatterySwitch = batteryOption.getByRole("switch", {
     name: "Batteria Test: Attiva",
   });
   await expect(enableBatterySwitch).not.toBeChecked();
-  const disabledThumb = await readSwitchThumb(enableBatterySwitch);
-  expect(disabledThumb.content).toBe(enabledThumb.content);
+  const disabledThumb = await readSwitchThumb();
   expect(disabledThumb.width).toBe("16px");
   expect(disabledThumb.transform).not.toBe(enabledThumb.transform);
   await enableBatterySwitch.click();
@@ -5866,11 +5886,59 @@ test("price editor and mobile yellow layout support both languages", async ({
   await expect(setLcdDefault.locator("svg")).toBeVisible();
   await setLcdDefault.click();
   await expect(lcdOption).toContainText("Opzione consigliata predefinita");
+  await expect(lcdOption.locator(".price-option-default-action")).toHaveCSS(
+    "opacity",
+    "1",
+  );
   await expect(optionCards.nth(0)).toContainText("Batteria Test");
   await expect(optionCards.nth(1)).toContainText("Display LCD Test");
-  await form.locator(".dialog-actions button").first().click();
+  await form.getByRole("button", { name: "Salva ed esci" }).click();
   await expect(form).not.toBeVisible();
   await expect(page.getByRole("main").getByRole("status")).toBeVisible();
+  await page.locator(".price-filters input[type=search]").fill(testProject);
+  const createdRow = page
+    .locator(".price-rule-row")
+    .filter({ hasText: testProject });
+  await expect(createdRow).toHaveCount(1);
+  await page.getByRole("button", { name: "Gestisci selezione" }).click();
+  await createdRow.getByRole("checkbox").check();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: /Elimina preventivi selezionati/ })
+    .click();
+  await expect(createdRow).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Nuova regola", exact: true })
+    .first()
+    .click();
+  const existingProjectForm = page.getByRole("dialog");
+  await chooseBusinessOption(page, "Marca", "Apple", existingProjectForm);
+  await chooseBusinessOption(page, "Modello", "iPhone 13", existingProjectForm);
+  await chooseBusinessOption(
+    page,
+    "Intervento",
+    "sostituzione display",
+    existingProjectForm,
+  );
+  await expect(
+    existingProjectForm.locator(".price-option-card").filter({
+      hasText: "Display LCD Test",
+    }),
+  ).toHaveCount(1);
+  await existingProjectForm
+    .getByRole("button", { name: "Opzione ricambio", exact: true })
+    .click();
+  const existingOptionDialog = page.getByRole("dialog", {
+    name: "Nuova opzione ricambio",
+  });
+  await expect(existingOptionDialog).toBeVisible();
+  await existingOptionDialog
+    .getByRole("button", { name: "Annulla", exact: true })
+    .click();
+  await existingProjectForm
+    .locator(".dialog-actions")
+    .getByRole("button", { name: "Chiudi", exact: true })
+    .click();
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Oggi in laboratorio", exact: true }),
@@ -6536,25 +6604,27 @@ test("inventory repair products retain their compatibility editor", async ({
     .filter({ hasText: "iPhone 14" })
     .first();
   await iphoneOption.click();
-  const projects = editorDialog.getByRole("combobox", {
+  const openProjects = editorDialog.getByRole("button", {
     name: "Intervento",
     exact: true,
   });
-  await expect(projects).toBeEnabled();
-  const openProjects = editorDialog.locator(
-    ".compatibility-project-selector .business-combobox-chevron",
-  );
+  await expect(openProjects).toBeEnabled();
   await openProjects.click();
-  await page
-    .locator(".business-select-panel.is-entering")
-    .getByRole("option", { name: "sostituzione batteria", exact: true })
+  const projectPicker = page.getByRole("dialog", {
+    name: "Seleziona interventi",
+  });
+  await projectPicker
+    .getByRole("button", { name: "sostituzione batteria", exact: true })
     .click();
-  await openProjects.click();
   await expect(
-    page
-      .locator(".business-select-panel.is-entering")
-      .getByRole("option", { name: "sostituzione display", exact: true }),
+    projectPicker.getByRole("button", {
+      name: "sostituzione display",
+      exact: true,
+    }),
   ).toHaveCount(0);
+  await projectPicker
+    .getByRole("button", { name: "Conferma selezione" })
+    .click();
   await expect(editorDialog.locator(".compatibility-project-chip")).toHaveText([
     "sostituzione batteria",
   ]);
@@ -6604,11 +6674,28 @@ test("new repair products add compatible devices in a modal", async ({
   await chooseBusinessOption(page, "Marca", "Apple", reopenedDialog);
   await chooseBusinessOption(page, "Modello", "iPhone 13", reopenedDialog);
   await reopenedDialog
-    .locator(".compatibility-project-selector .business-combobox-chevron")
+    .getByRole("button", { name: "Intervento", exact: true })
     .click();
-  await page
-    .locator(".business-select-panel.is-entering")
-    .getByRole("option", { name: "sostituzione display", exact: true })
+  const projectPicker = page.getByRole("dialog", {
+    name: "Seleziona interventi",
+  });
+  await projectPicker
+    .getByRole("button", { name: "sostituzione display", exact: true })
+    .click();
+  const newProject = `progetto compatibilita ${Date.now()}`;
+  await projectPicker.getByRole("button", { name: "Nuovo intervento" }).click();
+  await projectPicker
+    .getByLabel("Intervento", { exact: true })
+    .fill(newProject);
+  await projectPicker.getByLabel("Prezzo suggerito (€)").fill("49");
+  await projectPicker
+    .getByRole("button", { name: "Salva", exact: true })
+    .click();
+  await expect(
+    projectPicker.getByRole("button", { name: newProject }),
+  ).toBeVisible();
+  await projectPicker
+    .getByRole("button", { name: "Conferma selezione" })
     .click();
   await reopenedDialog
     .getByRole("button", { name: "Registra conferma", exact: true })
@@ -6621,9 +6708,25 @@ test("new repair products add compatible devices in a modal", async ({
   await expect(
     productDialog.locator(".compatibility-device-row"),
   ).toContainText("sostituzione display");
+  await expect(
+    productDialog.locator(".compatibility-device-row"),
+  ).toContainText(newProject);
   await productDialog
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
+  await page.goto("/prices");
+  await page.locator(".price-filters input[type=search]").fill(newProject);
+  const createdRow = page
+    .locator(".price-rule-row")
+    .filter({ hasText: newProject });
+  await expect(createdRow).toHaveCount(1);
+  await page.getByRole("button", { name: "Gestisci selezione" }).click();
+  await createdRow.getByRole("checkbox").check();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: /Elimina preventivi selezionati/ })
+    .click();
+  await expect(createdRow).toHaveCount(0);
 });
 
 test("legacy repair rules use the shared part option dialog", async ({
@@ -7072,15 +7175,17 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
   await enterBusinessValue(page, "Modello", "Watch Modal", dialog);
   await enterBusinessValue(page, "Intervento", "Test battery", dialog);
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("bad");
-  await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Salva ed esci", exact: true })
+    .click();
   await expect(dialog.getByRole("alert")).toBeVisible();
   await expect(
     dialog.getByRole("combobox", { name: "Modello", exact: true }),
   ).toHaveValue("Watch Modal");
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("40");
-  await dialog.getByRole("button", { name: "Salva", exact: true }).click();
-  await expect(dialog.locator(".price-rule-editor-options")).toBeVisible();
-  await dialog.locator(".dialog-actions button").first().click();
+  await dialog
+    .getByRole("button", { name: "Salva ed esci", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await expect(page).toHaveURL(/prices$/);
   const model = page
@@ -7101,9 +7206,9 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
   ).toHaveValue("Watch Modal");
   await enterBusinessValue(page, "Intervento", "Test screen", dialog);
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("70");
-  await dialog.getByRole("button", { name: "Salva", exact: true }).click();
-  await expect(dialog.locator(".price-rule-editor-options")).toBeVisible();
-  await dialog.locator(".dialog-actions button").first().click();
+  await dialog
+    .getByRole("button", { name: "Salva ed esci", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await expect(model.locator("article")).toHaveCount(2);
   await page.getByLabel("Cerca", { exact: true }).fill("Test battery");
@@ -7409,12 +7514,8 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
     .getByLabel("Prezzo suggerito (€)", { exact: true })
     .fill("35");
   await createDialog
-    .getByRole("button", { name: "Salva", exact: true })
+    .getByRole("button", { name: "Salva ed esci", exact: true })
     .click();
-  await expect(
-    createDialog.locator(".price-rule-editor-options"),
-  ).toBeVisible();
-  await createDialog.locator(".dialog-actions button").first().click();
   await expect(createDialog).not.toBeVisible();
   await page.getByLabel("Cerca", { exact: true }).fill("iPhone 13");
   await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
@@ -7761,8 +7862,9 @@ test("price editor keeps deletion inside batch management", async ({
   const dialog = page.getByRole("dialog");
   await enterBusinessValue(page, "Intervento", "Da eliminare", dialog);
   await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("25");
-  await dialog.getByRole("button", { name: "Salva", exact: true }).click();
-  await dialog.locator(".dialog-actions button").first().click();
+  await dialog
+    .getByRole("button", { name: "Salva ed esci", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   const removable = page
     .locator(".price-rule-row")

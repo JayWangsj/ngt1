@@ -1,11 +1,16 @@
 "use client";
 
-import { X } from "lucide-react";
+import { useState } from "react";
+import { Check, Plus, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ruleAction } from "@/app/actions";
 import { categories, modelKey } from "@/lib/catalog";
 import { uniqueOptions } from "@/lib/options";
 import { useLanguage, useMessages } from "./language";
 import { EditableSelect } from "./editable-select";
-import { SearchableCombobox, SimpleSelect } from "./business-select";
+import { SimpleSelect } from "./business-select";
+import { FormDialog } from "./forms";
+import { Button } from "./ui/button";
 import type {
   DeviceCatalogDeletionView,
   ProductCompatibilityDraft,
@@ -31,6 +36,17 @@ export function CompatibilityAddEditor({
 }) {
   const it = useMessages();
   const { locale } = useLanguage();
+  const router = useRouter();
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProject, setNewProject] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [extraProjects, setExtraProjects] = useState<
+    ProductCompatibilityDraft[]
+  >([]);
+  const [pickerProjects, setPickerProjects] = useState<string[]>([]);
+  const [savingProject, setSavingProject] = useState(false);
+  const [projectError, setProjectError] = useState("");
   const hidden = (kind: "BRAND" | "MODEL", candidate: string) =>
     deletions.some(
       (entry) =>
@@ -58,16 +74,16 @@ export function CompatibilityAddEditor({
       .map((option) => option.model),
   ).filter((model) => model && !hidden("MODEL", model));
   const projectOptions = uniqueOptions(
-    options
+    [...options, ...extraProjects]
       .filter(
         (option) =>
           option.category === value.category &&
           option.brand.toLocaleLowerCase("it") ===
             value.brand.toLocaleLowerCase("it") &&
-          (!option.model || modelKey(option.model) === modelKey(value.model)),
+          modelKey(option.model) === modelKey(value.model),
       )
       .map((option) => option.project),
-  ).filter((project) => project && !value.projects.includes(project));
+  ).filter(Boolean);
 
   return (
     <div className="compatibility-add-editor">
@@ -126,29 +142,151 @@ export function CompatibilityAddEditor({
               </button>
             </span>
           ))}
-          <SearchableCombobox
-            className="compatibility-project-search"
-            value=""
-            onChange={(project) => {
-              if (project)
-                onChange({ ...value, projects: [...value.projects, project] });
-            }}
-            groups={[
-              {
-                options: projectOptions.map((project) => ({
-                  value: project,
-                  label: project,
-                })),
-              },
-            ]}
+          <button
+            type="button"
+            className="quick-service-picker-add compatibility-project-add"
             disabled={!value.model}
-            placeholder={it.selectRepairProjects}
-            ariaLabel={it.project}
-            searchPlaceholder={it.selectRepairProjects}
-            emptyText={it.noMatches}
-          />
+            onClick={() => {
+              setPickerProjects(value.projects);
+              setProjectPickerOpen(true);
+            }}
+          >
+            <Plus size={16} /> {it.addProject}
+          </button>
         </div>
       </section>
+      {projectPickerOpen && (
+        <FormDialog
+          title={it.selectRepairProjects}
+          onClose={() => {
+            setProjectPickerOpen(false);
+            setCreatingProject(false);
+            setProjectError("");
+          }}
+        >
+          <div data-form-dialog-body className="compatibility-project-picker">
+            <div className="compatibility-project-choices">
+              {projectOptions.length ? (
+                projectOptions.map((project) => (
+                  <button
+                    type="button"
+                    key={project}
+                    className={`price-option-card price-option-choice business-list-row${pickerProjects.includes(project) ? " is-selected" : ""}`}
+                    onClick={() =>
+                      setPickerProjects((current) =>
+                        current.includes(project)
+                          ? current.filter((item) => item !== project)
+                          : [...current, project],
+                      )
+                    }
+                  >
+                    <strong>{project}</strong>
+                    {pickerProjects.includes(project) && <Check size={18} />}
+                  </button>
+                ))
+              ) : (
+                <p className="empty">{it.noMatches}</p>
+              )}
+            </div>
+            {creatingProject ? (
+              <div className="compatibility-new-project">
+                <label>
+                  {it.project}
+                  <input
+                    value={newProject}
+                    onChange={(event) => setNewProject(event.target.value)}
+                    maxLength={120}
+                  />
+                </label>
+                <label>
+                  {it.suggested} (€)
+                  <input
+                    value={newPrice}
+                    onChange={(event) => setNewPrice(event.target.value)}
+                    inputMode="decimal"
+                  />
+                </label>
+                {projectError && (
+                  <p role="alert" className="message error">
+                    {projectError}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  disabled={
+                    savingProject || !newProject.trim() || !newPrice.trim()
+                  }
+                  onClick={async () => {
+                    setSavingProject(true);
+                    setProjectError("");
+                    try {
+                      const result = await ruleAction(null, {
+                        category: value.category,
+                        brand: value.brand,
+                        model: value.model,
+                        series: "",
+                        project: newProject,
+                        suggested: newPrice,
+                        cost: "",
+                        notes: "",
+                        requiredProductId: "",
+                        requiredQuantity: 1,
+                        minutes: 60,
+                        enabled: true,
+                      });
+                      if (!result.ok) {
+                        setProjectError(result.error ?? "Errore");
+                        return;
+                      }
+                      setExtraProjects((current) => [
+                        ...current,
+                        { ...value, project: newProject },
+                      ]);
+                      setPickerProjects((current) => [...current, newProject]);
+                      setCreatingProject(false);
+                      setNewProject("");
+                      setNewPrice("");
+                      router.refresh();
+                    } catch {
+                      setProjectError(it.connectionError);
+                    } finally {
+                      setSavingProject(false);
+                    }
+                  }}
+                >
+                  {savingProject ? it.saving : it.save}
+                </Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="quick-service-picker-add"
+                onClick={() => setCreatingProject(true)}
+              >
+                <Plus size={16} /> {it.newRepairProject}
+              </button>
+            )}
+            <div className="dialog-actions">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setProjectPickerOpen(false)}
+              >
+                {it.cancel}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  onChange({ ...value, projects: pickerProjects });
+                  setProjectPickerOpen(false);
+                }}
+              >
+                {it.confirmSelection}
+              </Button>
+            </div>
+          </div>
+        </FormDialog>
+      )}
     </div>
   );
 }

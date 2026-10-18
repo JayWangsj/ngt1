@@ -3229,6 +3229,8 @@ function ActionForm({
   cancelLabel,
   disabled = false,
   className = "",
+  closeOnSuccess = false,
+  saveRef,
 }: {
   action: (data: FormData) => Promise<ActionResult>;
   children: ReactNode;
@@ -3238,6 +3240,8 @@ function ActionForm({
   cancelLabel?: string;
   disabled?: boolean;
   className?: string;
+  closeOnSuccess?: boolean;
+  saveRef?: { current: (() => Promise<boolean>) | null };
 }) {
   const it = useMessages();
   const dialogClose = useContext(FormCloseContext);
@@ -3318,10 +3322,19 @@ function ActionForm({
         Boolean(form.current && snapshot(form.current) !== initial.current),
     });
   }, [registerSave, save, snapshot]);
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = () =>
+      form.current ? save(form.current) : Promise.resolve(false);
+    return () => {
+      saveRef.current = null;
+    };
+  }, [save, saveRef]);
   async function handle(event: FormEvent<HTMLFormElement>) {
+    if (event.target !== event.currentTarget) return;
     event.preventDefault();
     if (await save(event.currentTarget)) {
-      if (registerSave) closeDialog?.();
+      if (registerSave || closeOnSuccess) closeDialog?.();
     }
   }
   return (
@@ -4706,6 +4719,7 @@ export function RuleForm({
   const [optionPending, setOptionPending] = useState(false);
   const [optionError, setOptionError] = useState("");
   const optionSection = useRef<HTMLElement>(null);
+  const saveBaseQuote = useRef<(() => Promise<boolean>) | null>(null);
   const ruleId = rule?.id ?? createdRuleId;
   const currentRule =
     rules.find((candidate) => candidate.id === ruleId) ?? rule ?? null;
@@ -4746,9 +4760,11 @@ export function RuleForm({
   }, [focusOptions]);
   return (
     <ActionForm
-      submit={it.save}
+      submit={it.saveAndLeave}
       cancelLabel={it.close}
       className="price-rule-editor"
+      closeOnSuccess
+      saveRef={saveBaseQuote}
       onSuccess={(result) => {
         if (!rule && result.id) setCreatedRuleId(result.id);
         onSuccess?.(
@@ -4761,7 +4777,7 @@ export function RuleForm({
         );
       }}
       action={(data) =>
-        ruleAction(ruleId || null, {
+        ruleAction(ruleId || selectedProjectRule?.id || null, {
           ...Object.fromEntries(data),
           category,
           brand,
@@ -4900,7 +4916,7 @@ export function RuleForm({
                         {option.enabled && (
                           <button
                             type="button"
-                            className="price-option-default-action"
+                            className={`price-option-default-action${option.isDefault ? " is-default" : ""}`}
                             disabled={optionPending || option.isDefault}
                             onClick={async () => {
                               setOptionPending(true);
@@ -5025,16 +5041,20 @@ export function RuleForm({
           </div>
         ) : optionRule ? (
           <p className="empty">{it.noPartOptions}</p>
-        ) : (
-          <p className="muted">{it.saveQuoteBeforeOptions}</p>
-        )}
+        ) : null}
         <Message error={optionError} />
         {project.trim() && (
           <button
             type="button"
             className="quick-service-picker-add price-option-add"
-            disabled={!optionRule || optionPending}
-            onClick={() => setEditingOption({})}
+            disabled={optionPending}
+            onClick={async () => {
+              if (selectedProjectRule && !ruleId) {
+                setEditingOption({});
+                return;
+              }
+              if (await saveBaseQuote.current?.()) setEditingOption({});
+            }}
           >
             <Plus size={16} /> {it.addPartOption}
           </button>
