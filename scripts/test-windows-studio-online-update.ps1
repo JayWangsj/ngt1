@@ -173,11 +173,10 @@ const db = new PrismaClient();
   assert.equal(order?.fault, "Update acceptance record");
   assert.equal(order?.device?.model, "Update acceptance phone");
   assert.equal(order?.device?.customer?.name, "Update acceptance customer");
-  const written = await db.customer.upsert({
-    where: { phone: "390000000001" },
-    create: { name: "Post update write", phone: "390000000001" },
-    update: { name: "Post update write" },
-  });
+  const priorWrite = await db.customer.findFirst({ where: { phone: "390000000001" } });
+  const written = priorWrite
+    ? await db.customer.update({ where: { id: priorWrite.id }, data: { name: "Post update write" } })
+    : await db.customer.create({ data: { name: "Post update write", phone: "390000000001" } });
   assert.equal((await db.customer.findUnique({ where: { id: written.id } }))?.name, "Post update write");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => db.$disconnect());
 '@ | Set-Content -LiteralPath $probePath -Encoding utf8
