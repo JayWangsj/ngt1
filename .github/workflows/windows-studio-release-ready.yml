@@ -101,7 +101,14 @@ jobs:
 
   release-ready:
     name: Release Ready
-    needs: [qualify, build, installer-acceptance, online-update-acceptance, manual-installer-acceptance]
+    needs:
+      [
+        qualify,
+        build,
+        installer-acceptance,
+        online-update-acceptance,
+        manual-installer-acceptance,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
