@@ -972,6 +972,13 @@ test("sidebar version entry hover stays contained and collapses cleanly", async 
   await mockAvailableCheck(page);
   await mockIdleTask(page);
   await page.goto("/settings");
+  await expect
+    .poll(() =>
+      page
+        .locator("body")
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    )
+    .toBe("rgb(255, 255, 255)");
   await switchToItalian(page);
 
   const entry = page.locator(".sidebar-update-entry");
@@ -1061,6 +1068,17 @@ test("sidebar version entry hover stays contained and collapses cleanly", async 
   });
 
   await page.mouse.move(0, 0);
+  await expect
+    .poll(() => entry.evaluate((node) => node.matches(":hover")))
+    .toBe(false);
+  await expect
+    .poll(() =>
+      entry.evaluate((node) => getComputedStyle(node).backgroundColor),
+    )
+    .toBe(initialBackground);
+  await expect
+    .poll(() => icon.evaluate((node) => getComputedStyle(node).color))
+    .toBe(initialIconColor);
   await expect
     .poll(() =>
       arrow.evaluate(
