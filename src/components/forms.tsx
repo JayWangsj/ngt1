@@ -917,6 +917,7 @@ function Section({
 
 function PriceOptionPicker({
   options,
+  inventoryProducts = [],
   selected,
   customProduct,
   currentPrice,
@@ -925,9 +926,11 @@ function PriceOptionPicker({
   ariaLabel,
   onOpenChange,
   onSelect,
+  onSelectProduct,
   onAdd,
 }: {
   options: PriceRuleOptionView[];
+  inventoryProducts?: CreatedProduct[];
   selected?: PriceRuleOptionView | null;
   customProduct?: CreatedProduct;
   currentPrice?: string;
@@ -936,12 +939,14 @@ function PriceOptionPicker({
   ariaLabel: string;
   onOpenChange: (open: boolean) => void;
   onSelect: (optionId: string) => void;
+  onSelectProduct?: (productId: string) => void;
   onAdd?: () => void;
 }) {
   const it = useMessages();
   const product = selected?.product ?? customProduct;
   const available = product?.available ?? product?.stock ?? 0;
-  const initialDraftOptionId = selected?.id ?? (product ? null : "");
+  const initialDraftOptionId =
+    selected?.id ?? (product ? `product:${product.id}` : "");
   const [draftOptionId, setDraftOptionId] = useState<string | null>(
     initialDraftOptionId,
   );
@@ -1066,6 +1071,44 @@ function PriceOptionPicker({
                   </div>
                 </button>
               ))}
+              {inventoryProducts
+                .filter(
+                  (entry) =>
+                    !options.some((option) => option.productId === entry.id),
+                )
+                .map((entry) => {
+                  const entryAvailable = entry.available ?? entry.stock;
+                  return (
+                    <button
+                      type="button"
+                      className={`price-option-card price-option-choice price-option-inventory${draftOptionId === `product:${entry.id}` ? " is-selected" : ""}`}
+                      key={entry.id}
+                      disabled={disabled}
+                      onClick={() => setDraftOptionId(`product:${entry.id}`)}
+                    >
+                      <div className="price-option-card-heading">
+                        <div>
+                          <strong>{entry.name}</strong>
+                          <small>{entry.category}</small>
+                        </div>
+                      </div>
+                      <div className="price-option-data price-option-inventory-data">
+                        <span>
+                          <small>{it.actualStock}</small>
+                          <strong>{entry.stock}</strong>
+                        </span>
+                        <span>
+                          <small>{it.reservedStock}</small>
+                          <strong>{entry.reserved ?? 0}</strong>
+                        </span>
+                        <span>
+                          <small>{it.availableStock}</small>
+                          <strong>{entryAvailable}</strong>
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
               <button
                 type="button"
                 className={`price-option-card price-option-choice price-option-none${draftOptionId === "" ? " is-selected" : ""}`}
@@ -1109,7 +1152,9 @@ function PriceOptionPicker({
                   disabled={disabled || draftOptionId === null}
                   onClick={() => {
                     if (draftOptionId === null) return;
-                    onSelect(draftOptionId);
+                    if (draftOptionId.startsWith("product:"))
+                      onSelectProduct?.(draftOptionId.slice(8));
+                    else onSelect(draftOptionId);
                     onOpenChange(false);
                   }}
                 >
@@ -1807,14 +1852,17 @@ export function ItemsEditor({
                   <div className="quote-required-part">
                     {!focusedEdit && (
                       <strong className="quote-required-part-label">
-                        {priceOptions.length
+                        {match
                           ? it.partPriceOption
                           : `${it.requiredPart} (${it.optional})`}
                       </strong>
                     )}
-                    {priceOptions.length ? (
+                    {match ? (
                       <PriceOptionPicker
                         options={priceOptions}
+                        inventoryProducts={
+                          priceOptions.length ? [] : availableProducts
+                        }
                         selected={selectedPriceOption}
                         customProduct={selectedProduct}
                         currentPrice={item.final}
@@ -1829,6 +1877,18 @@ export function ItemsEditor({
                             }));
                         }}
                         onSelect={switchPriceOption}
+                        onSelectProduct={(requiredProductId) => {
+                          update(index, {
+                            requiredProductId,
+                            requiredQuantity: 1,
+                            requiredProductRemoved: false,
+                            priceOptionId: "",
+                            priceOptionName: "",
+                            suggested: "",
+                            suggestedAfterSwitch: undefined,
+                          });
+                          if (focusedEdit) onFocusedEditComplete?.();
+                        }}
                         onAdd={() =>
                           setCreatingPriceOptionRule(match?.rule ?? null)
                         }
@@ -3819,9 +3879,10 @@ export function ReworkPartEditor({
   };
   return (
     <div className="rework-part-editor">
-      {options.length ? (
+      {rule ? (
         <PriceOptionPicker
           options={options.filter((option) => option.enabled)}
+          inventoryProducts={options.length ? [] : availableProducts}
           selected={selectedOption}
           customProduct={selectedProduct}
           open={editing}
@@ -3834,6 +3895,7 @@ export function ReworkPartEditor({
             );
             select(option?.productId ?? "");
           }}
+          onSelectProduct={select}
           onAdd={rule ? () => setCreatingPriceOption(true) : undefined}
         />
       ) : editing ? (
@@ -4127,9 +4189,12 @@ export function AfterSalesForm({
                   )}
                   <div className="after-sales-part-field">
                     <span>{it.requiredPart}</span>
-                    {options.length ? (
+                    {rule ? (
                       <PriceOptionPicker
                         options={options}
+                        inventoryProducts={
+                          options.length ? [] : availableProducts
+                        }
                         selected={selectedOption}
                         customProduct={selectedProduct}
                         open={Boolean(editingParts[project.id])}
@@ -4150,6 +4215,16 @@ export function AfterSalesForm({
                               ...value,
                               requiredProductId: option?.productId ?? "",
                               requiredQuantity: option?.quantity ?? 1,
+                            },
+                          }));
+                        }}
+                        onSelectProduct={(requiredProductId) => {
+                          setItemValues((current) => ({
+                            ...current,
+                            [project.id]: {
+                              ...value,
+                              requiredProductId,
+                              requiredQuantity: 1,
                             },
                           }));
                         }}

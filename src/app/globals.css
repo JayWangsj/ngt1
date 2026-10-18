@@ -8877,6 +8877,9 @@ details.secondary-actions {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
+.price-option-inventory-data {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .price-option-data > span {
   display: grid;
   gap: 3px;

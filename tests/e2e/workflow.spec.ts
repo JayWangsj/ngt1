@@ -6328,133 +6328,62 @@ test("inventory repair products retain their compatibility editor", async ({
   await expect(summary).toContainText("sostituzione display");
 });
 
-test("changing a selected repair part focuses its current name and preserves it on cancel", async ({
+test("legacy repair rules use the shared part option dialog", async ({
   page,
 }) => {
   await page.goto("/orders/new");
   await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
-  await chooseRepairDevice(page, "Apple iPhone 13");
+  await createRepairDevice(page, "Apple", "iPhone 14");
   await page.getByLabel("Display rotto", { exact: true }).check();
   await page
     .getByLabel("Consegna prevista", { exact: true })
     .fill("2099-12-31");
-  await chooseRepairProjects(page, ["sostituzione display"]);
-  await chooseRequiredPart(page, "Batteria Test");
-  const summary = page.locator(".selected-part-summary");
-  await expect(summary).toContainText("Batteria Test");
-  const projectSummary = page.locator(".selected-project-summary");
-  expect(
-    await projectSummary.or(summary).evaluateAll((elements) => {
-      const [project, part] = elements;
-      return Math.abs(
-        project.getBoundingClientRect().width -
-          part.getBoundingClientRect().width,
-      );
-    }),
-  ).toBeLessThanOrEqual(1);
-  expect(
-    await summary.evaluate((part) => {
-      const label = part.parentElement?.querySelector(
-        ".quote-required-part-label",
-      );
-      return label
-        ? part.getBoundingClientRect().top -
-            label.getBoundingClientRect().bottom
-        : 0;
-    }),
-  ).toBeGreaterThanOrEqual(12);
-  expect(
-    await page.locator(".quote-required-part-label").evaluate((label) => {
-      const project = label
-        .closest(".quote-item")
-        ?.querySelector(".selected-project-summary");
-      return project
-        ? label.getBoundingClientRect().top -
-            project.getBoundingClientRect().bottom
-        : 0;
-    }),
-  ).toBeGreaterThanOrEqual(18);
-  expect(
-    await summary.locator(".selection-summary-icon").evaluate((icon) => {
-      const iconBox = icon.getBoundingClientRect();
-      const svgBox = icon.querySelector("svg")!.getBoundingClientRect();
-      return Math.abs(
-        iconBox.left + iconBox.width / 2 - (svgBox.left + svgBox.width / 2),
-      );
-    }),
-  ).toBeLessThanOrEqual(1);
-  const removePart = summary.getByRole("button", {
-    name: "Rimuovi Batteria Test",
-    exact: true,
-  });
-  await page.mouse.move(0, 0);
-  await expect(removePart).toHaveCSS("opacity", "0");
-  await summary.hover();
-  await expect(removePart).toHaveCSS("opacity", "1");
-  await expect(summary.locator(".summary-action svg")).toHaveCSS(
-    "transform",
-    "matrix(1, 0, 0, 1, 4, 0)",
-  );
-  await summary.locator(".selection-summary-copy").click();
-  const search = page.getByRole("combobox", {
-    name: "Ricambio richiesto 1",
-    exact: true,
-  });
-  await expect(search).toBeFocused();
-  await expect(search).toHaveValue("Batteria Test");
-  expect(
-    await search.evaluate(
-      (input) =>
-        (input as HTMLInputElement).selectionStart === 0 &&
-        (input as HTMLInputElement).selectionEnd ===
-          (input as HTMLInputElement).value.length,
-    ),
-  ).toBe(true);
-  await expect(search).toHaveAttribute("aria-expanded", "true");
-  await search.press("Escape");
+  await chooseRepairProjects(page, ["sostituzione batteria"]);
+  const summary = page.locator(".price-option-picker-summary");
   await expect(summary).toContainText("Batteria Test");
   await summary.locator(".summary-action").click();
-  await search.fill("");
-  await expect(search).toBeVisible();
-  await search.press("Escape");
-  await expect(summary).toContainText("Batteria Test");
-  await summary.locator(".summary-action").click();
-  await search.fill("");
-  await expect(search).toBeVisible();
-  await expect(search).toHaveValue("");
-  await page.locator(".quote-required-part-label").click();
-  await expect(search).toHaveCount(0);
-  await expect(summary).toContainText("Nessuno");
-  await chooseRequiredPart(page, "Batteria Test");
-  await summary.locator(".summary-action").click();
-  await search.fill("");
-  await expect(search).toHaveValue("");
-  await search.press("Enter");
-  await expect(search).toHaveCount(0);
-  await expect(summary).toContainText("Nessuno");
-  await chooseRequiredPart(page, "Batteria Test");
-  await summary.locator(".summary-action").click();
-  await expect(search).toBeFocused();
-  await search.fill(`Ricambio stile ${Date.now()}`);
-  const newPart = page.getByRole("button", {
-    name: "Nuovo ricambio",
-    exact: true,
-  });
-  await expect(newPart).toBeEnabled();
-  await expect(newPart).toHaveCSS("font-weight", "650");
-  expect(
-    await newPart.evaluate(
-      (button) => button.scrollWidth <= button.clientWidth + 1,
-    ),
-  ).toBe(true);
-  await expect(newPart.locator("span")).toHaveCSS("text-overflow", "clip");
-  await search.press("Escape");
-  await summary.hover();
-  await removePart.click();
-  await expect(summary).toContainText("Nessuno");
-  await expect(removePart).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Ricambio", exact: true }),
+    page.getByRole("combobox", {
+      name: "Ricambio richiesto 1",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const picker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await expect(picker).toBeVisible();
+  await expect(
+    picker.locator(".price-option-inventory").filter({
+      hasText: "Batteria Test",
+    }),
+  ).toHaveClass(/is-selected/);
+  await expect(
+    picker.getByRole("button", {
+      name: "Opzione ricambio",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await picker
+    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+    .click();
+  await picker.getByRole("button", { name: "Annulla", exact: true }).click();
+  await expect(summary).toContainText("Batteria Test");
+  await summary.locator(".summary-action").click();
+  await picker
+    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+    .click();
+  await picker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Opzioni ricambio", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("combobox", {
+      name: "Ricambio richiesto 1",
+      exact: true,
+    }),
   ).toHaveCount(0);
 });
 
