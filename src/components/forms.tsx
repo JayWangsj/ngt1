@@ -416,6 +416,7 @@ export type CreatedProduct = {
   stock: number;
   reserved?: number;
   available?: number;
+  costPrice?: string;
 };
 
 export type ProductCompatibilityDraft = {
@@ -730,6 +731,7 @@ export function ProductForm({
           name,
           category,
           stock: initialStock,
+          costPrice,
         });
       onClose();
       if (!onCreated) router.refresh();
@@ -939,12 +941,20 @@ function PriceOptionPicker({
   const it = useMessages();
   const product = selected?.product ?? customProduct;
   const available = product?.available ?? product?.stock ?? 0;
+  const initialDraftOptionId = selected?.id ?? (product ? null : "");
+  const [draftOptionId, setDraftOptionId] = useState<string | null>(
+    initialDraftOptionId,
+  );
+  const openPicker = () => {
+    setDraftOptionId(initialDraftOptionId);
+    onOpenChange(true);
+  };
   return (
     <>
       {product ? (
         <div
           className={`selection-summary selected-part-summary price-option-picker-summary${disabled ? "" : " is-actionable"}`}
-          onClick={() => !disabled && onOpenChange(true)}
+          onClick={() => !disabled && openPicker()}
         >
           <span className="selection-summary-icon is-part">
             <Package size={18} aria-hidden="true" />
@@ -982,7 +992,7 @@ function PriceOptionPicker({
             type="button"
             className="summary-action"
             disabled={disabled}
-            onClick={() => onOpenChange(true)}
+            onClick={openPicker}
           >
             <span>{it.change}</span>
             <ChevronRight size={15} aria-hidden="true" />
@@ -993,7 +1003,7 @@ function PriceOptionPicker({
           type="button"
           className="quick-service-service-add quote-required-part-add"
           disabled={disabled}
-          onClick={() => onOpenChange(true)}
+          onClick={openPicker}
         >
           <Plus size={18} /> {it.partPriceOptions}
         </button>
@@ -1008,13 +1018,10 @@ function PriceOptionPicker({
               {options.map((option) => (
                 <button
                   type="button"
-                  className={`price-option-card price-option-choice${option.id === selected?.id ? " is-selected" : ""}`}
+                  className={`price-option-card price-option-choice${option.id === draftOptionId ? " is-selected" : ""}`}
                   key={option.id}
                   disabled={disabled}
-                  onClick={() => {
-                    onSelect(option.id);
-                    onOpenChange(false);
-                  }}
+                  onClick={() => setDraftOptionId(option.id)}
                 >
                   <div className="price-option-card-heading">
                     <div>
@@ -1059,33 +1066,57 @@ function PriceOptionPicker({
                   </div>
                 </button>
               ))}
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="price-option-clear"
-              disabled={disabled}
-              onClick={() => {
-                onSelect("");
-                onOpenChange(false);
-              }}
-            >
-              {it.noRequiredPart}
-            </Button>
-            {onAdd && (
-              <Button
+              <button
                 type="button"
-                variant="outline"
-                className="price-option-add"
+                className={`price-option-card price-option-choice price-option-none${draftOptionId === "" ? " is-selected" : ""}`}
+                disabled={disabled}
+                onClick={() => setDraftOptionId("")}
+              >
+                <span className="quick-service-picker-icon">
+                  <Package size={20} aria-hidden="true" />
+                </span>
+                <span className="quick-service-picker-copy">
+                  <strong>{it.noRequiredPart}</strong>
+                  <small>{it.noPartOptions}</small>
+                </span>
+              </button>
+            </div>
+            {onAdd && (
+              <button
+                type="button"
+                className="quick-service-picker-add price-option-add"
                 disabled={disabled}
                 onClick={() => {
                   onOpenChange(false);
                   onAdd();
                 }}
               >
-                <Plus size={16} /> {it.repairPart}
-              </Button>
+                <Plus size={16} /> {it.addPartOption}
+              </button>
             )}
+            <div className="quick-service-picker-footer price-option-picker-footer">
+              <div className="dialog-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => onOpenChange(false)}
+                >
+                  {it.cancel}
+                </Button>
+                <Button
+                  type="button"
+                  disabled={disabled || draftOptionId === null}
+                  onClick={() => {
+                    if (draftOptionId === null) return;
+                    onSelect(draftOptionId);
+                    onOpenChange(false);
+                  }}
+                >
+                  {it.quickService.confirmServices}
+                </Button>
+              </div>
+            </div>
           </div>
         </FormDialog>
       )}
@@ -1120,6 +1151,7 @@ export function ItemsEditor({
     stock: number;
     reserved?: number;
     available?: number;
+    costPrice?: string;
   }[];
   productCategories?: CategoryView[];
   device: { category: string; brand: string; series: string; model: string };
@@ -1133,6 +1165,7 @@ export function ItemsEditor({
   protectPriceOnOptionSwitch?: boolean;
 }) {
   const it = useMessages();
+  const router = useRouter();
   const [createdProducts, setCreatedProducts] = useState<CreatedProduct[]>([]);
   const availableProducts = [
     ...products,
@@ -1144,6 +1177,8 @@ export function ItemsEditor({
     index: number;
     query: string;
   } | null>(null);
+  const [creatingPriceOptionRule, setCreatingPriceOptionRule] =
+    useState<RuleView | null>(null);
   const [projectQueries, setProjectQueries] = useState<Record<number, string>>(
     {},
   );
@@ -1794,7 +1829,9 @@ export function ItemsEditor({
                             }));
                         }}
                         onSelect={switchPriceOption}
-                        onAdd={() => setCreatingPart({ index, query: "" })}
+                        onAdd={() =>
+                          setCreatingPriceOptionRule(match?.rule ?? null)
+                        }
                       />
                     ) : selectedProduct && !editingPart ? (
                       <div
@@ -2391,6 +2428,34 @@ export function ItemsEditor({
                 requiredQuantity: 1,
                 requiredProductRemoved: false,
               });
+            }}
+          />
+        </FormDialog>
+      )}
+      {creatingPriceOptionRule && (
+        <FormDialog
+          title={it.newPartOption}
+          onClose={() => setCreatingPriceOptionRule(null)}
+        >
+          <PriceRuleOptionForm
+            rule={creatingPriceOptionRule}
+            products={availableProducts.map((product) => ({
+              id: product.id,
+              name: product.name,
+              category: product.category,
+              stockQuantity: product.stock,
+              costPrice: product.costPrice,
+            }))}
+            productCategories={productCategories}
+            compatibility={{
+              category: device.category,
+              brand: device.brand,
+              model: device.model,
+              project: creatingPriceOptionRule.project,
+            }}
+            onSuccess={() => {
+              setCreatingPriceOptionRule(null);
+              router.refresh();
             }}
           />
         </FormDialog>
@@ -3698,6 +3763,7 @@ export function ReworkPartEditor({
   device,
   project,
   options = [],
+  rule,
 }: {
   orderId: string;
   itemId: string;
@@ -3707,6 +3773,7 @@ export function ReworkPartEditor({
   device: { category: string; brand: string; model: string };
   project: string;
   options?: PriceRuleOptionView[];
+  rule?: RuleView;
 }) {
   const it = useMessages();
   const router = useRouter();
@@ -3716,6 +3783,7 @@ export function ReworkPartEditor({
   const [error, setError] = useState("");
   const [createdProducts, setCreatedProducts] = useState<CreatedProduct[]>([]);
   const [creatingPart, setCreatingPart] = useState<string | null>(null);
+  const [creatingPriceOption, setCreatingPriceOption] = useState(false);
   const availableProducts = [
     ...products,
     ...createdProducts.filter(
@@ -3766,7 +3834,7 @@ export function ReworkPartEditor({
             );
             select(option?.productId ?? "");
           }}
-          onAdd={() => setCreatingPart("")}
+          onAdd={rule ? () => setCreatingPriceOption(true) : undefined}
         />
       ) : editing ? (
         <SearchableCombobox
@@ -3844,6 +3912,29 @@ export function ReworkPartEditor({
           />
         </FormDialog>
       )}
+      {creatingPriceOption && rule && (
+        <FormDialog
+          title={it.newPartOption}
+          onClose={() => setCreatingPriceOption(false)}
+        >
+          <PriceRuleOptionForm
+            rule={rule}
+            products={availableProducts.map((product) => ({
+              id: product.id,
+              name: product.name,
+              category: product.category,
+              stockQuantity: product.stock,
+              costPrice: product.costPrice,
+            }))}
+            productCategories={productCategories}
+            compatibility={{ ...device, project }}
+            onSuccess={() => {
+              setCreatingPriceOption(false);
+              router.refresh();
+            }}
+          />
+        </FormDialog>
+      )}
     </div>
   );
 }
@@ -3906,6 +3997,8 @@ export function AfterSalesForm({
     projectId: string;
     query: string;
   } | null>(null);
+  const [creatingPriceOptionRule, setCreatingPriceOptionRule] =
+    useState<RuleView | null>(null);
   const availableProducts = [
     ...products,
     ...createdProducts.filter(
@@ -4060,8 +4153,10 @@ export function AfterSalesForm({
                             },
                           }));
                         }}
-                        onAdd={() =>
-                          setCreatingPart({ projectId: project.id, query: "" })
+                        onAdd={
+                          rule
+                            ? () => setCreatingPriceOptionRule(rule)
+                            : undefined
                         }
                       />
                     ) : editingParts[project.id] ? (
@@ -4213,6 +4308,33 @@ export function AfterSalesForm({
                 ...current,
                 [creatingPart.projectId]: false,
               }));
+            }}
+          />
+        </FormDialog>
+      )}
+      {creatingPriceOptionRule && (
+        <FormDialog
+          title={it.newPartOption}
+          onClose={() => setCreatingPriceOptionRule(null)}
+        >
+          <PriceRuleOptionForm
+            rule={creatingPriceOptionRule}
+            products={availableProducts.map((product) => ({
+              id: product.id,
+              name: product.name,
+              category: product.category,
+              stockQuantity: product.stock,
+              costPrice: product.costPrice,
+            }))}
+            productCategories={productCategories}
+            compatibility={{
+              category: device.category,
+              brand: device.brand,
+              model: device.model,
+              project: creatingPriceOptionRule.project,
+            }}
+            onSuccess={() => {
+              setCreatingPriceOptionRule(null);
             }}
           />
         </FormDialog>
@@ -4916,6 +5038,8 @@ function PriceRuleOptionForm({
   rule,
   option,
   products,
+  productCategories = [],
+  compatibility,
   onSuccess,
 }: {
   rule: RuleView;
@@ -4925,13 +5049,33 @@ function PriceRuleOptionForm({
     name: string;
     category: string;
     stockQuantity: number;
-    costPrice: string;
+    costPrice?: string;
   }[];
+  productCategories?: CategoryView[];
+  compatibility?: ProductCompatibilityDraft;
   onSuccess: () => void;
 }) {
   const it = useMessages();
+  const [createdProducts, setCreatedProducts] = useState<
+    {
+      id: string;
+      name: string;
+      category: string;
+      stockQuantity: number;
+      costPrice?: string;
+    }[]
+  >([]);
+  const [creatingProduct, setCreatingProduct] = useState(false);
+  const availableProducts = [
+    ...products,
+    ...createdProducts.filter(
+      (created) => !products.some((product) => product.id === created.id),
+    ),
+  ];
   const [productId, setProductId] = useState(option?.productId ?? "");
-  const selected = products.find((product) => product.id === productId);
+  const selected = availableProducts.find(
+    (product) => product.id === productId,
+  );
   const [name, setName] = useState(option?.name ?? "");
   const [suggested, setSuggested] = useState(option?.suggested ?? "");
   const [cost, setCost] = useState(option?.cost ?? "");
@@ -4941,118 +5085,170 @@ function PriceRuleOptionForm({
   const [enabled, setEnabled] = useState(option?.enabled ?? true);
   const [isDefault, setIsDefault] = useState(option?.isDefault ?? false);
   const [notes, setNotes] = useState(option?.notes ?? "");
+  const selectProduct = (value: string) => {
+    setProductId(value);
+    const product = availableProducts.find((entry) => entry.id === value);
+    if (!product) return;
+    if (!option || !name.trim()) setName(product.name);
+    if (!cost.trim() && product.costPrice) setCost(product.costPrice);
+  };
   return (
-    <ActionForm
-      submit={it.save}
-      onSuccess={onSuccess}
-      action={() =>
-        priceRuleOptionAction(rule.id, option?.id ?? null, {
-          productId,
-          name: name.trim() || selected?.name || "",
-          suggested,
-          cost,
-          quantity,
-          minutes,
-          warrantyDays,
-          enabled,
-          isDefault,
-          notes,
-        })
-      }
-    >
-      <Field label={it.requiredPart}>
-        <SimpleSelect
-          value={productId}
-          onChange={(value) => {
-            setProductId(value);
-            const product = products.find((entry) => entry.id === value);
-            if (!product) return;
-            if (!name.trim()) setName(product.name);
-            if (!cost.trim()) setCost(product.costPrice);
-          }}
-          ariaLabel={it.requiredPart}
-          placeholder={it.selectOption}
-          options={products.map((product) => ({
-            value: product.id,
-            label: product.name,
-            secondary: `${product.category} · ${it.actualStock} ${product.stockQuantity}`,
-          }))}
-        />
-      </Field>
-      <div className="form-grid two">
-        <Field label={it.partOptionName}>
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
+    <>
+      <ActionForm
+        submit={it.save}
+        onSuccess={onSuccess}
+        action={() =>
+          priceRuleOptionAction(rule.id, option?.id ?? null, {
+            productId,
+            name: name.trim() || selected?.name || "",
+            suggested,
+            cost,
+            quantity,
+            minutes,
+            warrantyDays,
+            enabled,
+            isDefault,
+            notes,
+          })
+        }
+      >
+        <Field label={it.requiredPart}>
+          <SearchableCombobox
+            value={productId}
+            onChange={selectProduct}
+            ariaLabel={it.requiredPart}
+            placeholder={it.selectOption}
+            searchPlaceholder={it.searchInventoryPart}
+            emptyText={it.noMatches}
+            groups={[
+              {
+                options: availableProducts.map((product) => ({
+                  value: product.id,
+                  label: product.name,
+                  secondary: product.category,
+                  trailing: `${it.actualStock} ${product.stockQuantity}`,
+                })),
+              },
+            ]}
+          />
+          <button
+            type="button"
+            className="quick-service-picker-add price-option-product-add"
+            onClick={() => setCreatingProduct(true)}
+          >
+            <Plus size={16} /> {it.repairPart}
+          </button>
+        </Field>
+        <div className="form-grid two">
+          <Field label={it.partOptionName}>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+            />
+          </Field>
+          <Field label={`${it.suggested} (€)`}>
+            <input
+              value={suggested}
+              inputMode="decimal"
+              onChange={(event) => setSuggested(event.target.value)}
+              required
+            />
+          </Field>
+          <Field label={`${it.cost} (€)`}>
+            <input
+              value={cost}
+              inputMode="decimal"
+              onChange={(event) => setCost(event.target.value)}
+            />
+          </Field>
+          <Field label={it.quantity}>
+            <QuantityStepper
+              ariaLabel={it.quantity}
+              min={1}
+              value={quantity}
+              onValueChange={(value) => setQuantity(Number(value))}
+            />
+          </Field>
+          <Field label={it.durationMinutes}>
+            <input
+              type="number"
+              min={0}
+              value={minutes}
+              onChange={(event) => setMinutes(Number(event.target.value))}
+            />
+          </Field>
+          <Field label={it.warrantyDays}>
+            <input
+              type="number"
+              min={0}
+              value={warrantyDays}
+              onChange={(event) => setWarrantyDays(Number(event.target.value))}
+            />
+          </Field>
+        </div>
+        <Field label={it.notes}>
+          <textarea
+            rows={2}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
           />
         </Field>
-        <Field label={`${it.suggested} (€)`}>
-          <input
-            value={suggested}
-            inputMode="decimal"
-            onChange={(event) => setSuggested(event.target.value)}
-            required
+        <div className="form-row">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+            />
+            {it.enabled}
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={isDefault}
+              onChange={(event) => setIsDefault(event.target.checked)}
+            />
+            {it.defaultRecommended}
+          </label>
+        </div>
+      </ActionForm>
+      {creatingProduct && (
+        <FormDialog
+          title={it.newRepairPart}
+          onClose={() => setCreatingProduct(false)}
+        >
+          <ProductForm
+            categories={productCategories}
+            mode="inventory"
+            initialUsage="REPAIR"
+            quickRepair
+            initialCompatibility={
+              compatibility ?? {
+                category: rule.category,
+                brand: rule.brand,
+                model: rule.model,
+                project: rule.project,
+              }
+            }
+            onClose={() => setCreatingProduct(false)}
+            onCreated={(product) => {
+              const created = {
+                id: product.id,
+                name: product.name,
+                category: product.category,
+                stockQuantity: product.stock,
+                costPrice: product.costPrice,
+              };
+              setCreatedProducts((current) => [...current, created]);
+              setProductId(created.id);
+              setName(created.name);
+              if (created.costPrice) setCost(created.costPrice);
+            }}
           />
-        </Field>
-        <Field label={`${it.cost} (€)`}>
-          <input
-            value={cost}
-            inputMode="decimal"
-            onChange={(event) => setCost(event.target.value)}
-          />
-        </Field>
-        <Field label={it.quantity}>
-          <input
-            type="number"
-            min={1}
-            value={quantity}
-            onChange={(event) => setQuantity(Number(event.target.value))}
-          />
-        </Field>
-        <Field label={it.durationMinutes}>
-          <input
-            type="number"
-            min={0}
-            value={minutes}
-            onChange={(event) => setMinutes(Number(event.target.value))}
-          />
-        </Field>
-        <Field label={it.warrantyDays}>
-          <input
-            type="number"
-            min={0}
-            value={warrantyDays}
-            onChange={(event) => setWarrantyDays(Number(event.target.value))}
-          />
-        </Field>
-      </div>
-      <Field label={it.notes}>
-        <textarea
-          rows={2}
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-        />
-      </Field>
-      <div className="form-row">
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => setEnabled(event.target.checked)}
-          />
-          {it.enabled}
-        </label>
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={isDefault}
-            onChange={(event) => setIsDefault(event.target.checked)}
-          />
-          {it.defaultRecommended}
-        </label>
-      </div>
-    </ActionForm>
+        </FormDialog>
+      )}
+    </>
   );
 }
 
@@ -5404,14 +5600,13 @@ export function PriceList({
             ) : (
               <p className="empty">{it.noPartOptions}</p>
             )}
-            <Button
+            <button
               type="button"
-              variant="outline"
-              className="price-option-add"
+              className="quick-service-picker-add price-option-add"
               onClick={() => setEditingOption({ rule: optionRule })}
             >
-              <Plus size={16} /> {it.repairPart}
-            </Button>
+              <Plus size={16} /> {it.addPartOption}
+            </button>
           </div>
         </FormDialog>
       )}

@@ -2115,7 +2115,9 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex: 0 0 auto;
   gap: 10px;
+  white-space: nowrap;
 }
 .selection-summary > .selected-part-actions {
   display: flex;
@@ -8834,6 +8836,10 @@ details.secondary-actions {
   color: var(--ink);
   text-align: left;
 }
+.price-option-none {
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+}
 .price-option-card.is-disabled {
   opacity: 0.58;
 }
@@ -8851,7 +8857,7 @@ details.secondary-actions {
   background: #fffbee;
 }
 .price-option-choice.is-selected {
-  box-shadow: inset 3px 0 #e4ad00;
+  box-shadow: 0 0 0 1px rgb(232 187 21 / 12%);
 }
 .price-option-card-heading {
   display: flex;
@@ -8888,10 +8894,22 @@ details.secondary-actions {
 }
 .price-option-add,
 .price-option-clear {
-  justify-self: start;
+  width: 100%;
 }
 .price-option-picker-summary {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+.price-option-picker-summary .summary-action {
+  justify-self: end;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.price-option-picker-footer {
+  justify-content: flex-end;
+}
+.price-option-product-add {
+  min-height: 42px;
+  margin-top: 8px;
 }
 .quote-price-switch-notice {
   display: flex;

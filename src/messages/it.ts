@@ -1037,6 +1037,7 @@ export const it = {
     "Lo stesso intervento può avere un prezzo totale diverso per ogni ricambio.",
   managePartOptions: "Gestisci opzioni ricambio",
   newPartOption: "Nuova opzione ricambio",
+  addPartOption: "Opzione ricambio",
   editPartOption: "Modifica opzione ricambio",
   noPartOptions:
     "Nessun ricambio associato: viene usato il prezzo base dell'intervento.",

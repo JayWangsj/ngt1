@@ -1024,6 +1024,10 @@ export default async function Detail({
                             matchRule(ruleViews, order.device, item.project)
                               ?.rule.options
                           }
+                          rule={
+                            matchRule(ruleViews, order.device, item.project)
+                              ?.rule
+                          }
                         />
                       </div>
                     )}

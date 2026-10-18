@@ -894,6 +894,7 @@ export const zh: typeof it = {
   partOptionsHelp: "同一维修项目可按配件设置不同的维修总报价。",
   managePartOptions: "管理配件报价方案",
   newPartOption: "新增配件方案",
+  addPartOption: "配件方案",
   editPartOption: "编辑配件方案",
   noPartOptions: "此项目未关联配件，使用基础维修报价。",
   partOptionName: "方案名称",
