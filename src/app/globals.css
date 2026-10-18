@@ -5656,6 +5656,7 @@ details.secondary-actions {
   display: block;
   width: 14px;
   height: 14px;
+  border: 2px solid #59635f;
   border-radius: 50%;
   background: white;
   box-shadow: 0 1px 3px #0002;
@@ -8928,19 +8929,14 @@ details.secondary-actions {
   margin-left: auto;
   align-items: center;
 }
-.price-option-enabled-switch.motion-switch {
-  width: 34px;
-  height: 20px;
-  flex: 0 0 34px;
+.price-option-enabled-switch {
+  justify-self: auto;
+  gap: 5px;
+  color: #68736f;
+  font-size: 11px;
 }
-.price-option-enabled-switch.motion-switch > span {
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-}
-.price-option-enabled-switch.motion-switch[aria-checked="true"] > span {
-  transform: translateX(14px);
+.price-option-enabled-switch input:checked + span {
+  color: #806000;
 }
 .price-option-default-action {
   display: inline-flex;
@@ -9937,6 +9933,22 @@ summary.record-icon::-webkit-details-marker {
 .inventory-compatible-cell {
   width: 17%;
   min-width: 220px;
+}
+.inventory-compatible-edit.button-ghost {
+  min-height: 30px;
+  gap: 5px;
+  padding: 5px 7px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #806000;
+  font-size: 12px;
+  font-weight: 600;
+}
+.inventory-compatible-edit.button-ghost:hover,
+.inventory-compatible-edit.button-ghost:focus-visible {
+  border-color: transparent;
+  background: #fff7d6;
 }
 .inventory-compatibility-list {
   display: grid;

@@ -5801,12 +5801,28 @@ test("price editor and mobile yellow layout support both languages", async ({
     name: "Batteria Test: Disattiva",
   });
   await expect(batterySwitch).toBeChecked();
+  const readSwitchThumb = (toggle: typeof batterySwitch) =>
+    toggle.evaluate((input) => {
+      const thumb = getComputedStyle(input, "::before");
+      return {
+        content: thumb.content,
+        width: thumb.width,
+        transform: thumb.transform,
+      };
+    });
+  const enabledThumb = await readSwitchThumb(batterySwitch);
+  expect(enabledThumb.content).not.toBe("none");
+  expect(enabledThumb.width).toBe("14px");
   await batterySwitch.click();
   await expect(batteryOption).toHaveClass(/is-disabled/);
   const enableBatterySwitch = batteryOption.getByRole("switch", {
     name: "Batteria Test: Attiva",
   });
   await expect(enableBatterySwitch).not.toBeChecked();
+  const disabledThumb = await readSwitchThumb(enableBatterySwitch);
+  expect(disabledThumb.content).toBe(enabledThumb.content);
+  expect(disabledThumb.width).toBe("14px");
+  expect(disabledThumb.transform).not.toBe(enabledThumb.transform);
   await enableBatterySwitch.click();
   await expect(batteryOption).not.toHaveClass(/is-disabled/);
 
@@ -6409,8 +6425,17 @@ test("creates a repair part from the quote and selects it immediately", async ({
   const editCompatibility = createdPart.getByRole("button", {
     name: "Modifica dispositivi compatibili",
   });
-  await expect(editCompatibility).toHaveClass(/record-icon-compact/);
+  await expect(editCompatibility).toContainText("Dispositivi compatibili");
   await expect(editCompatibility.locator("svg")).toBeVisible();
+  await expect(editCompatibility).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await editCompatibility.hover();
+  await expect(editCompatibility).toHaveCSS(
+    "background-color",
+    "rgb(255, 247, 214)",
+  );
   await editCompatibility.click();
   const compatibilityDialog = page.getByRole("dialog", {
     name: "Modifica dispositivi compatibili",

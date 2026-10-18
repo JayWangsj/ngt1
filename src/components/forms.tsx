@@ -5051,46 +5051,48 @@ export function RuleForm({
                         {it.setDefault}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="motion-switch price-option-enabled-switch"
-                      role="switch"
-                      aria-checked={option.enabled}
-                      aria-label={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
-                      title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
-                      disabled={optionPending}
-                      onClick={async () => {
-                        setOptionPending(true);
-                        setOptionError("");
-                        try {
-                          const result = await priceRuleOptionAction(
-                            optionRule.id,
-                            option.id,
-                            {
-                              ...option,
-                              enabled: !option.enabled,
-                              isDefault: option.enabled
-                                ? false
-                                : option.isDefault,
-                              cost: option.cost ?? "",
-                            },
-                          );
-                          if (!result.ok) setOptionError(result.error);
-                          else {
-                            onOptionSaved?.();
-                            router.refresh();
+                    <label className="fault-enabled-switch price-option-enabled-switch">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        checked={option.enabled}
+                        aria-label={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                        title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                        disabled={optionPending}
+                        onChange={async () => {
+                          setOptionPending(true);
+                          setOptionError("");
+                          try {
+                            const result = await priceRuleOptionAction(
+                              optionRule.id,
+                              option.id,
+                              {
+                                ...option,
+                                enabled: !option.enabled,
+                                isDefault: option.enabled
+                                  ? false
+                                  : option.isDefault,
+                                cost: option.cost ?? "",
+                              },
+                            );
+                            if (!result.ok) setOptionError(result.error);
+                            else {
+                              onOptionSaved?.();
+                              router.refresh();
+                            }
+                          } catch {
+                            setOptionError(
+                              "Connessione non disponibile. Riprova.",
+                            );
+                          } finally {
+                            setOptionPending(false);
                           }
-                        } catch {
-                          setOptionError(
-                            "Connessione non disponibile. Riprova.",
-                          );
-                        } finally {
-                          setOptionPending(false);
-                        }
-                      }}
-                    >
-                      <span />
-                    </button>
+                        }}
+                      />
+                      <span>
+                        {option.enabled ? it.enabledState : it.disabledState}
+                      </span>
+                    </label>
                     <RecordIcon
                       kind="edit"
                       label={it.editPartOption}

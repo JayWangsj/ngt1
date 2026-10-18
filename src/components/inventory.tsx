@@ -14,6 +14,7 @@ import {
   ArrowRight,
   ChevronDown,
   PackageOpen,
+  Pencil,
   Plus,
   Smartphone,
   Star,
@@ -38,7 +39,6 @@ import {
   SimpleSelect,
 } from "./business-select";
 import { Button } from "./ui/button";
-import { RecordIcon } from "./ui/record-icon";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
 export type { CategoryView } from "./forms";
@@ -1369,13 +1369,17 @@ export function InventoryWorkspace({
                     </td>
                     <td className="inventory-compatible-cell">
                       {selected && product.usage === "REPAIR" ? (
-                        <RecordIcon
-                          kind="edit"
-                          label={it.inventory.editCompatibleDevices}
+                        <Button
                           type="button"
-                          className="record-icon-compact"
+                          variant="ghost"
+                          className="inventory-compatible-edit"
+                          aria-label={it.inventory.editCompatibleDevices}
+                          title={it.inventory.editCompatibleDevices}
                           onClick={() => setCompatibilityEditor(product.id)}
-                        />
+                        >
+                          {it.inventory.compatibleDevices}
+                          <Pencil size={15} aria-hidden="true" />
+                        </Button>
                       ) : compatibilityPaths(product).length ? (
                         <span className="inventory-compatibility-list">
                           {compatibilityPaths(product).map((path) => (
