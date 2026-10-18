@@ -7969,10 +7969,16 @@ test("price editor keeps deletion inside batch management", async ({
   await page.goto("/prices");
   await page.getByRole("button", { name: "Apple", exact: true }).click();
   await page.getByRole("button", { name: "Telefono", exact: true }).click();
-  await page.getByRole("button", { name: "iPhone 13", exact: true }).click();
-  await page
+  const modelToggle = page.getByRole("button", {
+    name: "iPhone 13",
+    exact: true,
+  });
+  const modelSection = modelToggle.locator(
+    "xpath=ancestor::section[contains(@class, 'price-tree-level')][1]",
+  );
+  await modelToggle.click();
+  await modelSection
     .getByRole("button", { name: "Intervento", exact: true })
-    .last()
     .click();
   const dialog = page.getByRole("dialog");
   await enterBusinessValue(page, "Intervento", "Da eliminare", dialog);
