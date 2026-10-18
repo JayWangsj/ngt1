@@ -8671,7 +8671,7 @@ details.secondary-actions {
 
 .price-rule-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 36px;
+  grid-template-columns: minmax(0, 1fr) 112px 72px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -8682,7 +8682,7 @@ details.secondary-actions {
     box-shadow 150ms ease-out;
 }
 .price-rule-row.is-batch {
-  grid-template-columns: 18px minmax(0, 1fr) 112px 36px;
+  grid-template-columns: 18px minmax(0, 1fr) 112px 72px;
 }
 .price-rule-row:last-child {
   border-bottom: 0;
@@ -8702,7 +8702,7 @@ details.secondary-actions {
 }
 .price-rule-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 36px;
+  grid-template-columns: minmax(0, 1fr) 112px 72px;
   align-items: center;
   gap: 8px;
   min-height: 36px;
@@ -8712,7 +8712,7 @@ details.secondary-actions {
   font-size: 12px;
 }
 .price-rule-header.is-batch {
-  grid-template-columns: 18px minmax(0, 1fr) 112px 36px;
+  grid-template-columns: 18px minmax(0, 1fr) 112px 72px;
   padding-left: 10px;
 }
 .price-rule-header strong {
@@ -8763,10 +8763,76 @@ details.secondary-actions {
   min-width: 0;
 }
 .price-row-actions {
-  width: 36px;
+  width: 72px;
   min-height: 40px;
   justify-content: flex-end;
   flex-wrap: nowrap;
+}
+.record-icon-button {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.record-icon-button:hover,
+.record-icon-button:focus-visible {
+  background: var(--surface-hover, #f5f7f7);
+  color: var(--ink);
+}
+.price-option-panel {
+  padding: 14px 16px 16px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #fffdf5;
+}
+.price-option-panel-header,
+.price-option-row,
+.price-option-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.price-option-panel-header {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.price-option-panel-header div,
+.price-option-row > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+.price-option-panel small {
+  color: var(--muted);
+}
+.price-option-list {
+  display: grid;
+  gap: 7px;
+}
+.price-option-row {
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.price-option-row > div:first-child {
+  flex: 1;
+}
+.price-option-row.is-disabled {
+  opacity: 0.58;
+}
+.price-option-actions {
+  margin-left: auto;
+}
+.quote-price-switch-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .price-row-actions > .record-icon {
   opacity: 0;

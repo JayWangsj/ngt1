@@ -1151,6 +1151,8 @@ export async function replaceQuote(
       },
       before: order.items.map((i) => ({
         project: i.project,
+        priceOptionId: i.priceOptionId,
+        priceOptionName: i.priceOptionName,
         suggested: i.suggested?.toString() ?? null,
         final: i.final.toString(),
         discount: i.discount.toString(),
@@ -1159,6 +1161,8 @@ export async function replaceQuote(
       })),
       after: items.map((i) => ({
         project: i.project,
+        priceOptionId: i.priceOptionId,
+        priceOptionName: i.priceOptionName,
         suggested: i.suggested?.toString() ?? null,
         final: i.final,
         discount: i.discount,
@@ -1637,6 +1641,47 @@ export async function savePriceRule(
     const rule = id
       ? await tx.priceRule.update({ where: { id }, data })
       : await tx.priceRule.create({ data });
+    if (input.requiredProductId) {
+      const product = await tx.product.findFirst({
+        where: {
+          id: input.requiredProductId,
+          enabled: true,
+          usage: "REPAIR",
+        },
+      });
+      if (!product) throw new BusinessError("Ricambio non disponibile.");
+      await tx.priceRuleOption.updateMany({
+        where: { ruleId: rule.id, isDefault: true },
+        data: { isDefault: false },
+      });
+      await tx.priceRuleOption.upsert({
+        where: {
+          ruleId_productId: {
+            ruleId: rule.id,
+            productId: product.id,
+          },
+        },
+        create: {
+          ruleId: rule.id,
+          productId: product.id,
+          name: product.name,
+          suggested: data.suggested,
+          cost: data.cost ?? product.costPrice,
+          quantity: input.requiredQuantity,
+          minutes: input.minutes,
+          isDefault: true,
+        },
+        update: {
+          suggested: data.suggested,
+          cost: data.cost ?? product.costPrice,
+          quantity: input.requiredQuantity,
+          minutes: input.minutes,
+          enabled: true,
+          isDefault: true,
+        },
+      });
+      await syncPriceOptionCompatibility(tx, rule, product.id);
+    }
     await audit(
       tx,
       actor,
@@ -1787,20 +1832,15 @@ export async function deletePriceRuleOption(
     const option = await tx.priceRuleOption.findFirstOrThrow({
       where: { id, ruleId },
     });
-    const used = await tx.workOrderItem.count({
-      where: { priceOptionId: id },
+    await tx.priceRuleOption.update({
+      where: { id },
+      data: { enabled: false, isDefault: false },
     });
-    if (used)
-      await tx.priceRuleOption.update({
-        where: { id },
-        data: { enabled: false, isDefault: false },
-      });
-    else await tx.priceRuleOption.delete({ where: { id } });
     await syncLegacyDefaultPriceOption(tx, ruleId);
     await audit(tx, actor, id, "PRICE_RULE_OPTION_DELETED", {
       ruleId,
       productId: option.productId,
-      disabled: used > 0,
+      disabled: true,
     });
   });
 }

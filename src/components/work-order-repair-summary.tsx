@@ -58,6 +58,7 @@ export function WorkOrderRepairSummary({
   initialDiscount,
   initialVat,
   locked,
+  protectPriceOnOptionSwitch,
 }: {
   orderId: string;
   items: SummaryItem[];
@@ -70,6 +71,7 @@ export function WorkOrderRepairSummary({
   inspectionFee: string;
   owner: boolean;
   locked: boolean;
+  protectPriceOnOptionSwitch: boolean;
 }) {
   const it = useMessages();
   const cardEdit = useOrderDetailEdit();
@@ -106,6 +108,7 @@ export function WorkOrderRepairSummary({
         initialEdit={{ index, field }}
         focusedEdit
         showEmptyPartSummary
+        protectPriceOnOptionSwitch={protectPriceOnOptionSwitch}
         onFocusedEditComplete={cardEdit?.clearTarget}
       />
     </div>

@@ -42,6 +42,7 @@ import { WorkOrderRepairSummary } from "@/components/work-order-repair-summary";
 import { ServiceOrderActions } from "@/components/service-order-actions";
 import { ServiceOrderPrint } from "@/components/service-order-print";
 import { it as italianMessages } from "@/messages/it";
+import { priceRuleViews } from "@/lib/price-rule-view";
 
 type TimelineEvent = {
   id: string;
@@ -108,7 +109,16 @@ export default async function Detail({
     productCategories,
     reservations,
   ] = await Promise.all([
-    db.priceRule.findMany({ where: { enabled: true } }),
+    db.priceRule.findMany({
+      where: { enabled: true },
+      include: {
+        options: {
+          where: { enabled: true },
+          include: { product: true },
+          orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+        },
+      },
+    }),
     db.product.findMany({
       where: { enabled: true },
       orderBy: [{ favorite: "desc" }, { name: "asc" }],
@@ -157,6 +167,7 @@ export default async function Detail({
   const reservedByProduct = new Map(
     reservations.map((entry) => [entry.productId, entry._sum.quantity ?? 0]),
   );
+  const ruleViews = priceRuleViews(rules, reservedByProduct);
   const totals = settlement(order.items, order);
   const remaining = balance(order.items, order.payments, order);
   const receivedTotal = order.payments.reduce(
@@ -192,12 +203,7 @@ export default async function Detail({
           series: order.device.series,
           model: order.device.model,
         }}
-        rules={rules.map((rule) => ({
-          ...rule,
-          suggested: rule.suggested.toString(),
-          cost: undefined,
-          updatedAt: undefined,
-        }))}
+        rules={ruleViews}
         faultOptions={faultOptions.map(({ _count, ...fault }) => ({
           ...fault,
           usageCount: _count.orders,
@@ -690,6 +696,9 @@ export default async function Detail({
                 <WorkOrderRepairSummary
                   orderId={id}
                   locked={originalLocked}
+                  protectPriceOnOptionSwitch={
+                    !!order.confirmedAt || receivedTotal > 0
+                  }
                   initialDiscount={order.orderDiscount.toString()}
                   initialVat={order.includeVat}
                   inspectionFee={order.inspectionFee.toString()}
@@ -705,6 +714,7 @@ export default async function Detail({
                     final: item.final.toString(),
                     discount: item.discount.toString(),
                     adjustmentReason: item.adjustmentReason,
+                    priceOptionId: item.priceOptionId ?? "",
                     requiredProductId: item.requiredProductId ?? "",
                     requiredQuantity: item.requiredQuantity,
                     source: `${it.levels[item.matchLevel as keyof typeof it.levels]} · ${order.device.brand} ${order.device.model}`,
@@ -725,12 +735,7 @@ export default async function Detail({
                         }
                       : null,
                   }))}
-                  rules={rules.map((rule) => ({
-                    ...rule,
-                    suggested: rule.suggested.toString(),
-                    cost: undefined,
-                    updatedAt: undefined,
-                  }))}
+                  rules={ruleViews}
                   products={repairProducts.map((product) => ({
                     id: product.id,
                     name: product.name,
@@ -860,6 +865,7 @@ export default async function Detail({
                     final: item.final.toString(),
                     discount: item.discount.toString(),
                     adjustmentReason: item.adjustmentReason,
+                    priceOptionId: item.priceOptionId ?? "",
                     requiredProductId: item.requiredProductId ?? "",
                     requiredQuantity: item.requiredQuantity,
                   }))}
@@ -870,12 +876,7 @@ export default async function Detail({
                     model: order.device.model,
                   }}
                   owner={actor.role === "OWNER"}
-                  rules={rules.map((rule) => ({
-                    ...rule,
-                    suggested: rule.suggested.toString(),
-                    cost: undefined,
-                    updatedAt: undefined,
-                  }))}
+                  rules={ruleViews}
                   products={repairProducts.map((product) => ({
                     id: product.id,
                     name: product.name,

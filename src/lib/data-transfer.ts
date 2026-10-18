@@ -12,6 +12,7 @@ import type {
   PaymentAllocation,
   WorkOrderProduct,
   PriceRule,
+  PriceRuleOption,
   StatusHistory,
   WorkOrder,
   WorkOrderFault,
@@ -32,7 +33,7 @@ import { BusinessError, type Actor } from "./domain";
 import { normalizeBrand, normalizeModel } from "./catalog";
 
 export const BACKUP_FORMAT = "ngt-repair-data";
-export const BACKUP_VERSION = 9;
+export const BACKUP_VERSION = 10;
 
 type JsonRow<T> = {
   [K in keyof T]: T[K] extends Date
@@ -54,6 +55,7 @@ type BackupData = {
   payments: JsonRow<Payment>[];
   histories: JsonRow<StatusHistory>[];
   prices: JsonRow<PriceRule>[];
+  priceOptions: JsonRow<PriceRuleOption>[];
   faults: JsonRow<FaultOption>[];
   audits: JsonRow<AuditLog>[];
   products: JsonRow<Product>[];
@@ -111,6 +113,8 @@ function ensureBackup(value: unknown): BackupFile {
     if (!Array.isArray(candidate.data[key]))
       throw new BusinessError("File di backup incompleto.");
   const products = (candidate.data as Partial<BackupData>).products ?? [];
+  const priceOptions =
+    (candidate.data as Partial<BackupData>).priceOptions ?? [];
   const inventoryMovements =
     (candidate.data as Partial<BackupData>).inventoryMovements ?? [];
   const retailSales = (candidate.data as Partial<BackupData>).retailSales ?? [];
@@ -141,6 +145,7 @@ function ensureBackup(value: unknown): BackupFile {
     (candidate.data as Partial<BackupData>).businessClock ?? null;
   if (
     !Array.isArray(products) ||
+    !Array.isArray(priceOptions) ||
     !Array.isArray(inventoryMovements) ||
     !Array.isArray(retailSales) ||
     !Array.isArray(retailSaleItems) ||
@@ -162,6 +167,7 @@ function ensureBackup(value: unknown): BackupFile {
     data: {
       ...(candidate.data as BackupData),
       products,
+      priceOptions,
       inventoryMovements,
       retailSales,
       retailSaleItems,
@@ -198,6 +204,7 @@ export async function exportBusinessData(): Promise<BackupFile> {
     payments,
     histories,
     prices,
+    priceOptions,
     faults,
     audits,
     products,
@@ -234,6 +241,9 @@ export async function exportBusinessData(): Promise<BackupFile> {
             { project: "asc" },
           ],
         }),
+        tx.priceRuleOption.findMany({
+          orderBy: [{ ruleId: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+        }),
         tx.faultOption.findMany({
           orderBy: [{ category: "asc" }, { key: "asc" }],
         }),
@@ -269,6 +279,7 @@ export async function exportBusinessData(): Promise<BackupFile> {
       payments,
       histories,
       prices,
+      priceOptions,
       faults,
       audits,
       products,
@@ -310,16 +321,17 @@ export async function clearBusinessData(actor: Actor) {
     await tx.reworkItem.deleteMany();
     await tx.reworkSession.deleteMany();
     await tx.inventoryMovement.deleteMany();
-    await tx.product.deleteMany();
     await tx.statusHistory.deleteMany();
     await tx.workOrderFault.deleteMany();
     await tx.workOrderDevice.deleteMany();
     await tx.workOrderItem.deleteMany();
+    await tx.priceRuleOption.deleteMany();
+    await tx.priceRule.deleteMany();
+    await tx.product.deleteMany();
     await tx.workOrder.deleteMany();
     await tx.device.deleteMany();
     await tx.customerPhone.deleteMany();
     await tx.customer.deleteMany();
-    await tx.priceRule.deleteMany();
     await tx.quickService.deleteMany();
     await tx.faultOption.deleteMany();
     await tx.deviceCatalogDeletion.deleteMany();
@@ -347,6 +359,7 @@ export async function importBusinessData(
     const customerIds = new Map<string, string>();
     const deviceIds = new Map<string, string>();
     const priceIds = new Map<string, string>();
+    const priceOptionIds = new Map<string, string>();
     const orderIds = new Map<string, string>();
     const existingOrderIds = new Set<string>();
     const saleIds = new Map<string, string>();
@@ -706,6 +719,53 @@ export async function importBusinessData(
       priceIds.set(source.id, target.id);
       entityIds.set(source.id, target.id);
     }
+    for (const source of backup.data.priceOptions) {
+      const ruleId = priceIds.get(source.ruleId);
+      const product = await tx.product.findUnique({
+        where: { id: source.productId },
+      });
+      if (!ruleId || !product) {
+        skipped++;
+        continue;
+      }
+      let target = await tx.priceRuleOption.findUnique({
+        where: { id: source.id },
+      });
+      target ??= await tx.priceRuleOption.findUnique({
+        where: {
+          ruleId_productId: { ruleId, productId: source.productId },
+        },
+      });
+      if (!target) {
+        const existingDefault = source.isDefault
+          ? await tx.priceRuleOption.findFirst({
+              where: { ruleId, isDefault: true },
+              select: { id: true },
+            })
+          : null;
+        target = await tx.priceRuleOption.create({
+          data: {
+            id: source.id,
+            ruleId,
+            productId: source.productId,
+            name: source.name,
+            suggested: source.suggested,
+            cost: source.cost,
+            quantity: source.quantity,
+            minutes: source.minutes,
+            warrantyDays: source.warrantyDays,
+            enabled: source.enabled,
+            isDefault: source.isDefault && !existingDefault,
+            sortOrder: source.sortOrder,
+            notes: source.notes,
+            updatedAt: date(source.updatedAt) ?? new Date(),
+          },
+        });
+        imported++;
+      } else skipped++;
+      priceOptionIds.set(source.id, target.id);
+      entityIds.set(source.id, target.id);
+    }
     for (const source of backup.data.orders) {
       const deviceId = deviceIds.get(source.deviceId);
       if (!deviceId) {
@@ -816,6 +876,10 @@ export async function importBusinessData(
             ruleId: source.ruleId
               ? (priceIds.get(source.ruleId) ?? null)
               : null,
+            priceOptionId: source.priceOptionId
+              ? (priceOptionIds.get(source.priceOptionId) ?? null)
+              : null,
+            priceOptionName: source.priceOptionName ?? "",
             quickServiceId: source.quickServiceId
               ? ((
                   await tx.quickService.findUnique({
@@ -831,6 +895,7 @@ export async function importBusinessData(
             adjustmentReason: source.adjustmentReason,
             minutes: source.minutes,
             requiredProductId: source.requiredProductId ?? null,
+            requiredProductName: source.requiredProductName ?? "",
             requiredQuantity: source.requiredQuantity ?? 1,
             warrantyStart: date(source.warrantyStart),
             warrantyDays: source.warrantyDays ?? 0,

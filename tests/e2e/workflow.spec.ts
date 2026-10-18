@@ -760,6 +760,56 @@ test("single operator opens every business page without login", async ({
   await expect(page).toHaveURL(/\/$/);
 });
 
+test("uses part-specific prices without overwriting a manual quote", async ({
+  page,
+}) => {
+  await page.goto("/prices");
+  await page
+    .getByRole("searchbox", { name: "Cerca" })
+    .fill("sostituzione display");
+  const row = page
+    .locator(".price-rule-row")
+    .filter({ hasText: "sostituzione display" })
+    .first();
+  await row
+    .getByRole("button", { name: "Gestisci opzioni ricambio", exact: true })
+    .click();
+  const options = page.locator(".price-option-panel");
+  await expect(
+    options.getByText("Display LCD standard", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    options.getByText("Display OLED alta qualità", { exact: true }),
+  ).toBeVisible();
+
+  await fillOrder(page);
+  await chooseBusinessOption(
+    page,
+    "Opzione ricambio 1",
+    "Display OLED alta qualità",
+  );
+  const quote = page.getByRole("button", {
+    name: "Modifica dati Preventivo attuale",
+    exact: true,
+  });
+  await expect(quote).toContainText("119,00");
+  await quote.click();
+  const input = page.getByLabel("Prezzo originale (€) 1", { exact: true });
+  await input.fill("105");
+  await input.press("Enter");
+  await chooseBusinessOption(
+    page,
+    "Opzione ricambio 1",
+    "Display LCD standard",
+  );
+  await expect(quote).toContainText("105,00");
+  await expect(page.getByText(/nuovo suggerito è 100,00/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Usa il nuovo suggerito", exact: true })
+    .click();
+  await expect(quote).toContainText("100,00");
+});
+
 test("switching repair and quick-service modes keeps both drafts", async ({
   page,
 }) => {
@@ -7275,7 +7325,7 @@ test("settings exports data and re-import skips existing records", async ({
   const backup = await exported.json();
   expect(backup).toMatchObject({
     format: "ngt-repair-data",
-    version: 9,
+    version: 10,
   });
   const imported = await page.request.post("/api/data/import", {
     data: backup,

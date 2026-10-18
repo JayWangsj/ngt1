@@ -4,6 +4,7 @@ import { NewOrderWizard } from "@/components/new-order-form";
 import { NewServiceOrder } from "@/components/new-service-order";
 import { BackButton, PageHeader } from "@/components/common";
 import { getMessages } from "@/lib/i18n-server";
+import { priceRuleViews } from "@/lib/price-rule-view";
 export default async function NewOrder({
   searchParams,
 }: {
@@ -14,6 +15,13 @@ export default async function NewOrder({
   const query = await searchParams;
   const rules = await db.priceRule.findMany({
     where: { enabled: true },
+    include: {
+      options: {
+        where: { enabled: true },
+        include: { product: true },
+        orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+      },
+    },
     orderBy: { project: "asc" },
   });
   const [
@@ -110,12 +118,7 @@ export default async function NewOrder({
               ),
             }))}
             productCategories={productCategories}
-            rules={rules.map((r) => ({
-              ...r,
-              suggested: r.suggested.toString(),
-              cost: undefined,
-              updatedAt: undefined,
-            }))}
+            rules={priceRuleViews(rules, reservedByProduct)}
           />
         }
       />

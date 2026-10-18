@@ -198,17 +198,28 @@ describe("PostgreSQL workflow", () => {
     const rule = await db.priceRule.findFirstOrThrow({
       where: { project: "display" },
     });
-    const lcdOption = await savePriceRuleOption(owner, rule.id, null, {
-      productId: lcd.id,
-      name: lcd.name,
+    await savePriceRule(owner, rule.id, {
+      category: rule.category,
+      brand: rule.brand,
+      series: rule.series,
+      model: rule.model,
+      project: rule.project,
       suggested: "79",
       cost: "32",
-      quantity: 1,
       minutes: 60,
-      warrantyDays: 90,
       enabled: true,
-      isDefault: false,
       notes: "",
+      requiredProductId: lcd.id,
+      requiredQuantity: 1,
+    });
+    const lcdOption = await db.priceRuleOption.findUniqueOrThrow({
+      where: {
+        ruleId_productId: { ruleId: rule.id, productId: lcd.id },
+      },
+    });
+    await db.priceRuleOption.update({
+      where: { id: lcdOption.id },
+      data: { warrantyDays: 90 },
     });
     const oledOption = await savePriceRuleOption(owner, rule.id, null, {
       productId: oled.id,
@@ -264,6 +275,15 @@ describe("PostgreSQL workflow", () => {
       warrantyDays: 90,
     });
     expect(item.suggested?.toString()).toBe("79");
+    expect(
+      await db.workOrderProduct.findFirstOrThrow({
+        where: {
+          orderId: order.id,
+          kind: "REPAIR_PART",
+          productId: lcd.id,
+        },
+      }),
+    ).toMatchObject({ quantity: 1, consumedAt: null });
 
     await replaceQuote(owner, order.id, {
       items: [
@@ -2826,6 +2846,31 @@ describe("versioned data backup and merge import", () => {
       initialStock: 6,
       minStock: 2,
     });
+    const repairProduct = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "OLED backup",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "45",
+      salePrice: "0",
+      initialStock: 3,
+      minStock: 1,
+    });
+    const displayRule = await db.priceRule.findFirstOrThrow({
+      where: { project: "display" },
+    });
+    const priceOption = await savePriceRuleOption(owner, displayRule.id, null, {
+      productId: repairProduct.id,
+      name: "OLED backup",
+      suggested: "119",
+      cost: "45",
+      quantity: 1,
+      minutes: 75,
+      warrantyDays: 180,
+      enabled: true,
+      isDefault: true,
+      notes: "Backup option",
+    });
     await createRetailSale(owner, {
       requestId: randomUUID(),
       items: [{ productId: product.id, quantity: 2 }],
@@ -2848,20 +2893,21 @@ describe("versioned data backup and merge import", () => {
     const backup = await exportBusinessData();
     expect(backup).toMatchObject({
       format: "ngt-repair-data",
-      version: 9,
+      version: 10,
     });
     expect(backup.data.orders).toHaveLength(1);
     expect(backup.data.payments.map((payment) => payment.kind).sort()).toEqual([
       "BALANCE",
       "SALE",
     ]);
-    expect(backup.data.products).toHaveLength(1);
-    expect(backup.data.inventoryMovements).toHaveLength(2);
+    expect(backup.data.products).toHaveLength(2);
+    expect(backup.data.priceOptions).toHaveLength(1);
+    expect(backup.data.inventoryMovements).toHaveLength(3);
     expect(backup.data.retailSales).toHaveLength(1);
     expect(backup.data.retailSaleItems).toHaveLength(1);
     expect(backup.data.paymentAllocations).toHaveLength(2);
     expect(backup.data.workOrderProducts).toHaveLength(1);
-    expect(backup.data.inventoryCategories).toHaveLength(1);
+    expect(backup.data.inventoryCategories).toHaveLength(2);
     expect(backup.data.businessClock).toMatchObject({
       mode: "MANUAL",
       manualDate: testBusinessDay,
@@ -2917,11 +2963,21 @@ describe("versioned data backup and merge import", () => {
     expect(
       await db.product.findUniqueOrThrow({ where: { id: product.id } }),
     ).toMatchObject({ stockQuantity: 4 });
-    expect(await db.inventoryMovement.count()).toBe(2);
+    expect(await db.inventoryMovement.count()).toBe(3);
     expect(await db.retailSale.count()).toBe(1);
     expect(await db.paymentAllocation.count()).toBe(2);
     expect(await db.workOrderProduct.count()).toBe(1);
-    expect(await db.inventoryCategory.count()).toBe(1);
+    expect(await db.inventoryCategory.count()).toBe(2);
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: priceOption.id },
+      }),
+    ).toMatchObject({
+      productId: repairProduct.id,
+      name: "OLED backup",
+      warrantyDays: 180,
+      isDefault: true,
+    });
     expect(
       await db.businessClock.findUniqueOrThrow({ where: { id: "default" } }),
     ).toMatchObject({ mode: "MANUAL", manualDate: testBusinessDay });

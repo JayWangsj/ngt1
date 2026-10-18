@@ -762,6 +762,11 @@ export const it = {
   diagnosticFee: "Costo diagnosi (€)",
   requiredPart: "Ricambio richiesto",
   repairPart: "Ricambio",
+  partPriceOption: "Opzione ricambio",
+  recommended: "Consigliato",
+  partChangedKeepsPrice:
+    "Il prezzo attuale confermato è stato mantenuto; il nuovo suggerito è {price}.",
+  useSuggestedPrice: "Usa il nuovo suggerito",
   optional: "facoltativo",
   change: "Cambia",
   searchInventoryPart: "Cerca ricambio in magazzino...",
@@ -1027,6 +1032,20 @@ export const it = {
   minutes: "Tempo previsto (min)",
   enabled: "Attiva",
   disabled: "Disattiva",
+  partPriceOptions: "Opzioni ricambio",
+  partOptionsHelp:
+    "Lo stesso intervento può avere un prezzo totale diverso per ogni ricambio.",
+  managePartOptions: "Gestisci opzioni ricambio",
+  newPartOption: "Nuova opzione ricambio",
+  editPartOption: "Modifica opzione ricambio",
+  noPartOptions:
+    "Nessun ricambio associato: viene usato il prezzo base dell'intervento.",
+  partOptionName: "Nome opzione",
+  quantity: "Quantità ricambio",
+  durationMinutes: "Tempo previsto (minuti)",
+  warrantyDays: "Giorni di garanzia",
+  defaultRecommended: "Opzione consigliata predefinita",
+  setDefault: "Imposta predefinita",
   ruleHelp:
     "Per modello: marca + modello. Per serie: marca + serie. Per una regola generica, lascia vuoti tutti i campi dispositivo.",
   reportDescription:

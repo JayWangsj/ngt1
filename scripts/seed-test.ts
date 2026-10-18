@@ -14,18 +14,19 @@ async function main() {
   await db.reworkSession.deleteMany();
   await db.retailSaleItem.deleteMany();
   await db.retailSale.deleteMany();
-  await db.inventoryMovement.deleteMany();
   await db.workOrderProduct.deleteMany();
-  await db.product.deleteMany();
-  await db.inventoryCategory.deleteMany();
   await db.statusHistory.deleteMany();
   await db.workOrderFault.deleteMany();
   await db.workOrderDevice.deleteMany();
   await db.workOrderItem.deleteMany();
+  await db.priceRuleOption.deleteMany();
+  await db.priceRule.deleteMany();
+  await db.inventoryMovement.deleteMany();
+  await db.product.deleteMany();
+  await db.inventoryCategory.deleteMany();
   await db.workOrder.deleteMany();
   await db.device.deleteMany();
   await db.customer.deleteMany();
-  await db.priceRule.deleteMany();
   await db.quickService.deleteMany();
   await db.deviceCatalogDeletion.deleteMany();
   await db.faultOption.deleteMany();
@@ -106,6 +107,7 @@ async function main() {
   const actor = await db.user.findUniqueOrThrow({
     where: { email: "owner@test.it" },
   });
+  const productsByName = new Map<string, string>();
   for (const product of [
     {
       name: "Cavo USB-C Test",
@@ -124,6 +126,26 @@ async function main() {
       costPrice: "35.00",
       salePrice: "80.00",
       stockQuantity: 3,
+      minStock: 1,
+      favorite: true,
+    },
+    {
+      name: "Display LCD Test",
+      category: "Schermi",
+      usage: "REPAIR" as const,
+      costPrice: "32.00",
+      salePrice: "0.00",
+      stockQuantity: 5,
+      minStock: 1,
+      favorite: true,
+    },
+    {
+      name: "Display OLED Test",
+      category: "Schermi",
+      usage: "REPAIR" as const,
+      costPrice: "65.00",
+      salePrice: "0.00",
+      stockQuantity: 2,
       minStock: 1,
       favorite: true,
     },
@@ -147,6 +169,7 @@ async function main() {
       update: {},
     });
     const created = await db.product.create({ data: product });
+    productsByName.set(product.name, created.id);
     if (product.name === "Batteria Test")
       await db.priceRule.create({
         data: {
@@ -176,5 +199,53 @@ async function main() {
         },
       });
   }
+  const displayRule = await db.priceRule.findFirstOrThrow({
+    where: {
+      category: "PHONE",
+      brand: "Apple",
+      model: "iPhone 13",
+      project: "sostituzione display",
+    },
+  });
+  await db.priceRuleOption.createMany({
+    data: [
+      {
+        ruleId: displayRule.id,
+        productId: productsByName.get("Display LCD Test")!,
+        name: "Display LCD standard",
+        suggested: "100.00",
+        cost: "32.00",
+        quantity: 1,
+        minutes: 60,
+        warrantyDays: 90,
+        enabled: true,
+        isDefault: true,
+        sortOrder: 0,
+      },
+      {
+        ruleId: displayRule.id,
+        productId: productsByName.get("Display OLED Test")!,
+        name: "Display OLED alta qualità",
+        suggested: "119.00",
+        cost: "65.00",
+        quantity: 1,
+        minutes: 75,
+        warrantyDays: 180,
+        enabled: true,
+        isDefault: false,
+        sortOrder: 1,
+      },
+    ],
+  });
+  await db.priceRule.update({
+    where: { id: displayRule.id },
+    data: {
+      suggested: "100.00",
+      cost: "32.00",
+      minutes: 60,
+      requiredProductId: productsByName.get("Display LCD Test")!,
+      requiredQuantity: 1,
+    },
+  });
 }
 main().finally(() => db.$disconnect());
