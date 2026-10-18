@@ -1216,7 +1216,10 @@ describe("PostgreSQL workflow", () => {
     const old = await createOrder(owner, input({ deposit: "0" }));
     await createOrder(
       owner,
-      input({ deposit: "0", items: [{ project: "Display", final: "120" }] }),
+      input({
+        deposit: "0",
+        items: [{ project: "Display", final: "120", saveRule: true }],
+      }),
     );
     await replaceQuote(owner, old.id, {
       items: [{ project: "Display", final: "100", discount: "10" }],
@@ -1661,7 +1664,7 @@ describe("1.2 customer and catalog management", () => {
       input({
         brand: "apple",
         model: "iphone 16 pro max",
-        items: [{ project: "Camera", final: "80" }],
+        items: [{ project: "Camera", final: "80", saveRule: true }],
       }),
     );
     const storedPhone = await db.workOrder.findUniqueOrThrow({
