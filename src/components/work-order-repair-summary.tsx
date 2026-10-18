@@ -26,6 +26,8 @@ type Product = {
 };
 type SummaryItem = ItemView & {
   source: string;
+  priceOptionName?: string;
+  suggested?: string;
   requiredProduct?: Product | null;
 };
 
@@ -40,6 +42,9 @@ function removeDraftTarget(
     index === target.index
       ? {
           ...item,
+          priceOptionId: "",
+          priceOptionName: "",
+          suggested: "",
           requiredProductId: "",
           requiredQuantity: 1,
           requiredProductRemoved: true,
@@ -141,6 +146,9 @@ export function WorkOrderRepairSummary({
         itemIndex === index
           ? {
               ...item,
+              priceOptionId: "",
+              priceOptionName: "",
+              suggested: "",
               requiredProductId: "",
               requiredQuantity: 1,
               requiredProductRemoved: true,
@@ -239,22 +247,29 @@ export function WorkOrderRepairSummary({
               </div>
             )}
             <strong className="quote-required-part-label">
-              {it.requiredPart} ({it.optional})
+              {item.priceOptionName
+                ? it.partPriceOption
+                : `${it.requiredPart} (${it.optional})`}
             </strong>
             {editing?.index === index && editing.field === "part" ? (
               editor(index, "part")
             ) : (
               <div
-                className={`selection-summary selected-part-summary${locked ? "" : " is-actionable"}`}
+                className={`selection-summary selected-part-summary${item.suggested ? " has-quote" : ""}${locked ? "" : " is-actionable"}`}
                 onClick={() => change(index, "part")}
               >
                 <span className="selection-summary-icon is-part">
                   <Package size={18} aria-hidden="true" />
                 </span>
                 <div className="selection-summary-copy">
-                  <strong>{product?.name ?? it.afterSales.noPart}</strong>
+                  <strong>
+                    {item.priceOptionName ||
+                      product?.name ||
+                      it.afterSales.noPart}
+                  </strong>
                   {product && (
                     <small>
+                      {item.priceOptionName && `${product.name} · `}
                       {product.category} · {it.actualStock} {product.stock} ·{" "}
                       {it.reservedStock} {product.reserved} ·{" "}
                       {it.availableStock} {product.available} ·{" "}
@@ -269,6 +284,12 @@ export function WorkOrderRepairSummary({
                     </small>
                   )}
                 </div>
+                {item.suggested && (
+                  <div className="selection-summary-value">
+                    <small>{it.priceListPrice}</small>
+                    <strong>{money(cents(item.suggested))}</strong>
+                  </div>
+                )}
                 {!locked && (
                   <div className="selected-part-actions">
                     <button
@@ -276,7 +297,11 @@ export function WorkOrderRepairSummary({
                       className="summary-action"
                       onClick={() => change(index, "part")}
                     >
-                      <span>{it.change}</span>
+                      <span>
+                        {item.priceOptionName
+                          ? `${it.change} ${it.partPriceOption}`
+                          : it.change}
+                      </span>
                       <ChevronRight size={15} aria-hidden="true" />
                     </button>
                     {removable && product && (

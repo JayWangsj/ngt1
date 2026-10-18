@@ -5189,6 +5189,31 @@ details.secondary-actions {
 .selection-summary.selected-project-summary {
   grid-template-columns: auto minmax(0, 1fr) 104px auto;
 }
+.selection-summary.selected-part-summary.has-quote {
+  grid-template-columns: auto minmax(0, 1fr) 104px auto;
+}
+.price-option-current-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.price-option-current-summary > span {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #ebe7d9;
+  border-radius: 8px;
+  background: #fffdf7;
+}
+.price-option-current-summary small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.price-option-current-summary strong {
+  color: var(--ink);
+  font-size: 12px;
+}
 .selection-summary-value > small {
   color: var(--muted);
   font-size: 10px;
@@ -5743,9 +5768,19 @@ details.secondary-actions {
   .selection-summary.selected-project-summary .selection-summary-value {
     grid-column: 2;
   }
+  .selection-summary.selected-part-summary.has-quote .selection-summary-value {
+    grid-column: 2;
+  }
   .selection-summary.selected-project-summary .summary-action {
     grid-column: 3;
     grid-row: 1 / span 2;
+  }
+  .selection-summary.selected-part-summary.has-quote .selected-part-actions {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  .price-option-current-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .selected-customer-summary .button {
     grid-column: 1 / -1;

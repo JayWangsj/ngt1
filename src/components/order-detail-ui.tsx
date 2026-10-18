@@ -23,6 +23,7 @@ import {
   FormDialog,
   RefundForm,
   type AfterSalesProject,
+  type RuleView,
 } from "./forms";
 import { useMessages } from "./language";
 import { ensureComfortableInteractionSpace } from "@/lib/comfortable-scroll";
@@ -389,13 +390,15 @@ export function AfterSalesActions({
   products,
   productCategories,
   device,
+  rules,
 }: {
   orderId: string;
   received: number;
   originalProjects: AfterSalesProject[];
   products: import("./forms").CreatedProduct[];
   productCategories: import("./forms").CategoryView[];
-  device: { category: string; brand: string; model: string };
+  device: { category: string; brand: string; series: string; model: string };
+  rules: RuleView[];
 }) {
   const it = useMessages();
   const [dialog, setDialog] = useState<"rework" | "refund" | null>(null);
@@ -426,6 +429,7 @@ export function AfterSalesActions({
             products={products}
             productCategories={productCategories}
             device={device}
+            rules={rules}
             onSuccess={() => setDialog(null)}
           />
         </FormDialog>

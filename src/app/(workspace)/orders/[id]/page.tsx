@@ -10,6 +10,7 @@ import {
   dateTime,
   dateTimeLocal,
   money,
+  matchRule,
   orderCode,
   promisedDate,
   settlement,
@@ -715,6 +716,8 @@ export default async function Detail({
                     discount: item.discount.toString(),
                     adjustmentReason: item.adjustmentReason,
                     priceOptionId: item.priceOptionId ?? "",
+                    priceOptionName: item.priceOptionName,
+                    suggested: item.suggested?.toString(),
                     requiredProductId: item.requiredProductId ?? "",
                     requiredQuantity: item.requiredQuantity,
                     source: `${it.levels[item.matchLevel as keyof typeof it.levels]} · ${order.device.brand} ${order.device.model}`,
@@ -1017,6 +1020,10 @@ export default async function Detail({
                             model: order.device.model,
                           }}
                           project={item.project}
+                          options={
+                            matchRule(ruleViews, order.device, item.project)
+                              ?.rule.options
+                          }
                         />
                       </div>
                     )}
@@ -1163,8 +1170,10 @@ export default async function Detail({
               device={{
                 category: order.device.category,
                 brand: order.device.brand,
+                series: order.device.series,
                 model: order.device.model,
               }}
+              rules={ruleViews}
             />
           )}
         </div>

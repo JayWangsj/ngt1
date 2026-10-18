@@ -783,6 +783,19 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   ).toBeVisible();
 
   await fillOrder(page);
+  const optionSummary = page.locator(".price-option-current-summary");
+  await expect(optionSummary).toContainText("Prezzo di listino");
+  await expect(optionSummary).toContainText("100,00 €");
+  await expect(optionSummary).toContainText("60");
+  await expect(optionSummary).toContainText("90");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await expect(optionSummary).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 844 });
   await chooseBusinessOption(
     page,
     "Opzione ricambio 1",
@@ -808,6 +821,36 @@ test("uses part-specific prices without overwriting a manual quote", async ({
     .getByRole("button", { name: "Usa il nuovo suggerito", exact: true })
     .click();
   await expect(quote).toContainText("100,00");
+  await save(page);
+  const details = page.getByTestId("details-card");
+  await details.locator(".order-card-heading").click();
+  const savedPart = details.locator(".selected-part-summary");
+  await expect(savedPart).toContainText("Display LCD standard");
+  await expect(savedPart).toContainText("Prezzo di listino");
+  await expect(savedPart).toContainText("100,00 €");
+
+  await state(page, "READY");
+  await page.getByRole("button", { name: /Incassa e consegna/ }).click();
+  await page
+    .getByRole("button", { name: "Riparazione in garanzia", exact: true })
+    .click();
+  const rework = page.getByRole("dialog");
+  await expect(rework.locator(".selected-part-summary")).toContainText(
+    "Display LCD standard",
+  );
+  await expect(rework.locator(".selected-part-summary")).toContainText(
+    "Prezzo di listino 100,00 €",
+  );
+  await rework.locator(".selected-part-summary .summary-action").click();
+  await chooseBusinessOption(
+    page,
+    "Ricambio richiesto sostituzione display",
+    "Display OLED alta qualità",
+    rework,
+  );
+  await expect(rework.locator(".selected-part-summary")).toContainText(
+    "Display OLED alta qualità",
+  );
 });
 
 test("switching repair and quick-service modes keeps both drafts", async ({
@@ -3572,30 +3615,26 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
   await expect(dialog.locator(".selected-project-summary")).toContainText(
     "100,00 €",
   );
+  await expect(dialog.locator(".price-option-current-summary")).toContainText(
+    "Prezzo di listino",
+  );
+  await expect(dialog.locator(".price-option-current-summary")).toContainText(
+    "90",
+  );
   await expect(dialog.locator(".quote-item")).toHaveCount(1);
   await dialog.locator(".selected-project-summary").hover();
   await expect(
     dialog.locator(".selected-project-summary .summary-action"),
   ).toBeVisible();
-  await expect(
-    dialog.getByRole("button", { name: "Ricambio", exact: true }),
-  ).toBeVisible();
-  await expect(
-    dialog.getByRole("combobox", {
-      name: "Ricambio richiesto 1",
-      exact: true,
-    }),
-  ).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Ricambio", exact: true }).click();
-  const inspectionPartSearch = dialog.getByRole("combobox", {
-    name: "Ricambio richiesto 1",
-    exact: true,
-  });
-  await inspectionPartSearch.fill("Cavo USB-C Test");
-  await expect(
-    dialog.getByRole("option", { name: /Cavo USB-C Test/ }),
-  ).toHaveCount(0);
-  await inspectionPartSearch.press("Escape");
+  await chooseBusinessOption(
+    page,
+    "Opzione ricambio 1",
+    "Display OLED alta qualità",
+    dialog,
+  );
+  await expect(dialog.locator(".price-option-current-summary")).toContainText(
+    "119,00 €",
+  );
   const projectActions = dialog.locator(
     ".selected-project-summary .selected-part-actions",
   );
@@ -3626,12 +3665,12 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
     "sostituzione display",
   );
   await expect(details.locator(".selected-part-summary")).toContainText(
-    "Nessuno",
+    "Display OLED alta qualità",
   );
   await details.locator(".selected-part-summary .summary-action").click();
   await expect(
     details.getByRole("combobox", {
-      name: "Ricambio richiesto 1",
+      name: "Opzione ricambio 1",
       exact: true,
     }),
   ).toBeFocused();
@@ -3648,9 +3687,9 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
   await expect(history).toContainText("Preventivo creato");
   await expect(history).toContainText("Stato aggiornato: In riparazione");
   const balanceCard = page.locator(".balance-card");
-  await expect(balanceCard).toContainText("Riparazione: 100,00 €");
+  await expect(balanceCard).toContainText("Riparazione: 119,00 €");
   await expect(balanceCard).toContainText("Diagnosi: 30,00 €");
-  await expect(balanceCard).toContainText("Totale: 130,00 €");
+  await expect(balanceCard).toContainText("Totale: 149,00 €");
   await state(page, "READY");
   await page.getByRole("button", { name: /Incassa e consegna/ }).click();
   await expect(page.locator(".message.error")).toHaveCount(0);
@@ -4927,20 +4966,20 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   ).toHaveCount(0);
   await expect(
     details.getByRole("combobox", {
-      name: "Ricambio richiesto 1",
+      name: "Opzione ricambio 1",
       exact: true,
     }),
   ).toBeFocused();
   await expect(details.locator(".quote-required-part-label")).toHaveCount(1);
   await chooseBusinessOption(
     page,
-    "Ricambio richiesto 1",
+    "Opzione ricambio 1",
     "Batteria Test",
     details,
   );
   await expect(
     details.getByRole("combobox", {
-      name: "Ricambio richiesto 1",
+      name: "Opzione ricambio 1",
       exact: true,
     }),
   ).toHaveCount(0);
@@ -4953,7 +4992,7 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   );
   await editablePart.locator(".summary-action").click();
   const requiredPartSearch = details.getByRole("combobox", {
-    name: "Ricambio richiesto 1",
+    name: "Opzione ricambio 1",
     exact: true,
   });
   await requiredPartSearch.fill("");
@@ -4976,7 +5015,7 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     .click();
   await chooseBusinessOption(
     page,
-    "Ricambio richiesto 1",
+    "Opzione ricambio 1",
     "Batteria Test",
     details,
   );

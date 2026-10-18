@@ -293,6 +293,8 @@ export type ItemView = {
   discount?: string;
   saveRule?: boolean;
   priceOptionId?: string;
+  priceOptionName?: string;
+  suggested?: string;
   suggestedAfterSwitch?: string;
   discountVisible?: boolean;
   requiredProductId?: string;
@@ -306,6 +308,8 @@ const blankItem = (): ItemView => ({
   discount: "0",
   saveRule: false,
   priceOptionId: "",
+  priceOptionName: "",
+  suggested: "",
 });
 function defaultPriceOption(rule?: RuleView | null) {
   const options = rule?.options?.filter((option) => option.enabled) ?? [];
@@ -1023,6 +1027,8 @@ export function ItemsEditor({
           discountVisible: false,
           saveRule: false,
           priceOptionId: option?.id ?? "",
+          priceOptionName: option?.name ?? "",
+          suggested: option?.suggested ?? found.rule.suggested,
           requiredProductId:
             option?.productId ?? found.rule.requiredProductId ?? "",
           requiredQuantity:
@@ -1109,6 +1115,8 @@ export function ItemsEditor({
             project,
             final: option?.suggested ?? found.rule.suggested,
             priceOptionId: option?.id ?? "",
+            priceOptionName: option?.name ?? "",
+            suggested: option?.suggested ?? found.rule.suggested,
             requiredProductId:
               option?.productId ?? found.rule.requiredProductId ?? "",
             requiredQuantity:
@@ -1122,6 +1130,8 @@ export function ItemsEditor({
             final: "",
             discount: "0",
             priceOptionId: "",
+            priceOptionName: "",
+            suggested: "",
             requiredProductId: "",
             requiredQuantity: 1,
             requiredProductRemoved: false,
@@ -1166,6 +1176,8 @@ export function ItemsEditor({
       discountVisible: false,
       saveRule: false,
       priceOptionId: "",
+      priceOptionName: "",
+      suggested: "",
       requiredProductId: "",
       requiredQuantity: 1,
       requiredProductRemoved: false,
@@ -1232,6 +1244,19 @@ export function ItemsEditor({
           const option = priceOptions.find(
             (candidate) => candidate.id === priceOptionId,
           );
+          if (!priceOptionId) {
+            update(index, {
+              priceOptionId: "",
+              priceOptionName: "",
+              suggested: "",
+              requiredProductId: "",
+              requiredQuantity: 1,
+              requiredProductRemoved: true,
+              suggestedAfterSwitch: undefined,
+            });
+            if (focusedEdit) onFocusedEditComplete?.();
+            return;
+          }
           if (!option) return;
           const previousSuggestion =
             selectedPriceOption?.suggested ?? match?.rule.suggested ?? "";
@@ -1241,6 +1266,8 @@ export function ItemsEditor({
               numeric(item.final) !== numeric(previousSuggestion));
           update(index, {
             priceOptionId: option.id,
+            priceOptionName: option.name,
+            suggested: option.suggested,
             requiredProductId: option.productId,
             requiredQuantity: option.quantity,
             requiredProductRemoved: false,
@@ -1249,6 +1276,7 @@ export function ItemsEditor({
               ? option.suggested
               : undefined,
           });
+          if (focusedEdit) onFocusedEditComplete?.();
         };
         const createTemporaryProject = (project: string) => {
           const value = project.trim();
@@ -1271,6 +1299,8 @@ export function ItemsEditor({
             discountVisible: false,
             saveRule: true,
             priceOptionId: "",
+            priceOptionName: "",
+            suggested: "",
             requiredProductId: "",
             requiredQuantity: 1,
             requiredProductRemoved: false,
@@ -1531,6 +1561,9 @@ export function ItemsEditor({
                         discountVisible: false,
                         saveRule: false,
                         priceOptionId: option?.id ?? "",
+                        priceOptionName: option?.name ?? "",
+                        suggested:
+                          option?.suggested ?? found?.rule.suggested ?? "",
                         requiredProductId:
                           option?.productId ??
                           found?.rule.requiredProductId ??
@@ -1567,33 +1600,65 @@ export function ItemsEditor({
                       </strong>
                     )}
                     {priceOptions.length ? (
-                      <SearchableCombobox
-                        className="repair-part-combobox"
-                        value={selectedPriceOption?.id ?? ""}
-                        onChange={switchPriceOption}
-                        ariaLabel={`${it.partPriceOption} ${index + 1}`}
-                        placeholder={it.partPriceOption}
-                        searchPlaceholder={it.searchInventoryPart}
-                        emptyText={it.noMatches}
-                        groups={[
-                          {
-                            options: priceOptions.map((option) => ({
-                              value: option.id,
-                              label: option.name,
-                              secondary: `${it.suggested}: ${money(cents(option.suggested))}${option.isDefault ? ` · ${it.recommended}` : ""}`,
-                              trailing: (
-                                <span
-                                  className={`part-stock ${option.product.available >= option.quantity ? "is-available" : "is-empty"}`}
-                                >
-                                  {it.actualStock} {option.product.stock} ·{" "}
-                                  {it.reservedStock} {option.product.reserved} ·{" "}
-                                  {it.availableStock} {option.product.available}
-                                </span>
-                              ),
-                            })),
-                          },
-                        ]}
-                      />
+                      <>
+                        <SearchableCombobox
+                          className="repair-part-combobox"
+                          value={selectedPriceOption?.id ?? ""}
+                          onChange={switchPriceOption}
+                          autoFocusQuery={
+                            editingPart ? selectedPriceOption?.name : undefined
+                          }
+                          ariaLabel={`${it.partPriceOption} ${index + 1}`}
+                          placeholder={it.partPriceOption}
+                          searchPlaceholder={it.searchInventoryPart}
+                          emptyText={it.noMatches}
+                          clearable
+                          commitEmptyOnClose
+                          groups={[
+                            {
+                              options: priceOptions.map((option) => ({
+                                value: option.id,
+                                label: option.name,
+                                secondary: `${it.suggested}: ${money(cents(option.suggested))}${option.isDefault ? ` · ${it.recommended}` : ""}`,
+                                trailing: (
+                                  <span
+                                    className={`part-stock ${option.product.available >= option.quantity ? "is-available" : "is-empty"}`}
+                                  >
+                                    {it.actualStock} {option.product.stock} ·{" "}
+                                    {it.reservedStock} {option.product.reserved}{" "}
+                                    · {it.availableStock}{" "}
+                                    {option.product.available}
+                                  </span>
+                                ),
+                              })),
+                            },
+                          ]}
+                        />
+                        {selectedPriceOption && (
+                          <div className="price-option-current-summary">
+                            <span>
+                              <small>{it.priceListPrice}</small>
+                              <strong>
+                                {money(cents(selectedPriceOption.suggested))}
+                              </strong>
+                            </span>
+                            <span>
+                              <small>{it.currentQuote}</small>
+                              <strong>{money(cents(item.final))}</strong>
+                            </span>
+                            <span>
+                              <small>{it.minutes}</small>
+                              <strong>{selectedPriceOption.minutes}</strong>
+                            </span>
+                            <span>
+                              <small>{it.warrantyDays}</small>
+                              <strong>
+                                {selectedPriceOption.warrantyDays}
+                              </strong>
+                            </span>
+                          </div>
+                        )}
+                      </>
                     ) : selectedProduct && !editingPart ? (
                       <div
                         className="selection-summary selected-part-summary is-actionable"
@@ -3413,11 +3478,13 @@ export function WarrantyProgressPanel({
 
 function ReworkPartSummary({
   product,
+  option,
   disabled = false,
   onChange,
   onRemove,
 }: {
   product?: CreatedProduct;
+  option?: PriceRuleOptionView;
   disabled?: boolean;
   onChange: () => void;
   onRemove: () => void;
@@ -3436,10 +3503,16 @@ function ReworkPartSummary({
         <Package size={18} aria-hidden="true" />
       </span>
       <div className="selection-summary-copy">
-        <strong>{product?.name ?? it.afterSales.noPart}</strong>
+        <strong>{option?.name ?? product?.name ?? it.afterSales.noPart}</strong>
         <small>
           {product ? (
             <>
+              {option && (
+                <>
+                  {product.name} · {it.priceListPrice}{" "}
+                  {money(cents(option.suggested))} ·{" "}
+                </>
+              )}
               {product.category} · {it.actualStock} {product.stock} ·{" "}
               {it.reservedStock} {product.reserved ?? 0} · {it.availableStock}{" "}
               {available} ·{" "}
@@ -3487,6 +3560,7 @@ export function ReworkPartEditor({
   productCategories,
   device,
   project,
+  options = [],
 }: {
   orderId: string;
   itemId: string;
@@ -3495,6 +3569,7 @@ export function ReworkPartEditor({
   productCategories: CategoryView[];
   device: { category: string; brand: string; model: string };
   project: string;
+  options?: PriceRuleOptionView[];
 }) {
   const it = useMessages();
   const router = useRouter();
@@ -3513,12 +3588,18 @@ export function ReworkPartEditor({
   const selectedProduct = availableProducts.find(
     (product) => product.id === selected,
   );
+  const selectedOption = options.find(
+    (option) => option.enabled && option.productId === selected,
+  );
   const select = (productId: string) => {
+    const option = options.find(
+      (candidate) => candidate.productId === productId,
+    );
     setSelected(productId);
     startTransition(async () => {
       const result = await updateReworkPartAction(orderId, itemId, {
         productId,
-        quantity: 1,
+        quantity: option?.quantity ?? 1,
       });
       if (!result.ok) {
         setSelected(value);
@@ -3546,13 +3627,32 @@ export function ReworkPartEditor({
           emptyText={it.noMatches}
           clearable
           groups={[
+            ...(options.length
+              ? [
+                  {
+                    options: options
+                      .filter((option) => option.enabled)
+                      .map((option) => ({
+                        value: option.productId,
+                        label: option.name,
+                        secondary: `${it.priceListPrice}: ${money(cents(option.suggested))}`,
+                        trailing: `${it.availableStock} ${option.product.available}`,
+                      })),
+                  },
+                ]
+              : []),
             {
-              options: availableProducts.map((product) => ({
-                value: product.id,
-                label: product.name,
-                secondary: product.category,
-                trailing: `${it.actualStock} ${product.stock} · ${it.reservedStock} ${product.reserved ?? 0} · ${it.availableStock} ${product.available ?? product.stock}`,
-              })),
+              options: availableProducts
+                .filter(
+                  (product) =>
+                    !options.some((option) => option.productId === product.id),
+                )
+                .map((product) => ({
+                  value: product.id,
+                  label: product.name,
+                  secondary: product.category,
+                  trailing: `${it.actualStock} ${product.stock} · ${it.reservedStock} ${product.reserved ?? 0} · ${it.availableStock} ${product.available ?? product.stock}`,
+                })),
             },
           ]}
           customLabel={it.newPart}
@@ -3563,6 +3663,7 @@ export function ReworkPartEditor({
       ) : (
         <ReworkPartSummary
           product={selectedProduct}
+          option={selectedOption}
           disabled={pending}
           onChange={() => setEditing(true)}
           onRemove={() => select("")}
@@ -3599,13 +3700,15 @@ export function AfterSalesForm({
   products,
   productCategories,
   device,
+  rules,
   onSuccess,
 }: {
   id: string;
   originalProjects: AfterSalesProject[];
   products: CreatedProduct[];
   productCategories: CategoryView[];
-  device: { category: string; brand: string; model: string };
+  device: { category: string; brand: string; series: string; model: string };
+  rules: RuleView[];
   onSuccess?: () => void;
 }) {
   const it = useMessages();
@@ -3621,6 +3724,7 @@ export function AfterSalesForm({
         treatment: "WARRANTY" | "PAID";
         fee: string;
         requiredProductId: string;
+        requiredQuantity: number;
       }
     >
   >(() =>
@@ -3634,6 +3738,7 @@ export function AfterSalesForm({
               : "PAID",
           fee: "0",
           requiredProductId: project.requiredProductId ?? "",
+          requiredQuantity: project.requiredQuantity ?? 1,
         },
       ]),
     ),
@@ -3671,9 +3776,7 @@ export function AfterSalesForm({
                 ? "0"
                 : itemValues[originalItemId].fee,
             requiredProductId: itemValues[originalItemId].requiredProductId,
-            requiredQuantity:
-              originalProjects.find((project) => project.id === originalItemId)
-                ?.requiredQuantity ?? 1,
+            requiredQuantity: itemValues[originalItemId].requiredQuantity,
           })),
           notes: str(data, "notes"),
           dueDate: str(data, "dueDate"),
@@ -3686,6 +3789,12 @@ export function AfterSalesForm({
           const value = itemValues[project.id];
           const selectedProduct = availableProducts.find(
             (product) => product.id === value?.requiredProductId,
+          );
+          const rule = matchRule(rules, device, project.name)?.rule;
+          const options =
+            rule?.options?.filter((option) => option.enabled) ?? [];
+          const selectedOption = options.find(
+            (option) => option.productId === value?.requiredProductId,
           );
           return (
             <section
@@ -3761,6 +3870,12 @@ export function AfterSalesForm({
                           }))
                         }
                       />
+                      {selectedOption && (
+                        <small>
+                          {it.priceListPrice}:{" "}
+                          {money(cents(selectedOption.suggested))}
+                        </small>
+                      )}
                     </Field>
                   )}
                   <div className="after-sales-part-field">
@@ -3778,9 +3893,17 @@ export function AfterSalesForm({
                           }))
                         }
                         onChange={(requiredProductId) => {
+                          const option = options.find(
+                            (candidate) =>
+                              candidate.productId === requiredProductId,
+                          );
                           setItemValues((current) => ({
                             ...current,
-                            [project.id]: { ...value, requiredProductId },
+                            [project.id]: {
+                              ...value,
+                              requiredProductId,
+                              requiredQuantity: option?.quantity ?? 1,
+                            },
                           }));
                           setEditingParts((current) => ({
                             ...current,
@@ -3793,13 +3916,32 @@ export function AfterSalesForm({
                         emptyText={it.noMatches}
                         clearable
                         groups={[
+                          ...(options.length
+                            ? [
+                                {
+                                  options: options.map((option) => ({
+                                    value: option.productId,
+                                    label: option.name,
+                                    secondary: `${it.priceListPrice}: ${money(cents(option.suggested))}`,
+                                    trailing: `${it.actualStock} ${option.product.stock} · ${it.reservedStock} ${option.product.reserved} · ${it.availableStock} ${option.product.available}`,
+                                  })),
+                                },
+                              ]
+                            : []),
                           {
-                            options: availableProducts.map((product) => ({
-                              value: product.id,
-                              label: product.name,
-                              secondary: product.category,
-                              trailing: `${it.actualStock} ${product.stock} · ${it.availableStock} ${product.available ?? product.stock}`,
-                            })),
+                            options: availableProducts
+                              .filter(
+                                (product) =>
+                                  !options.some(
+                                    (option) => option.productId === product.id,
+                                  ),
+                              )
+                              .map((product) => ({
+                                value: product.id,
+                                label: product.name,
+                                secondary: product.category,
+                                trailing: `${it.actualStock} ${product.stock} · ${it.availableStock} ${product.available ?? product.stock}`,
+                              })),
                           },
                         ]}
                         customLabel={it.newPart}
@@ -3812,12 +3954,14 @@ export function AfterSalesForm({
                     ) : (
                       <ReworkPartSummary
                         product={selectedProduct}
+                        option={selectedOption}
                         onRemove={() =>
                           setItemValues((current) => ({
                             ...current,
                             [project.id]: {
                               ...value,
                               requiredProductId: "",
+                              requiredQuantity: 1,
                             },
                           }))
                         }
@@ -3878,6 +4022,7 @@ export function AfterSalesForm({
                 [creatingPart.projectId]: {
                   ...current[creatingPart.projectId],
                   requiredProductId: product.id,
+                  requiredQuantity: 1,
                 },
               }));
               setEditingParts((current) => ({
