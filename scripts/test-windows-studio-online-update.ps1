@@ -187,6 +187,7 @@ try {
     $shimCommand = Join-Path $shimRoot "gh.cmd"
     "@echo off`r`nnode `"$shimScript`" %*`r`n" | Set-Content -LiteralPath $shimCommand -Encoding ascii
     $env:NGT_READY_GH_ORIGINAL = $githubCli
+    $env:NGT_READY_GH_SHIM = $shimCommand
     $env:NGT_READY_CANDIDATE_DIR = [System.IO.Path]::GetFullPath($CandidateDirectory)
     $env:NGT_READY_CANDIDATE_TAG = $TargetTag
     $env:PATH = "$shimRoot;$env:PATH"
@@ -311,9 +312,16 @@ try {
     $replaceCount = [regex]::Matches($scriptContent, $legacyReplacePattern).Count
     if ($replaceCount -gt 0) {
       $scriptContent = [regex]::Replace($scriptContent, $legacyReplacePattern, $legacyReplaceFix)
+      Write-Output "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1: $relativePath ($replaceCount calls)."
+    }
+    if ($CandidateDirectory -and $relativePath -eq "scripts/windows-studio-common.ps1") {
+      . (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
+      $scriptContent = Set-NgtReadyBaselineGhShim $scriptContent
+      Write-Output "Adapted the verified legacy baseline to use the local candidate release adapter."
+    }
+    if ($replaceCount -gt 0 -or ($CandidateDirectory -and $relativePath -eq "scripts/windows-studio-common.ps1")) {
       Set-Content -LiteralPath $scriptPath -Value $scriptContent -Encoding utf8
       $manifestEntry.Value = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-      Write-Output "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1: $relativePath ($replaceCount calls)."
     }
   }
   $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
