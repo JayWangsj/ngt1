@@ -13,7 +13,7 @@ export default async function Prices() {
       include: {
         options: {
           include: { product: true },
-          orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         },
       },
       orderBy: [

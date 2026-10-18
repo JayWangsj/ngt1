@@ -32,15 +32,14 @@ import {
   type DeviceCatalogDeletionView,
   type ProductCompatibilityDraft,
 } from "./forms";
-import { EditableSelect } from "./editable-select";
-import {
-  DatePicker,
-  SearchableCombobox,
-  SimpleSelect,
-} from "./business-select";
+import { DatePicker, SimpleSelect } from "./business-select";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
+import {
+  CompatibilityAddEditor,
+  type CompatibilityDeviceDraft,
+} from "./compatibility-add-editor";
 export type { CategoryView } from "./forms";
 
 const presetCategories = [
@@ -127,16 +126,10 @@ function ProductCompatibilityDialog({
   onSave: (value: ProductCompatibilityDraft[]) => void;
 }) {
   const it = useMessages();
-  const { locale } = useLanguage();
   const [value, setValue] = useState<ProductCompatibilityDraft[]>(
     product.compatibilities,
   );
-  const [adding, setAdding] = useState<{
-    category: string;
-    brand: string;
-    model: string;
-    projects: string[];
-  } | null>(null);
+  const [adding, setAdding] = useState<CompatibilityDeviceDraft | null>(null);
   const devices = Object.values(
     value.reduce<
       Record<
@@ -165,51 +158,6 @@ function ProductCompatibilityDialog({
       return groups;
     }, {}),
   );
-  const hiddenCatalogValue = (kind: "BRAND" | "MODEL", candidate: string) =>
-    Boolean(
-      adding &&
-      catalogDeletions.some(
-        (deletion) =>
-          deletion.category === adding.category &&
-          deletion.kind === kind &&
-          (kind === "BRAND" ||
-            deletion.brand.toLocaleLowerCase("it") ===
-              adding.brand.toLocaleLowerCase("it")) &&
-          deletion.value.toLocaleLowerCase("it") ===
-            candidate.toLocaleLowerCase("it"),
-      ),
-    );
-  const brandOptions = adding
-    ? uniqueValues(
-        options
-          .filter((option) => option.category === adding.category)
-          .map((option) => option.brand),
-      ).filter((brand) => !hiddenCatalogValue("BRAND", brand))
-    : [];
-  const modelOptions = adding
-    ? uniqueValues(
-        options
-          .filter(
-            (option) =>
-              option.category === adding.category &&
-              option.brand.toLocaleLowerCase("it") ===
-                adding.brand.toLocaleLowerCase("it"),
-          )
-          .map((option) => option.model),
-      ).filter((model) => !hiddenCatalogValue("MODEL", model))
-    : [];
-  const projectOptions = adding
-    ? uniqueValues(
-        options
-          .filter(
-            (option) =>
-              option.category === adding.category &&
-              option.brand.toLocaleLowerCase("it") ===
-                adding.brand.toLocaleLowerCase("it"),
-          )
-          .map((option) => option.project),
-      ).filter((project) => project && !adding.projects.includes(project))
-    : [];
   function confirmAdding() {
     if (!adding) return;
     setValue((current) => [
@@ -248,100 +196,12 @@ function ProductCompatibilityDialog({
     >
       <div data-form-dialog-body data-product-compatibility-dialog>
         {adding ? (
-          <div className="compatibility-add-editor">
-            <div className="compatibility-device-fields">
-              <label>
-                <span>{it.deviceType}</span>
-                <SimpleSelect
-                  value={adding.category}
-                  onChange={(category) =>
-                    setAdding({
-                      category,
-                      brand: "",
-                      model: "",
-                      projects: [],
-                    })
-                  }
-                  placeholder={it.deviceType}
-                  ariaLabel={it.deviceType}
-                  options={Object.entries(deviceCategories).map(
-                    ([category, labels]) => ({
-                      value: category,
-                      label: labels[locale === "zh" ? 1 : 0],
-                    }),
-                  )}
-                />
-              </label>
-              <EditableSelect
-                label={it.brand}
-                value={adding.brand}
-                options={brandOptions}
-                onChange={(brand) =>
-                  setAdding({ ...adding, brand, model: "", projects: [] })
-                }
-              />
-              <EditableSelect
-                label={it.model}
-                value={adding.model}
-                options={modelOptions}
-                readOnly={!adding.brand}
-                onChange={(model) =>
-                  setAdding({ ...adding, model, projects: [] })
-                }
-              />
-            </div>
-            <section className="compatibility-project-field">
-              <header>
-                <strong>{it.project}</strong>
-                <small>{it.inventory.compatibilityProjectsHelp}</small>
-              </header>
-              <div className="compatibility-project-selector">
-                {adding.projects.map((project) => (
-                  <span className="compatibility-project-chip" key={project}>
-                    {project}
-                    <button
-                      type="button"
-                      aria-label={`${it.remove} ${project}`}
-                      onClick={() =>
-                        setAdding({
-                          ...adding,
-                          projects: adding.projects.filter(
-                            (value) => value !== project,
-                          ),
-                        })
-                      }
-                    >
-                      <X size={13} />
-                    </button>
-                  </span>
-                ))}
-                <SearchableCombobox
-                  className="compatibility-project-search"
-                  value=""
-                  onChange={(project) => {
-                    if (!project) return;
-                    setAdding({
-                      ...adding,
-                      projects: [...adding.projects, project],
-                    });
-                  }}
-                  groups={[
-                    {
-                      options: projectOptions.map((project) => ({
-                        value: project,
-                        label: project,
-                      })),
-                    },
-                  ]}
-                  disabled={!adding.model}
-                  placeholder={it.selectRepairProjects}
-                  ariaLabel={it.project}
-                  searchPlaceholder={it.selectRepairProjects}
-                  emptyText={it.noMatches}
-                />
-              </div>
-            </section>
-          </div>
+          <CompatibilityAddEditor
+            value={adding}
+            onChange={setAdding}
+            options={options}
+            deletions={catalogDeletions}
+          />
         ) : (
           <div className="compatibility-overview">
             <section className="compatibility-product-summary">
@@ -614,9 +474,11 @@ export function InventoryHistoryCard({
 
 export function NewProductDialogButton({
   categories,
+  projectCatalog = [],
   mode = "inventory",
 }: {
   categories: CategoryView[];
+  projectCatalog?: ProductCompatibilityDraft[];
   mode?: "inventory" | "retail";
 }) {
   const it = useMessages();
@@ -637,6 +499,7 @@ export function NewProductDialogButton({
         >
           <ProductForm
             categories={categories}
+            projectCatalog={projectCatalog}
             mode={mode}
             onClose={() => setOpen(false)}
           />
@@ -949,10 +812,6 @@ export function InventoryWorkspace({
   const compatibilities = useMemo(
     () => products.flatMap((product) => product.compatibilities),
     [products],
-  );
-  const compatibilityOptions = useMemo(
-    () => [...compatibilities, ...projectCatalog],
-    [compatibilities, projectCatalog],
   );
   const filtered = useMemo(
     () =>
@@ -1485,7 +1344,7 @@ export function InventoryWorkspace({
           return product ? (
             <ProductCompatibilityDialog
               product={product}
-              options={compatibilityOptions}
+              options={projectCatalog}
               catalogDeletions={catalogDeletions}
               onClose={() => setCompatibilityEditor("")}
               onSave={(compatibilities) => {

@@ -13,6 +13,7 @@ import { useLanguage, useMessages } from "./language";
 import { FormDialog } from "./forms";
 import { SimpleSelect } from "./business-select";
 import { Button } from "./ui/button";
+import { ToggleSwitch } from "./ui/toggle-switch";
 import { focusComfortably } from "@/lib/comfortable-scroll";
 
 export type FaultCatalogItem = {
@@ -407,14 +408,12 @@ export function FaultCatalogManager({
                 {item.name}
               </button>
             )}
-            <label className="fault-enabled-switch">
-              <input
-                type="checkbox"
-                checked={!item.hidden}
-                onChange={() => void toggle(item)}
-              />
-              <span>{item.hidden ? it.disabledState : it.enabledState}</span>
-            </label>
+            <ToggleSwitch
+              checked={!item.hidden}
+              onToggle={() => toggle(item)}
+              enabledLabel={it.enabledState}
+              disabledLabel={it.disabledState}
+            />
             <button
               type="button"
               className="fault-delete-button"

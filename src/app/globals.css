@@ -5637,31 +5637,33 @@ details.secondary-actions {
 }
 .fault-enabled-switch input {
   position: relative;
-  flex: 0 0 32px;
-  width: 32px;
-  min-height: 18px;
-  height: 18px;
+  flex: 0 0 36px;
+  width: 36px;
+  min-height: 20px;
+  height: 20px;
   margin: 0;
   padding: 0;
   border: 0;
   appearance: none;
   border-radius: 999px;
-  background: #d9ddd9;
-  transition: background var(--motion-base) var(--ease-ui);
+  background: #c8ceca;
+  cursor: pointer;
+  transition: background-color 220ms ease;
 }
 .fault-enabled-switch input::before {
   position: absolute;
   top: 2px;
   left: 2px;
   display: block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid #59635f;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #39423d;
   border-radius: 50%;
   background: white;
   box-shadow: 0 1px 3px #0002;
   content: "";
-  transition: transform var(--motion-base) var(--ease-ui);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .fault-enabled-switch > span {
   display: inline-flex;
@@ -5671,7 +5673,7 @@ details.secondary-actions {
   background: #d7b52b;
 }
 .fault-enabled-switch input:checked::before {
-  transform: translateX(14px);
+  transform: translateX(16px);
 }
 .fault-drag-hint {
   margin: -4px 2px 0;
@@ -8902,6 +8904,12 @@ details.secondary-actions {
   display: grid;
   gap: 3px;
 }
+.price-option-card-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .price-option-card small {
   color: var(--muted);
 }
@@ -8926,7 +8934,7 @@ details.secondary-actions {
   color: #806000 !important;
 }
 .price-option-actions {
-  margin-left: auto;
+  margin-left: 0;
   align-items: center;
 }
 .price-option-enabled-switch {

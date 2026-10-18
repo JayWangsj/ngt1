@@ -4791,8 +4791,13 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   const serviceSwitch = firstServiceRow.locator(
     '.fault-enabled-switch input[type="checkbox"]',
   );
-  await expect(serviceSwitch).toHaveCSS("width", "32px");
-  await expect(serviceSwitch).toHaveCSS("height", "18px");
+  await expect(serviceSwitch).toHaveCSS("width", "36px");
+  await expect(serviceSwitch).toHaveCSS("height", "20px");
+  expect(
+    await serviceSwitch.evaluate(
+      (input) => getComputedStyle(input, "::before").transitionDuration,
+    ),
+  ).toBe("0.22s");
   const serviceInitiallyEnabled = await serviceSwitch.isChecked();
   await serviceSwitch.click();
   await expect(serviceSwitch).toBeChecked({
@@ -5812,7 +5817,8 @@ test("price editor and mobile yellow layout support both languages", async ({
     });
   const enabledThumb = await readSwitchThumb(batterySwitch);
   expect(enabledThumb.content).not.toBe("none");
-  expect(enabledThumb.width).toBe("14px");
+  expect(enabledThumb.width).toBe("16px");
+  await expect(batterySwitch).toHaveCSS("transition-duration", "0.22s");
   await batterySwitch.click();
   await expect(batteryOption).toHaveClass(/is-disabled/);
   const enableBatterySwitch = batteryOption.getByRole("switch", {
@@ -5821,7 +5827,7 @@ test("price editor and mobile yellow layout support both languages", async ({
   await expect(enableBatterySwitch).not.toBeChecked();
   const disabledThumb = await readSwitchThumb(enableBatterySwitch);
   expect(disabledThumb.content).toBe(enabledThumb.content);
-  expect(disabledThumb.width).toBe("14px");
+  expect(disabledThumb.width).toBe("16px");
   expect(disabledThumb.transform).not.toBe(enabledThumb.transform);
   await enableBatterySwitch.click();
   await expect(batteryOption).not.toHaveClass(/is-disabled/);
@@ -5851,9 +5857,17 @@ test("price editor and mobile yellow layout support both languages", async ({
   const setLcdDefault = lcdOption.getByRole("button", {
     name: "Imposta predefinita",
   });
+  const optionCards = form.locator(".price-option-card");
+  await expect(optionCards.nth(0)).toContainText("Batteria Test");
+  await expect(optionCards.nth(1)).toContainText("Display LCD Test");
+  await expect(
+    lcdOption.locator(".price-option-card-title-row .price-option-actions"),
+  ).toBeVisible();
   await expect(setLcdDefault.locator("svg")).toBeVisible();
   await setLcdDefault.click();
   await expect(lcdOption).toContainText("Opzione consigliata predefinita");
+  await expect(optionCards.nth(0)).toContainText("Batteria Test");
+  await expect(optionCards.nth(1)).toContainText("Display LCD Test");
   await form.locator(".dialog-actions button").first().click();
   await expect(form).not.toBeVisible();
   await expect(page.getByRole("main").getByRole("status")).toBeVisible();
@@ -6536,20 +6550,20 @@ test("inventory repair products retain their compatibility editor", async ({
     .getByRole("option", { name: "sostituzione batteria", exact: true })
     .click();
   await openProjects.click();
-  await page
-    .locator(".business-select-panel.is-entering")
-    .getByRole("option", { name: "sostituzione display", exact: true })
-    .click();
+  await expect(
+    page
+      .locator(".business-select-panel.is-entering")
+      .getByRole("option", { name: "sostituzione display", exact: true }),
+  ).toHaveCount(0);
   await expect(editorDialog.locator(".compatibility-project-chip")).toHaveText([
     "sostituzione batteria",
-    "sostituzione display",
   ]);
-  await editorDialog.getByRole("button", { name: "Conferma" }).click();
+  await editorDialog.getByRole("button", { name: "Registra conferma" }).click();
   const summary = dialog.locator(".compatibility-device-row", {
     hasText: "iPhone 14",
   });
   await expect(summary).toContainText("sostituzione batteria");
-  await expect(summary).toContainText("sostituzione display");
+  await expect(summary).not.toContainText("sostituzione display");
 });
 
 test("new repair products add compatible devices in a modal", async ({
@@ -6584,16 +6598,29 @@ test("new repair products add compatible devices in a modal", async ({
     name: "Aggiungi dispositivo compatibile",
     exact: true,
   });
+  await expect(
+    reopenedDialog.locator(".compatibility-device-fields"),
+  ).toBeVisible();
   await chooseBusinessOption(page, "Marca", "Apple", reopenedDialog);
   await chooseBusinessOption(page, "Modello", "iPhone 13", reopenedDialog);
   await reopenedDialog
-    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .locator(".compatibility-project-selector .business-combobox-chevron")
+    .click();
+  await page
+    .locator(".business-select-panel.is-entering")
+    .getByRole("option", { name: "sostituzione display", exact: true })
+    .click();
+  await reopenedDialog
+    .getByRole("button", { name: "Registra conferma", exact: true })
     .click();
   await expect(reopenedDialog).toHaveCount(0);
   await expect(addCompatibility).toBeVisible();
   await expect(
     productDialog.locator(".compatibility-device-row"),
   ).toContainText("Apple iPhone 13");
+  await expect(
+    productDialog.locator(".compatibility-device-row"),
+  ).toContainText("sostituzione display");
   await productDialog
     .getByRole("button", { name: "Annulla", exact: true })
     .click();

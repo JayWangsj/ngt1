@@ -155,7 +155,12 @@ export default async function InventoryPage({
       <PageHeader
         title={it.inventory.title}
         description={it.inventory.description}
-        actionNode={<NewProductDialogButton categories={categories} />}
+        actionNode={
+          <NewProductDialogButton
+            categories={categories}
+            projectCatalog={projectCatalog}
+          />
+        }
       />
       <div className="inventory-metrics">
         {metrics.map(({ label, value, icon: Icon }) => (

@@ -11,6 +11,7 @@ import { modelKey, normalizeDeviceModel } from "@/lib/catalog";
 import { cents, decimal } from "@/lib/domain";
 import { useMessages } from "./language";
 import { Button } from "./ui/button";
+import { ToggleSwitch } from "./ui/toggle-switch";
 import { Field, FormDialog } from "./forms";
 import { RecordIcon } from "./ui/record-icon";
 
@@ -187,20 +188,15 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
                   <small>{item.notes || "—"}</small>
                 </span>
                 <span>{decimal(item.defaultPrice)}</span>
-                <label
-                  className="fault-enabled-switch"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <input
-                    type="checkbox"
+                <span onClick={(event) => event.stopPropagation()}>
+                  <ToggleSwitch
                     checked={item.enabled}
                     disabled={pending}
-                    onChange={() => void toggle(item)}
+                    onToggle={() => toggle(item)}
+                    enabledLabel={it.enabledState}
+                    disabledLabel={it.disabledState}
                   />
-                  <span>
-                    {item.enabled ? it.enabledState : it.disabledState}
-                  </span>
-                </label>
+                </span>
                 <span className="record-actions">
                   <RecordIcon
                     kind="edit"

@@ -66,6 +66,11 @@ import {
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
+import {
+  CompatibilityAddEditor,
+  type CompatibilityDeviceDraft,
+} from "./compatibility-add-editor";
+import { ToggleSwitch } from "./ui/toggle-switch";
 import { FormSaveContext, FormCloseContext } from "./ui/form-close-context";
 import { useMessages, useLanguage } from "./language";
 import { translateError } from "@/lib/i18n";
@@ -76,7 +81,6 @@ import {
   models,
   faultPresets,
   type Category,
-  modelKey,
   normalizeBrand,
   normalizeDeviceModel,
 } from "@/lib/catalog";
@@ -448,234 +452,107 @@ export function ProductCompatibilityFields({
   value,
   onChange,
   options = [],
-  deletions = [],
-  onDelete,
-  editing = false,
 }: {
   value: ProductCompatibilityDraft[];
   onChange: (value: ProductCompatibilityDraft[]) => void;
   options?: ProductCompatibilityDraft[];
-  deletions?: DeviceCatalogDeletionView[];
-  onDelete?: (
-    kind: "BRAND" | "MODEL",
-    entry: ProductCompatibilityDraft,
-    value: string,
-  ) => void | Promise<void>;
-  editing?: boolean;
 }) {
   const it = useMessages();
-  const { locale } = useLanguage();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [draft, setDraft] = useState<ProductCompatibilityDraft[]>([]);
-  const hidden = (
-    kind: "BRAND" | "MODEL",
-    entry: ProductCompatibilityDraft,
-    candidate: string,
-  ) =>
-    deletions.some(
-      (deletion) =>
-        deletion.category === entry.category &&
-        deletion.kind === kind &&
-        (kind === "BRAND" ||
-          deletion.brand.toLocaleLowerCase("it") ===
-            entry.brand.toLocaleLowerCase("it")) &&
-        deletion.value.toLocaleLowerCase("it") ===
-          candidate.toLocaleLowerCase("it"),
-    );
+  const [draft, setDraft] = useState<CompatibilityDeviceDraft>({
+    category: "PHONE",
+    brand: "",
+    model: "",
+    projects: [],
+  });
+  const devices = Object.values(
+    value.reduce<
+      Record<
+        string,
+        {
+          category: string;
+          brand: string;
+          model: string;
+          projects: string[];
+          indices: number[];
+        }
+      >
+    >((groups, entry, index) => {
+      const key = [entry.category, entry.brand, entry.model].join("\u0000");
+      const device = groups[key] ?? {
+        category: entry.category,
+        brand: entry.brand,
+        model: entry.model,
+        projects: [],
+        indices: [],
+      };
+      if (entry.project && !device.projects.includes(entry.project))
+        device.projects.push(entry.project);
+      device.indices.push(index);
+      groups[key] = device;
+      return groups;
+    }, {}),
+  );
   return (
     <>
       <fieldset className="product-compatibility-editor">
         <legend>{it.inventory.compatibleDevices}</legend>
-        {editing
-          ? value.map((entry, index) => {
-              const category = entry.category as Category;
-              const brandOptions = uniqueOptions([
-                ...(brands[category] ?? []),
-                ...options
-                  .filter((option) => option.category === entry.category)
-                  .map((option) => option.brand),
-                entry.brand,
-              ]).filter((brand) => brand && !hidden("BRAND", entry, brand));
-              const catalogBrand = Object.keys(models[category] ?? {}).find(
-                (brand) =>
-                  brand.toLocaleLowerCase("it") ===
-                  entry.brand.toLocaleLowerCase("it"),
-              );
-              const modelOptions = uniqueOptions([
-                ...(catalogBrand
-                  ? (models[category]?.[catalogBrand] ?? [])
-                  : []),
-                ...options
-                  .filter(
-                    (option) =>
-                      option.category === entry.category &&
-                      option.brand.toLocaleLowerCase("it") ===
-                        entry.brand.toLocaleLowerCase("it"),
-                  )
-                  .map((option) => option.model),
-                entry.model,
-              ]).filter((model) => model && !hidden("MODEL", entry, model));
-              const projectOptions = uniqueOptions(
-                options
-                  .filter(
-                    (option) =>
-                      option.category === entry.category &&
-                      option.brand.toLocaleLowerCase("it") ===
-                        entry.brand.toLocaleLowerCase("it") &&
-                      modelKey(option.model) === modelKey(entry.model),
-                  )
-                  .map((option) => option.project),
-              ).filter(Boolean);
-              return (
-                <div className="product-compatibility-row" key={index}>
-                  <SimpleSelect
-                    value={entry.category}
-                    onChange={(category) =>
-                      onChange(
-                        value.map((item, position) =>
-                          position === index
-                            ? {
-                                ...item,
-                                category,
-                                brand: "",
-                                model: "",
-                                project: "",
-                              }
-                            : item,
-                        ),
-                      )
-                    }
-                    placeholder={it.deviceType}
-                    ariaLabel={it.deviceType}
-                    options={Object.entries(categories).map(
-                      ([category, labels]) => ({
-                        value: category,
-                        label: labels[locale === "zh" ? 1 : 0],
-                      }),
-                    )}
-                  />
-                  <EditableSelect
-                    label={it.brand}
-                    value={entry.brand}
-                    createLabel={it.customBrand}
-                    options={brandOptions}
-                    normalize={(brand) => normalizeBrand(brand, brandOptions)}
-                    deletableValues={onDelete ? brandOptions : []}
-                    onDelete={(brand) => onDelete?.("BRAND", entry, brand)}
-                    onChange={(brand) =>
-                      onChange(
-                        value.map((item, position) =>
-                          position === index
-                            ? { ...item, brand, model: "", project: "" }
-                            : item,
-                        ),
-                      )
-                    }
-                  />
-                  <EditableSelect
-                    label={it.model}
-                    value={entry.model}
-                    createLabel={it.customModel}
-                    options={modelOptions}
-                    normalize={(model) =>
-                      normalizeDeviceModel(entry.brand, model, modelOptions)
-                    }
-                    readOnly={!entry.brand}
-                    deletableValues={onDelete ? modelOptions : []}
-                    onDelete={(model) => onDelete?.("MODEL", entry, model)}
-                    onChange={(model) =>
-                      onChange(
-                        value.map((item, position) =>
-                          position === index
-                            ? { ...item, model, project: "" }
-                            : item,
-                        ),
-                      )
-                    }
-                  />
-                  <EditableSelect
-                    label={`${it.project} (${it.optional})`}
-                    value={entry.project}
-                    options={projectOptions}
-                    readOnly={!entry.model}
-                    onChange={(project) =>
-                      onChange(
-                        value.map((item, position) =>
-                          position === index ? { ...item, project } : item,
-                        ),
-                      )
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="icon-button record-icon record-icon-delete"
-                    aria-label={it.remove}
-                    onClick={() =>
-                      onChange(
-                        value.filter((_, position) => position !== index),
-                      )
-                    }
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              );
-            })
-          : value.map((entry, index) => (
-              <div
-                className="compatibility-device-row business-list-row"
-                key={`${entry.category}:${entry.brand}:${entry.model}:${entry.project}:${index}`}
-              >
-                <div className="compatibility-device-summary">
-                  <strong>
-                    {entry.brand} {entry.model}
-                  </strong>
-                  <span className="compatibility-projects">
-                    <span>{entry.project || it.inventory.allRepairUses}</span>
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="record-icon record-icon-delete"
-                  aria-label={`${it.remove} ${entry.brand} ${entry.model}`}
-                  onClick={() =>
-                    onChange(value.filter((_, position) => position !== index))
-                  }
-                >
-                  <Trash2 size={17} />
-                </button>
-              </div>
-            ))}
-        {!editing && (
-          <Button
-            type="button"
-            variant="outline"
-            className="add-device-action"
-            onClick={() => {
-              setDraft([
-                { category: "PHONE", brand: "", model: "", project: "" },
-              ]);
-              setDialogOpen(true);
-            }}
+        {devices.map((device) => (
+          <div
+            className="compatibility-device-row business-list-row"
+            key={device.indices[0]}
           >
-            <Plus size={16} /> {it.inventory.addCompatibility}
-          </Button>
-        )}
+            <div className="compatibility-device-summary">
+              <strong>
+                {device.brand} {device.model}
+              </strong>
+              <span className="compatibility-projects">
+                {device.projects.length ? (
+                  device.projects.map((project) => (
+                    <span key={project}>{project}</span>
+                  ))
+                ) : (
+                  <span>{it.inventory.allRepairUses}</span>
+                )}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="record-icon record-icon-delete"
+              aria-label={`${it.remove} ${device.brand} ${device.model}`}
+              onClick={() =>
+                onChange(
+                  value.filter((_, index) => !device.indices.includes(index)),
+                )
+              }
+            >
+              <Trash2 size={17} />
+            </button>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          className="add-device-action"
+          onClick={() => {
+            setDraft({ category: "PHONE", brand: "", model: "", projects: [] });
+            setDialogOpen(true);
+          }}
+        >
+          <Plus size={16} /> {it.inventory.addCompatibility}
+        </Button>
       </fieldset>
-      {!editing && dialogOpen && (
+      {dialogOpen && (
         <FormDialog
           title={it.inventory.addCompatibleDevice}
           subtitle={it.inventory.compatibilityEditorHelp}
           onClose={() => setDialogOpen(false)}
         >
-          <div className="product-compatibility-dialog" data-form-dialog-body>
-            <ProductCompatibilityFields
+          <div data-form-dialog-body data-product-compatibility-dialog>
+            <CompatibilityAddEditor
               value={draft}
               onChange={setDraft}
               options={options}
-              deletions={deletions}
-              onDelete={onDelete}
-              editing
             />
             <div className="dialog-actions">
               <Button
@@ -687,17 +564,25 @@ export function ProductCompatibilityFields({
               </Button>
               <Button
                 type="button"
-                disabled={!draft[0]?.brand.trim() || !draft[0]?.model.trim()}
+                disabled={
+                  !draft.brand.trim() ||
+                  !draft.model.trim() ||
+                  !draft.projects.length
+                }
                 onClick={() => {
-                  const additions = draft.filter(
-                    (entry) => entry.brand.trim() && entry.model.trim(),
-                  );
-                  if (!additions.length) return;
-                  onChange([...value, ...additions]);
+                  onChange([
+                    ...value,
+                    ...draft.projects.map((project) => ({
+                      category: draft.category,
+                      brand: draft.brand,
+                      model: draft.model,
+                      project,
+                    })),
+                  ]);
                   setDialogOpen(false);
                 }}
               >
-                {it.quickService.confirmDevices}
+                {it.confirm}
               </Button>
             </div>
           </div>
@@ -706,7 +591,6 @@ export function ProductCompatibilityFields({
     </>
   );
 }
-
 const presetInventoryCategories = [
   "Accessori",
   "Ricambi",
@@ -724,6 +608,7 @@ export function ProductForm({
   onCreated,
   quickRepair = false,
   initialCompatibility,
+  projectCatalog = [],
 }: {
   categories: CategoryView[];
   onClose: () => void;
@@ -733,6 +618,7 @@ export function ProductForm({
   onCreated?: (product: CreatedProduct) => void;
   quickRepair?: boolean;
   initialCompatibility?: ProductCompatibilityDraft;
+  projectCatalog?: ProductCompatibilityDraft[];
 }) {
   const it = useMessages();
   const { locale } = useLanguage();
@@ -965,6 +851,7 @@ export function ProductForm({
         <ProductCompatibilityFields
           value={compatibilities}
           onChange={setCompatibilities}
+          options={projectCatalog}
         />
       )}
       <label className="checkbox">
@@ -5006,100 +4893,102 @@ export function RuleForm({
                 key={option.id}
               >
                 <div className="price-option-card-heading">
-                  <div>
-                    <strong>{option.name}</strong>
+                  <div className="price-option-card-title">
+                    <div className="price-option-card-title-row">
+                      <strong>{option.name}</strong>
+                      <div className="price-option-actions">
+                        {option.enabled && (
+                          <button
+                            type="button"
+                            className="price-option-default-action"
+                            disabled={optionPending || option.isDefault}
+                            onClick={async () => {
+                              setOptionPending(true);
+                              setOptionError("");
+                              try {
+                                const result = await priceRuleOptionAction(
+                                  optionRule.id,
+                                  option.id,
+                                  {
+                                    ...option,
+                                    isDefault: true,
+                                    cost: option.cost ?? "",
+                                  },
+                                );
+                                if (!result.ok) setOptionError(result.error);
+                                else {
+                                  onOptionSaved?.();
+                                  router.refresh();
+                                }
+                              } catch {
+                                setOptionError(
+                                  "Connessione non disponibile. Riprova.",
+                                );
+                              } finally {
+                                setOptionPending(false);
+                              }
+                            }}
+                          >
+                            <Star
+                              size={14}
+                              fill="currentColor"
+                              aria-hidden="true"
+                            />
+                            {option.isDefault
+                              ? it.defaultRecommended
+                              : it.setDefault}
+                          </button>
+                        )}
+                        <ToggleSwitch
+                          className="price-option-enabled-switch"
+                          role="switch"
+                          checked={option.enabled}
+                          enabledLabel={it.enabledState}
+                          disabledLabel={it.disabledState}
+                          ariaLabel={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                          title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                          disabled={optionPending}
+                          onToggle={async (enabled) => {
+                            setOptionPending(true);
+                            setOptionError("");
+                            try {
+                              const result = await priceRuleOptionAction(
+                                optionRule.id,
+                                option.id,
+                                {
+                                  ...option,
+                                  enabled,
+                                  isDefault: enabled ? option.isDefault : false,
+                                  cost: option.cost ?? "",
+                                },
+                              );
+                              if (!result.ok) {
+                                setOptionError(result.error);
+                                return false;
+                              }
+                              onOptionSaved?.();
+                              router.refresh();
+                              return true;
+                            } catch {
+                              setOptionError(
+                                "Connessione non disponibile. Riprova.",
+                              );
+                              return false;
+                            } finally {
+                              setOptionPending(false);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
                     <small>{option.product.name}</small>
                   </div>
-                  <div className="price-option-actions">
-                    {!option.isDefault && option.enabled && (
-                      <button
-                        type="button"
-                        className="price-option-default-action"
-                        disabled={optionPending}
-                        onClick={async () => {
-                          setOptionPending(true);
-                          setOptionError("");
-                          try {
-                            const result = await priceRuleOptionAction(
-                              optionRule.id,
-                              option.id,
-                              {
-                                ...option,
-                                isDefault: true,
-                                cost: option.cost ?? "",
-                              },
-                            );
-                            if (!result.ok) setOptionError(result.error);
-                            else {
-                              onOptionSaved?.();
-                              router.refresh();
-                            }
-                          } catch {
-                            setOptionError(
-                              "Connessione non disponibile. Riprova.",
-                            );
-                          } finally {
-                            setOptionPending(false);
-                          }
-                        }}
-                      >
-                        <Star
-                          size={14}
-                          fill="currentColor"
-                          aria-hidden="true"
-                        />
-                        {it.setDefault}
-                      </button>
-                    )}
-                    <label className="fault-enabled-switch price-option-enabled-switch">
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        checked={option.enabled}
-                        aria-label={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
-                        title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
-                        disabled={optionPending}
-                        onChange={async () => {
-                          setOptionPending(true);
-                          setOptionError("");
-                          try {
-                            const result = await priceRuleOptionAction(
-                              optionRule.id,
-                              option.id,
-                              {
-                                ...option,
-                                enabled: !option.enabled,
-                                isDefault: option.enabled
-                                  ? false
-                                  : option.isDefault,
-                                cost: option.cost ?? "",
-                              },
-                            );
-                            if (!result.ok) setOptionError(result.error);
-                            else {
-                              onOptionSaved?.();
-                              router.refresh();
-                            }
-                          } catch {
-                            setOptionError(
-                              "Connessione non disponibile. Riprova.",
-                            );
-                          } finally {
-                            setOptionPending(false);
-                          }
-                        }}
-                      />
-                      <span>
-                        {option.enabled ? it.enabledState : it.disabledState}
-                      </span>
-                    </label>
-                    <RecordIcon
-                      kind="edit"
-                      label={it.editPartOption}
-                      disabled={optionPending}
-                      onClick={() => setEditingOption({ option })}
-                    />
-                  </div>
+                  <RecordIcon
+                    kind="edit"
+                    label={it.editPartOption}
+                    disabled={optionPending}
+                    onClick={() => setEditingOption({ option })}
+                  />
                 </div>
                 <div className="price-option-data">
                   <span>
@@ -5131,11 +5020,6 @@ export function RuleForm({
                     </strong>
                   </span>
                 </div>
-                <small className="price-option-card-status">
-                  {option.isDefault ? it.defaultRecommended : ""}
-                  {option.isDefault && !option.enabled ? " · " : ""}
-                  {!option.enabled ? it.disabled : ""}
-                </small>
               </article>
             ))}
           </div>
