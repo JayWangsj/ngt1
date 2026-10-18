@@ -36,6 +36,7 @@ import {
   workOrderProductInput,
   checkoutInput,
   ruleInput,
+  priceRuleOptionInput,
   statusInput,
   warrantyInput,
   afterSalesInput,
@@ -102,7 +103,12 @@ export const orderInclude = {
   device: { include: { customer: true } },
   relatedDevices: { include: { device: true } },
   items: {
-    include: { requiredProduct: true, reworkItem: true, quickService: true },
+    include: {
+      requiredProduct: true,
+      priceOption: true,
+      reworkItem: true,
+      quickService: true,
+    },
   },
   faults: { include: { catalog: true } },
   products: true,
@@ -355,6 +361,10 @@ async function snapshots(
     project: string;
     final: { toString(): string };
     ruleId: string | null;
+    priceOptionId: string | null;
+    priceOptionName: string;
+    requiredProductId: string | null;
+    requiredProductName: string;
     warrantyStart: Date | null;
     warrantyDays: number;
     warrantyExpiresAt: Date | null;
@@ -363,6 +373,13 @@ async function snapshots(
 ) {
   const rules = await tx.priceRule.findMany({
     where: { enabled: true },
+    include: {
+      options: {
+        where: { enabled: true },
+        include: { product: true },
+        orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+      },
+    },
     orderBy: { id: "asc" },
   });
   const results = [];
@@ -386,58 +403,146 @@ async function snapshots(
       model: normalizeDeviceModel(device.brand, device.model),
       project: item.project.trim().toLowerCase(),
     };
-    const previous = await tx.priceRule.findUnique({
-      where: { category_brand_series_model_project: key },
-    });
     const oldItem = previousItems?.find(
       (i) => i.project.trim().toLowerCase() === key.project,
     );
-    const unchanged = oldItem && cents(oldItem.final) === final;
-    const rule = unchanged
-      ? null
-      : await tx.priceRule.upsert({
-          where: { category_brand_series_model_project: key },
-          create: {
-            ...key,
-            suggested: decimal(final),
-            minutes: match?.rule.minutes ?? 60,
-            requiredProductId: item.saveRule
-              ? item.requiredProductId || null
-              : null,
-            requiredQuantity: item.saveRule ? item.requiredQuantity : 1,
-          },
-          update: { suggested: decimal(final), enabled: true },
-        });
-    const ruleId = rule?.id ?? oldItem?.ruleId ?? match?.rule.id;
-    if (rule && (!previous || cents(previous.suggested) !== final))
+    let effectiveRule = match?.rule ?? null;
+    if (item.saveRule) {
+      const previous = await tx.priceRule.findUnique({
+        where: { category_brand_series_model_project: key },
+      });
+      const savedRule = await tx.priceRule.upsert({
+        where: { category_brand_series_model_project: key },
+        create: {
+          ...key,
+          suggested: decimal(final),
+          minutes: match?.rule.minutes ?? 60,
+          requiredProductId: item.saveRule
+            ? item.requiredProductId || null
+            : null,
+          requiredQuantity: item.saveRule ? item.requiredQuantity : 1,
+        },
+        update: {
+          suggested: decimal(final),
+          enabled: true,
+          requiredProductId: item.requiredProductId || null,
+          requiredQuantity: item.requiredQuantity,
+        },
+      });
       await audit(
         tx,
         actor,
-        rule.id,
+        savedRule.id,
         previous ? "PRICE_RULE_UPDATED" : "PRICE_RULE_CREATED",
         {
           before: previous?.suggested.toString() ?? null,
           after: decimal(final),
         },
       );
+      if (item.requiredProductId) {
+        const product = await tx.product.findFirst({
+          where: { id: item.requiredProductId, enabled: true, usage: "REPAIR" },
+        });
+        if (!product) throw new BusinessError("Ricambio non disponibile.");
+        await tx.priceRuleOption.updateMany({
+          where: { ruleId: savedRule.id, isDefault: true },
+          data: { isDefault: false },
+        });
+        await tx.priceRuleOption.upsert({
+          where: {
+            ruleId_productId: {
+              ruleId: savedRule.id,
+              productId: product.id,
+            },
+          },
+          create: {
+            ruleId: savedRule.id,
+            productId: product.id,
+            name: product.name,
+            suggested: decimal(final),
+            cost: product.costPrice,
+            quantity: item.requiredQuantity,
+            minutes: savedRule.minutes,
+            isDefault: true,
+          },
+          update: {
+            suggested: decimal(final),
+            quantity: item.requiredQuantity,
+            enabled: true,
+            isDefault: true,
+          },
+        });
+      }
+      effectiveRule = await tx.priceRule.findUniqueOrThrow({
+        where: { id: savedRule.id },
+        include: {
+          options: {
+            where: { enabled: true },
+            include: { product: true },
+            orderBy: [
+              { isDefault: "desc" },
+              { sortOrder: "asc" },
+              { id: "asc" },
+            ],
+          },
+        },
+      });
+    }
+    const options = effectiveRule?.options ?? [];
+    let selectedOption = item.requiredProductRemoved
+      ? null
+      : item.priceOptionId
+        ? options.find((option) => option.id === item.priceOptionId)
+        : item.requiredProductId
+          ? options.find(
+              (option) => option.productId === item.requiredProductId,
+            )
+          : (options.find((option) => option.isDefault) ?? options[0]);
+    if (item.priceOptionId && !selectedOption)
+      throw new BusinessError(
+        "L'opzione ricambio non appartiene all'intervento selezionato.",
+      );
+    if (item.saveRule && item.requiredProductId) {
+      selectedOption = await tx.priceRuleOption.findUnique({
+        where: {
+          ruleId_productId: {
+            ruleId: effectiveRule!.id,
+            productId: item.requiredProductId,
+          },
+        },
+        include: { product: true },
+      });
+    }
+    const requiredProductId = item.requiredProductRemoved
+      ? null
+      : item.requiredProductId ||
+        selectedOption?.productId ||
+        effectiveRule?.requiredProductId ||
+        null;
+    const requiredProduct = requiredProductId
+      ? await tx.product.findUnique({ where: { id: requiredProductId } })
+      : null;
     results.push({
       project: item.project,
       final: decimal(final),
       discount: decimal(cents(item.discount)),
-      suggested: match?.rule.suggested ?? null,
-      ruleId,
+      suggested: selectedOption?.suggested ?? effectiveRule?.suggested ?? null,
+      ruleId: effectiveRule?.id ?? oldItem?.ruleId ?? null,
+      priceOptionId: selectedOption?.id ?? null,
+      priceOptionName: selectedOption?.name ?? "",
       matchLevel: match?.level ?? "MANUAL",
       adjustmentReason: item.adjustmentReason,
-      minutes: match?.rule.minutes ?? 0,
-      requiredProductId: item.requiredProductRemoved
-        ? null
-        : item.requiredProductId || match?.rule.requiredProductId || null,
+      minutes: selectedOption?.minutes ?? effectiveRule?.minutes ?? 0,
+      requiredProductId,
+      requiredProductName: requiredProduct?.name ?? "",
       requiredQuantity:
-        item.requiredProductId || !match?.rule.requiredProductId
+        item.requiredProductId ||
+        selectedOption ||
+        !effectiveRule?.requiredProductId
           ? item.requiredQuantity
-          : match.rule.requiredQuantity,
+          : effectiveRule.requiredQuantity,
       warrantyStart: oldItem?.warrantyStart ?? null,
-      warrantyDays: oldItem?.warrantyDays ?? 0,
+      warrantyDays: oldItem?.warrantyDays ?? selectedOption?.warrantyDays ?? 0,
       warrantyExpiresAt: oldItem?.warrantyExpiresAt ?? null,
       warrantyNotes: oldItem?.warrantyNotes ?? "",
     });
@@ -1543,6 +1648,160 @@ export async function savePriceRule(
       },
     );
     return rule;
+  });
+}
+
+async function syncPriceOptionCompatibility(
+  tx: Tx,
+  rule: {
+    category: string;
+    brand: string;
+    series: string;
+    model: string;
+    project: string;
+  },
+  productId: string,
+) {
+  const model = rule.model || rule.series;
+  if (!rule.brand || !model) return;
+  const key = {
+    productId,
+    category: rule.category,
+    brand: normalizeBrand(rule.brand),
+    model: normalizeDeviceModel(rule.brand, model),
+    project: rule.project.trim().toLowerCase(),
+  };
+  await tx.productCompatibility.upsert({
+    where: { productId_category_brand_model_project: key },
+    create: key,
+    update: {},
+  });
+}
+
+async function syncLegacyDefaultPriceOption(tx: Tx, ruleId: string) {
+  const fallback = await tx.priceRuleOption.findFirst({
+    where: { ruleId, enabled: true },
+    orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+  });
+  if (!fallback) {
+    await tx.priceRule.update({
+      where: { id: ruleId },
+      data: { requiredProductId: null, requiredQuantity: 1 },
+    });
+    return;
+  }
+  await tx.priceRuleOption.updateMany({
+    where: { ruleId, isDefault: true, id: { not: fallback.id } },
+    data: { isDefault: false },
+  });
+  if (!fallback.isDefault)
+    await tx.priceRuleOption.update({
+      where: { id: fallback.id },
+      data: { isDefault: true },
+    });
+  await tx.priceRule.update({
+    where: { id: ruleId },
+    data: {
+      suggested: fallback.suggested,
+      cost: fallback.cost,
+      minutes: fallback.minutes,
+      requiredProductId: fallback.productId,
+      requiredQuantity: fallback.quantity,
+    },
+  });
+}
+
+export async function savePriceRuleOption(
+  actorInput: Actor,
+  ruleId: string,
+  id: string | null,
+  raw: unknown,
+) {
+  const input = priceRuleOptionInput.parse(raw);
+  return transact(async (tx) => {
+    const actor = await currentActor(tx, actorInput);
+    assertOwner(actor);
+    const [rule, product, existingCount] = await Promise.all([
+      tx.priceRule.findUniqueOrThrow({ where: { id: ruleId } }),
+      tx.product.findFirst({
+        where: { id: input.productId, enabled: true, usage: "REPAIR" },
+      }),
+      tx.priceRuleOption.count({ where: { ruleId, enabled: true } }),
+    ]);
+    if (!product) throw new BusinessError("Ricambio non disponibile.");
+    const before = id
+      ? await tx.priceRuleOption.findFirstOrThrow({ where: { id, ruleId } })
+      : null;
+    const isDefault = input.isDefault || existingCount === 0;
+    if (isDefault)
+      await tx.priceRuleOption.updateMany({
+        where: { ruleId, isDefault: true, ...(id ? { id: { not: id } } : {}) },
+        data: { isDefault: false },
+      });
+    const data = {
+      productId: product.id,
+      name: input.name,
+      suggested: decimal(cents(input.suggested)),
+      cost: input.cost ? decimal(cents(input.cost)) : product.costPrice,
+      quantity: input.quantity,
+      minutes: input.minutes,
+      warrantyDays: input.warrantyDays,
+      enabled: input.enabled,
+      isDefault,
+      notes: input.notes,
+    };
+    const option = id
+      ? await tx.priceRuleOption.update({ where: { id }, data })
+      : await tx.priceRuleOption.create({
+          data: {
+            ...data,
+            ruleId,
+            sortOrder: await tx.priceRuleOption.count({ where: { ruleId } }),
+          },
+        });
+    await syncPriceOptionCompatibility(tx, rule, product.id);
+    await syncLegacyDefaultPriceOption(tx, ruleId);
+    await audit(
+      tx,
+      actor,
+      option.id,
+      before ? "PRICE_RULE_OPTION_UPDATED" : "PRICE_RULE_OPTION_CREATED",
+      {
+        ruleId,
+        before: before ? JSON.parse(JSON.stringify(before)) : null,
+        after: data,
+      },
+    );
+    return option;
+  });
+}
+
+export async function deletePriceRuleOption(
+  actorInput: Actor,
+  ruleId: string,
+  id: string,
+) {
+  return transact(async (tx) => {
+    const actor = await currentActor(tx, actorInput);
+    assertOwner(actor);
+    const option = await tx.priceRuleOption.findFirstOrThrow({
+      where: { id, ruleId },
+    });
+    const used = await tx.workOrderItem.count({
+      where: { priceOptionId: id },
+    });
+    if (used)
+      await tx.priceRuleOption.update({
+        where: { id },
+        data: { enabled: false, isDefault: false },
+      });
+    else await tx.priceRuleOption.delete({ where: { id } });
+    await syncLegacyDefaultPriceOption(tx, ruleId);
+    await audit(tx, actor, id, "PRICE_RULE_OPTION_DELETED", {
+      ruleId,
+      productId: option.productId,
+      disabled: used > 0,
+    });
   });
 }
 

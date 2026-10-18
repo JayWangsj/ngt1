@@ -39,6 +39,8 @@ import {
   orderInclude,
   replaceQuote,
   savePriceRule,
+  savePriceRuleOption,
+  deletePriceRuleOption,
   setPaidTotal,
   removeWorkOrderProduct,
   setUserEnabled,
@@ -97,11 +99,12 @@ beforeAll(async () => {
   await db.workOrderProduct.deleteMany();
   await db.reworkItem.deleteMany();
   await db.reworkSession.deleteMany();
+  await db.workOrderItem.deleteMany();
+  await db.priceRuleOption.deleteMany();
   await db.product.deleteMany();
   await db.inventoryCategory.deleteMany();
   await db.statusHistory.deleteMany();
   await db.workOrderDevice.deleteMany();
-  await db.workOrderItem.deleteMany();
   await db.workOrder.deleteMany();
   await db.device.deleteMany();
   await db.customer.deleteMany();
@@ -145,12 +148,13 @@ beforeEach(async () => {
   await db.workOrderProduct.deleteMany();
   await db.reworkItem.deleteMany();
   await db.reworkSession.deleteMany();
+  await db.workOrderItem.deleteMany();
+  await db.priceRuleOption.deleteMany();
   await db.product.deleteMany();
   await db.inventoryCategory.deleteMany();
   await db.deviceCatalogDeletion.deleteMany();
   await db.statusHistory.deleteMany();
   await db.workOrderDevice.deleteMany();
-  await db.workOrderItem.deleteMany();
   await db.workOrder.deleteMany();
   await db.device.deleteMany();
   await db.customer.deleteMany();
@@ -170,6 +174,140 @@ beforeEach(async () => {
 afterEach(() => db.businessClock.deleteMany());
 afterAll(() => db.$disconnect());
 describe("PostgreSQL workflow", () => {
+  it("keeps part-specific standard prices separate from work-order price snapshots", async () => {
+    const lcd = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Display LCD standard",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "32",
+      salePrice: "0",
+      initialStock: 4,
+      minStock: 0,
+    });
+    const oled = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Display OLED alta qualità",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "65",
+      salePrice: "0",
+      initialStock: 3,
+      minStock: 0,
+    });
+    const rule = await db.priceRule.findFirstOrThrow({
+      where: { project: "display" },
+    });
+    const lcdOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: lcd.id,
+      name: lcd.name,
+      suggested: "79",
+      cost: "32",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 90,
+      enabled: true,
+      isDefault: false,
+      notes: "",
+    });
+    const oledOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: oled.id,
+      name: oled.name,
+      suggested: "119",
+      cost: "65",
+      quantity: 1,
+      minutes: 75,
+      warrantyDays: 180,
+      enabled: true,
+      isDefault: true,
+      notes: "",
+    });
+    expect(
+      await db.productCompatibility.count({
+        where: {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "display",
+        },
+      }),
+    ).toBe(2);
+    expect(
+      await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } }),
+    ).toMatchObject({
+      requiredProductId: oled.id,
+      requiredQuantity: 1,
+    });
+
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            priceOptionId: lcdOption.id,
+            final: "79",
+            adjustmentReason: "",
+          },
+        ],
+      }),
+    );
+    let item = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    expect(item).toMatchObject({
+      priceOptionId: lcdOption.id,
+      priceOptionName: lcd.name,
+      requiredProductId: lcd.id,
+      requiredProductName: lcd.name,
+      warrantyDays: 90,
+    });
+    expect(item.suggested?.toString()).toBe("79");
+
+    await replaceQuote(owner, order.id, {
+      items: [
+        {
+          project: "Display",
+          priceOptionId: lcdOption.id,
+          final: "85",
+          adjustmentReason: "Eccezione cliente",
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+    item = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    expect(item.final.toString()).toBe("85");
+    expect(item.suggested?.toString()).toBe("79");
+    expect(
+      (
+        await db.priceRuleOption.findUniqueOrThrow({
+          where: { id: lcdOption.id },
+        })
+      ).suggested.toString(),
+    ).toBe("79");
+    expect(
+      (
+        await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
+      ).suggested.toString(),
+    ).toBe("119");
+
+    await deletePriceRuleOption(owner, rule.id, lcdOption.id);
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: lcdOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: oledOption.id },
+      }),
+    ).toMatchObject({ enabled: true, isDefault: true });
+  });
+
   it("registers, quotes, receives balance, delivers and audits every change", async () => {
     const created = await createOrder(staff, input());
     await updateDueDate(staff, created.id, "2099-12-31");
@@ -906,7 +1044,7 @@ describe("PostgreSQL workflow", () => {
     expect(replacement.warrantyDays).toBe(365);
     expect(replacement.warrantyNotes).toBe("Display escluso da urti");
   });
-  it("saves missing normal prices automatically without a manual reason", async () => {
+  it("does not overwrite the price list from an order-specific quote", async () => {
     const created = await createOrder(
       owner,
       input({
@@ -915,10 +1053,8 @@ describe("PostgreSQL workflow", () => {
       }),
     );
     expect(
-      (
-        await db.priceRule.findFirstOrThrow({ where: { project: "camera" } })
-      ).suggested.toString(),
-    ).toBe("50");
+      await db.priceRule.findFirst({ where: { project: "camera" } }),
+    ).toBeNull();
     const saved = await db.workOrder.findUniqueOrThrow({
       where: { id: created.id },
       include: orderInclude,
@@ -926,7 +1062,10 @@ describe("PostgreSQL workflow", () => {
     expect(balance(saved.items, saved.payments, saved)).toBe(1500);
     await createOrder(
       owner,
-      input({ deposit: "0", items: [{ project: "Camera", final: "60" }] }),
+      input({
+        deposit: "0",
+        items: [{ project: "Camera", final: "60", saveRule: true }],
+      }),
     );
     expect(
       (

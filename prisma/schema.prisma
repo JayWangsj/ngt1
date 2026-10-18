@@ -181,52 +181,82 @@ model WorkOrder {
 }
 
 model PriceRule {
-  id                String          @id @default(cuid())
-  category          String          @default("PHONE")
-  brand             String          @default("")
-  series            String          @default("")
-  model             String          @default("")
+  id                String            @id @default(cuid())
+  category          String            @default("PHONE")
+  brand             String            @default("")
+  series            String            @default("")
+  model             String            @default("")
   project           String
-  suggested         Decimal         @db.Decimal(12, 2)
-  cost              Decimal?        @db.Decimal(12, 2)
-  minutes           Int             @default(60)
-  enabled           Boolean         @default(true)
-  notes             String          @default("")
+  suggested         Decimal           @db.Decimal(12, 2)
+  cost              Decimal?          @db.Decimal(12, 2)
+  minutes           Int               @default(60)
+  enabled           Boolean           @default(true)
+  notes             String            @default("")
   requiredProductId String?
-  requiredProduct   Product?        @relation("RequiredRepairProduct", fields: [requiredProductId], references: [id])
-  requiredQuantity  Int             @default(1)
-  updatedAt         DateTime        @updatedAt @db.Timestamptz(3)
+  requiredProduct   Product?          @relation("RequiredRepairProduct", fields: [requiredProductId], references: [id])
+  requiredQuantity  Int               @default(1)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
   items             WorkOrderItem[]
+  options           PriceRuleOption[]
 
   @@unique([category, brand, series, model, project])
 }
 
+model PriceRuleOption {
+  id           String          @id @default(cuid())
+  ruleId       String
+  rule         PriceRule       @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  name         String
+  suggested    Decimal         @db.Decimal(12, 2)
+  cost         Decimal?        @db.Decimal(12, 2)
+  quantity     Int             @default(1)
+  minutes      Int             @default(60)
+  warrantyDays Int             @default(0)
+  enabled      Boolean         @default(true)
+  isDefault    Boolean         @default(false)
+  sortOrder    Int             @default(0)
+  notes        String          @default("")
+  updatedAt    DateTime        @updatedAt @db.Timestamptz(3)
+  items        WorkOrderItem[]
+
+  @@unique([ruleId, productId])
+  @@index([ruleId, enabled, sortOrder])
+  @@index([productId])
+}
+
 model WorkOrderItem {
-  id                String        @id @default(cuid())
-  orderId           String
-  order             WorkOrder     @relation(fields: [orderId], references: [id])
-  ruleId            String?
-  rule              PriceRule?    @relation(fields: [ruleId], references: [id])
-  quickServiceId    String?
-  quickService      QuickService? @relation(fields: [quickServiceId], references: [id], onDelete: SetNull)
-  project           String
-  suggested         Decimal?      @db.Decimal(12, 2)
-  discount          Decimal       @default(0) @db.Decimal(12, 2)
-  final             Decimal       @db.Decimal(12, 2)
-  matchLevel        String
-  adjustmentReason  String        @default("")
-  minutes           Int           @default(0)
-  requiredProductId String?
-  requiredQuantity  Int           @default(1)
-  requiredProduct   Product?      @relation("RequiredWorkOrderProduct", fields: [requiredProductId], references: [id])
-  warrantyStart     DateTime?     @db.Timestamptz(3)
-  warrantyDays      Int           @default(0)
-  warrantyExpiresAt DateTime?     @db.Timestamptz(3)
-  warrantyNotes     String        @default("")
-  reworkItem        ReworkItem?
+  id                  String           @id @default(cuid())
+  orderId             String
+  order               WorkOrder        @relation(fields: [orderId], references: [id])
+  ruleId              String?
+  rule                PriceRule?       @relation(fields: [ruleId], references: [id])
+  priceOptionId       String?
+  priceOption         PriceRuleOption? @relation(fields: [priceOptionId], references: [id], onDelete: Restrict)
+  priceOptionName     String           @default("")
+  quickServiceId      String?
+  quickService        QuickService?    @relation(fields: [quickServiceId], references: [id], onDelete: SetNull)
+  project             String
+  suggested           Decimal?         @db.Decimal(12, 2)
+  discount            Decimal          @default(0) @db.Decimal(12, 2)
+  final               Decimal          @db.Decimal(12, 2)
+  matchLevel          String
+  adjustmentReason    String           @default("")
+  minutes             Int              @default(0)
+  requiredProductId   String?
+  requiredProductName String           @default("")
+  requiredQuantity    Int              @default(1)
+  requiredProduct     Product?         @relation("RequiredWorkOrderProduct", fields: [requiredProductId], references: [id])
+  warrantyStart       DateTime?        @db.Timestamptz(3)
+  warrantyDays        Int              @default(0)
+  warrantyExpiresAt   DateTime?        @db.Timestamptz(3)
+  warrantyNotes       String           @default("")
+  reworkItem          ReworkItem?
 
   @@index([orderId])
   @@index([requiredProductId])
+  @@index([priceOptionId])
   @@index([quickServiceId])
 }
 
@@ -370,6 +400,7 @@ model Product {
   workOrderProducts WorkOrderProduct[]
   requiredByRules   PriceRule[]            @relation("RequiredRepairProduct")
   requiredByItems   WorkOrderItem[]        @relation("RequiredWorkOrderProduct")
+  priceRuleOptions  PriceRuleOption[]
   reworkItems       ReworkItem[]
   compatibilities   ProductCompatibility[]
 

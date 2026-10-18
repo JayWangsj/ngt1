@@ -425,6 +425,28 @@ export async function updatePriceRuleFieldsAction(id: string, input: unknown) {
   );
 }
 
+export async function priceRuleOptionAction(
+  ruleId: string,
+  id: string | null,
+  input: unknown,
+) {
+  const actor = await requireActor();
+  return execute(
+    () => service.savePriceRuleOption(actor, ruleId, id, input),
+    undefined,
+    pricePaths,
+  );
+}
+
+export async function deletePriceRuleOptionAction(ruleId: string, id: string) {
+  const actor = await requireActor();
+  return execute(
+    () => service.deletePriceRuleOption(actor, ruleId, id),
+    undefined,
+    pricePaths,
+  );
+}
+
 export async function lookupCustomerAction(phone: string) {
   await requireActor();
   const parsed = phoneInput.safeParse(phone);

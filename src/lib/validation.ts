@@ -63,6 +63,7 @@ export const itemInput = z.object({
   adjustmentReason: text,
   discount: amountInput.default("0"),
   saveRule: z.boolean().default(false),
+  priceOptionId: z.string().trim().max(100).default(""),
   requiredProductId: z.string().trim().max(100).default(""),
   requiredQuantity: z.coerce.number().int().min(1).max(999).default(1),
   requiredProductRemoved: z.boolean().default(false),
@@ -409,6 +410,18 @@ export const ruleInput = z
           "Scegli marca + modello, marca + serie oppure una regola generica senza dispositivo.",
       });
   });
+export const priceRuleOptionInput = z.object({
+  productId: z.string().trim().min(1).max(100),
+  name: short,
+  suggested: amountInput,
+  cost: z.union([amountInput, z.literal("")]).default(""),
+  quantity: z.coerce.number().int().min(1).max(999).default(1),
+  minutes: z.coerce.number().int().min(0).max(10000).default(60),
+  warrantyDays: z.coerce.number().int().min(0).max(3650).default(0),
+  enabled: z.boolean().default(true),
+  isDefault: z.boolean().default(false),
+  notes: text,
+});
 export const userInput = z.object({
   name: short,
   email: z.string().email().toLowerCase(),
