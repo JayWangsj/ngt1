@@ -4455,7 +4455,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .quick-service-schedule {
   border-bottom: 0;
 }
-.quick-service-schedule .form-grid {
+.quick-service-schedule > label {
   width: min(100%, 620px);
 }
 .quick-service-service-cards {
@@ -8085,9 +8085,11 @@ details.secondary-actions {
   flex: 0 0 auto;
   width: auto;
 }
-.date-picker-heading-button:hover:not(:disabled) {
-  border-color: #efcf67 !important;
-  background: #fff8d9;
+.date-picker-header .date-picker-heading-button:hover:not(:disabled) {
+  background: transparent;
+  color: #9a6d00;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 .date-picker-heading-button:focus-visible,
 .date-picker-year-jump button:focus-visible,

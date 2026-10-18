@@ -1072,15 +1072,18 @@ test("uses part-specific prices without overwriting a manual quote", async ({
 test("switching repair and quick-service modes keeps both drafts", async ({
   page,
 }) => {
-  await fillOrder(page);
+  await fillOrder(page, { diagnosis: true });
   const quickMode = page.getByRole("button", {
     name: "Servizio rapido",
     exact: true,
   });
   await quickMode.click();
   await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
-  await page.getByLabel("Data", { exact: true }).fill("2099-12-30");
-  await page.getByLabel("Ora", { exact: true }).fill("17:45");
+  const expectedAt = page.locator(
+    '.service-mode-form-quick input[type="datetime-local"]',
+  );
+  await expectedAt.fill("2099-12-30T17:45");
+  await expectedAt.press("Enter");
 
   await page
     .getByRole("button", { name: "Servizio di riparazione", exact: true })
@@ -1096,11 +1099,8 @@ test("switching repair and quick-service modes keeps both drafts", async ({
   await expect(quickForm.locator(".selected-customer-summary")).toContainText(
     "Cliente Playwright",
   );
-  await expect(quickForm.getByLabel("Data", { exact: true })).toHaveValue(
-    "2099-12-30",
-  );
-  await expect(quickForm.getByLabel("Ora", { exact: true })).toHaveValue(
-    "17:45",
+  await expect(quickForm.locator('input[type="datetime-local"]')).toHaveValue(
+    "2099-12-30T17:45",
   );
 });
 
@@ -1445,20 +1445,29 @@ test("manages one quick service for held service orders and retail checkout", as
   await expect(editQuote).toContainText("34,50 €");
   await page.locator(".selected-project-summary").hover();
   await expect(removeService).toHaveCSS("opacity", "1");
-  const expectedDate = page.getByLabel("Data", { exact: true });
-  await expect(expectedDate).toHaveCSS("cursor", "pointer");
-  const expectedDateBox = await expectedDate.boundingBox();
-  await expectedDate.click({
-    position: { x: 8, y: expectedDateBox!.height / 2 },
+  const expectedAt = page.locator(
+    '.service-mode-form-quick input[type="datetime-local"]',
+  );
+  await expect(expectedAt).toHaveCSS("cursor", "pointer");
+  const expectedAtBox = await expectedAt.boundingBox();
+  await expectedAt.click({
+    position: { x: 8, y: expectedAtBox!.height / 2 },
   });
   const quickCalendar = page.getByRole("dialog", { name: "Scegli data" });
   await expect(quickCalendar).toBeVisible();
+  await expect(quickCalendar.locator('input[type="time"]')).toBeVisible();
   await expect(
     quickCalendar.locator(".date-picker-days [role=gridcell]"),
   ).toHaveCount(42);
   await page.keyboard.press("Escape");
-  await expectedDate.fill("2099-12-31");
-  await page.getByLabel("Ora", { exact: true }).fill("18:30");
+  await expectedAt.fill("2099-12-31T17:00");
+  await expectedAt.press("Enter");
+  await page.locator(".quick-service-schedule .date-picker-toggle").click();
+  await quickCalendar.locator('input[type="time"]').fill("18:30");
+  await quickCalendar
+    .getByRole("button", { name: "Conferma", exact: true })
+    .click();
+  await expect(expectedAt).toHaveValue("2099-12-31T18:30");
   await page
     .getByRole("button", {
       name: "Crea scheda di servizio rapido",

@@ -47,6 +47,13 @@ test("shared picker jumps directly to years and months without early filtering",
     path: ".local/date-picker-evidence/month-value-italian.png",
   });
   const picker = page.locator(".date-picker-popover");
+  const yearButton = picker.getByRole("button", {
+    name: "Scegli anno",
+    exact: true,
+  });
+  await yearButton.hover();
+  await expect(yearButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
+  await expect(yearButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(
     picker.locator(".date-picker-months [role=gridcell]"),
   ).toHaveCount(12);
@@ -140,3 +147,30 @@ for (const locale of ["it", "zh"] as const) {
     });
   });
 }
+
+test("quick service selects date and time in one picker", async ({ page }) => {
+  await page.goto("/orders/new?type=quick");
+  const quickForm = page.locator(".service-mode-form-quick");
+  const expectedAt = quickForm.locator('input[type="datetime-local"]');
+  await expect(expectedAt).toHaveCount(1);
+  await expect(quickForm.locator('input[type="time"]')).toHaveCount(0);
+  const day = (await expectedAt.getAttribute("min"))!.slice(0, 10);
+  await expectedAt.click();
+  const picker = page.getByRole("dialog", { name: "Scegli data" });
+  await picker.locator(`[data-date="${day}"]`).click();
+  await picker.locator('input[type="time"]').fill("18:30");
+  await picker.getByRole("button", { name: "Conferma", exact: true }).click();
+  await expect(expectedAt).toHaveValue(`${day}T18:30`);
+  await expect(quickForm.locator(".date-picker-toggle")).toBeFocused();
+  await expectNoBlueSelection(quickForm.locator(".date-picker"));
+  await quickForm.locator(".date-picker").screenshot({
+    path: ".local/date-picker-evidence/quick-service-datetime.png",
+  });
+  await page
+    .getByRole("button", { name: "Servizio di riparazione", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Servizio rapido", exact: true })
+    .click();
+  await expect(expectedAt).toHaveValue(`${day}T18:30`);
+});

@@ -64,8 +64,7 @@ export function NewServiceOrder({
   const [editingServicePrices, setEditingServicePrices] = useState<
     Record<string, boolean>
   >({});
-  const [expectedDate, setExpectedDate] = useState("");
-  const [expectedTime, setExpectedTime] = useState("");
+  const [expectedAt, setExpectedAt] = useState("");
   const [choosingDevices, setChoosingDevices] = useState(false);
   const [draftDeviceIds, setDraftDeviceIds] = useState<string[]>([]);
   const [choosingServices, setChoosingServices] = useState(false);
@@ -84,8 +83,6 @@ export function NewServiceOrder({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const customerId = customer?.id ?? "";
-  const expectedAt =
-    expectedDate && expectedTime ? `${expectedDate}T${expectedTime}` : "";
   const selectedDevices =
     customer?.devices.filter((device) => deviceIds.includes(device.id)) ?? [];
   const selectedServiceItems = availableServices.filter(
@@ -368,25 +365,16 @@ export function NewServiceOrder({
             </section>
             <section className="quick-service-section quick-service-schedule">
               <h2>{it.quickService.expectedAt}</h2>
-              <div className="form-grid">
-                <Field label={it.quickService.expectedDate}>
-                  <DatePicker
-                    value={expectedDate}
-                    required
-                    min={today}
-                    quickDays={[0, 1, 2, 3, 7]}
-                    onChange={(event) => setExpectedDate(event.target.value)}
-                  />
-                </Field>
-                <Field label={it.quickService.expectedTime}>
-                  <input
-                    type="time"
-                    value={expectedTime}
-                    required
-                    onChange={(event) => setExpectedTime(event.target.value)}
-                  />
-                </Field>
-              </div>
+              <Field label={it.quickService.expectedAt}>
+                <DatePicker
+                  type="datetime-local"
+                  value={expectedAt}
+                  required
+                  min={`${today}T00:00`}
+                  quickDays={[0, 1, 2, 3, 7]}
+                  onChange={(event) => setExpectedAt(event.target.value)}
+                />
+              </Field>
             </section>
             {error && <p className="message error">{error}</p>}
             <div className="dialog-actions">
