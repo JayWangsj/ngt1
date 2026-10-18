@@ -29,6 +29,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   Plus,
+  Star,
   Trash2,
   Check,
   ShieldCheck,
@@ -112,7 +113,6 @@ import {
   deleteDeviceAction,
   deleteRulesAction,
   priceRuleOptionAction,
-  deletePriceRuleOptionAction,
   warrantyAction,
   afterSalesAction,
   updateReworkPartAction,
@@ -450,6 +450,7 @@ export function ProductCompatibilityFields({
   options = [],
   deletions = [],
   onDelete,
+  editing = false,
 }: {
   value: ProductCompatibilityDraft[];
   onChange: (value: ProductCompatibilityDraft[]) => void;
@@ -460,9 +461,12 @@ export function ProductCompatibilityFields({
     entry: ProductCompatibilityDraft,
     value: string,
   ) => void | Promise<void>;
+  editing?: boolean;
 }) {
   const it = useMessages();
   const { locale } = useLanguage();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [draft, setDraft] = useState<ProductCompatibilityDraft[]>([]);
   const hidden = (
     kind: "BRAND" | "MODEL",
     entry: ProductCompatibilityDraft,
@@ -479,142 +483,227 @@ export function ProductCompatibilityFields({
           candidate.toLocaleLowerCase("it"),
     );
   return (
-    <fieldset className="product-compatibility-editor">
-      <legend>{it.inventory.compatibleDevices}</legend>
-      {value.map((entry, index) => {
-        const category = entry.category as Category;
-        const brandOptions = uniqueOptions([
-          ...(brands[category] ?? []),
-          ...options
-            .filter((option) => option.category === entry.category)
-            .map((option) => option.brand),
-          entry.brand,
-        ]).filter((brand) => brand && !hidden("BRAND", entry, brand));
-        const catalogBrand = Object.keys(models[category] ?? {}).find(
-          (brand) =>
-            brand.toLocaleLowerCase("it") ===
-            entry.brand.toLocaleLowerCase("it"),
-        );
-        const modelOptions = uniqueOptions([
-          ...(catalogBrand ? (models[category]?.[catalogBrand] ?? []) : []),
-          ...options
-            .filter(
-              (option) =>
-                option.category === entry.category &&
-                option.brand.toLocaleLowerCase("it") ===
+    <>
+      <fieldset className="product-compatibility-editor">
+        <legend>{it.inventory.compatibleDevices}</legend>
+        {editing
+          ? value.map((entry, index) => {
+              const category = entry.category as Category;
+              const brandOptions = uniqueOptions([
+                ...(brands[category] ?? []),
+                ...options
+                  .filter((option) => option.category === entry.category)
+                  .map((option) => option.brand),
+                entry.brand,
+              ]).filter((brand) => brand && !hidden("BRAND", entry, brand));
+              const catalogBrand = Object.keys(models[category] ?? {}).find(
+                (brand) =>
+                  brand.toLocaleLowerCase("it") ===
                   entry.brand.toLocaleLowerCase("it"),
-            )
-            .map((option) => option.model),
-          entry.model,
-        ]).filter((model) => model && !hidden("MODEL", entry, model));
-        const projectOptions = uniqueOptions(
-          options
-            .filter(
-              (option) =>
-                option.category === entry.category &&
-                option.brand.toLocaleLowerCase("it") ===
-                  entry.brand.toLocaleLowerCase("it") &&
-                modelKey(option.model) === modelKey(entry.model),
-            )
-            .map((option) => option.project),
-        ).filter(Boolean);
-        return (
-          <div className="product-compatibility-row" key={index}>
-            <SimpleSelect
-              value={entry.category}
-              onChange={(category) =>
-                onChange(
-                  value.map((item, position) =>
-                    position === index
-                      ? { ...item, category, brand: "", model: "", project: "" }
-                      : item,
-                  ),
-                )
-              }
-              placeholder={it.deviceType}
-              ariaLabel={it.deviceType}
-              options={Object.entries(categories).map(([category, labels]) => ({
-                value: category,
-                label: labels[locale === "zh" ? 1 : 0],
-              }))}
+              );
+              const modelOptions = uniqueOptions([
+                ...(catalogBrand
+                  ? (models[category]?.[catalogBrand] ?? [])
+                  : []),
+                ...options
+                  .filter(
+                    (option) =>
+                      option.category === entry.category &&
+                      option.brand.toLocaleLowerCase("it") ===
+                        entry.brand.toLocaleLowerCase("it"),
+                  )
+                  .map((option) => option.model),
+                entry.model,
+              ]).filter((model) => model && !hidden("MODEL", entry, model));
+              const projectOptions = uniqueOptions(
+                options
+                  .filter(
+                    (option) =>
+                      option.category === entry.category &&
+                      option.brand.toLocaleLowerCase("it") ===
+                        entry.brand.toLocaleLowerCase("it") &&
+                      modelKey(option.model) === modelKey(entry.model),
+                  )
+                  .map((option) => option.project),
+              ).filter(Boolean);
+              return (
+                <div className="product-compatibility-row" key={index}>
+                  <SimpleSelect
+                    value={entry.category}
+                    onChange={(category) =>
+                      onChange(
+                        value.map((item, position) =>
+                          position === index
+                            ? {
+                                ...item,
+                                category,
+                                brand: "",
+                                model: "",
+                                project: "",
+                              }
+                            : item,
+                        ),
+                      )
+                    }
+                    placeholder={it.deviceType}
+                    ariaLabel={it.deviceType}
+                    options={Object.entries(categories).map(
+                      ([category, labels]) => ({
+                        value: category,
+                        label: labels[locale === "zh" ? 1 : 0],
+                      }),
+                    )}
+                  />
+                  <EditableSelect
+                    label={it.brand}
+                    value={entry.brand}
+                    createLabel={it.customBrand}
+                    options={brandOptions}
+                    normalize={(brand) => normalizeBrand(brand, brandOptions)}
+                    deletableValues={onDelete ? brandOptions : []}
+                    onDelete={(brand) => onDelete?.("BRAND", entry, brand)}
+                    onChange={(brand) =>
+                      onChange(
+                        value.map((item, position) =>
+                          position === index
+                            ? { ...item, brand, model: "", project: "" }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                  <EditableSelect
+                    label={it.model}
+                    value={entry.model}
+                    createLabel={it.customModel}
+                    options={modelOptions}
+                    normalize={(model) =>
+                      normalizeDeviceModel(entry.brand, model, modelOptions)
+                    }
+                    readOnly={!entry.brand}
+                    deletableValues={onDelete ? modelOptions : []}
+                    onDelete={(model) => onDelete?.("MODEL", entry, model)}
+                    onChange={(model) =>
+                      onChange(
+                        value.map((item, position) =>
+                          position === index
+                            ? { ...item, model, project: "" }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                  <EditableSelect
+                    label={`${it.project} (${it.optional})`}
+                    value={entry.project}
+                    options={projectOptions}
+                    readOnly={!entry.model}
+                    onChange={(project) =>
+                      onChange(
+                        value.map((item, position) =>
+                          position === index ? { ...item, project } : item,
+                        ),
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="icon-button record-icon record-icon-delete"
+                    aria-label={it.remove}
+                    onClick={() =>
+                      onChange(
+                        value.filter((_, position) => position !== index),
+                      )
+                    }
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              );
+            })
+          : value.map((entry, index) => (
+              <div
+                className="compatibility-device-row business-list-row"
+                key={`${entry.category}:${entry.brand}:${entry.model}:${entry.project}:${index}`}
+              >
+                <div className="compatibility-device-summary">
+                  <strong>
+                    {entry.brand} {entry.model}
+                  </strong>
+                  <span className="compatibility-projects">
+                    <span>{entry.project || it.inventory.allRepairUses}</span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="record-icon record-icon-delete"
+                  aria-label={`${it.remove} ${entry.brand} ${entry.model}`}
+                  onClick={() =>
+                    onChange(value.filter((_, position) => position !== index))
+                  }
+                >
+                  <Trash2 size={17} />
+                </button>
+              </div>
+            ))}
+        {!editing && (
+          <Button
+            type="button"
+            variant="outline"
+            className="add-device-action"
+            onClick={() => {
+              setDraft([
+                { category: "PHONE", brand: "", model: "", project: "" },
+              ]);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus size={16} /> {it.inventory.addCompatibility}
+          </Button>
+        )}
+      </fieldset>
+      {!editing && dialogOpen && (
+        <FormDialog
+          title={it.inventory.addCompatibleDevice}
+          subtitle={it.inventory.compatibilityEditorHelp}
+          onClose={() => setDialogOpen(false)}
+        >
+          <div className="product-compatibility-dialog" data-form-dialog-body>
+            <ProductCompatibilityFields
+              value={draft}
+              onChange={setDraft}
+              options={options}
+              deletions={deletions}
+              onDelete={onDelete}
+              editing
             />
-            <EditableSelect
-              label={it.brand}
-              value={entry.brand}
-              createLabel={it.customBrand}
-              options={brandOptions}
-              normalize={(brand) => normalizeBrand(brand, brandOptions)}
-              deletableValues={onDelete ? brandOptions : []}
-              onDelete={(brand) => onDelete?.("BRAND", entry, brand)}
-              onChange={(brand) =>
-                onChange(
-                  value.map((item, position) =>
-                    position === index
-                      ? { ...item, brand, model: "", project: "" }
-                      : item,
-                  ),
-                )
-              }
-            />
-            <EditableSelect
-              label={it.model}
-              value={entry.model}
-              createLabel={it.customModel}
-              options={modelOptions}
-              normalize={(model) =>
-                normalizeDeviceModel(entry.brand, model, modelOptions)
-              }
-              readOnly={!entry.brand}
-              deletableValues={onDelete ? modelOptions : []}
-              onDelete={(model) => onDelete?.("MODEL", entry, model)}
-              onChange={(model) =>
-                onChange(
-                  value.map((item, position) =>
-                    position === index ? { ...item, model, project: "" } : item,
-                  ),
-                )
-              }
-            />
-            <EditableSelect
-              label={`${it.project} (${it.optional})`}
-              value={entry.project}
-              options={projectOptions}
-              readOnly={!entry.model}
-              onChange={(project) =>
-                onChange(
-                  value.map((item, position) =>
-                    position === index ? { ...item, project } : item,
-                  ),
-                )
-              }
-            />
-            <button
-              type="button"
-              className="icon-button record-icon record-icon-delete"
-              aria-label={it.remove}
-              onClick={() =>
-                onChange(value.filter((_, position) => position !== index))
-              }
-            >
-              <Trash2 size={16} />
-            </button>
+            <div className="dialog-actions">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+              >
+                {it.cancel}
+              </Button>
+              <Button
+                type="button"
+                disabled={!draft[0]?.brand.trim() || !draft[0]?.model.trim()}
+                onClick={() => {
+                  const additions = draft.filter(
+                    (entry) => entry.brand.trim() && entry.model.trim(),
+                  );
+                  if (!additions.length) return;
+                  onChange([...value, ...additions]);
+                  setDialogOpen(false);
+                }}
+              >
+                {it.quickService.confirmDevices}
+              </Button>
+            </div>
           </div>
-        );
-      })}
-      <Button
-        type="button"
-        variant="outline"
-        className="add-device-action"
-        onClick={() =>
-          onChange([
-            ...value,
-            { category: "PHONE", brand: "", model: "", project: "" },
-          ])
-        }
-      >
-        <Plus size={16} /> {it.inventory.addCompatibility}
-      </Button>
-    </fieldset>
+        </FormDialog>
+      )}
+    </>
   );
 }
 
@@ -4733,8 +4822,21 @@ export function RuleForm({
   const ruleId = rule?.id ?? createdRuleId;
   const currentRule =
     rules.find((candidate) => candidate.id === ruleId) ?? rule ?? null;
+  const selectedProjectRule =
+    !currentRule && category && brand.trim() && model.trim() && project.trim()
+      ? rules.find(
+          (candidate) =>
+            candidate.category === category &&
+            normalizeBrand(candidate.brand) === normalizeBrand(brand) &&
+            normalizeDeviceModel(candidate.brand, candidate.model) ===
+              normalizeDeviceModel(brand, model) &&
+            candidate.project.toLocaleLowerCase("it") ===
+              project.trim().toLocaleLowerCase("it"),
+        )
+      : null;
   const optionRule: RuleView | null =
     currentRule ??
+    selectedProjectRule ??
     (ruleId
       ? {
           id: ruleId,
@@ -4910,9 +5012,9 @@ export function RuleForm({
                   </div>
                   <div className="price-option-actions">
                     {!option.isDefault && option.enabled && (
-                      <Button
+                      <button
                         type="button"
-                        variant="outline"
+                        className="price-option-default-action"
                         disabled={optionPending}
                         onClick={async () => {
                           setOptionPending(true);
@@ -4941,26 +5043,37 @@ export function RuleForm({
                           }
                         }}
                       >
+                        <Star
+                          size={14}
+                          fill="currentColor"
+                          aria-hidden="true"
+                        />
                         {it.setDefault}
-                      </Button>
+                      </button>
                     )}
-                    <RecordIcon
-                      kind="edit"
-                      label={it.editPartOption}
-                      disabled={optionPending}
-                      onClick={() => setEditingOption({ option })}
-                    />
-                    <RecordIcon
-                      kind="delete"
-                      label={it.remove}
+                    <button
+                      type="button"
+                      className="motion-switch price-option-enabled-switch"
+                      role="switch"
+                      aria-checked={option.enabled}
+                      aria-label={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                      title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
                       disabled={optionPending}
                       onClick={async () => {
                         setOptionPending(true);
                         setOptionError("");
                         try {
-                          const result = await deletePriceRuleOptionAction(
+                          const result = await priceRuleOptionAction(
                             optionRule.id,
                             option.id,
+                            {
+                              ...option,
+                              enabled: !option.enabled,
+                              isDefault: option.enabled
+                                ? false
+                                : option.isDefault,
+                              cost: option.cost ?? "",
+                            },
                           );
                           if (!result.ok) setOptionError(result.error);
                           else {
@@ -4975,6 +5088,14 @@ export function RuleForm({
                           setOptionPending(false);
                         }
                       }}
+                    >
+                      <span />
+                    </button>
+                    <RecordIcon
+                      kind="edit"
+                      label={it.editPartOption}
+                      disabled={optionPending}
+                      onClick={() => setEditingOption({ option })}
                     />
                   </div>
                 </div>
@@ -5022,10 +5143,11 @@ export function RuleForm({
           <p className="muted">{it.saveQuoteBeforeOptions}</p>
         )}
         <Message error={optionError} />
-        {optionRule && (
+        {project.trim() && (
           <button
             type="button"
             className="quick-service-picker-add price-option-add"
+            disabled={!optionRule || optionPending}
             onClick={() => setEditingOption({})}
           >
             <Plus size={16} /> {it.addPartOption}
@@ -5849,7 +5971,12 @@ export function PriceList({
                             >
                               {batchMode && <span aria-hidden="true" />}
                               <strong>{it.project}</strong>
-                              <strong>{it.quote}</strong>
+                              <strong className="price-rule-heading-quote">
+                                {it.quote}
+                              </strong>
+                              <strong className="price-option-count-heading">
+                                {it.partOptionCount}
+                              </strong>
                               <span aria-hidden="true" />
                             </div>
                             {group.rules.map((rule) => (
@@ -5899,44 +6026,25 @@ export function PriceList({
                                   onError={setError}
                                   onSaved={() => setSaved(true)}
                                 />
+                                <span
+                                  className="price-option-count"
+                                  aria-label={`${rule.options?.length ?? 0} ${it.partOptionCount}`}
+                                >
+                                  {rule.options?.length ?? 0}
+                                </span>
                                 <span className="price-row-actions record-actions">
                                   {!batchMode && activeRuleId !== rule.id && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        className={`price-option-summary${rule.options?.length ? " has-options" : ""}`}
-                                        aria-label={it.managePartOptions}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setCreating(null);
-                                          setEditing(rule);
-                                          setFocusOptions(true);
-                                        }}
-                                      >
-                                        {!rule.options?.length && (
-                                          <Plus size={15} />
-                                        )}
-                                        <span>
-                                          {rule.options?.length
-                                            ? `${rule.options.length} ${it.partPriceOptions}`
-                                            : it.partPriceOptions}
-                                        </span>
-                                        {rule.options?.length ? (
-                                          <ChevronRight size={15} />
-                                        ) : null}
-                                      </button>
-                                      <RecordIcon
-                                        kind="edit"
-                                        label={it.editQuote}
-                                        disabled={pending}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setCreating(null);
-                                          setEditing(rule);
-                                          setFocusOptions(false);
-                                        }}
-                                      />
-                                    </>
+                                    <RecordIcon
+                                      kind="edit"
+                                      label={it.editQuote}
+                                      disabled={pending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setCreating(null);
+                                        setEditing(rule);
+                                        setFocusOptions(false);
+                                      }}
+                                    />
                                   )}
                                 </span>
                               </article>

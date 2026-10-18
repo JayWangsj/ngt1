@@ -340,6 +340,7 @@ export default async function Detail({
             <ServiceOrderActions
               id={id}
               code={order.code}
+              status={order.status}
               blockedReason={deleteBlockedReason}
             />
           </div>
@@ -631,15 +632,17 @@ export default async function Detail({
           {inspectionStageAction}
           {order.status === "PARTS_MISSING" && (
             <a
-              className="button button-primary stage-primary-action"
-              href="#required-parts"
+              className={`button button-primary stage-primary-action status-action-trigger status-${order.status.toLowerCase()}`}
+              href={order.afterSalesOpen ? "#warranty" : "#required-parts"}
             >
+              <span className="status-dropdown-dot" aria-hidden="true" />
               {it.stageActions.viewMissingParts}
             </a>
           )}
           <ServiceOrderActions
             id={id}
             code={order.code}
+            status={order.status}
             blockedReason={deleteBlockedReason}
           />
         </div>
@@ -963,6 +966,7 @@ export default async function Detail({
               })
               .join(" · ")}
             testId="warranty-card"
+            id="warranty"
             edit={
               <WarrantyForm
                 id={id}

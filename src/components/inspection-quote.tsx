@@ -84,9 +84,10 @@ export function CompleteInspectionButton({
     <>
       <Button
         type="button"
-        className="stage-primary-action"
+        className="stage-primary-action status-action-trigger status-diagnosing"
         onClick={() => setOpen(true)}
       >
+        <span className="status-dropdown-dot" aria-hidden="true" />
         {it.completeInspection}
       </Button>
       {open && (

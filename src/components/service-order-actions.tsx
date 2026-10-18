@@ -11,10 +11,12 @@ import { Button } from "./ui/button";
 export function ServiceOrderActions({
   id,
   code,
+  status,
   blockedReason,
 }: {
   id: string;
   code: string;
+  status: string;
   blockedReason?: string;
 }) {
   const it = useMessages();
@@ -26,7 +28,11 @@ export function ServiceOrderActions({
   return (
     <>
       <details className="secondary-actions">
-        <summary aria-label={it.moreActions}>
+        <summary
+          className={`status-action-trigger status-${status.toLowerCase()}`}
+          aria-label={it.moreActions}
+        >
+          <span className="status-dropdown-dot" aria-hidden="true" />
           <MoreVertical size={18} />
           {it.moreActions}
         </summary>

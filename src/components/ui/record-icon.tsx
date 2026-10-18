@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 export function RecordIcon({
   kind,
   label,
+  className = "",
   ...props
 }: Omit<ComponentProps<typeof Button>, "children"> & {
   kind: "edit" | "delete";
@@ -15,7 +16,7 @@ export function RecordIcon({
       type="button"
       variant="ghost"
       {...props}
-      className={`record-icon record-icon-${kind}`}
+      className={`record-icon record-icon-${kind} ${className}`.trim()}
       aria-label={label}
       title={label}
     >

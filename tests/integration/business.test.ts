@@ -1969,7 +1969,42 @@ describe("work order products and combined checkout", () => {
         items: [{ project: "Rimozione reservation", final: "40" }],
       }),
     );
+    const third = await createOrder(
+      staff,
+      input({
+        phone: "3335555555",
+        deposit: "0",
+        items: [{ project: "Rimozione reservation", final: "40" }],
+      }),
+    );
     expect(second.status).toBe("PARTS_MISSING");
+    expect(third.status).toBe("PARTS_MISSING");
+
+    await replaceQuote(staff, third.id, {
+      items: [
+        {
+          project: "Rimozione reservation",
+          final: "40",
+          requiredProductRemoved: true,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: third.id } }))
+        .status,
+    ).toBe("REPAIRING");
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId: third.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(0);
 
     await replaceQuote(owner, first.id, {
       items: [

@@ -38,6 +38,7 @@ import {
   SimpleSelect,
 } from "./business-select";
 import { Button } from "./ui/button";
+import { RecordIcon } from "./ui/record-icon";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
 export type { CategoryView } from "./forms";
@@ -1368,13 +1369,13 @@ export function InventoryWorkspace({
                     </td>
                     <td className="inventory-compatible-cell">
                       {selected && product.usage === "REPAIR" ? (
-                        <Button
+                        <RecordIcon
+                          kind="edit"
+                          label={it.inventory.editCompatibleDevices}
                           type="button"
-                          variant="outline"
+                          className="record-icon-compact"
                           onClick={() => setCompatibilityEditor(product.id)}
-                        >
-                          {it.inventory.editCompatibleDevices}
-                        </Button>
+                        />
                       ) : compatibilityPaths(product).length ? (
                         <span className="inventory-compatibility-list">
                           {compatibilityPaths(product).map((path) => (

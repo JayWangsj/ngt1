@@ -2366,50 +2366,59 @@ textarea {
   outline: none;
 }
 .status-dropdown-trigger.status-received,
+.status-action-trigger.status-received,
 .status-dropdown-option.status-received {
   --status-color: #6d7880;
   --status-bg: #f3f5f6;
   --status-bg-hover: #ebeff1;
 }
 .status-dropdown-trigger.status-diagnosing,
+.status-action-trigger.status-diagnosing,
 .status-dropdown-option.status-diagnosing {
   --status-color: #81649a;
   --status-bg: #f6f2f8;
   --status-bg-hover: #eee7f3;
 }
 .status-dropdown-trigger.status-ready,
+.status-action-trigger.status-ready,
 .status-dropdown-option.status-ready {
   --status-color: #9b741e;
   --status-bg: #fdf8e9;
   --status-bg-hover: #f9f0d2;
 }
 .status-dropdown-trigger.status-repairing,
+.status-action-trigger.status-repairing,
 .status-dropdown-option.status-repairing {
   --status-color: #4779a8;
   --status-bg: #f0f6fb;
   --status-bg-hover: #e6f0f8;
 }
 .status-dropdown-trigger.status-parts_missing,
+.status-action-trigger.status-parts_missing,
 .status-dropdown-option.status-parts_missing {
   --status-color: #a9632f;
   --status-bg: #fbf3ec;
   --status-bg-hover: #f6e8db;
 }
 .status-dropdown-trigger.status-completed,
+.status-action-trigger.status-completed,
 .status-dropdown-option.status-completed {
   --status-color: #377b50;
   --status-bg: #eff8f2;
   --status-bg-hover: #e4f2e8;
 }
 .status-dropdown-trigger.status-reworking,
+.status-action-trigger.status-reworking,
 .status-dropdown-option.status-reworking {
   --status-color: #be185d;
   --status-bg: #fce7f3;
   --status-bg-hover: #fbcfe8;
 }
 .status-dropdown-trigger.status-refunded,
+.status-action-trigger.status-refunded,
 .status-dropdown-option.status-refunded,
 .status-dropdown-trigger.status-cancelled,
+.status-action-trigger.status-cancelled,
 .status-dropdown-option.status-cancelled {
   --status-color: #6f7a80;
   --status-bg: #f4f6f7;
@@ -8683,7 +8692,7 @@ details.secondary-actions {
 
 .price-rule-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 190px;
+  grid-template-columns: minmax(0, 1fr) 112px 92px 42px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -8694,7 +8703,7 @@ details.secondary-actions {
     box-shadow 150ms ease-out;
 }
 .price-rule-row.is-batch {
-  grid-template-columns: 18px minmax(0, 1fr) 112px 190px;
+  grid-template-columns: 18px minmax(0, 1fr) 112px 92px 42px;
 }
 .price-rule-row:last-child {
   border-bottom: 0;
@@ -8714,7 +8723,7 @@ details.secondary-actions {
 }
 .price-rule-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 190px;
+  grid-template-columns: minmax(0, 1fr) 112px 92px 42px;
   align-items: center;
   gap: 8px;
   min-height: 36px;
@@ -8724,13 +8733,14 @@ details.secondary-actions {
   font-size: 12px;
 }
 .price-rule-header.is-batch {
-  grid-template-columns: 18px minmax(0, 1fr) 112px 190px;
+  grid-template-columns: 18px minmax(0, 1fr) 112px 92px 42px;
   padding-left: 10px;
 }
 .price-rule-header strong {
   padding-inline: 6px;
 }
-.price-rule-header strong:nth-last-child(2) {
+.price-rule-heading-quote,
+.price-option-count-heading {
   text-align: right;
 }
 .inline-rule-project {
@@ -8775,44 +8785,23 @@ details.secondary-actions {
   min-width: 0;
 }
 .price-row-actions {
-  width: 190px;
+  width: 42px;
   min-height: 40px;
   justify-content: flex-end;
   flex-wrap: nowrap;
 }
-.price-option-summary,
 .price-option-actions {
   display: flex;
   align-items: center;
   gap: 7px;
 }
-.price-option-summary {
-  min-width: 0;
-  max-width: 148px;
-  min-height: 32px;
-  padding: 5px 8px;
-  border: 1px dashed #d9c67e;
-  border-radius: 8px;
-  background: #fffdf5;
-  color: #755900;
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
+.price-option-count {
+  padding-inline: 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
-.price-option-summary span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.price-option-summary.has-options {
-  border-style: solid;
-  background: #fff8d8;
-}
-.price-option-summary:hover,
-.price-option-summary:focus-visible {
-  border-color: #c99a00;
-  background: #fff3bd;
+.form-dialog:has(.product-compatibility-dialog) {
+  width: min(920px, calc(100vw - 32px));
 }
 .form-dialog:has(.price-rule-editor) {
   width: min(920px, calc(100vw - 32px));
@@ -8937,6 +8926,46 @@ details.secondary-actions {
 }
 .price-option-actions {
   margin-left: auto;
+  align-items: center;
+}
+.price-option-enabled-switch.motion-switch {
+  width: 34px;
+  height: 20px;
+  flex: 0 0 34px;
+}
+.price-option-enabled-switch.motion-switch > span {
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+}
+.price-option-enabled-switch.motion-switch[aria-checked="true"] > span {
+  transform: translateX(14px);
+}
+.price-option-default-action {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #806000;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.price-option-default-action:hover:not(:disabled),
+.price-option-default-action:focus-visible {
+  border-color: transparent;
+  background: #fff7d6;
+}
+.price-option-default-action:disabled {
+  cursor: default;
+  opacity: 0.58;
 }
 .price-option-add,
 .price-option-clear {
@@ -8952,6 +8981,42 @@ details.secondary-actions {
 }
 .price-option-picker-footer {
   justify-content: flex-end;
+}
+.detail-primary-actions .status-dropdown-trigger,
+.detail-primary-actions .status-action-trigger {
+  min-height: 30px;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--status-color) 22%, white);
+  border-radius: 7px;
+  background: var(--status-bg);
+  box-shadow: none;
+  color: var(--status-color);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+.detail-primary-actions .status-dropdown-trigger:hover:not(:disabled),
+.detail-primary-actions .status-dropdown-trigger:focus-visible,
+.detail-primary-actions .status-action-trigger:hover:not(:disabled),
+.detail-primary-actions .status-action-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--status-color) 42%, white);
+  background: var(--status-bg-hover);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--status-color) 10%, transparent);
+}
+.detail-primary-actions .secondary-actions > summary.status-action-trigger {
+  width: auto;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-color: color-mix(in srgb, var(--status-color) 22%, white);
+  background: var(--status-bg);
+  color: var(--status-color);
 }
 .quote-price-switch-notice {
   display: flex;
@@ -9022,17 +9087,17 @@ details.secondary-actions {
 }
 @media (max-width: 600px) {
   .price-rule-row {
-    grid-template-columns: minmax(0, 1fr) 82px 132px;
+    grid-template-columns: minmax(0, 1fr) 74px 62px 36px;
     gap: 6px;
   }
   .price-rule-row.is-batch {
-    grid-template-columns: 18px minmax(0, 1fr) 82px 132px;
+    grid-template-columns: 18px minmax(0, 1fr) 74px 62px 36px;
   }
   .price-rule-header {
-    grid-template-columns: minmax(0, 1fr) 82px 132px;
+    grid-template-columns: minmax(0, 1fr) 74px 62px 36px;
   }
   .price-rule-header.is-batch {
-    grid-template-columns: 18px minmax(0, 1fr) 82px 132px;
+    grid-template-columns: 18px minmax(0, 1fr) 74px 62px 36px;
   }
   .price-list-controls > .grow {
     min-width: 100%;
@@ -9060,10 +9125,7 @@ details.secondary-actions {
     font-size: 12px;
   }
   .price-row-actions {
-    width: 132px;
-  }
-  .price-option-summary {
-    max-width: 96px;
+    width: 36px;
   }
   .price-option-data {
     grid-template-columns: repeat(2, minmax(0, 1fr));
