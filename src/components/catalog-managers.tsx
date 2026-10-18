@@ -53,8 +53,14 @@ export function QuickServiceEditor({
   );
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
+  const unchanged =
+    item !== undefined &&
+    draft.name === item.name &&
+    priceDraft === decimal(item.defaultPrice) &&
+    draft.notes === item.notes;
 
   function save() {
+    if (unchanged || pending) return;
     startTransition(async () => {
       const result = await saveQuickServiceAction(draft.id || null, {
         name: draft.name,
@@ -111,7 +117,7 @@ export function QuickServiceEditor({
         <Button type="button" variant="outline" onClick={onCancel}>
           {it.cancel}
         </Button>
-        <Button disabled={pending}>{it.save}</Button>
+        <Button disabled={pending || unchanged}>{it.save}</Button>
       </div>
     </form>
   );

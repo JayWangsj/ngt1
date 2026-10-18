@@ -85,11 +85,13 @@ export function OrderDetailCard({
   const wasExpanded = useRef(expanded);
   const saves = useRef(new Set<FormSaveRegistration>());
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [leaveHref, setLeaveHref] = useState("");
   const editable = Boolean(edit) && !locked;
   const closeEdit = () => {
     setEditTarget(null);
     setEditing(false);
+    setDirty(false);
   };
   const requestEdit = (target: OrderDetailEditTarget) => {
     setExpanded(true);
@@ -99,7 +101,10 @@ export function OrderDetailCard({
   };
   const registerSave = useCallback((registration: FormSaveRegistration) => {
     saves.current.add(registration);
-    return () => saves.current.delete(registration);
+    setDirty(Array.from(saves.current).some((entry) => entry.isDirty()));
+    return () => {
+      saves.current.delete(registration);
+    };
   }, []);
   useEffect(() => {
     const justExpanded = expanded && !wasExpanded.current;
@@ -292,7 +297,16 @@ export function OrderDetailCard({
           aria-hidden={!expanded}
           inert={!expanded || undefined}
         >
-          <div ref={body} className="order-card-body">
+          <div
+            ref={body}
+            className="order-card-body"
+            onChangeCapture={() =>
+              requestAnimationFrame(() => setDirty(hasUnsavedChanges()))
+            }
+            onInputCapture={() =>
+              requestAnimationFrame(() => setDirty(hasUnsavedChanges()))
+            }
+          >
             {editing ? (
               <FormSaveContext.Provider value={registerSave}>
                 <FormCloseContext.Provider value={closeEdit}>
@@ -309,7 +323,7 @@ export function OrderDetailCard({
                     </Button>
                     <Button
                       type="button"
-                      disabled={saving}
+                      disabled={saving || !dirty}
                       onClick={() => void submitEdit()}
                     >
                       {saving ? it.saving : it.save}

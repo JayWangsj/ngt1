@@ -265,6 +265,7 @@ async function fillOrder(
     manual?: boolean;
     diagnosis?: boolean;
     discount?: boolean;
+    fault?: string;
     phone?: string;
     name?: string;
   } = {},
@@ -297,7 +298,10 @@ async function fillOrder(
     await page
       .getByRole("button", { name: "Imposta diagnosi", exact: true })
       .click();
-  else await page.getByLabel("Display rotto", { exact: true }).check();
+  else
+    await page
+      .getByLabel(options.fault ?? "Display rotto", { exact: true })
+      .check();
   await page
     .getByLabel("Consegna prevista", { exact: true })
     .fill("2099-12-31");
@@ -4997,7 +5001,7 @@ test("zero balance delivery uses the lightweight confirmation dialog", async ({
 test("detail edits save on outside click and protect navigation", async ({
   page,
 }) => {
-  await fillOrder(page);
+  await fillOrder(page, { fault: "Non si accende" });
   await save(page);
   const orderPath = new URL(page.url()).pathname;
   const details = page.getByTestId("details-card");
@@ -5005,9 +5009,14 @@ test("detail edits save on outside click and protect navigation", async ({
   await details
     .getByRole("button", { name: "Modifica dati", exact: true })
     .click();
+  const saveDetails = details
+    .locator(".order-card-edit-actions")
+    .getByRole("button", { name: "Salva", exact: true });
+  await expect(saveDetails).toBeDisabled();
   await details
     .getByLabel("Consegna prevista", { exact: true })
     .fill("2099-12-30");
+  await expect(saveDetails).toBeEnabled();
 
   await page.getByTestId("history-card").locator(".order-card-heading").click();
   await expect(details).not.toHaveClass(/is-editing/);
@@ -6624,6 +6633,9 @@ test("inventory repair products retain their compatibility editor", async ({
     "Batteria Test",
   );
   await expect(dialog.locator(".compatibility-device-list")).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Salva", exact: true }),
+  ).toBeDisabled();
   await compatibilityAdd.click();
   const editorDialog = page.getByRole("dialog", {
     name: "Aggiungi dispositivo compatibile",
@@ -6700,6 +6712,9 @@ test("inventory repair products retain their compatibility editor", async ({
   });
   await expect(summary).toContainText("sostituzione batteria");
   await expect(summary).not.toContainText("sostituzione display");
+  await expect(
+    dialog.getByRole("button", { name: "Salva", exact: true }),
+  ).toBeEnabled();
   await compatibilityAdd.click();
   const existingModelDialog = page.getByRole("dialog", {
     name: "Aggiungi dispositivo compatibile",
@@ -7221,9 +7236,15 @@ test("customer page adds, edits and deletes a customer", async ({ page }) => {
   await summary
     .getByRole("button", { name: "Modifica cliente", exact: true })
     .click();
+  const saveCustomer = detailDialog.getByRole("button", {
+    name: "Salva",
+    exact: true,
+  });
+  await expect(saveCustomer).toBeDisabled();
   await page
     .getByLabel("Nome e cognome", { exact: true })
     .fill("Cliente modificato");
+  await expect(saveCustomer).toBeEnabled();
   await page.getByRole("button", { name: "Salva", exact: true }).click();
   const updatedDetailDialog = page.getByRole("dialog", {
     name: "Dettagli cliente",
@@ -7243,6 +7264,20 @@ test("customer page adds, edits and deletes a customer", async ({ page }) => {
   await expect(
     page.getByRole("link", { name: "Cliente modificato", exact: true }),
   ).toHaveCount(0);
+});
+test("quick service editor saves only changed content", async ({ page }) => {
+  await page.goto("/settings/quick-services");
+  await page.locator(".catalog-manager-row").first().click();
+  const dialog = page.getByRole("dialog");
+  const name = dialog.getByRole("textbox").first();
+  const original = await name.inputValue();
+  const save = dialog.getByRole("button", { name: "Salva", exact: true });
+  await expect(save).toBeDisabled();
+  await name.fill(`${original} test`);
+  await expect(save).toBeEnabled();
+  await name.fill(original);
+  await expect(save).toBeDisabled();
+  await dialog.getByRole("button", { name: "Annulla", exact: true }).click();
 });
 test("customer dialog keeps filters and inputs on errors and allows deleted numbers again", async ({
   page,
@@ -7335,6 +7370,32 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
     .filter({ has: page.locator(".price-toggle", { hasText: "Watch Modal" }) })
     .last();
   await expect(model.locator("article")).toBeVisible();
+  const firstRule = model.locator(".price-rule-row").first();
+  await firstRule.hover();
+  await firstRule
+    .getByRole("button", { name: "Modifica preventivo", exact: true })
+    .click();
+  const editQuote = page.getByRole("dialog", {
+    name: "Modifica preventivo",
+    exact: true,
+  });
+  const saveQuote = editQuote.getByRole("button", {
+    name: "Salva ed esci",
+    exact: true,
+  });
+  const basePrice = editQuote.getByLabel("Prezzo suggerito (€)", {
+    exact: true,
+  });
+  const originalPrice = await basePrice.inputValue();
+  await expect(saveQuote).toBeDisabled();
+  await basePrice.fill("987");
+  await expect(saveQuote).toBeEnabled();
+  await basePrice.fill(originalPrice);
+  await expect(saveQuote).toBeDisabled();
+  await editQuote
+    .getByRole("button", { name: "Chiudi", exact: true })
+    .last()
+    .click();
   await model.getByRole("button", { name: "Intervento", exact: true }).click();
   dialog = page.getByRole("dialog");
   await expect(

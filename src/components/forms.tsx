@@ -3265,6 +3265,8 @@ function ActionForm({
   onCancel,
   cancelLabel,
   disabled = false,
+  disableUnchangedSave = false,
+  changeKey = "",
   className = "",
   closeOnSuccess = false,
   saveRef,
@@ -3276,6 +3278,8 @@ function ActionForm({
   onCancel?: () => void;
   cancelLabel?: string;
   disabled?: boolean;
+  disableUnchangedSave?: boolean;
+  changeKey?: string;
   className?: string;
   closeOnSuccess?: boolean;
   saveRef?: { current: (() => Promise<boolean>) | null };
@@ -3289,6 +3293,8 @@ function ActionForm({
   const [success, setSuccess] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const initial = useRef("");
+  const initialChangeKey = useRef(changeKey);
+  const [unchanged, setUnchanged] = useState(disableUnchangedSave);
   const initialized = useRef(false);
   const activeSave = useRef<Promise<boolean> | null>(null);
   const router = useRouter();
@@ -3312,11 +3318,22 @@ function ActionForm({
       }),
     );
   }, []);
+  const updateUnchanged = useCallback(() => {
+    if (form.current && disableUnchangedSave)
+      setUnchanged(
+        snapshot(form.current) === initial.current &&
+          changeKey === initialChangeKey.current,
+      );
+  }, [changeKey, disableUnchangedSave, snapshot]);
   const save = useCallback(
     (element: HTMLFormElement) => {
       if (activeSave.current) return activeSave.current;
       const current = snapshot(element);
-      if (registerSave && current === initial.current)
+      if (
+        registerSave &&
+        current === initial.current &&
+        changeKey === initialChangeKey.current
+      )
         return Promise.resolve(true);
       const request = (async () => {
         setPending(true);
@@ -3329,6 +3346,8 @@ function ActionForm({
             return false;
           }
           initial.current = current;
+          initialChangeKey.current = changeKey;
+          if (disableUnchangedSave) setUnchanged(true);
           setSuccess(true);
           onSuccess?.(result);
           router.refresh();
@@ -3344,7 +3363,15 @@ function ActionForm({
       activeSave.current = request;
       return request;
     },
-    [action, onSuccess, registerSave, router, snapshot],
+    [
+      action,
+      changeKey,
+      disableUnchangedSave,
+      onSuccess,
+      registerSave,
+      router,
+      snapshot,
+    ],
   );
   useEffect(() => {
     if (!form.current || initialized.current) return;
@@ -3352,13 +3379,20 @@ function ActionForm({
     initial.current = snapshot(form.current);
   }, [snapshot]);
   useEffect(() => {
+    updateUnchanged();
+  }, [updateUnchanged]);
+  useEffect(() => {
     if (!registerSave) return;
     return registerSave({
       save: () => (form.current ? save(form.current) : Promise.resolve(true)),
       isDirty: () =>
-        Boolean(form.current && snapshot(form.current) !== initial.current),
+        Boolean(
+          form.current &&
+          (snapshot(form.current) !== initial.current ||
+            changeKey !== initialChangeKey.current),
+        ),
     });
-  }, [registerSave, save, snapshot]);
+  }, [changeKey, registerSave, save, snapshot]);
   useEffect(() => {
     if (!saveRef) return;
     saveRef.current = () =>
@@ -3370,6 +3404,7 @@ function ActionForm({
   async function handle(event: FormEvent<HTMLFormElement>) {
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
+    if (disableUnchangedSave && unchanged) return;
     if (await save(event.currentTarget)) {
       if (registerSave || closeOnSuccess) closeDialog?.();
     }
@@ -3378,6 +3413,8 @@ function ActionForm({
     <form
       ref={form}
       onSubmit={handle}
+      onChangeCapture={() => requestAnimationFrame(updateUnchanged)}
+      onInputCapture={() => requestAnimationFrame(updateUnchanged)}
       className={`action-form ${className}`}
       aria-busy={pending}
     >
@@ -3393,12 +3430,12 @@ function ActionForm({
           >
             {cancelLabel ?? it.cancel}
           </Button>
-          <Button disabled={pending || disabled}>
+          <Button disabled={pending || disabled || unchanged}>
             {pending ? it.saving : submit}
           </Button>
         </div>
       ) : (
-        <Button disabled={pending || disabled}>
+        <Button disabled={pending || disabled || unchanged}>
           {pending ? it.saving : submit}
         </Button>
       )}
@@ -3506,6 +3543,8 @@ export function EditOrderForm({
     <>
       <ActionForm
         submit={it.save}
+        disableUnchangedSave
+        changeKey={JSON.stringify([customerId, standardFaultIds])}
         action={(data) =>
           updateOrderAction(id, {
             ...Object.fromEntries(data),
@@ -3642,6 +3681,8 @@ export function WarrantyForm({
   return (
     <ActionForm
       submit={it.save}
+      disableUnchangedSave
+      changeKey={JSON.stringify([values])}
       action={(data) =>
         warrantyAction(id, {
           items: items.map((item) => ({
@@ -4613,6 +4654,8 @@ export function EditQuoteForm({
   return (
     <ActionForm
       submit={it.save}
+      disableUnchangedSave
+      changeKey={JSON.stringify([items, orderDiscount, includeVat])}
       action={() => quoteAction(id, { items, orderDiscount, includeVat })}
       onSuccess={onSuccess}
     >
@@ -4798,6 +4841,8 @@ export function RuleForm({
   return (
     <ActionForm
       submit={it.saveAndLeave}
+      disableUnchangedSave={Boolean(rule)}
+      changeKey={JSON.stringify([category, brand, model, project])}
       cancelLabel={it.close}
       className="price-rule-editor"
       closeOnSuccess
@@ -5142,6 +5187,8 @@ export function CustomerForm({
   return (
     <ActionForm
       submit={it.save}
+      disableUnchangedSave={Boolean(customer)}
+      changeKey={JSON.stringify(phones)}
       onSuccess={onSuccess}
       onCancel={onCancel}
       action={async (data) => {
@@ -5255,6 +5302,8 @@ export function DeviceForm({
   return (
     <ActionForm
       submit={it.save}
+      disableUnchangedSave={Boolean(device)}
+      changeKey={JSON.stringify([category, brand, model])}
       onSuccess={onSuccess}
       onCancel={onCancel}
       action={(data) => {
@@ -5468,6 +5517,19 @@ function PriceRuleOptionForm({
     <>
       <ActionForm
         submit={it.save}
+        disableUnchangedSave={Boolean(option)}
+        changeKey={JSON.stringify([
+          productId,
+          name,
+          suggested,
+          cost,
+          quantity,
+          minutes,
+          warrantyDays,
+          enabled,
+          isDefault,
+          notes,
+        ])}
         onSuccess={onSuccess}
         action={() =>
           priceRuleOptionAction(rule.id, option?.id ?? null, {

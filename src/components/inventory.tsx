@@ -133,6 +133,11 @@ function ProductCompatibilityDialog({
   const [value, setValue] = useState<ProductCompatibilityDraft[]>(
     product.compatibilities,
   );
+  const unchanged =
+    JSON.stringify(value.map((entry) => JSON.stringify(entry)).sort()) ===
+    JSON.stringify(
+      product.compatibilities.map((entry) => JSON.stringify(entry)).sort(),
+    );
   const [adding, setAdding] = useState<CompatibilityDeviceDraft | null>(null);
   const devices = Object.values(
     value.reduce<
@@ -320,8 +325,9 @@ function ProductCompatibilityDialog({
           <Button
             type="button"
             disabled={Boolean(
-              adding &&
-              (!adding.brand || !adding.model || adding.projects.length === 0),
+              adding
+                ? !adding.brand || !adding.model || adding.projects.length === 0
+                : unchanged,
             )}
             onClick={() => (adding ? confirmAdding() : onSave(value))}
           >
