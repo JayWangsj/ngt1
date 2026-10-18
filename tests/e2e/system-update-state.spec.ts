@@ -995,9 +995,9 @@ test("sidebar version entry hover stays contained and collapses cleanly", async 
   const initialIconColor = await icon.evaluate(
     (node) => getComputedStyle(node).color,
   );
-  expect(
-    await entry.evaluate((node) => getComputedStyle(node).overflow),
-  ).toBe("clip");
+  expect(await entry.evaluate((node) => getComputedStyle(node).overflow)).toBe(
+    "clip",
+  );
 
   const initialGeometry = await Promise.all(
     [icon, version, summary].map((node) => node.boundingBox()),
