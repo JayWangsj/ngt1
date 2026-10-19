@@ -1,4 +1,76 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
+
+const retirementFixture = {
+  productName: "Retirement fixture LCD Test",
+  project: "sostituzione display retirement fixture",
+  optionName: "Retirement fixture LCD",
+};
+
+async function resetRetirementFixture() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl || !new URL(databaseUrl).pathname.endsWith("_test"))
+    throw new Error("The retirement fixture can only use a *_test database.");
+
+  const db = new PrismaClient();
+  try {
+    const product = await db.product.findFirstOrThrow({
+      where: { name: retirementFixture.productName },
+    });
+    const rule = await db.priceRule.findFirstOrThrow({
+      where: {
+        category: "PHONE",
+        brand: "Apple",
+        model: "iPhone 13",
+        project: retirementFixture.project,
+      },
+    });
+    const option = await db.priceRuleOption.findFirstOrThrow({
+      where: { ruleId: rule.id, productId: product.id },
+    });
+
+    await db.$transaction(async (tx) => {
+      await tx.product.update({
+        where: { id: product.id },
+        data: { enabled: true, usage: "REPAIR" },
+      });
+      await tx.priceRuleOption.update({
+        where: { id: option.id },
+        data: { enabled: true, isDefault: true },
+      });
+      await tx.priceRule.update({
+        where: { id: rule.id },
+        data: {
+          enabled: true,
+          suggested: "30.00",
+          requiredProductId: product.id,
+          requiredQuantity: 1,
+        },
+      });
+      await tx.productCompatibility.upsert({
+        where: {
+          productId_category_brand_model_project: {
+            productId: product.id,
+            category: "PHONE",
+            brand: "Apple",
+            model: "iPhone 13",
+            project: retirementFixture.project,
+          },
+        },
+        create: {
+          productId: product.id,
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: retirementFixture.project,
+        },
+        update: {},
+      });
+    });
+  } finally {
+    await db.$disconnect();
+  }
+}
 
 async function expectMatchingColumn(
   header: Locator,
@@ -317,13 +389,15 @@ async function fillOrder(
   }
   if (options.diagnosis) {
     // Diagnosis orders intentionally have no repair quote yet.
-  } else if (!options.manual)
+  } else if (!options.manual) {
+    await choosePriceOption(page, "Display LCD standard");
     await expect(
       page.getByRole("button", {
         name: "Modifica dati Preventivo attuale",
         exact: true,
       }),
     ).toContainText("100,00");
+  }
   if (options.discount && !options.diagnosis) {
     await page
       .getByRole("button", { name: "Aggiungi sconto intervento", exact: true })
@@ -1209,24 +1283,84 @@ test("keeps a paid quote when its repair part is explicitly removed", async ({
   );
 });
 
-test("shows a retired repair part in its historical order and hides it from new choices", async ({
+test("returns an unpaid detail quote to its base price when the part is removed", async ({
   page,
 }) => {
   await fillOrder(page);
-  await choosePriceOption(page, "Display LCD standard");
+  await choosePriceOption(page, "Display OLED alta qualità");
   await save(page);
-  const orderUrl = page.url();
 
-  await page.goto("/inventory");
-  const inventory = page.locator(".inventory-main");
-  await inventory
-    .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
-    .fill("Display LCD Test");
-  const productRow = inventory
-    .locator(".inventory-table tbody tr[data-inventory-product]")
-    .first();
-  await expect(productRow).toBeVisible();
+  const details = page.getByTestId("details-card");
+  const detailsHeading = details.locator(".order-card-heading");
+  if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
+    await detailsHeading.click();
+  const quoteSummary = details.locator(".detail-repair-summaries");
+  await expect(quoteSummary.locator(".selected-project-summary")).toContainText(
+    "119,00 €",
+  );
+  await details.locator(".selected-part-summary .summary-action").click();
+
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await optionPicker
+    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+    .click();
+  await optionPicker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+  await expect(optionPicker).toHaveCount(0);
+  await expect(quoteSummary.locator(".selected-project-summary")).toContainText(
+    "100,00 €",
+  );
+  await expect(quoteSummary.locator(".selected-part-summary")).toContainText(
+    "Nessun ricambio",
+  );
+
+  await details.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(page.locator(".message.error")).toHaveCount(0);
+  await expect(quoteSummary.locator(".selected-project-summary")).toContainText(
+    "100,00 €",
+  );
+  await expect(details.locator(".selected-part-summary")).toContainText(
+    "Nessun ricambio",
+  );
+});
+
+test("shows a retired repair part in its historical order and hides it from new choices", async ({
+  page,
+}) => {
+  await resetRetirementFixture();
   try {
+    await page.goto("/orders/new");
+    await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+    await chooseRepairDevice(page, "Apple iPhone 13");
+    await page.getByLabel("Display rotto", { exact: true }).check();
+    await page
+      .getByLabel("Consegna prevista", { exact: true })
+      .fill("2099-12-31");
+    await chooseRepairProjects(page, [retirementFixture.project]);
+    await choosePriceOption(page, retirementFixture.optionName);
+    const currentQuote = page.getByRole("button", {
+      name: "Modifica dati Preventivo attuale",
+      exact: true,
+    });
+    await expect(currentQuote).toContainText("119,00");
+    await save(page);
+    const orderUrl = page.url();
+
+    await page.goto("/inventory");
+    const inventory = page.locator(".inventory-main");
+    await inventory
+      .getByLabel("Cerca prodotto, ricambio, marca o modello", {
+        exact: true,
+      })
+      .fill(retirementFixture.productName);
+    const productRow = inventory
+      .locator(".inventory-table tbody tr[data-inventory-product]")
+      .filter({ hasText: retirementFixture.productName });
+    await expect(productRow).toBeVisible();
     await productRow.click();
     await productRow.locator(".inventory-usage-cell button").click();
     await page
@@ -1241,7 +1375,7 @@ test("shows a retired repair part in its historical order and hides it from new 
     await page.reload();
     await inventory
       .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
-      .fill("Display LCD Test");
+      .fill(retirementFixture.productName);
     await expect(productRow).toContainText("Vendita");
 
     await page.goto("/orders/new");
@@ -1251,7 +1385,7 @@ test("shows a retired repair part in its historical order and hides it from new 
     await page
       .getByLabel("Consegna prevista", { exact: true })
       .fill("2099-12-31");
-    await chooseRepairProjects(page, ["sostituzione display"]);
+    await chooseRepairProjects(page, [retirementFixture.project]);
     const newOrderSummary = page.locator(".price-option-picker-summary");
     await newOrderSummary.locator(".summary-action").click();
     const optionPicker = page.getByRole("dialog", {
@@ -1260,12 +1394,36 @@ test("shows a retired repair part in its historical order and hides it from new 
     });
     await expect(
       optionPicker.locator(".price-option-choice").filter({
-        hasText: "Display LCD standard",
+        hasText: retirementFixture.optionName,
       }),
     ).toHaveCount(0);
     await optionPicker
       .getByRole("button", { name: "Annulla", exact: true })
       .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Modifica dati Preventivo attuale",
+        exact: true,
+      }),
+    ).toContainText("30,00");
+
+    await page.goto("/orders/new");
+    await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+    await chooseRepairDevice(page, "Apple iPhone 13");
+    await page.getByLabel("Display rotto", { exact: true }).check();
+    await page
+      .getByLabel("Consegna prevista", { exact: true })
+      .fill("2099-12-31");
+    await chooseRepairProjects(page, ["sostituzione display"]);
+    await expect(page.locator(".price-option-picker-summary")).toContainText(
+      "Display LCD standard",
+    );
+    await expect(
+      page.getByRole("button", {
+        name: "Modifica dati Preventivo attuale",
+        exact: true,
+      }),
+    ).toContainText("100,00");
 
     await page.goto(orderUrl);
     const details = page.getByTestId("details-card");
@@ -1273,40 +1431,22 @@ test("shows a retired repair part in its historical order and hides it from new 
     if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
       await detailsHeading.click();
     const savedPart = details.locator(".selected-part-summary");
-    await expect(savedPart).toContainText("Display LCD Test");
+    await expect(savedPart).toContainText(retirementFixture.productName);
+    await expect(savedPart).toContainText("Prezzo di listino 119,00 €");
     await expect(savedPart).not.toContainText("Nessun ricambio");
     await savedPart.locator(".summary-action").click();
     await page
       .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
       .getByRole("button", { name: "Chiudi", exact: true })
       .click();
-    await expect(savedPart).toContainText("Display LCD Test");
+    await expect(savedPart).toContainText(retirementFixture.productName);
     await details.getByRole("button", { name: "Annulla", exact: true }).click();
     await expect(details).not.toHaveClass(/is-editing/);
     await expect(details.locator(".selected-part-summary")).toContainText(
-      "Display LCD Test",
+      retirementFixture.productName,
     );
   } finally {
-    await page.goto("/inventory");
-    await inventory
-      .getByLabel("Cerca prodotto, ricambio, marca o modello", {
-        exact: true,
-      })
-      .fill("Display LCD Test");
-    await productRow.click();
-    const usageButton = productRow.locator(".inventory-usage-cell button");
-    if ((await usageButton.innerText()).includes("Vendita")) {
-      await usageButton.click();
-      await page
-        .locator(".business-select-panel.is-entering")
-        .getByRole("option", { name: "Riparazione", exact: true })
-        .click();
-      const restoreResponse = page.waitForResponse(
-        (response) => response.request().method() === "POST",
-      );
-      await page.getByRole("heading", { name: "Magazzino" }).click();
-      await restoreResponse;
-    }
+    await resetRetirementFixture();
   }
 });
 

@@ -150,6 +150,16 @@ async function main() {
       favorite: true,
     },
     {
+      name: "Retirement fixture LCD Test",
+      category: "Schermi",
+      usage: "REPAIR" as const,
+      costPrice: "32.00",
+      salePrice: "0.00",
+      stockQuantity: 5,
+      minStock: 1,
+      favorite: false,
+    },
+    {
       name: "Cover esaurita Test",
       category: "Cover",
       usage: "RETAIL" as const,
@@ -259,6 +269,47 @@ async function main() {
       model: "iPhone 13",
       project: "sostituzione display",
     })),
+  });
+  const retirementFixtureProject = "sostituzione display retirement fixture";
+  const retirementFixtureProductId = productsByName.get(
+    "Retirement fixture LCD Test",
+  )!;
+  const retirementFixtureRule = await db.priceRule.create({
+    data: {
+      category: "PHONE",
+      brand: "Apple",
+      model: "iPhone 13",
+      project: retirementFixtureProject,
+      suggested: "30.00",
+      minutes: 60,
+      enabled: true,
+      requiredProductId: retirementFixtureProductId,
+      requiredQuantity: 1,
+    },
+  });
+  await db.priceRuleOption.create({
+    data: {
+      ruleId: retirementFixtureRule.id,
+      productId: retirementFixtureProductId,
+      name: "Retirement fixture LCD",
+      suggested: "119.00",
+      cost: "32.00",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 90,
+      enabled: true,
+      isDefault: true,
+      sortOrder: 0,
+    },
+  });
+  await db.productCompatibility.create({
+    data: {
+      productId: retirementFixtureProductId,
+      category: "PHONE",
+      brand: "Apple",
+      model: "iPhone 13",
+      project: retirementFixtureProject,
+    },
   });
   await db.priceRule.update({
     where: { id: displayRule.id },
