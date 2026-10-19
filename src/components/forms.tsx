@@ -301,6 +301,7 @@ export type ItemView = {
   suggestedAfterSwitch?: string;
   discountVisible?: boolean;
   requiredProductId?: string;
+  requiredProductName?: string;
   requiredQuantity?: number;
   requiredProductRemoved?: boolean;
 };
@@ -348,6 +349,38 @@ function validPositiveAmount(value: string) {
   } catch {
     return false;
   }
+}
+export function removePartPricePatch(
+  item: ItemView,
+  baseSuggestion: string,
+  protectPrice: boolean,
+): Partial<ItemView> {
+  const previousSuggestion = item.suggested || baseSuggestion;
+  const manuallyAdjusted =
+    protectPrice ||
+    Boolean(item.adjustmentReason.trim()) ||
+    (!!item.final.trim() &&
+      numeric(item.final) !== numeric(previousSuggestion));
+  const showNewSuggestion =
+    manuallyAdjusted &&
+    !!baseSuggestion &&
+    numeric(item.final) !== numeric(baseSuggestion);
+  return {
+    priceOptionId: "",
+    priceOptionName: "",
+    suggested: baseSuggestion,
+    requiredProductId: "",
+    requiredProductName: "",
+    requiredQuantity: 1,
+    requiredProductRemoved: true,
+    ...(manuallyAdjusted
+      ? { suggestedAfterSwitch: showNewSuggestion ? baseSuggestion : undefined }
+      : {
+          final: baseSuggestion || item.final,
+          adjustmentReason: "",
+          suggestedAfterSwitch: undefined,
+        }),
+  };
 }
 function normalizedProject(value: string) {
   return value.trim().toLocaleLowerCase("it");
@@ -964,7 +997,7 @@ function PriceOptionPicker({
   open: boolean;
   disabled?: boolean;
   ariaLabel: string;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (open: boolean, confirmed?: boolean) => void;
   onSelect: (optionId: string) => void;
   onSelectProduct?: (productId: string) => void;
   onRemove?: () => void;
@@ -1206,7 +1239,7 @@ function PriceOptionPicker({
                     if (draftOptionId.startsWith("product:"))
                       onSelectProduct?.(draftOptionId.slice(8));
                     else onSelect(draftOptionId);
-                    onOpenChange(false);
+                    onOpenChange(false, true);
                   }}
                 >
                   {it.quickService.confirmServices}
@@ -1540,7 +1573,10 @@ export function ItemsEditor({
           (focusedEdit && initialEdit?.field === "project") ||
           editingProjects[index];
         const editingPart =
-          (focusedEdit && initialEdit?.field === "part") || editingParts[index];
+          (focusedEdit &&
+            initialEdit?.field === "part" &&
+            editingParts[index] !== false) ||
+          editingParts[index];
         const selectedProduct = availableProducts.find(
           (product) => product.id === item.requiredProductId,
         );
@@ -1554,16 +1590,14 @@ export function ItemsEditor({
             (candidate) => candidate.id === priceOptionId,
           );
           if (!priceOptionId) {
-            update(index, {
-              priceOptionId: "",
-              priceOptionName: "",
-              suggested: "",
-              requiredProductId: "",
-              requiredQuantity: 1,
-              requiredProductRemoved: true,
-              suggestedAfterSwitch: undefined,
-            });
-            if (focusedEdit) onFocusedEditComplete?.();
+            const patch = removePartPricePatch(
+              item,
+              match?.rule.suggested ?? "",
+              protectPriceOnOptionSwitch,
+            );
+            update(index, patch);
+            if (focusedEdit && !patch.suggestedAfterSwitch)
+              onFocusedEditComplete?.();
             return;
           }
           if (!option) return;
@@ -1571,6 +1605,7 @@ export function ItemsEditor({
             selectedPriceOption?.suggested ?? match?.rule.suggested ?? "";
           const manuallyAdjusted =
             protectPriceOnOptionSwitch ||
+            Boolean(item.adjustmentReason.trim()) ||
             (!!item.final.trim() &&
               numeric(item.final) !== numeric(previousSuggestion));
           update(index, {
@@ -1578,6 +1613,7 @@ export function ItemsEditor({
             priceOptionName: option.name,
             suggested: option.suggested,
             requiredProductId: option.productId,
+            requiredProductName: option.product.name,
             requiredQuantity: option.quantity,
             requiredProductRemoved: false,
             ...(manuallyAdjusted ? {} : { final: option.suggested }),
@@ -1585,7 +1621,7 @@ export function ItemsEditor({
               ? option.suggested
               : undefined,
           });
-          if (focusedEdit) onFocusedEditComplete?.();
+          if (focusedEdit && !manuallyAdjusted) onFocusedEditComplete?.();
         };
         const createTemporaryProject = (project: string) => {
           const value = project.trim();
@@ -1877,6 +1913,7 @@ export function ItemsEditor({
                           option?.productId ??
                           found?.rule.requiredProductId ??
                           "",
+                        requiredProductName: option?.product.name ?? "",
                         requiredQuantity:
                           option?.quantity ?? found?.rule.requiredQuantity ?? 1,
                         requiredProductRemoved: false,
@@ -1926,18 +1963,22 @@ export function ItemsEditor({
                         noneSelected={Boolean(item.requiredProductRemoved)}
                         open={Boolean(editingPart)}
                         ariaLabel={`${it.partPriceOption} ${index + 1}`}
-                        onOpenChange={(open) => {
-                          if (focusedEdit && !open) onFocusedEditComplete?.();
-                          else
-                            setEditingParts((current) => ({
-                              ...current,
-                              [index]: open,
-                            }));
+                        onOpenChange={(open, confirmed) => {
+                          if (focusedEdit && !open && !confirmed)
+                            onFocusedEditComplete?.();
+                          setEditingParts((current) => ({
+                            ...current,
+                            [index]: open,
+                          }));
                         }}
                         onSelect={switchPriceOption}
                         onSelectProduct={(requiredProductId) => {
                           update(index, {
                             requiredProductId,
+                            requiredProductName:
+                              availableProducts.find(
+                                (product) => product.id === requiredProductId,
+                              )?.name ?? "",
                             requiredQuantity: 1,
                             requiredProductRemoved: false,
                             priceOptionId: "",
@@ -1947,16 +1988,7 @@ export function ItemsEditor({
                           });
                           if (focusedEdit) onFocusedEditComplete?.();
                         }}
-                        onRemove={() =>
-                          update(index, {
-                            requiredProductId: "",
-                            requiredQuantity: 1,
-                            requiredProductRemoved: true,
-                            priceOptionId: "",
-                            priceOptionName: "",
-                            suggestedAfterSwitch: undefined,
-                          })
-                        }
+                        onRemove={() => switchPriceOption("")}
                         onAdd={() =>
                           setCreatingPriceOptionRule(match?.rule ?? null)
                         }

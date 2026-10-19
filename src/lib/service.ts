@@ -2363,6 +2363,13 @@ export async function updateProduct(
     const current = await tx.product.findUniqueOrThrow({
       where: { id: productId },
     });
+    const usageChanged = current.usage !== data.usage;
+    const affectedRules = usageChanged
+      ? await tx.priceRuleOption.findMany({
+          where: { productId },
+          select: { ruleId: true },
+        })
+      : [];
     const stockChange = data.stockQuantity - current.stockQuantity;
     await tx.product.update({
       where: { id: productId },
@@ -2376,6 +2383,11 @@ export async function updateProduct(
         favorite: data.favorite,
       },
     });
+    if (current.usage === "REPAIR" && data.usage === "RETAIL")
+      await tx.priceRuleOption.updateMany({
+        where: { productId, enabled: true },
+        data: { enabled: false, isDefault: false },
+      });
     if (data.compatibilities)
       await syncProductCompatibilities(
         tx,
@@ -2383,6 +2395,8 @@ export async function updateProduct(
         data.usage,
         data.compatibilities,
       );
+    for (const ruleId of new Set(affectedRules.map(({ ruleId }) => ruleId)))
+      await syncLegacyDefaultPriceOption(tx, ruleId);
     if (stockChange)
       await applyInventoryMovement(tx, actor, {
         requestId: crypto.randomUUID(),

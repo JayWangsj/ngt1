@@ -60,6 +60,7 @@ import {
   saveQuickService,
 } from "@/lib/service";
 import { balance, type Actor } from "@/lib/domain";
+import { priceRuleViews } from "@/lib/price-rule-view";
 import {
   clearBusinessData,
   exportBusinessData,
@@ -479,6 +480,81 @@ describe("PostgreSQL workflow", () => {
         (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
       ),
     ).toMatchObject({ productId: manuallySelected.id, quantity: 1 });
+  });
+
+  it("uses the base price after removing a part without changing the price list", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "No-part base quote option",
+      1,
+      "30",
+    );
+    const updatedOption = await savePriceRuleOption(owner, rule.id, option.id, {
+      productId: product.id,
+      name: option.name,
+      suggested: "119",
+      cost: "32",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 0,
+      enabled: true,
+      isDefault: true,
+      notes: "",
+    });
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "119",
+            priceOptionId: updatedOption.id,
+          },
+        ],
+      }),
+    );
+    await replaceQuote(staff, order.id, {
+      items: [
+        {
+          project: "Display",
+          final: "30",
+          requiredProductRemoved: true,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+
+    const savedItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    expect(savedItem).toMatchObject({
+      requiredProductId: null,
+      priceOptionId: null,
+    });
+    expect(savedItem.suggested?.toString()).toBe("30");
+    expect(savedItem.final.toString()).toBe("30");
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId: order.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(0);
+    expect(
+      (
+        await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
+      ).suggested.toString(),
+    ).toBe("30");
+    expect(
+      (
+        await db.priceRuleOption.findUniqueOrThrow({
+          where: { id: updatedOption.id },
+        })
+      ).suggested.toString(),
+    ).toBe("119");
   });
 
   it("allows unlinked quote items alongside required repair parts", async () => {
@@ -2166,6 +2242,204 @@ describe("unified product inventory", () => {
       (await db.product.findUniqueOrThrow({ where: { id: product.id } }))
         .enabled,
     ).toBe(false);
+  });
+
+  it("retires repair options when a product changes usage without changing history", async () => {
+    const {
+      product: retiring,
+      rule,
+      option: retiringOption,
+    } = await configureRepairOption("Retired usage option", 2, "79");
+    const fallback = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Fallback usage option",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "44",
+      salePrice: "0",
+      initialStock: 7,
+      minStock: 0,
+    });
+    const fallbackOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: fallback.id,
+      name: "Fallback usage option",
+      suggested: "119",
+      cost: "44",
+      quantity: 3,
+      minutes: 75,
+      warrantyDays: 90,
+      enabled: true,
+      isDefault: false,
+      notes: "",
+    });
+    const manuallyDisabled = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Manually disabled usage option",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "22",
+      salePrice: "0",
+      initialStock: 2,
+      minStock: 0,
+    });
+    const disabledOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: manuallyDisabled.id,
+      name: "Manually disabled usage option",
+      suggested: "59",
+      cost: "22",
+      quantity: 1,
+      minutes: 40,
+      warrantyDays: 0,
+      enabled: false,
+      isDefault: false,
+      notes: "",
+    });
+    const order = await createOrder(
+      staff,
+      input({ deposit: "0", items: [{ project: "Display", final: "79" }] }),
+    );
+    const before = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(before.items[0]).toMatchObject({
+      priceOptionId: retiringOption.id,
+      requiredProductId: retiring.id,
+      requiredProductName: retiring.name,
+      requiredQuantity: 2,
+    });
+    expect(before.products).toContainEqual(
+      expect.objectContaining({
+        productId: retiring.id,
+        quantity: 2,
+        kind: "REPAIR_PART",
+      }),
+    );
+
+    await updateProduct(owner, retiring.id, {
+      name: retiring.name,
+      category: retiring.category,
+      usage: "RETAIL",
+      costPrice: retiring.costPrice.toString(),
+      salePrice: retiring.salePrice.toString(),
+      stockQuantity: retiring.stockQuantity,
+      minStock: retiring.minStock,
+      favorite: retiring.favorite,
+      compatibilities: [],
+    });
+
+    const retiredOption = await db.priceRuleOption.findUniqueOrThrow({
+      where: { id: retiringOption.id },
+    });
+    const remainingOption = await db.priceRuleOption.findUniqueOrThrow({
+      where: { id: fallbackOption.id },
+    });
+    expect(retiredOption).toMatchObject({ enabled: false, isDefault: false });
+    expect(remainingOption).toMatchObject({ enabled: true, isDefault: true });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: disabledOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    const savedRule = await db.priceRule.findUniqueOrThrow({
+      where: { id: rule.id },
+    });
+    expect(savedRule).toMatchObject({
+      requiredProductId: fallback.id,
+      requiredQuantity: 3,
+      minutes: 60,
+    });
+    expect(savedRule.suggested.toString()).toBe("79");
+    expect(savedRule.cost?.toString()).toBe("32");
+    const priceRuleView = priceRuleViews([
+      await db.priceRule.findUniqueOrThrow({
+        where: { id: rule.id },
+        include: { options: { include: { product: true } } },
+      }),
+    ]).find((candidate) => candidate.id === rule.id);
+    expect(
+      priceRuleView?.options
+        ?.filter((candidate) => candidate.enabled)
+        .map(({ id }) => id),
+    ).toEqual([fallbackOption.id]);
+    await expect(
+      createOrder(
+        staff,
+        input({
+          deposit: "0",
+          items: [
+            {
+              project: "Display",
+              final: "79",
+              priceOptionId: retiringOption.id,
+              requiredProductId: retiring.id,
+              requiredQuantity: 2,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await replaceQuote(staff, order.id, {
+      items: [
+        {
+          project: before.items[0].project,
+          final: before.items[0].final.toString(),
+          priceOptionId: before.items[0].priceOptionId ?? undefined,
+          requiredProductId: before.items[0].requiredProductId ?? undefined,
+          requiredQuantity: before.items[0].requiredQuantity,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+    const afterEdit = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: true, products: true },
+    });
+    expect(afterEdit.items[0]).toMatchObject({
+      priceOptionId: retiringOption.id,
+      priceOptionName: retiringOption.name,
+      suggested: retiringOption.suggested,
+      requiredProductId: retiring.id,
+      requiredProductName: retiring.name,
+      requiredQuantity: 2,
+    });
+    expect(afterEdit.products).toContainEqual(
+      expect.objectContaining({
+        productId: retiring.id,
+        quantity: 2,
+        kind: "REPAIR_PART",
+        consumedAt: null,
+      }),
+    );
+
+    await updateProduct(owner, retiring.id, {
+      name: retiring.name,
+      category: retiring.category,
+      usage: "REPAIR",
+      costPrice: retiring.costPrice.toString(),
+      salePrice: retiring.salePrice.toString(),
+      stockQuantity: retiring.stockQuantity,
+      minStock: retiring.minStock,
+      favorite: retiring.favorite,
+      compatibilities: [],
+    });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: retiringOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: disabledOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: fallbackOption.id },
+      }),
+    ).toMatchObject({ enabled: true, isDefault: true });
   });
 
   it("creates initial stock and records idempotent stock changes", async () => {

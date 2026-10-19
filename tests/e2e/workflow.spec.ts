@@ -950,6 +950,21 @@ test("uses part-specific prices without overwriting a manual quote", async ({
     "Nessun ricambio richiesto",
   );
   await choosePriceOption(page, "Display LCD standard");
+  await choosePriceOption(page, "Display OLED alta qualità");
+  const currentQuote = page.getByRole("button", {
+    name: "Modifica dati Preventivo attuale",
+    exact: true,
+  });
+  await expect(currentQuote).toContainText("119,00");
+  const removeOled = optionSummary.getByRole("button", {
+    name: "Rimuovi Display OLED Test",
+    exact: true,
+  });
+  await optionSummary.hover();
+  await removeOled.click();
+  await expect(currentQuote).toContainText("100,00");
+  await expect(optionSummary).toContainText("Nessun ricambio richiesto");
+  await choosePriceOption(page, "Display LCD standard");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
@@ -994,19 +1009,6 @@ test("uses part-specific prices without overwriting a manual quote", async ({
     .getByRole("button", { name: "Conferma selezione", exact: true })
     .click();
   await expect(optionSummary).toContainText("Nessun ricambio richiesto");
-  await expect(
-    page.getByRole("button", { name: "Opzioni ricambio", exact: true }),
-  ).toHaveCount(0);
-  await optionSummary.hover();
-  await optionSummary
-    .getByRole("button", {
-      name: "Rimuovi Nessun ricambio richiesto",
-      exact: true,
-    })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Opzioni ricambio", exact: true }),
-  ).toBeVisible();
   await choosePriceOption(page, "Display LCD standard");
   await optionSummary.locator(".summary-action").click();
   await optionPicker
@@ -1040,13 +1042,20 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   const input = page.getByLabel("Prezzo originale (€) 1", { exact: true });
   await input.fill("105");
   await input.press("Enter");
-  await choosePriceOption(page, "Display LCD standard");
+  await optionSummary.locator(".summary-action").click();
+  await optionPicker
+    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+    .click();
+  await optionPicker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
   await expect(quote).toContainText("105,00");
   await expect(page.getByText(/nuovo suggerito è 100,00/)).toBeVisible();
   await page
     .getByRole("button", { name: "Usa il nuovo suggerito", exact: true })
     .click();
   await expect(quote).toContainText("100,00");
+  await choosePriceOption(page, "Display LCD standard");
   await save(page);
   const details = page.getByTestId("details-card");
   await details.locator(".order-card-heading").click();
@@ -1070,6 +1079,211 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   await choosePriceOption(page, "Display OLED alta qualità", rework);
   await expect(rework.locator(".selected-part-summary")).toContainText(
     "Display OLED alta qualità",
+  );
+});
+
+test("creates a repair part and quote option directly from a new order", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  const optionSummary = page.locator(".price-option-picker-summary");
+  await optionSummary.locator(".summary-action").click();
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await optionPicker
+    .getByRole("button", { name: "Opzione ricambio", exact: true })
+    .click();
+  const newOption = page.getByRole("dialog", {
+    name: "Nuova opzione ricambio",
+    exact: true,
+  });
+  const productName = `Ricambio ordine ${Date.now()}`;
+  await newOption
+    .getByRole("combobox", { name: "Ricambio richiesto", exact: true })
+    .fill(productName);
+  await newOption
+    .getByRole("button", { name: "Ricambio", exact: true })
+    .click();
+  const productDialog = page.getByRole("dialog", {
+    name: "Nuovo ricambio per riparazione",
+    exact: true,
+  });
+  await expect(
+    productDialog.getByLabel("Nome ricambio", { exact: true }),
+  ).toHaveValue(productName);
+  await productDialog.getByLabel("Costo (€)", { exact: true }).fill("12");
+  await productDialog.getByLabel("Scorta iniziale", { exact: true }).fill("5");
+  await productDialog.getByLabel("Scorta minima", { exact: true }).fill("1");
+  await productDialog
+    .getByRole("button", { name: "Crea e seleziona", exact: true })
+    .click();
+  await expect(productDialog).toHaveCount(0);
+  await expect(
+    newOption.getByLabel("Nome opzione", { exact: true }),
+  ).toHaveValue(productName);
+  await newOption
+    .getByLabel("Prezzo suggerito (€)", { exact: true })
+    .fill("127");
+  await newOption.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(newOption).toHaveCount(0);
+  await expect(optionPicker).toBeVisible();
+  await expect(
+    optionPicker
+      .locator(".price-option-choice")
+      .filter({ hasText: productName }),
+  ).toBeVisible();
+  await choosePriceOption(page, productName, optionPicker);
+  await expect(optionSummary).toContainText(productName);
+  await expect(optionSummary).toContainText("127,00 €");
+  await expect(
+    page.getByRole("button", {
+      name: "Modifica dati Preventivo attuale",
+      exact: true,
+    }),
+  ).toContainText("127,00");
+  await save(page);
+
+  const details = page.getByTestId("details-card");
+  await details.locator(".order-card-heading").click();
+  const savedPart = details.locator(".selected-part-summary");
+  await expect(savedPart).toContainText(productName);
+  await expect(savedPart).toContainText("Prezzo di listino");
+  await expect(savedPart).toContainText("127,00 €");
+  await expect(savedPart).toContainText("Impegnata 1");
+
+  await page.goto("/inventory");
+  const inventory = page.locator(".inventory-main");
+  await inventory
+    .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
+    .fill(productName);
+  const productRow = inventory
+    .locator(".inventory-table tbody tr")
+    .filter({ hasText: productName });
+  await expect(productRow).toContainText("Apple / Telefono / iPhone 13");
+});
+
+test("keeps a paid quote when its repair part is explicitly removed", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  await choosePriceOption(page, "Display OLED alta qualità");
+  await page.getByRole("button", { name: /^04 Pagamento/ }).click();
+  await page
+    .getByLabel("Incasso alla creazione (€)", { exact: true })
+    .fill("20");
+  await save(page);
+  await expect(page.locator(".balance-card")).toContainText(
+    "Incassato: 20,00 €",
+  );
+
+  const details = page.getByTestId("details-card");
+  const detailsHeading = details.locator(".order-card-heading");
+  if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
+    await detailsHeading.click();
+  await details.locator(".selected-part-summary .summary-action").click();
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await optionPicker
+    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+    .click();
+  await optionPicker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+  await expect(optionPicker).toHaveCount(0);
+  const summary = details.locator(".detail-repair-summaries");
+  await expect(page.getByText(/nuovo suggerito è 100,00/)).toBeVisible();
+  await expect(summary.locator(".selected-project-summary")).toContainText(
+    "119,00 €",
+  );
+  await details.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(page.locator(".message.error")).toHaveCount(0);
+  await expect(details.locator(".selected-project-summary")).toContainText(
+    "119,00 €",
+  );
+  await expect(details.locator(".selected-part-summary")).toContainText(
+    "Nessun ricambio",
+  );
+});
+
+test("shows a retired repair part in its historical order and hides it from new choices", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  await choosePriceOption(page, "Display LCD standard");
+  await save(page);
+  const orderUrl = page.url();
+
+  await page.goto("/inventory");
+  const inventory = page.locator(".inventory-main");
+  await inventory
+    .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
+    .fill("Display LCD Test");
+  const productRow = inventory
+    .locator(".inventory-table tbody tr[data-inventory-product]")
+    .first();
+  await expect(productRow).toBeVisible();
+  await productRow.click();
+  await productRow.locator(".inventory-usage-cell button").click();
+  await page
+    .locator(".business-select-panel.is-entering")
+    .getByRole("option", { name: "Vendita", exact: true })
+    .click();
+  const updateResponse = page.waitForResponse(
+    (response) => response.request().method() === "POST",
+  );
+  await page.getByRole("heading", { name: "Magazzino" }).click();
+  await updateResponse;
+  await page.reload();
+  await inventory
+    .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
+    .fill("Display LCD Test");
+  await expect(productRow).toContainText("Vendita");
+
+  await page.goto("/orders/new");
+  await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+  await chooseRepairDevice(page, "Apple iPhone 13");
+  await page.getByLabel("Display rotto", { exact: true }).check();
+  await page
+    .getByLabel("Consegna prevista", { exact: true })
+    .fill("2099-12-31");
+  await chooseRepairProjects(page, ["sostituzione display"]);
+  const newOrderSummary = page.locator(".price-option-picker-summary");
+  await newOrderSummary.locator(".summary-action").click();
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await expect(
+    optionPicker.locator(".price-option-choice").filter({
+      hasText: "Display LCD standard",
+    }),
+  ).toHaveCount(0);
+  await optionPicker
+    .getByRole("button", { name: "Annulla", exact: true })
+    .click();
+
+  await page.goto(orderUrl);
+  const details = page.getByTestId("details-card");
+  const detailsHeading = details.locator(".order-card-heading");
+  if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
+    await detailsHeading.click();
+  const savedPart = details.locator(".selected-part-summary");
+  await expect(savedPart).toContainText("Display LCD Test");
+  await expect(savedPart).not.toContainText("Nessun ricambio");
+  await savedPart.locator(".summary-action").click();
+  await page
+    .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+    .getByRole("button", { name: "Chiudi", exact: true })
+    .click();
+  await expect(savedPart).toContainText("Display LCD Test");
+  await details.getByRole("button", { name: "Annulla", exact: true }).click();
+  await expect(details).not.toHaveClass(/is-editing/);
+  await expect(details.locator(".selected-part-summary")).toContainText(
+    "Display LCD Test",
   );
 });
 
