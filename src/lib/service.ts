@@ -1838,6 +1838,7 @@ export async function savePriceRule(
       });
       await syncPriceOptionCompatibility(tx, rule, product.id);
     }
+    await syncLegacyDefaultPriceOption(tx, rule.id);
     await audit(
       tx,
       actor,
@@ -1879,7 +1880,7 @@ async function syncPriceOptionCompatibility(
   });
 }
 
-async function syncLegacyDefaultPriceOption(tx: Tx, ruleId: string) {
+export async function syncLegacyDefaultPriceOption(tx: Tx, ruleId: string) {
   const fallback = await tx.priceRuleOption.findFirst({
     where: {
       ruleId,
@@ -1889,6 +1890,10 @@ async function syncLegacyDefaultPriceOption(tx: Tx, ruleId: string) {
     orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
   });
   if (!fallback) {
+    await tx.priceRuleOption.updateMany({
+      where: { ruleId, isDefault: true },
+      data: { isDefault: false },
+    });
     await tx.priceRule.update({
       where: { id: ruleId },
       data: { requiredProductId: null, requiredQuantity: 1 },
@@ -1934,6 +1939,24 @@ export async function savePriceRuleOption(
     const before = id
       ? await tx.priceRuleOption.findFirstOrThrow({ where: { id, ruleId } })
       : null;
+    if (before && before.productId !== product.id) {
+      const usedByWorkOrders = await tx.workOrderItem.count({
+        where: {
+          OR: [
+            { priceOptionId: before.id },
+            {
+              ruleId,
+              priceOptionId: null,
+              requiredProductId: before.productId,
+            },
+          ],
+        },
+      });
+      if (usedByWorkOrders)
+        throw new BusinessError(
+          "Non puoi cambiare il ricambio di un'opzione già usata in una scheda. Crea una nuova opzione.",
+        );
+    }
     const isDefault = input.isDefault || existingCount === 0;
     if (isDefault)
       await tx.priceRuleOption.updateMany({
@@ -2158,23 +2181,6 @@ async function syncProductCompatibilities(
       data: normalized.map((entry) => ({ ...entry, productId })),
       skipDuplicates: true,
     });
-  await tx.priceRule.updateMany({
-    where: { requiredProductId: productId },
-    data: { requiredProductId: null, requiredQuantity: 1 },
-  });
-  for (const entry of normalized) {
-    if (!entry.project) continue;
-    await tx.priceRule.updateMany({
-      where: {
-        category: entry.category,
-        brand: { equals: entry.brand, mode: "insensitive" },
-        model: { equals: entry.model, mode: "insensitive" },
-        project: { equals: entry.project, mode: "insensitive" },
-        enabled: true,
-      },
-      data: { requiredProductId: productId },
-    });
-  }
 }
 
 export async function createProduct(actorInput: Actor, raw: unknown) {
@@ -2364,12 +2370,21 @@ export async function updateProduct(
       where: { id: productId },
     });
     const usageChanged = current.usage !== data.usage;
-    const affectedRules = usageChanged
-      ? await tx.priceRuleOption.findMany({
+    const affectedRuleIds = new Set<string>();
+    if (usageChanged || data.compatibilities) {
+      const [options, rules] = await Promise.all([
+        tx.priceRuleOption.findMany({
           where: { productId },
           select: { ruleId: true },
-        })
-      : [];
+        }),
+        tx.priceRule.findMany({
+          where: { requiredProductId: productId },
+          select: { id: true },
+        }),
+      ]);
+      for (const { ruleId } of options) affectedRuleIds.add(ruleId);
+      for (const { id } of rules) affectedRuleIds.add(id);
+    }
     const stockChange = data.stockQuantity - current.stockQuantity;
     await tx.product.update({
       where: { id: productId },
@@ -2395,7 +2410,7 @@ export async function updateProduct(
         data.usage,
         data.compatibilities,
       );
-    for (const ruleId of new Set(affectedRules.map(({ ruleId }) => ruleId)))
+    for (const ruleId of affectedRuleIds)
       await syncLegacyDefaultPriceOption(tx, ruleId);
     if (stockChange)
       await applyInventoryMovement(tx, actor, {

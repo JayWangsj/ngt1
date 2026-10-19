@@ -398,6 +398,343 @@ describe("PostgreSQL workflow", () => {
     ).toBe("84");
   });
 
+  it("preserves referenced part-option history and requires a new option for another product", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "Referenced price option A",
+      2,
+      "79",
+    );
+    const replacement = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Referenced price option B",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "44",
+      salePrice: "0",
+      initialStock: 4,
+      minStock: 0,
+    });
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "85",
+            adjustmentReason: "Eccezione cliente",
+            priceOptionId: option.id,
+          },
+        ],
+      }),
+    );
+    const oldItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    const reservationBefore = await db.workOrderProduct.findFirstOrThrow({
+      where: {
+        orderId: order.id,
+        productId: product.id,
+        kind: "REPAIR_PART",
+        consumedAt: null,
+      },
+    });
+
+    await expect(
+      savePriceRuleOption(owner, rule.id, option.id, {
+        productId: replacement.id,
+        name: replacement.name,
+        suggested: "119",
+        cost: "44",
+        quantity: 1,
+        minutes: 75,
+        warrantyDays: 90,
+        enabled: true,
+        isDefault: true,
+        notes: "",
+      }),
+    ).rejects.toThrow("Crea una nuova opzione.");
+
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: option.id },
+      }),
+    ).toMatchObject({
+      productId: product.id,
+      name: product.name,
+      isDefault: true,
+    });
+    expect(
+      await db.workOrderItem.findUniqueOrThrow({ where: { id: oldItem.id } }),
+    ).toMatchObject({
+      priceOptionId: option.id,
+      priceOptionName: product.name,
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+      requiredQuantity: 2,
+    });
+    expect(oldItem.final.toString()).toBe("85");
+    expect(
+      await db.workOrderProduct.findUniqueOrThrow({
+        where: { id: reservationBefore.id },
+      }),
+    ).toMatchObject({ productId: product.id, quantity: 2, consumedAt: null });
+
+    const newOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: replacement.id,
+      name: replacement.name,
+      suggested: "119",
+      cost: "44",
+      quantity: 1,
+      minutes: 75,
+      warrantyDays: 90,
+      enabled: true,
+      isDefault: false,
+      notes: "",
+    });
+    expect(newOption).toMatchObject({
+      productId: replacement.id,
+      isDefault: false,
+    });
+    await savePriceRuleOption(owner, rule.id, option.id, {
+      productId: product.id,
+      name: "Updated option A",
+      suggested: "84",
+      cost: "34",
+      quantity: 2,
+      minutes: 70,
+      warrantyDays: 120,
+      enabled: true,
+      isDefault: true,
+      notes: "Updated metadata",
+    });
+    const preservedItem = await db.workOrderItem.findUniqueOrThrow({
+      where: { id: oldItem.id },
+    });
+    expect(preservedItem).toMatchObject({
+      priceOptionId: option.id,
+      priceOptionName: product.name,
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+    });
+    expect(preservedItem.suggested?.toString()).toBe("79");
+    expect(preservedItem.final.toString()).toBe("85");
+  });
+
+  it("keeps the default option stable during compatibility edits and falls back when its product is retired", async () => {
+    const {
+      product: lcd,
+      rule,
+      option: lcdOption,
+    } = await configureRepairOption("Compatibility default LCD", 1, "100");
+    const oled = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Compatibility non-default OLED",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "65",
+      salePrice: "0",
+      initialStock: 4,
+      minStock: 0,
+    });
+    const oledOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: oled.id,
+      name: oled.name,
+      suggested: "119",
+      cost: "65",
+      quantity: 1,
+      minutes: 75,
+      warrantyDays: 90,
+      enabled: true,
+      isDefault: false,
+      notes: "",
+    });
+    const retiredLater = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Compatibility disabled option",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "20",
+      salePrice: "0",
+      initialStock: 2,
+      minStock: 0,
+    });
+    const disabledOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: retiredLater.id,
+      name: retiredLater.name,
+      suggested: "59",
+      cost: "20",
+      quantity: 1,
+      minutes: 40,
+      warrantyDays: 0,
+      enabled: false,
+      isDefault: false,
+      notes: "",
+    });
+    const updateCompatibility = (product: typeof lcd, models: string[]) =>
+      updateProduct(owner, product.id, {
+        name: product.name,
+        category: product.category,
+        usage: "REPAIR",
+        costPrice: product.costPrice.toString(),
+        salePrice: product.salePrice.toString(),
+        stockQuantity: product.stockQuantity,
+        minStock: product.minStock,
+        favorite: product.favorite,
+        compatibilities: models.map((model) => ({
+          category: "PHONE",
+          brand: "Apple",
+          model,
+          project: "Display",
+        })),
+      });
+
+    await updateCompatibility(oled, ["iPhone 13", "iPhone 14"]);
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: lcdOption.id },
+      }),
+    ).toMatchObject({ isDefault: true, enabled: true });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: oledOption.id },
+      }),
+    ).toMatchObject({ isDefault: false, enabled: true });
+    expect(
+      await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } }),
+    ).toMatchObject({ requiredProductId: lcd.id });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: disabledOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+
+    await updateCompatibility(lcd, ["iPhone 13", "iPhone 15"]);
+    expect(
+      await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } }),
+    ).toMatchObject({ requiredProductId: lcd.id });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: lcdOption.id },
+      }),
+    ).toMatchObject({ isDefault: true, enabled: true });
+    expect(
+      (
+        await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
+      ).suggested.toString(),
+    ).toBe("100");
+
+    await savePriceRuleOption(owner, rule.id, oledOption.id, {
+      productId: oled.id,
+      name: oled.name,
+      suggested: "119",
+      cost: "65",
+      quantity: 1,
+      minutes: 75,
+      warrantyDays: 90,
+      enabled: true,
+      isDefault: true,
+      notes: "",
+    });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: oledOption.id },
+      }),
+    ).toMatchObject({ isDefault: true, enabled: true });
+    expect(
+      await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } }),
+    ).toMatchObject({ requiredProductId: oled.id });
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          { project: "Display", final: "119", priceOptionId: oledOption.id },
+        ],
+      }),
+    );
+    const historicalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    const reservation = await db.workOrderProduct.findFirstOrThrow({
+      where: {
+        orderId: order.id,
+        productId: oled.id,
+        kind: "REPAIR_PART",
+        consumedAt: null,
+      },
+    });
+
+    await updateProduct(owner, oled.id, {
+      name: oled.name,
+      category: oled.category,
+      usage: "RETAIL",
+      costPrice: oled.costPrice.toString(),
+      salePrice: oled.salePrice.toString(),
+      stockQuantity: oled.stockQuantity,
+      minStock: oled.minStock,
+      favorite: oled.favorite,
+      compatibilities: [],
+    });
+
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: oledOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: lcdOption.id },
+      }),
+    ).toMatchObject({ enabled: true, isDefault: true });
+    expect(
+      await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } }),
+    ).toMatchObject({ requiredProductId: lcd.id });
+    expect(
+      await db.workOrderItem.findUniqueOrThrow({
+        where: { id: historicalItem.id },
+      }),
+    ).toMatchObject({
+      priceOptionId: oledOption.id,
+      priceOptionName: oled.name,
+      requiredProductId: oled.id,
+      requiredProductName: oled.name,
+    });
+    expect(historicalItem.final.toString()).toBe("119");
+    expect(
+      await db.workOrderProduct.findUniqueOrThrow({
+        where: { id: reservation.id },
+      }),
+    ).toMatchObject({ productId: oled.id, quantity: 1, consumedAt: null });
+
+    await savePriceRuleOption(owner, rule.id, lcdOption.id, {
+      productId: lcd.id,
+      name: lcd.name,
+      suggested: "100",
+      cost: "32",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 90,
+      enabled: false,
+      isDefault: true,
+      notes: "",
+    });
+    await updateCompatibility(lcd, ["iPhone 16"]);
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: lcdOption.id },
+      }),
+    ).toMatchObject({ enabled: false, isDefault: false });
+    expect(
+      await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } }),
+    ).toMatchObject({ requiredProductId: null, requiredQuantity: 1 });
+    expect(
+      (
+        await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
+      ).suggested.toString(),
+    ).toBe("100");
+  });
+
   it("keeps an explicit no-part choice after saving and allows a later selection", async () => {
     await configureRepairOption("No part default test");
     const order = await createOrder(staff, input({ deposit: "0" }));
@@ -3724,6 +4061,172 @@ describe("versioned data backup and merge import", () => {
     expect(second.skipped).toBeGreaterThan(0);
     expect(await db.workOrder.count()).toBe(1);
     expect(await db.customer.count()).toBe(1);
+  });
+
+  it("restores a v9 legacy part rule and preserves its order and reservation through v10", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "V9 legacy LCD",
+      2,
+      "100",
+    );
+    const order = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [{ project: "Display", final: "100", priceOptionId: option.id }],
+      }),
+    );
+    const beforeItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    const backup = await exportBusinessData();
+    const legacy = structuredClone(backup) as unknown as {
+      version: number;
+      data: {
+        priceOptions?: unknown;
+        items: Record<string, unknown>[];
+      };
+    };
+    legacy.version = 9;
+    delete legacy.data.priceOptions;
+    for (const item of legacy.data.items) {
+      delete item.priceOptionId;
+      delete item.priceOptionName;
+      delete item.requiredProductName;
+    }
+
+    await clearBusinessData(owner);
+    const firstImport = await importBusinessData(owner, legacy);
+    expect(firstImport.imported).toBeGreaterThan(0);
+    const restoredRule = await db.priceRule.findUniqueOrThrow({
+      where: { id: rule.id },
+      include: { options: { include: { product: true } } },
+    });
+    const convertedOption = restoredRule.options.find(
+      (candidate) => candidate.productId === product.id,
+    );
+    expect(convertedOption).toMatchObject({
+      enabled: true,
+      isDefault: true,
+      quantity: 2,
+      name: product.name,
+    });
+    expect(convertedOption?.suggested.toString()).toBe("100");
+    expect(
+      priceRuleViews([restoredRule])[0].options?.find(
+        (candidate) => candidate.productId === product.id,
+      ),
+    ).toMatchObject({ enabled: true, isDefault: true, suggested: "100" });
+    const restoredItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    expect(restoredItem).toMatchObject({
+      ruleId: rule.id,
+      priceOptionId: convertedOption?.id,
+      priceOptionName: product.name,
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+      requiredQuantity: 2,
+    });
+    expect(restoredItem.suggested?.toString()).toBe(
+      beforeItem.suggested?.toString(),
+    );
+    expect(restoredItem.final.toString()).toBe(beforeItem.final.toString());
+    expect(
+      await db.workOrderProduct.findFirstOrThrow({
+        where: {
+          orderId: order.id,
+          productId: product.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toMatchObject({ quantity: 2 });
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: product.id } }))
+        .stockQuantity,
+    ).toBe(5);
+    expect(
+      await db.inventoryMovement.count({ where: { productId: product.id } }),
+    ).toBe(1);
+
+    const secondImport = await importBusinessData(owner, legacy);
+    expect(secondImport.imported).toBe(0);
+    expect(
+      await db.priceRuleOption.count({
+        where: { ruleId: rule.id, productId: product.id },
+      }),
+    ).toBe(1);
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId: order.id,
+          productId: product.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await db.inventoryMovement.count({ where: { productId: product.id } }),
+    ).toBe(1);
+
+    const newOrder = await createOrder(
+      staff,
+      input({
+        deposit: "0",
+        items: [
+          {
+            project: "Display",
+            final: "100",
+            priceOptionId: convertedOption!.id,
+          },
+        ],
+      }),
+    );
+    expect(
+      await db.workOrderItem.findFirstOrThrow({
+        where: { orderId: newOrder.id },
+      }),
+    ).toMatchObject({
+      priceOptionId: convertedOption!.id,
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+    });
+
+    const v10 = await exportBusinessData();
+    expect(v10.version).toBe(10);
+    expect(v10.data.priceOptions).toHaveLength(1);
+    await clearBusinessData(owner);
+    await importBusinessData(owner, v10);
+    const finalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: order.id },
+    });
+    expect(finalItem).toMatchObject({
+      priceOptionId: convertedOption!.id,
+      requiredProductId: product.id,
+      requiredProductName: product.name,
+      requiredQuantity: 2,
+    });
+    expect(finalItem.suggested?.toString()).toBe(
+      beforeItem.suggested?.toString(),
+    );
+    expect(finalItem.final.toString()).toBe(beforeItem.final.toString());
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId: order.id,
+          productId: product.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await db.priceRuleOption.count({
+        where: { ruleId: rule.id, productId: product.id },
+      }),
+    ).toBe(1);
   });
 
   it("does not append stale quote lines when merging a backup into an existing order", async () => {
