@@ -272,14 +272,17 @@ async function chooseRepairProjects(
     name: "Seleziona interventi",
   });
   for (const name of names) {
-    await dialog
-      .locator(".quick-service-picker-option")
-      .filter({ hasText: name })
-      .click();
+    await repairProjectOption(dialog, name).click();
   }
   await dialog
     .getByRole("button", { name: "Conferma selezione", exact: true })
     .click();
+}
+
+function repairProjectOption(dialog: Locator, name: string) {
+  return dialog.locator(".quick-service-picker-option").filter({
+    has: dialog.getByText(name, { exact: true }),
+  });
 }
 
 async function createRepairProject(page: Page, name: string, price: string) {
@@ -728,10 +731,7 @@ test("repair project picker selects multiple items and removes a summary on hove
   const picker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
-  await picker
-    .locator(".quick-service-picker-option")
-    .filter({ hasText: "sostituzione display" })
-    .click();
+  await repairProjectOption(picker, "sostituzione display").click();
   await picker.getByRole("button", { name: "Intervento", exact: true }).click();
   const customDialog = page.getByRole("dialog", {
     name: "Intervento personalizzato",
@@ -905,7 +905,7 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   await page.getByRole("button", { name: "Apple", exact: true }).click();
   const row = page
     .locator(".price-rule-row")
-    .filter({ hasText: "sostituzione display" })
+    .filter({ has: page.getByText("sostituzione display", { exact: true }) })
     .first();
   await expect(row).toBeVisible();
   await row.hover();
@@ -6722,10 +6722,7 @@ test("native quote choices populate prices, clear on model changes and discounts
   let projectPicker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
-  await projectPicker
-    .locator(".quick-service-picker-option")
-    .filter({ hasText: "sostituzione display" })
-    .click();
+  await repairProjectOption(projectPicker, "sostituzione display").click();
   await projectPicker.locator(".quick-service-picker-add").click();
   const customProjectDialog = page.getByRole("dialog", {
     name: "Intervento personalizzato",
@@ -7279,10 +7276,7 @@ test("replaces a repair item with a custom item without submitting the order", a
     .getByRole("button", { name: "Cambia", exact: true })
     .click();
   const picker = page.getByRole("dialog", { name: "Seleziona interventi" });
-  await picker
-    .locator(".quick-service-picker-option")
-    .filter({ hasText: "sostituzione display" })
-    .click();
+  await repairProjectOption(picker, "sostituzione display").click();
   await picker.locator(".quick-service-picker-add").click();
   const customDialog = page.getByRole("dialog", {
     name: "Intervento personalizzato",
