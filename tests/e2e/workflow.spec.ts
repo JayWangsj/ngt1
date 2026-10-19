@@ -1226,65 +1226,88 @@ test("shows a retired repair part in its historical order and hides it from new 
     .locator(".inventory-table tbody tr[data-inventory-product]")
     .first();
   await expect(productRow).toBeVisible();
-  await productRow.click();
-  await productRow.locator(".inventory-usage-cell button").click();
-  await page
-    .locator(".business-select-panel.is-entering")
-    .getByRole("option", { name: "Vendita", exact: true })
-    .click();
-  const updateResponse = page.waitForResponse(
-    (response) => response.request().method() === "POST",
-  );
-  await page.getByRole("heading", { name: "Magazzino" }).click();
-  await updateResponse;
-  await page.reload();
-  await inventory
-    .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
-    .fill("Display LCD Test");
-  await expect(productRow).toContainText("Vendita");
+  try {
+    await productRow.click();
+    await productRow.locator(".inventory-usage-cell button").click();
+    await page
+      .locator(".business-select-panel.is-entering")
+      .getByRole("option", { name: "Vendita", exact: true })
+      .click();
+    const updateResponse = page.waitForResponse(
+      (response) => response.request().method() === "POST",
+    );
+    await page.getByRole("heading", { name: "Magazzino" }).click();
+    await updateResponse;
+    await page.reload();
+    await inventory
+      .getByLabel("Cerca prodotto, ricambio, marca o modello", { exact: true })
+      .fill("Display LCD Test");
+    await expect(productRow).toContainText("Vendita");
 
-  await page.goto("/orders/new");
-  await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
-  await chooseRepairDevice(page, "Apple iPhone 13");
-  await page.getByLabel("Display rotto", { exact: true }).check();
-  await page
-    .getByLabel("Consegna prevista", { exact: true })
-    .fill("2099-12-31");
-  await chooseRepairProjects(page, ["sostituzione display"]);
-  const newOrderSummary = page.locator(".price-option-picker-summary");
-  await newOrderSummary.locator(".summary-action").click();
-  const optionPicker = page.getByRole("dialog", {
-    name: "Opzioni ricambio",
-    exact: true,
-  });
-  await expect(
-    optionPicker.locator(".price-option-choice").filter({
-      hasText: "Display LCD standard",
-    }),
-  ).toHaveCount(0);
-  await optionPicker
-    .getByRole("button", { name: "Annulla", exact: true })
-    .click();
+    await page.goto("/orders/new");
+    await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+    await chooseRepairDevice(page, "Apple iPhone 13");
+    await page.getByLabel("Display rotto", { exact: true }).check();
+    await page
+      .getByLabel("Consegna prevista", { exact: true })
+      .fill("2099-12-31");
+    await chooseRepairProjects(page, ["sostituzione display"]);
+    const newOrderSummary = page.locator(".price-option-picker-summary");
+    await newOrderSummary.locator(".summary-action").click();
+    const optionPicker = page.getByRole("dialog", {
+      name: "Opzioni ricambio",
+      exact: true,
+    });
+    await expect(
+      optionPicker.locator(".price-option-choice").filter({
+        hasText: "Display LCD standard",
+      }),
+    ).toHaveCount(0);
+    await optionPicker
+      .getByRole("button", { name: "Annulla", exact: true })
+      .click();
 
-  await page.goto(orderUrl);
-  const details = page.getByTestId("details-card");
-  const detailsHeading = details.locator(".order-card-heading");
-  if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
-    await detailsHeading.click();
-  const savedPart = details.locator(".selected-part-summary");
-  await expect(savedPart).toContainText("Display LCD Test");
-  await expect(savedPart).not.toContainText("Nessun ricambio");
-  await savedPart.locator(".summary-action").click();
-  await page
-    .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
-    .getByRole("button", { name: "Chiudi", exact: true })
-    .click();
-  await expect(savedPart).toContainText("Display LCD Test");
-  await details.getByRole("button", { name: "Annulla", exact: true }).click();
-  await expect(details).not.toHaveClass(/is-editing/);
-  await expect(details.locator(".selected-part-summary")).toContainText(
-    "Display LCD Test",
-  );
+    await page.goto(orderUrl);
+    const details = page.getByTestId("details-card");
+    const detailsHeading = details.locator(".order-card-heading");
+    if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
+      await detailsHeading.click();
+    const savedPart = details.locator(".selected-part-summary");
+    await expect(savedPart).toContainText("Display LCD Test");
+    await expect(savedPart).not.toContainText("Nessun ricambio");
+    await savedPart.locator(".summary-action").click();
+    await page
+      .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
+      .getByRole("button", { name: "Chiudi", exact: true })
+      .click();
+    await expect(savedPart).toContainText("Display LCD Test");
+    await details.getByRole("button", { name: "Annulla", exact: true }).click();
+    await expect(details).not.toHaveClass(/is-editing/);
+    await expect(details.locator(".selected-part-summary")).toContainText(
+      "Display LCD Test",
+    );
+  } finally {
+    await page.goto("/inventory");
+    await inventory
+      .getByLabel("Cerca prodotto, ricambio, marca o modello", {
+        exact: true,
+      })
+      .fill("Display LCD Test");
+    await productRow.click();
+    const usageButton = productRow.locator(".inventory-usage-cell button");
+    if ((await usageButton.innerText()).includes("Vendita")) {
+      await usageButton.click();
+      await page
+        .locator(".business-select-panel.is-entering")
+        .getByRole("option", { name: "Riparazione", exact: true })
+        .click();
+      const restoreResponse = page.waitForResponse(
+        (response) => response.request().method() === "POST",
+      );
+      await page.getByRole("heading", { name: "Magazzino" }).click();
+      await restoreResponse;
+    }
+  }
 });
 
 test("switching repair and quick-service modes keeps both drafts", async ({
@@ -1368,6 +1391,12 @@ test("removing a default repair part persists and allows later reselection", asy
     .getByTestId("details-card")
     .locator(".selected-part-summary");
   await expect(savedPart).toContainText("Batteria Test");
+  await savedPart.locator(".summary-action").click();
+  await choosePriceOption(page, "Nessun ricambio richiesto");
+  await details.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(details.locator(".selected-part-summary")).toContainText(
+    "Nessuno",
+  );
 });
 
 test("manages one quick service for held service orders and retail checkout", async ({
