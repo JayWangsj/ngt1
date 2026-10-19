@@ -1,8 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import { hash } from "bcryptjs";
+import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 const db = new PrismaClient();
-async function main() {
+export async function seedTestDatabase() {
   if (!new URL(process.env.DATABASE_URL || "").pathname.endsWith("_test"))
     throw new Error("This script only accepts *_test databases.");
   await db.businessClock.deleteMany();
@@ -322,4 +323,6 @@ async function main() {
     },
   });
 }
-main().finally(() => db.$disconnect());
+
+if (basename(process.argv[1] ?? "") === "seed-test.ts")
+  seedTestDatabase().finally(() => db.$disconnect());
