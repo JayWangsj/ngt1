@@ -26,13 +26,7 @@ type Product = {
   reserved: number;
   available: number;
 };
-type SummaryItem = ItemView & {
-  source?: string;
-  priceOptionName?: string;
-  suggested?: string;
-  requiredProductName?: string;
-  requiredProduct?: Product | null;
-};
+type SummaryItem = ItemView & { source?: string };
 
 function removeDraftTarget(
   items: SummaryItem[],

@@ -1,5 +1,15 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
+import type { Locator, Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { seedTestDatabase } from "../../scripts/seed-test";
+
+test.beforeEach(async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl || !new URL(databaseUrl).pathname.endsWith("_test"))
+    throw new Error("Workflow E2E requires a dedicated *_test database.");
+
+  await seedTestDatabase();
+});
 
 const retirementFixture = {
   productName: "Retirement fixture LCD Test",
@@ -105,18 +115,35 @@ async function chooseBusinessOption(
   option: string,
   scope: Page | Locator = page,
 ) {
+  await page.waitForLoadState("networkidle");
   const combobox = scope.getByRole("combobox", { name: label, exact: true });
   const simpleSelect = scope.getByRole("button", { name: label, exact: true });
   await expect(combobox.or(simpleSelect).first()).toBeVisible();
   if (await combobox.isVisible()) {
-    await combobox.click();
-    await combobox.fill(option);
-  } else await simpleSelect.click();
-  const panel = page.locator(".business-select-panel.is-entering");
+    if ((await combobox.inputValue()) === option) {
+      const expand = combobox
+        .locator(
+          "xpath=ancestor::*[contains(@class, 'business-combobox-control')]",
+        )
+        .locator(".business-combobox-chevron");
+      if ((await combobox.getAttribute("aria-expanded")) !== "true")
+        await expand.click();
+    } else await combobox.fill(option);
+    await expect(combobox).toHaveAttribute("aria-expanded", "true");
+  } else {
+    if ((await simpleSelect.getAttribute("aria-expanded")) !== "true")
+      await simpleSelect.click();
+    await expect(simpleSelect).toHaveAttribute("aria-expanded", "true");
+  }
+  const panel = page.locator(".business-select-panel.is-entering:visible");
+  await expect(panel).toHaveCount(1);
   const exact = panel.getByRole("option", { name: option, exact: true });
-  if (await exact.count()) await exact.click();
-  else
-    await panel.getByRole("option").filter({ hasText: option }).first().click();
+  if ((await exact.count()) === 1) return exact.click();
+  const exactLabel = panel
+    .locator(".business-select-option-copy")
+    .getByText(option, { exact: true });
+  await expect(exactLabel).toHaveCount(1);
+  await exactLabel.click();
 }
 
 async function chooseRequiredPart(
@@ -261,8 +288,11 @@ async function chooseRepairProjects(
   scope: Page | Locator = page,
 ) {
   if (scope === page) {
-    await page.waitForTimeout(250);
-    await openStep(page, 2);
+    const quoteHeading = page
+      .locator(".order-step-card")
+      .nth(2)
+      .locator(".order-step-heading");
+    await expect(quoteHeading).toHaveAttribute("aria-expanded", "true");
   }
   const addProject = scope
     .locator(".quick-service-service-add:visible")
@@ -272,7 +302,9 @@ async function chooseRepairProjects(
     name: "Seleziona interventi",
   });
   for (const name of names) {
-    await repairProjectOption(dialog, name).click();
+    const option = repairProjectOption(dialog, name);
+    await expect(option).toHaveCount(1);
+    await option.click();
   }
   await dialog
     .getByRole("button", { name: "Conferma selezione", exact: true })
@@ -280,9 +312,10 @@ async function chooseRepairProjects(
 }
 
 function repairProjectOption(dialog: Locator, name: string) {
-  return dialog.locator(".quick-service-picker-option").filter({
-    has: dialog.getByText(name, { exact: true }),
-  });
+  return dialog
+    .locator(".quick-service-picker-option")
+    .locator(".quick-service-picker-copy")
+    .getByText(name, { exact: true });
 }
 
 async function createRepairProject(page: Page, name: string, price: string) {
@@ -346,6 +379,7 @@ async function fillOrder(
   } = {},
 ) {
   await page.goto("/orders/new");
+  await page.waitForLoadState("networkidle");
   const customerName = options.name ?? "Cliente Playwright";
   if (options.phone) {
     await page
@@ -424,6 +458,7 @@ async function save(page: Page) {
     .getByRole("button", { name: "Crea scheda di servizio", exact: true })
     .click();
   await expect(page).toHaveURL(/\/orders\/(?!new)[a-z0-9]+$/);
+  await page.waitForLoadState("networkidle");
 }
 async function openPayment(page: Page) {
   const step = page.locator(".order-step-card").filter({ hasText: /^04/ });
@@ -431,14 +466,13 @@ async function openPayment(page: Page) {
 }
 async function openStep(page: Page, index: number) {
   const card = page.locator(".order-step-card").nth(index);
-  if (
-    (await card
-      .locator(".order-step-heading")
-      .getAttribute("aria-expanded")) !== "true"
-  )
-    await card.locator(".order-step-heading").click();
+  const heading = card.locator(".order-step-heading");
+  if ((await heading.getAttribute("aria-expanded")) !== "true")
+    await heading.click();
+  await expect(heading).toHaveAttribute("aria-expanded", "true");
 }
 async function state(page: Page, next: string) {
+  await page.waitForLoadState("networkidle");
   const label = next === "REPAIRING" ? "In riparazione" : "Da ritirare";
   const trigger = page.locator(".detail-status .status-dropdown-trigger");
   const option = page.getByRole("option", { name: label, exact: true });
@@ -457,6 +491,7 @@ async function state(page: Page, next: string) {
 }
 test("new repair uses a single selected accordion step", async ({ page }) => {
   await page.goto("/orders/new");
+  await page.waitForLoadState("networkidle");
   const cards = page.locator(".order-step-card");
   await expect(cards).toHaveCount(4);
   await expect(cards.nth(0)).toHaveClass(/is-selected/);
@@ -490,7 +525,10 @@ test("new repair uses a single selected accordion step", async ({ page }) => {
   await expect
     .poll(async () => (await cardGaps()).every((gap) => gap > 0))
     .toBe(true);
-  await cards.nth(3).locator(".order-step-heading").click();
+  const paymentHeading = cards.nth(3).locator(".order-step-heading");
+  await expect(paymentHeading).toHaveAttribute("aria-expanded", "false");
+  await paymentHeading.click();
+  await expect(paymentHeading).toHaveAttribute("aria-expanded", "true");
   await expect(cards.nth(3)).toHaveClass(/is-selected/);
   await expect(cards.nth(0)).not.toHaveClass(/is-selected/);
   await expect(page.locator(".order-step-collapse.is-expanded")).toHaveCount(1);
@@ -513,6 +551,7 @@ test("inputs and expanding controls scroll only when interaction space is tight"
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/orders/new");
+  await page.waitForLoadState("networkidle");
   const customer = page.getByRole("combobox", {
     name: "Cerca cliente",
     exact: true,
@@ -543,6 +582,7 @@ test("inputs and expanding controls scroll only when interaction space is tight"
     window.scrollBy({ top: box.bottom - window.innerHeight + 8 });
   });
   await paymentHeading.evaluate((element) => (element as HTMLElement).click());
+  await expect(paymentHeading).toHaveAttribute("aria-expanded", "true");
   await expect
     .poll(() =>
       paymentHeading.evaluate((element) => element.getBoundingClientRect().top),
@@ -731,7 +771,9 @@ test("repair project picker selects multiple items and removes a summary on hove
   const picker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
-  await repairProjectOption(picker, "sostituzione display").click();
+  const displayProject = repairProjectOption(picker, "sostituzione display");
+  await expect(displayProject).toHaveCount(1);
+  await displayProject.click();
   await picker.getByRole("button", { name: "Intervento", exact: true }).click();
   const customDialog = page.getByRole("dialog", {
     name: "Intervento personalizzato",
@@ -1015,6 +1057,10 @@ test("uses part-specific prices without overwriting a manual quote", async ({
     name: "Rimuovi Display LCD Test",
     exact: true,
   });
+  await optionSummary.evaluate((summary) => {
+    const focused = summary.querySelector(":focus");
+    if (focused instanceof HTMLElement) focused.blur();
+  });
   await page.mouse.move(0, 0);
   await expect(removeOption).toHaveCSS("opacity", "0");
   await optionSummary.hover();
@@ -1274,12 +1320,16 @@ test("keeps a paid quote when its repair part is explicitly removed", async ({
     "119,00 €",
   );
   await details.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(details).not.toHaveClass(/is-editing/);
   await expect(page.locator(".message.error")).toHaveCount(0);
+  await page.reload();
+  if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
+    await detailsHeading.click();
   await expect(details.locator(".selected-project-summary")).toContainText(
     "119,00 €",
   );
   await expect(details.locator(".selected-part-summary")).toContainText(
-    "Nessun ricambio",
+    "Nessuno",
   );
 });
 
@@ -1300,32 +1350,110 @@ test("returns an unpaid detail quote to its base price when the part is removed"
   );
   await details.locator(".selected-part-summary .summary-action").click();
 
-  const optionPicker = page.getByRole("dialog", {
-    name: "Opzioni ricambio",
-    exact: true,
-  });
-  await optionPicker
-    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
-    .click();
-  await optionPicker
-    .getByRole("button", { name: "Conferma selezione", exact: true })
-    .click();
-  await expect(optionPicker).toHaveCount(0);
-  await expect(quoteSummary.locator(".selected-project-summary")).toContainText(
-    "100,00 €",
-  );
-  await expect(quoteSummary.locator(".selected-part-summary")).toContainText(
-    "Nessun ricambio",
-  );
+  const databaseUrl = process.env.DATABASE_URL;
+  const orderId = new URL(page.url()).pathname.split("/").pop();
+  if (
+    !orderId ||
+    !databaseUrl ||
+    !new URL(databaseUrl).pathname.endsWith("_test")
+  )
+    throw new Error(
+      "Repair detail E2E requires an order in a *_test database.",
+    );
+  const db = new PrismaClient();
+  try {
+    const originalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId },
+    });
+    const productId = originalItem.requiredProductId;
+    expect(productId).toBeTruthy();
+    expect(originalItem.final.toString()).toBe("119");
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId,
+          productId: productId!,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(1);
 
-  await details.getByRole("button", { name: "Salva", exact: true }).click();
-  await expect(page.locator(".message.error")).toHaveCount(0);
-  await expect(quoteSummary.locator(".selected-project-summary")).toContainText(
-    "100,00 €",
-  );
-  await expect(details.locator(".selected-part-summary")).toContainText(
-    "Nessun ricambio",
-  );
+    const optionPicker = page.getByRole("dialog", {
+      name: "Opzioni ricambio",
+      exact: true,
+    });
+    await optionPicker
+      .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+      .click();
+    await optionPicker
+      .getByRole("button", { name: "Conferma selezione", exact: true })
+      .click();
+    await expect(optionPicker).toHaveCount(0);
+    await expect(
+      quoteSummary.locator(".selected-project-summary"),
+    ).toContainText("100,00 €");
+    await expect(quoteSummary.locator(".selected-part-summary")).toContainText(
+      "Nessuno",
+    );
+    await details.getByRole("button", { name: "Annulla", exact: true }).click();
+    await expect(details).not.toHaveClass(/is-editing/);
+    await expect(
+      quoteSummary.locator(".selected-project-summary"),
+    ).toContainText("119,00 €");
+    await expect(quoteSummary.locator(".selected-part-summary")).toContainText(
+      "Display OLED Test",
+    );
+
+    await details.locator(".selected-part-summary .summary-action").click();
+    const savePicker = page.getByRole("dialog", {
+      name: "Opzioni ricambio",
+      exact: true,
+    });
+    await savePicker
+      .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+      .click();
+    await savePicker
+      .getByRole("button", { name: "Conferma selezione", exact: true })
+      .click();
+    await expect(
+      quoteSummary.locator(".selected-project-summary"),
+    ).toContainText("100,00 €");
+
+    await details.getByRole("button", { name: "Salva", exact: true }).click();
+    await expect(details).not.toHaveClass(/is-editing/);
+    await expect(page.locator(".message.error")).toHaveCount(0);
+    await page.reload();
+    if ((await detailsHeading.getAttribute("aria-expanded")) !== "true")
+      await detailsHeading.click();
+    await expect(details.locator(".selected-project-summary")).toContainText(
+      "100,00 €",
+    );
+    await expect(details.locator(".selected-part-summary")).toContainText(
+      "Nessuno",
+    );
+    const savedItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId },
+    });
+    expect(savedItem).toMatchObject({
+      requiredProductId: null,
+      requiredProductName: "",
+      priceOptionId: null,
+    });
+    expect(savedItem.final.toString()).toBe("100");
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId,
+          productId: productId!,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(0);
+  } finally {
+    await db.$disconnect();
+  }
 });
 
 test("shows a retired repair part in its historical order and hides it from new choices", async ({
@@ -1361,8 +1489,18 @@ test("shows a retired repair part in its historical order and hides it from new 
       .locator(".inventory-table tbody tr[data-inventory-product]")
       .filter({ hasText: retirementFixture.productName });
     await expect(productRow).toBeVisible();
+    const productId = await productRow.getAttribute("data-inventory-product");
+    expect(productId).toBeTruthy();
     await productRow.click();
-    await productRow.locator(".inventory-usage-cell button").click();
+    const activeProductRow = inventory.locator(
+      `tr[data-inventory-product="${productId}"]`,
+    );
+    const usage = activeProductRow.getByRole("button", {
+      name: "Utilizzo",
+      exact: true,
+    });
+    await expect(usage).toHaveCount(1);
+    await usage.click();
     await page
       .locator(".business-select-panel.is-entering")
       .getByRole("option", { name: "Vendita", exact: true })
@@ -1386,8 +1524,12 @@ test("shows a retired repair part in its historical order and hides it from new 
       .getByLabel("Consegna prevista", { exact: true })
       .fill("2099-12-31");
     await chooseRepairProjects(page, [retirementFixture.project]);
-    const newOrderSummary = page.locator(".price-option-picker-summary");
-    await newOrderSummary.locator(".summary-action").click();
+    const openOptions = page.getByRole("button", {
+      name: "Opzioni ricambio",
+      exact: true,
+    });
+    await expect(openOptions).toHaveCount(1);
+    await openOptions.click();
     const optionPicker = page.getByRole("dialog", {
       name: "Opzioni ricambio",
       exact: true,
@@ -1432,7 +1574,8 @@ test("shows a retired repair part in its historical order and hides it from new 
       await detailsHeading.click();
     const savedPart = details.locator(".selected-part-summary");
     await expect(savedPart).toContainText(retirementFixture.productName);
-    await expect(savedPart).toContainText("Prezzo di listino 119,00 €");
+    await expect(savedPart).toContainText("Prezzo di listino");
+    await expect(savedPart).toContainText("119,00 €");
     await expect(savedPart).not.toContainText("Nessun ricambio");
     await savedPart.locator(".summary-action").click();
     await page
@@ -1521,16 +1664,23 @@ test("removing a default repair part persists and allows later reselection", asy
     .locator(".selected-part-summary");
   await expect(savedPart).toContainText("Nessuno");
 
+  const editDetails = details.getByRole("button", {
+    name: "Modifica dati",
+    exact: true,
+  });
+  await details.hover();
+  await expect(editDetails).toHaveCSS("opacity", "1");
+  await editDetails.click();
   await savedPart.locator(".summary-action").click();
   await choosePriceOption(page, "Batteria Test");
-  await page
-    .getByTestId("details-card")
-    .getByRole("button", { name: "Salva", exact: true })
-    .click();
+  await details.getByRole("button", { name: "Salva", exact: true }).click();
   savedPart = page
     .getByTestId("details-card")
     .locator(".selected-part-summary");
   await expect(savedPart).toContainText("Batteria Test");
+  await details.hover();
+  await expect(editDetails).toHaveCSS("opacity", "1");
+  await editDetails.click();
   await savedPart.locator(".summary-action").click();
   await choosePriceOption(page, "Nessun ricambio richiesto");
   await details.getByRole("button", { name: "Salva", exact: true }).click();
@@ -4400,6 +4550,14 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
 
 test("sales history uses a monthly filter", async ({ page }) => {
   await page.goto("/retail");
+  await page.getByRole("button", { name: /Cavo USB-C Test/ }).click();
+  await page.getByRole("button", { name: /Conferma incasso.*12,00/ }).click();
+  const saleSuccess = page.getByRole("dialog");
+  await expect(saleSuccess.getByRole("status")).toContainText(
+    "Vendita completata",
+  );
+  await saleSuccess.getByRole("button", { name: "Prossima vendita" }).click();
+  await expect(saleSuccess).toHaveCount(0);
   await page.getByRole("button", { name: "Vendite", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -4419,10 +4577,12 @@ test("sales history uses a monthly filter", async ({ page }) => {
   expect(closeBox!.x - (periodBox!.x + periodBox!.width)).toBeLessThanOrEqual(
     16,
   );
+  const currentMonth = await period.inputValue();
   await period.fill("2025-01");
   await expect(dialog).toContainText("Nessuna vendita registrata.");
-  await period.fill(new Date().toISOString().slice(0, 7));
+  await period.fill(currentMonth);
   const historyRow = dialog.locator("tbody tr").first();
+  await expect(historyRow).toBeVisible();
   await historyRow.hover();
   await historyRow.getByRole("button", { name: /Elimina vendita V-/ }).click();
   const deleteDialog = page.getByRole("dialog", {
@@ -4779,7 +4939,9 @@ test("discount and IVA persist without polluting historical prices", async ({
   await page
     .getByLabel("Consegna prevista", { exact: true })
     .fill("2099-12-31");
-  await openStep(page, 2);
+  await expect(
+    page.locator(".order-step-card").nth(2).locator(".order-step-heading"),
+  ).toHaveAttribute("aria-expanded", "true");
   await chooseRepairProjects(page, ["sostituzione display"]);
   await openStep(page, 2);
   await expect(
@@ -5873,10 +6035,17 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     quote.getByRole("button", { name: "Aggiungi intervento" }),
   ).toHaveCount(0);
   await quote.getByRole("button", { name: "Annulla" }).click();
-  await warranty.hover();
-  await warranty
-    .getByRole("button", { name: "Modifica dati", exact: true })
-    .click();
+  const editWarranty = warranty.getByRole("button", {
+    name: "Modifica dati",
+    exact: true,
+  });
+  await warranty.locator(".order-card-heading").hover();
+  await expect(editWarranty).toHaveCSS("pointer-events", "auto");
+  await expect(warranty).toHaveCSS(
+    "transform",
+    "matrix(1.003, 0, 0, 1.003, 0, -1)",
+  );
+  await editWarranty.click();
   const warrantyProject = await warranty
     .locator(".project-warranty-editor section strong")
     .textContent();
@@ -6218,7 +6387,10 @@ test("price editor and mobile yellow layout support both languages", async ({
   await chooseBusinessOption(page, "Marca", "Apple", form);
   await chooseBusinessOption(page, "Modello", "iPhone 13", form);
   await enterBusinessValue(page, "Intervento", testProject, form);
-  await form.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("15");
+  const baseSuggested = form.locator('input[name="suggested"]');
+  await expect(baseSuggested).toHaveCount(1);
+  await baseSuggested.fill("15");
+  await expect(baseSuggested).toHaveValue("15");
   await expect(form.locator(".price-rule-editor-options")).toBeVisible();
   const footer = form.locator(".dialog-actions");
   await expect(
@@ -6244,6 +6416,7 @@ test("price editor and mobile yellow layout support both languages", async ({
     name: "Nuova opzione ricambio",
     exact: true,
   });
+  await expect(newPriceOption).toBeVisible();
   await chooseBusinessOption(
     page,
     "Ricambio richiesto",
@@ -6431,6 +6604,7 @@ test("creates a customer and selects it without another search", async ({
 }) => {
   const phone = "336" + Date.now().toString().slice(-7);
   await page.goto("/orders/new");
+  await page.waitForLoadState("networkidle");
   await page
     .getByRole("combobox", { name: "Cerca cliente", exact: true })
     .fill(phone);
@@ -6471,6 +6645,7 @@ test("searchable combobox keeps search, create and chevron as independent contro
   page,
 }) => {
   await page.goto("/orders/new");
+  await page.waitForLoadState("networkidle");
   const customer = page.getByRole("combobox", {
     name: "Cerca cliente",
     exact: true,
@@ -6531,6 +6706,13 @@ test("searchable combobox keeps search, create and chevron as independent contro
     .click();
 
   await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+  const customerStepHeading = page
+    .locator(".order-step-card")
+    .first()
+    .locator(".order-step-heading");
+  await expect(customerStepHeading).toHaveAttribute("aria-expanded", "false");
+  await customerStepHeading.click();
+  await expect(customerStepHeading).toHaveAttribute("aria-expanded", "true");
   await page.getByRole("button", { name: "Cambia", exact: true }).click();
   await expect(customer).toHaveValue("");
   await expect(page.locator(".order-step-heading").first()).toHaveAttribute(
@@ -6542,7 +6724,11 @@ test("searchable combobox keeps search, create and chevron as independent contro
   );
 
   await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
-  await openStep(page, 1);
+  const deviceStepHeading = page
+    .locator(".order-step-card")
+    .nth(1)
+    .locator(".order-step-heading");
+  await expect(deviceStepHeading).toHaveAttribute("aria-expanded", "true");
   const { dialog: deviceDialog } = await openNewRepairDeviceDialog(page);
   const brand = deviceDialog.getByRole("combobox", {
     name: "Marca",
@@ -6665,7 +6851,11 @@ test("native quote choices populate prices, clear on model changes and discounts
   await page
     .getByLabel("Consegna prevista", { exact: true })
     .fill("2099-12-31");
-  await openStep(page, 2);
+  const quoteHeading = page
+    .locator(".order-step-card")
+    .nth(2)
+    .locator(".order-step-heading");
+  await expect(quoteHeading).toHaveAttribute("aria-expanded", "true");
   const projectPrice = page.getByLabel("Prezzo originale (€) 1", {
     exact: true,
   });
@@ -6722,7 +6912,12 @@ test("native quote choices populate prices, clear on model changes and discounts
   let projectPicker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
-  await repairProjectOption(projectPicker, "sostituzione display").click();
+  const displayProject = repairProjectOption(
+    projectPicker,
+    "sostituzione display",
+  );
+  await expect(displayProject).toHaveCount(1);
+  await displayProject.click();
   await projectPicker.locator(".quick-service-picker-add").click();
   const customProjectDialog = page.getByRole("dialog", {
     name: "Intervento personalizzato",
@@ -6877,10 +7072,18 @@ test("removing the last compatible repair project removes its device row", async
 }) => {
   await page.goto("/inventory");
   const productRow = page.getByRole("row", { name: /Display LCD Test/ });
+  await expect(productRow).toHaveCount(1);
+  const productId = await productRow.getAttribute("data-inventory-product");
+  expect(productId).toBeTruthy();
   await productRow.click();
-  await productRow
-    .getByRole("button", { name: "Modifica dispositivi compatibili" })
-    .click();
+  const activeProductRow = page.locator(
+    `tr[data-inventory-product="${productId}"]`,
+  );
+  const editCompatibilities = activeProductRow.getByRole("button", {
+    name: "Modifica dispositivi compatibili",
+  });
+  await expect(editCompatibilities).toHaveCount(1);
+  await editCompatibilities.click();
   const dialog = page.getByRole("dialog", {
     name: "Modifica dispositivi compatibili",
   });
@@ -7276,7 +7479,9 @@ test("replaces a repair item with a custom item without submitting the order", a
     .getByRole("button", { name: "Cambia", exact: true })
     .click();
   const picker = page.getByRole("dialog", { name: "Seleziona interventi" });
-  await repairProjectOption(picker, "sostituzione display").click();
+  const displayProject = repairProjectOption(picker, "sostituzione display");
+  await expect(displayProject).toHaveCount(1);
+  await displayProject.click();
   await picker.locator(".quick-service-picker-add").click();
   const customDialog = page.getByRole("dialog", {
     name: "Intervento personalizzato",
@@ -7558,6 +7763,7 @@ test("customer page adds, edits and deletes a customer", async ({ page }) => {
 });
 test("quick service editor saves only changed content", async ({ page }) => {
   await page.goto("/settings/quick-services");
+  await page.waitForLoadState("networkidle");
   await page.locator(".catalog-manager-row").first().click();
   const dialog = page.getByRole("dialog");
   const name = dialog.getByRole("textbox").first();
@@ -8601,6 +8807,7 @@ test("customer detail removes duplicate actions and supports keyboard icon editi
   page,
 }) => {
   await page.goto("/customers");
+  await page.waitForLoadState("networkidle");
   await page.locator(".customer-name .order-link").first().click();
   const customerDialog = page.getByRole("dialog");
   await expect(customerDialog.locator(".customer-summary")).toBeVisible();

@@ -302,6 +302,14 @@ export type ItemView = {
   discountVisible?: boolean;
   requiredProductId?: string;
   requiredProductName?: string;
+  requiredProduct?: {
+    id: string;
+    name: string;
+    category: string;
+    stock: number;
+    reserved: number;
+    available: number;
+  } | null;
   requiredQuantity?: number;
   requiredProductRemoved?: boolean;
 };
@@ -371,6 +379,7 @@ export function removePartPricePatch(
     suggested: baseSuggestion,
     requiredProductId: "",
     requiredProductName: "",
+    requiredProduct: null,
     requiredQuantity: 1,
     requiredProductRemoved: true,
     ...(manuallyAdjusted
@@ -1521,6 +1530,8 @@ export function ItemsEditor({
       priceOptionName: "",
       suggested: "",
       requiredProductId: "",
+      requiredProductName: "",
+      requiredProduct: null,
       requiredQuantity: 1,
       requiredProductRemoved: false,
       suggestedAfterSwitch: undefined,
