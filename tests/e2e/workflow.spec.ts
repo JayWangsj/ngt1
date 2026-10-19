@@ -7848,7 +7848,16 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
   await chooseBusinessOption(page, "Marca", "Apple", dialog);
   await enterBusinessValue(page, "Modello", "Watch Modal", dialog);
   await enterBusinessValue(page, "Intervento", "Test battery", dialog);
-  await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("bad");
+  const suggestedPrice = dialog.getByLabel("Prezzo suggerito (€)", {
+    exact: true,
+  });
+  await suggestedPrice.fill("bad");
+  await expect(suggestedPrice).toHaveValue("bad");
+  expect(
+    await suggestedPrice.evaluate((input) =>
+      (input as HTMLInputElement).checkValidity(),
+    ),
+  ).toBe(true);
   await dialog
     .getByRole("button", { name: "Salva ed esci", exact: true })
     .click();
@@ -7856,11 +7865,66 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
   await expect(
     dialog.getByRole("combobox", { name: "Modello", exact: true }),
   ).toHaveValue("Watch Modal");
-  await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("40");
+  await suggestedPrice.fill("40");
+  await expect(suggestedPrice).toHaveValue("40");
+  expect(
+    await suggestedPrice.evaluate((input) =>
+      (input as HTMLInputElement).checkValidity(),
+    ),
+  ).toBe(true);
+  const saveResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/prices" &&
+      Boolean(response.request().headers()["next-action"]),
+    { timeout: 12000 },
+  );
   await dialog
     .getByRole("button", { name: "Salva ed esci", exact: true })
     .click();
-  await expect(dialog).not.toBeVisible();
+  const saveResponse = await saveResponsePromise;
+  expect(saveResponse.status()).toBe(200);
+  const priceRuleDb = new PrismaClient();
+  let savedSuggested: string[];
+  try {
+    savedSuggested = (
+      await priceRuleDb.priceRule.findMany({
+        where: {
+          brand: "Apple",
+          model: "Watch Modal",
+          project: "test battery",
+        },
+        select: { suggested: true },
+      })
+    ).map((savedRule) => savedRule.suggested.toString());
+  } finally {
+    await priceRuleDb.$disconnect();
+  }
+  try {
+    await expect(dialog).not.toBeVisible();
+  } catch (error) {
+    let responseBody: string;
+    try {
+      responseBody = await saveResponse.text();
+    } catch (bodyError) {
+      responseBody =
+        bodyError instanceof Error ? bodyError.message : String(bodyError);
+    }
+    console.error(
+      `Quote save diagnostic: ${JSON.stringify({
+        responseStatus: saveResponse.status(),
+        responseBody,
+        savedSuggested,
+        visibleErrors: await dialog
+          .getByRole("alert")
+          .allTextContents()
+          .catch(() => []),
+      })}`,
+    );
+    throw error;
+  }
+  expect(savedSuggested).toHaveLength(1);
+  expect(Number(savedSuggested[0])).toBe(40);
   await expect(page).toHaveURL(/prices$/);
   const model = page
     .locator("section.price-tree-level")
@@ -7905,11 +7969,46 @@ test("quote tree supports contextual dialogs, search, editing and empty branch r
     dialog.getByRole("combobox", { name: "Modello", exact: true }),
   ).toHaveValue("Watch Modal");
   await enterBusinessValue(page, "Intervento", "Test screen", dialog);
-  await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("70");
+  const secondSuggestedPrice = dialog.getByLabel("Prezzo suggerito (€)", {
+    exact: true,
+  });
+  await secondSuggestedPrice.fill("70");
+  await expect(secondSuggestedPrice).toHaveValue("70");
+  expect(
+    await secondSuggestedPrice.evaluate((input) =>
+      (input as HTMLInputElement).checkValidity(),
+    ),
+  ).toBe(true);
+  const secondSaveResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/prices" &&
+      Boolean(response.request().headers()["next-action"]),
+    { timeout: 12000 },
+  );
   await dialog
     .getByRole("button", { name: "Salva ed esci", exact: true })
     .click();
+  const secondSaveResponse = await secondSaveResponsePromise;
+  expect(secondSaveResponse.status()).toBe(200);
+  const savedSecondRuleDb = new PrismaClient();
+  let savedSecondSuggested: string[];
+  try {
+    savedSecondSuggested = (
+      await savedSecondRuleDb.priceRule.findMany({
+        where: {
+          brand: "Apple",
+          model: "Watch Modal",
+          project: "test screen",
+        },
+        select: { suggested: true },
+      })
+    ).map((savedRule) => savedRule.suggested.toString());
+  } finally {
+    await savedSecondRuleDb.$disconnect();
+  }
   await expect(dialog).not.toBeVisible();
+  expect(savedSecondSuggested).toEqual(["70"]);
   await expect(model.locator("article")).toHaveCount(2);
   await page.getByLabel("Cerca", { exact: true }).fill("Test battery");
   await expect(page.locator(".rule-list > article")).toHaveCount(1);
@@ -9371,4 +9470,105 @@ test("test tools generate linked data and persist repair motion tuning", async (
   );
   await expect(product).toContainText("7,50 €");
   await expect(product).toContainText("19,90 €");
+});
+
+test("Production Standalone serves pages and assets without E2E interception", async ({
+  page,
+}) => {
+  await page.context().unroute("**/_next/static/**");
+  await page.context().unroute("**/brand/**");
+
+  const assetResponses: Promise<{
+    url: string;
+    status: number;
+    contentType: string;
+  }>[] = [];
+  const failedAssets: string[] = [];
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (
+      !url.pathname.startsWith("/_next/static/") &&
+      !url.pathname.startsWith("/brand/")
+    )
+      return;
+    assetResponses.push(
+      response.allHeaders().then((headers) => ({
+        url: url.pathname,
+        status: response.status(),
+        contentType: headers["content-type"] ?? "",
+      })),
+    );
+  });
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    if (
+      url.pathname.startsWith("/_next/static/") ||
+      url.pathname.startsWith("/brand/")
+    )
+      failedAssets.push(`${url.pathname}: ${request.failure()?.errorText}`);
+  });
+
+  const visit = async (path: string) => {
+    await page.goto(path);
+    await expect(
+      page.getByRole("img", { name: "NGT NEXT GEN TECH", exact: true }).first(),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page
+          .getByRole("img", { name: "NGT NEXT GEN TECH", exact: true })
+          .first()
+          .evaluate(
+            (image: HTMLImageElement) =>
+              image.complete && image.naturalWidth > 0,
+          ),
+      )
+      .toBe(true);
+    await page.waitForLoadState("networkidle");
+  };
+
+  await visit("/orders/new");
+  await fillOrder(page);
+  await save(page);
+  const orderPath = new URL(page.url()).pathname;
+
+  await visit("/prices");
+  await expect(
+    page.getByRole("button", { name: "Nuova regola", exact: true }).first(),
+  ).toBeVisible();
+
+  await visit(orderPath);
+  await expect(
+    page.locator(".detail-status .status-dropdown-trigger"),
+  ).toBeVisible();
+
+  const assets = await Promise.all(assetResponses);
+  expect(failedAssets).toEqual([]);
+  expect(
+    assets.some(
+      (asset) =>
+        asset.url.startsWith("/_next/static/") &&
+        asset.url.endsWith(".css") &&
+        asset.status === 200,
+    ),
+  ).toBe(true);
+  expect(
+    assets.some(
+      (asset) =>
+        asset.url.startsWith("/_next/static/") &&
+        asset.url.endsWith(".js") &&
+        asset.status === 200,
+    ),
+  ).toBe(true);
+  expect(
+    assets.some(
+      (asset) =>
+        asset.url === "/brand/ngt-logo-horizontal.svg" &&
+        asset.status === 200 &&
+        asset.contentType.includes("image/svg+xml"),
+    ),
+  ).toBe(true);
+  expect(
+    assets.every((asset) => asset.status === 200 || asset.status === 304),
+  ).toBe(true);
 });
