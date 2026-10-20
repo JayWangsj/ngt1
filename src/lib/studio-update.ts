@@ -1464,6 +1464,10 @@ export async function startStudioUpdate(
     root?: string;
     launch?: ProcessLauncher;
     inspect?: ProcessInspector;
+    persistStartingStatus?: (
+      filePath: string,
+      status: StudioUpdateStatus,
+    ) => Promise<void>;
     targetVersion?: string;
   } = {},
 ) {
@@ -1654,6 +1658,7 @@ export async function startStudioUpdate(
         });
       }
     };
+    let processLaunchAttempted = false;
     try {
       await appendUpdateDiagnostic(
         launchLogFile,
@@ -1664,11 +1669,20 @@ export async function startStudioUpdate(
           scriptPath: path.resolve(scriptPath),
         },
       );
-      await writeJsonAtomically(taskStatusFile, status);
+      try {
+        await (options.persistStartingStatus || writeJsonAtomically)(
+          taskStatusFile,
+          status,
+        );
+      } catch (cause) {
+        await record("starting-status-write-failed", diagnosticError(cause));
+        throw cause;
+      }
       await record("starting-status-persisted");
       await record("process-launch-requested", {
         bootstrapScriptPath: path.resolve(bootstrapScriptPath),
       });
+      processLaunchAttempted = true;
       const child = (options.launch || launchProcess)(
         "powershell.exe",
         [
@@ -1835,7 +1849,12 @@ export async function startStudioUpdate(
       return { ...status, logAvailable: true };
     } catch (cause) {
       activeUpdateRoots.delete(installRoot);
-      await record("process-launch-failed", diagnosticError(cause));
+      await record(
+        processLaunchAttempted
+          ? "process-launch-failed"
+          : "start-request-failed",
+        diagnosticError(cause),
+      );
       try {
         const latestState =
           await readJsonState<StudioUpdateStatus>(taskStatusFile);

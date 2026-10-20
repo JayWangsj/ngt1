@@ -1,5 +1,4 @@
 import {
-  chmod,
   mkdtemp,
   mkdir,
   readdir,
@@ -858,23 +857,19 @@ describe("studio update", () => {
 
   it("records a starting-status write failure and does not launch PowerShell", async () => {
     const { root, installRoot } = await studioRoot();
-    const statusPath = path.join(installRoot, "update-status.json");
-    await writeFile(statusPath, JSON.stringify({ status: "idle" }));
-    await chmod(statusPath, 0o444);
     let launchCount = 0;
-    try {
-      await expect(
-        startStudioUpdate({
-          root,
-          launch: () => {
-            launchCount += 1;
-            return updateProcess().process;
-          },
-        }),
-      ).rejects.toThrow();
-    } finally {
-      await chmod(statusPath, 0o666);
-    }
+    await expect(
+      startStudioUpdate({
+        root,
+        persistStartingStatus: async () => {
+          throw new Error("simulated status write failure");
+        },
+        launch: () => {
+          launchCount += 1;
+          return updateProcess().process;
+        },
+      }),
+    ).rejects.toThrow("simulated status write failure");
 
     expect(launchCount).toBe(0);
     await expect(
@@ -890,7 +885,9 @@ describe("studio update", () => {
       "utf8",
     );
     expect(launchLog).toContain('"event":"request-accepted"');
-    expect(launchLog).toContain('"event":"process-launch-failed"');
+    expect(launchLog).toContain('"event":"starting-status-write-failed"');
+    expect(launchLog).toContain('"event":"start-request-failed"');
+    expect(launchLog).not.toContain('"event":"process-launch-failed"');
   });
 
   it("keeps startup diagnostics readable after the API process restarts", async () => {
