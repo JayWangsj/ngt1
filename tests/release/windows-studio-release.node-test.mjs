@@ -709,6 +709,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const updater = (
     await readText("tools/ngt-updater/src/main.rs", "utf8")
   ).replace(/\r\n/g, "\n");
+  const innoInstaller = (
+    await readText("installer/windows-studio.iss", "utf8")
+  ).replace(/\r\n/g, "\n");
   const packageBuilder = (
     await readText("scripts/build-windows-studio-package.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -813,6 +816,8 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /"actualVersion"/);
   assert.match(online, /Get-NgtUpdaterVisibleWindows/);
   assert.match(online, /silent online update displayed a visible installer/);
+  assert.match(online, /windowTitle/);
+  assert.match(innoInstaller, /DisableStartupPrompt=yes/);
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
   assert.match(
     online,
@@ -872,6 +877,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(diagnostics, /Select-Object -Last 40/);
   assert.match(diagnostics, /lines matching failure indicators/);
   assert.match(diagnostics, /"application\.log", "application\.error\.log"/);
+  assert.match(diagnostics, /online-installer\.inno\.log/);
   assert.match(diagnostics, /studio-database\.error\.log/);
   assert.match(
     acceptanceAction,

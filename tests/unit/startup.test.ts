@@ -434,6 +434,7 @@ describe("Windows persistent startup", () => {
     expect(updater).toContain("update_log_path");
     expect(onlineUpdateTest).toContain("Get-NgtUpdaterVisibleWindows");
     expect(onlineUpdateTest).toContain("Get-NgtVisibleWindowProcessIds");
+    expect(onlineUpdateTest).toContain("inno.log");
     expect(onlineUpdateTest).toContain(
       "silent online update displayed a visible installer",
     );
@@ -448,6 +449,7 @@ describe("Windows persistent startup", () => {
     );
     expect(innoInstaller).toContain("SW_HIDE, ewWaitUntilTerminated");
     expect(innoInstaller).toContain("skipifsilent");
+    expect(innoInstaller).toContain("DisableStartupPrompt=yes");
     expect(onlineUpdateTest).toContain("Assert-ReleaseChecksum $oldAppArchive");
     expect(onlineUpdateTest).toContain(
       "Assert-ReleaseChecksum $oldRuntimeArchive",

@@ -52,6 +52,7 @@ foreach ($sourcePath in $SourcePaths) {
     "online-update" {
       if ((Split-Path -Leaf $sourcePath) -eq "online-update.log") { "online-update.log" }
       elseif ((Split-Path -Leaf $sourcePath) -eq "update-status.json") { "update-status.json" }
+      elseif ((Split-Path -Leaf $sourcePath) -match '^update-.+\.inno\.log$') { "online-installer.inno.log" }
       elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
       else { $null }
     }

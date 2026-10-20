@@ -212,7 +212,14 @@ function Get-NgtUpdaterVisibleWindows([int]$UpdaterPid) {
   return @($processes | Where-Object {
     $processIds.Contains([int]$_.ProcessId) -and $visibleIds -contains [int]$_.ProcessId
   } | ForEach-Object {
-    [pscustomobject]@{ processId = [int]$_.ProcessId; name = [string]$_.Name }
+    $windowProcess = Get-Process -Id ([int]$_.ProcessId) -ErrorAction SilentlyContinue
+    [pscustomobject]@{
+      processId = [int]$_.ProcessId
+      name = [string]$_.Name
+      parentProcessId = [int]$_.ParentProcessId
+      windowTitle = [string]$windowProcess.MainWindowTitle
+      commandLine = [string]$_.CommandLine
+    }
   })
 }
 
@@ -494,14 +501,18 @@ try {
       }
       $visibleWindows = @(Get-NgtUpdaterVisibleWindows -UpdaterPid $updaterPid)
       if ($visibleWindows.Count -gt 0) {
-        $windowOwners = ($visibleWindows | ForEach-Object { "$($_.name)/PID $($_.processId)" }) -join ", "
+        $windowOwners = ($visibleWindows | ForEach-Object {
+          "$($_.name)/PID $($_.processId) parent=$($_.parentProcessId) title='$($_.windowTitle)' command='$($_.commandLine)'"
+        }) -join ", "
         throw "The silent online update displayed a visible installer, CMD, or PowerShell window: $windowOwners"
       }
       $newVisibleWindowIds = @(Get-NgtVisibleWindowProcessIds | Where-Object { $_ -notin $visibleWindowBaseline })
       if ($newVisibleWindowIds.Count -gt 0) {
         $windowOwners = ($newVisibleWindowIds | ForEach-Object {
           $windowProcess = Get-Process -Id $_ -ErrorAction SilentlyContinue
-          if ($windowProcess) { "$($windowProcess.ProcessName)/PID $_" } else { "PID $_" }
+          if ($windowProcess) {
+            "$($windowProcess.ProcessName)/PID $_ title='$($windowProcess.MainWindowTitle)'"
+          } else { "PID $_" }
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
@@ -615,6 +626,8 @@ try {
     $diagnosticSources = @()
     if ($ManualInstaller) {
       $diagnosticSources += @(@($installerLog, $repairLog) | Where-Object { $_ })
+    } elseif ($updateId) {
+      $diagnosticSources += Join-Path $installRoot "logs\update-$updateId.inno.log"
     }
     if (Test-Path -LiteralPath $updateLog -PathType Leaf) { $diagnosticSources += $updateLog }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }

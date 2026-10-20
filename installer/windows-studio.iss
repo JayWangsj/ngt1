@@ -26,6 +26,7 @@ DefaultDirName={localappdata}\NGT
 UninstallFilesDir={localappdata}\NGT\uninstall
 UsePreviousAppDir=no
 DisableDirPage=yes
+DisableStartupPrompt=yes
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=ngt-studio-windows-setup-v{#AppVersion}
