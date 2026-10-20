@@ -119,7 +119,6 @@ async function seedFixture(db, code) {
       brand: "NGT",
       series: "",
       model: "Upgrade acceptance phone",
-      createdAt: receivedAt,
     },
   });
   const product = await db.product.create({
@@ -387,7 +386,7 @@ async function captureSnapshot(db, refs) {
     readRecord(
       db.device,
       refs.deviceId,
-      "id customerId category brand series model createdAt",
+      "id customerId category brand series model",
     ),
     readRecord(db.user, refs.actorId, "id email name role"),
     readRecord(
