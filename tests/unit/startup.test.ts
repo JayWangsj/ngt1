@@ -140,6 +140,12 @@ describe("Windows persistent startup", () => {
       'Write-NgtAcceptanceUpdateProbe "executor-confirming"',
     );
     expect(acceptance).toContain(
+      '$legacyUpdaterProbePath = Join-Path $testRoot "legacy-updater-probe.jsonl"',
+    );
+    expect(acceptance).toContain(
+      "if (Test-Path -LiteralPath $legacyUpdaterProbePath -PathType Leaf) { $diagnosticSources += $legacyUpdaterProbePath }",
+    );
+    expect(acceptance).toContain(
       "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1",
     );
     expect(acceptance).toContain(

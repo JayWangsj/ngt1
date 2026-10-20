@@ -143,6 +143,7 @@ if (Test-Path -LiteralPath $installRoot) {
 }
 
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-online-update-" + [guid]::NewGuid().ToString("N"))
+$legacyUpdaterProbePath = Join-Path $testRoot "legacy-updater-probe.jsonl"
 $downloadRoot = Join-Path $testRoot "downloads"
 $baselineRoot = Join-Path $testRoot "baseline"
 $dataRoot = if ($ManualInstaller) { Join-Path $installRoot "data-store" } else { Join-Path $testRoot "data-store" }
@@ -359,19 +360,30 @@ try {
       $probeFunction = @'
 function Write-NgtAcceptanceUpdateProbe([string]$Event) {
   try {
-    $probeFile = Join-Path (Split-Path -Parent $LogFile) ("update-executor-" + $UpdateId + ".jsonl")
     $entry = [ordered]@{
       at = (Get-Date).ToUniversalTime().ToString("o")
       event = $Event
       pid = $PID
+      parameterNames = @($script:NgtAcceptanceBoundParameters)
+      hasUpdateId = $script:NgtAcceptanceHasUpdateId
+      hasStatusFile = $script:NgtAcceptanceHasStatusFile
+      hasUpdateLockFile = $script:NgtAcceptanceHasUpdateLockFile
+      hasLogFile = $script:NgtAcceptanceHasLogFile
+      targetVersion = $ExpectedTargetVersion
     }
     [System.IO.File]::AppendAllText(
-      $probeFile,
+      '__PROBE_FILE__',
       (($entry | ConvertTo-Json -Compress) + [Environment]::NewLine),
       (New-Object System.Text.UTF8Encoding($false))
     )
   } catch { }
 }
+'@.Replace("__PROBE_FILE__", $legacyUpdaterProbePath.Replace("'", "''")) + @'
+$script:NgtAcceptanceBoundParameters = @($PSBoundParameters.Keys)
+$script:NgtAcceptanceHasUpdateId = -not [string]::IsNullOrWhiteSpace([string]$UpdateId)
+$script:NgtAcceptanceHasStatusFile = -not [string]::IsNullOrWhiteSpace([string]$StatusFile)
+$script:NgtAcceptanceHasUpdateLockFile = -not [string]::IsNullOrWhiteSpace([string]$UpdateLockFile)
+$script:NgtAcceptanceHasLogFile = -not [string]::IsNullOrWhiteSpace([string]$LogFile)
 Write-NgtAcceptanceUpdateProbe "script-started"
 '@
       $errorPreferenceLine = '$ErrorActionPreference = "Stop"'
@@ -603,6 +615,7 @@ Write-NgtAcceptanceUpdateProbe "script-started"
     if (Test-Path -LiteralPath $updateLog -PathType Leaf) { $diagnosticSources += $updateLog }
     if ($updateLaunchLog -and (Test-Path -LiteralPath $updateLaunchLog -PathType Leaf)) { $diagnosticSources += $updateLaunchLog }
     if ($updateExecutorLog -and (Test-Path -LiteralPath $updateExecutorLog -PathType Leaf)) { $diagnosticSources += $updateExecutorLog }
+    if (Test-Path -LiteralPath $legacyUpdaterProbePath -PathType Leaf) { $diagnosticSources += $legacyUpdaterProbePath }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }
     $diagnosticSources += @(
       (Join-Path $installRoot "install-preflight.log"),
