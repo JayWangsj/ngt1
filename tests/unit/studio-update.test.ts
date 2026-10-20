@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -89,8 +90,9 @@ function launchUpdater(
   return (executable: string, args: string[]) => {
     launches?.push({ executable, args });
     const updateId = args[args.indexOf("--update-id") + 1];
-    void writeFile(
-      path.join(root, "installed", "update-status.json"),
+    const statusPath = path.join(root, "installed", "update-status.json");
+    writeFileSync(
+      statusPath,
       JSON.stringify({
         status: "checking",
         stage: "checking",
