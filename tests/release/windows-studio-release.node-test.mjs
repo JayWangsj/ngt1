@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -129,6 +129,51 @@ test("manifest ties the six release assets to their sidecars and source Commit",
   );
   await writeFile(target, "tampered");
   await assert.rejects(verifyArtifact(assets, manifest), /SHA256 verification/);
+});
+
+test("candidate manifest accepts a GitHub pull-request merge ref", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ngt-release-candidate-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const assets = path.join(root, "assets");
+  await mkdir(assets, { recursive: true });
+  const packageVersion = JSON.parse(
+    await readFile(path.join(process.cwd(), "package.json"), "utf8"),
+  ).version;
+  const candidateTag = "v" + packageVersion;
+  for (const name of expectedAssetNames(candidateTag).filter(
+    (entry) => !entry.endsWith(".sha256"),
+  )) {
+    const bytes = Buffer.from("fixture asset: " + name);
+    await writeFile(path.join(assets, name), bytes);
+    await writeFile(
+      path.join(assets, name + ".sha256"),
+      sha256(bytes) + "  " + name + "\n",
+    );
+  }
+
+  execFileSync(
+    process.execPath,
+    [
+      path.join(process.cwd(), "scripts", "windows-studio-release.mjs"),
+      "manifest",
+      assets,
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        GITHUB_SHA: sourceSha,
+        GITHUB_REF_NAME: "28/merge",
+        NGT_RELEASE_READY: "true",
+      },
+      encoding: "utf8",
+    },
+  );
+  const manifest = JSON.parse(
+    await readFile(path.join(assets, "release-manifest.json"), "utf8"),
+  );
+  assert.equal(manifest.tag, candidateTag);
+  assert.equal(manifest.sha, sourceSha);
 });
 
 test("findRelease discovers Draft Releases through the paginated release list", async () => {

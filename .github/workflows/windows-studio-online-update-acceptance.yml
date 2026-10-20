@@ -43,6 +43,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - uses: ./.github/actions/build-windows-studio-candidate
+        env:
+          NGT_RELEASE_READY: "true"
       - name: Install the exact candidate as a disposable standard user
         shell: powershell
         env:
