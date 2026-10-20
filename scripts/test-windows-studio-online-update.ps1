@@ -354,7 +354,50 @@ try {
       $scriptContent = Set-NgtReadyBaselineGhShim $scriptContent
       Write-Output "Adapted the verified legacy baseline to use the local candidate release adapter."
     }
-    if ($replaceCount -gt 0 -or ($CandidateDirectory -and $relativePath -eq "scripts/windows-studio-common.ps1")) {
+    $instrumentedUpdater = $relativePath -eq "scripts/update-windows-studio.ps1"
+    if ($instrumentedUpdater) {
+      $probeFunction = @'
+function Write-NgtAcceptanceUpdateProbe([string]$Event) {
+  try {
+    $probeFile = Join-Path (Split-Path -Parent $LogFile) ("update-executor-" + $UpdateId + ".jsonl")
+    $entry = [ordered]@{
+      at = (Get-Date).ToUniversalTime().ToString("o")
+      event = $Event
+      pid = $PID
+    }
+    [System.IO.File]::AppendAllText(
+      $probeFile,
+      (($entry | ConvertTo-Json -Compress) + [Environment]::NewLine),
+      (New-Object System.Text.UTF8Encoding($false))
+    )
+  } catch { }
+}
+Write-NgtAcceptanceUpdateProbe "script-started"
+'@
+      $errorPreferenceLine = '$ErrorActionPreference = "Stop"'
+      if (-not $scriptContent.Contains($errorPreferenceLine)) {
+        throw "Baseline updater script has no supported instrumentation point."
+      }
+      $scriptContent = $scriptContent.Replace(
+        $errorPreferenceLine,
+        $errorPreferenceLine + [Environment]::NewLine + $probeFunction
+      )
+      $transcriptStartLine = '    Start-Transcript -Path $LogFile -Force | Out-Null'
+      if ($scriptContent.Contains($transcriptStartLine)) {
+        $scriptContent = $scriptContent.Replace(
+          $transcriptStartLine,
+          $transcriptStartLine + [Environment]::NewLine + '    Write-NgtAcceptanceUpdateProbe "transcript-started"'
+        )
+      }
+      $executorConfirmedLine = '  $script:NgtUpdateExecutorConfirmed = $true'
+      if ($scriptContent.Contains($executorConfirmedLine)) {
+        $scriptContent = $scriptContent.Replace(
+          $executorConfirmedLine,
+          $executorConfirmedLine + [Environment]::NewLine + '  Write-NgtAcceptanceUpdateProbe "executor-confirming"'
+        )
+      }
+    }
+    if ($replaceCount -gt 0 -or $instrumentedUpdater -or ($CandidateDirectory -and $relativePath -eq "scripts/windows-studio-common.ps1")) {
       Set-Content -LiteralPath $scriptPath -Value $scriptContent -Encoding utf8
       $manifestEntry.Value = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }

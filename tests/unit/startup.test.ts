@@ -131,6 +131,15 @@ describe("Windows persistent startup", () => {
       "$updaterManifestEntry.Value = (Get-FileHash -LiteralPath $baselineUpdaterScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()",
     );
     expect(acceptance).toContain(
+      'Write-NgtAcceptanceUpdateProbe "script-started"',
+    );
+    expect(acceptance).toContain(
+      'Write-NgtAcceptanceUpdateProbe "transcript-started"',
+    );
+    expect(acceptance).toContain(
+      'Write-NgtAcceptanceUpdateProbe "executor-confirming"',
+    );
+    expect(acceptance).toContain(
       "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1",
     );
     expect(acceptance).toContain(
