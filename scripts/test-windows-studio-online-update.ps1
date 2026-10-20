@@ -170,6 +170,23 @@ using System.Runtime.InteropServices;
 
 public static class NgtUpdaterAcceptanceWindowProbe {
   private delegate bool EnumWindowsCallback(IntPtr window, IntPtr state);
+  private struct WindowRect {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+  public sealed class WindowInfo {
+    public int ProcessId;
+    public string ClassName;
+    public string Title;
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+    public bool BoundsAvailable;
+    public bool OnScreen;
+  }
 
   [DllImport("user32.dll")]
   private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
@@ -177,20 +194,57 @@ public static class NgtUpdaterAcceptanceWindowProbe {
   private static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")]
   private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern int GetClassName(IntPtr window, System.Text.StringBuilder className, int maxCount);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder title, int maxCount);
+  [DllImport("user32.dll")]
+  private static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
+  [DllImport("user32.dll")]
+  private static extern int GetSystemMetrics(int index);
 
   public static int[] GetVisibleProcessIds() {
     var processIds = new HashSet<int>();
+    foreach (var window in GetVisibleWindows()) processIds.Add(window.ProcessId);
+    var result = new int[processIds.Count];
+    processIds.CopyTo(result);
+    return result;
+  }
+
+  public static WindowInfo[] GetVisibleWindows() {
+    var windows = new List<WindowInfo>();
     EnumWindows((window, state) => {
       if (IsWindowVisible(window)) {
         uint processId;
         GetWindowThreadProcessId(window, out processId);
-        if (processId > 0) processIds.Add((int)processId);
+        if (processId > 0) {
+          var className = new System.Text.StringBuilder(256);
+          var title = new System.Text.StringBuilder(512);
+          var rect = new WindowRect();
+          var boundsAvailable = GetWindowRect(window, out rect);
+          GetClassName(window, className, className.Capacity);
+          GetWindowText(window, title, title.Capacity);
+          var screenLeft = GetSystemMetrics(76);
+          var screenTop = GetSystemMetrics(77);
+          var screenRight = screenLeft + GetSystemMetrics(78);
+          var screenBottom = screenTop + GetSystemMetrics(79);
+          windows.Add(new WindowInfo {
+            ProcessId = (int)processId,
+            ClassName = className.ToString(),
+            Title = title.ToString(),
+            Left = rect.Left,
+            Top = rect.Top,
+            Right = rect.Right,
+            Bottom = rect.Bottom,
+            BoundsAvailable = boundsAvailable,
+            OnScreen = boundsAvailable && rect.Right > screenLeft && rect.Left < screenRight &&
+              rect.Bottom > screenTop && rect.Top < screenBottom
+          });
+        }
       }
       return true;
     }, IntPtr.Zero);
-    var result = new int[processIds.Count];
-    processIds.CopyTo(result);
-    return result;
+    return windows.ToArray();
   }
 }
 "@
@@ -208,17 +262,26 @@ function Get-NgtUpdaterVisibleWindows([int]$UpdaterPid) {
       }
     }
   } while ($added)
-  $visibleIds = [NgtUpdaterAcceptanceWindowProbe]::GetVisibleProcessIds()
-  return @($processes | Where-Object {
-    $processIds.Contains([int]$_.ProcessId) -and $visibleIds -contains [int]$_.ProcessId
+  $visibleWindows = [NgtUpdaterAcceptanceWindowProbe]::GetVisibleWindows()
+  return @($visibleWindows | Where-Object {
+    $processIds.Contains([int]$_.ProcessId) -and (
+      (-not $_.BoundsAvailable) -or
+      ((($_.Right -gt $_.Left) -and ($_.Bottom -gt $_.Top)) -and $_.OnScreen)
+    )
   } | ForEach-Object {
-    $windowProcess = Get-Process -Id ([int]$_.ProcessId) -ErrorAction SilentlyContinue
+    $windowInfo = $_
+    $windowProcess = Get-Process -Id ([int]$windowInfo.ProcessId) -ErrorAction SilentlyContinue
+    $process = $processes | Where-Object { [int]$_.ProcessId -eq [int]$windowInfo.ProcessId } | Select-Object -First 1
     [pscustomobject]@{
-      processId = [int]$_.ProcessId
-      name = [string]$_.Name
-      parentProcessId = [int]$_.ParentProcessId
+      processId = [int]$windowInfo.ProcessId
+      name = [string]$process.Name
+      parentProcessId = [int]$process.ParentProcessId
       windowTitle = [string]$windowProcess.MainWindowTitle
-      commandLine = [string]$_.CommandLine
+      windowClass = [string]$windowInfo.ClassName
+      windowBounds = "[$($windowInfo.Left),$($windowInfo.Top),$($windowInfo.Right),$($windowInfo.Bottom)]"
+      boundsAvailable = [bool]$windowInfo.BoundsAvailable
+      onScreen = [bool]$windowInfo.OnScreen
+      commandLine = [string]$process.CommandLine
     }
   })
 }
@@ -502,7 +565,7 @@ try {
       $visibleWindows = @(Get-NgtUpdaterVisibleWindows -UpdaterPid $updaterPid)
       if ($visibleWindows.Count -gt 0) {
         $windowOwners = ($visibleWindows | ForEach-Object {
-          "$($_.name)/PID $($_.processId) parent=$($_.parentProcessId) title='$($_.windowTitle)' command='$($_.commandLine)'"
+          "$($_.name)/PID $($_.processId) parent=$($_.parentProcessId) class='$($_.windowClass)' bounds=$($_.windowBounds) boundsAvailable=$($_.boundsAvailable) onScreen=$($_.onScreen) title='$($_.windowTitle)' command='$($_.commandLine)'"
         }) -join ", "
         throw "The silent online update displayed a visible installer, CMD, or PowerShell window: $windowOwners"
       }
