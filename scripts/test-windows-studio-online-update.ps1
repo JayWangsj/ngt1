@@ -326,6 +326,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Baseline runtime archive extraction failed." }
     Normalize-LegacyBaselineDocumentationPaths -Root $baselineRoot
   } else {
+    $baselineRuntimeArchive = Join-Path $CandidateDirectory "ngt-studio-runtime-$TargetTag.zip"
+    Assert-ReleaseChecksum $baselineRuntimeArchive `
+      (Join-Path $CandidateDirectory ("ngt-studio-runtime-$TargetTag.zip.sha256"))
+    & tar.exe -xf $baselineRuntimeArchive -C $baselineRoot
+    if ($LASTEXITCODE -ne 0) { throw "Candidate baseline runtime archive extraction failed." }
     $baselineMetadataPath = Join-Path $baselineRoot "studio-release.json"
     $baselineMetadata = Get-Content -LiteralPath $baselineMetadataPath -Raw | ConvertFrom-Json
     $baselineMetadata.version = $oldTag -replace "^v", ""

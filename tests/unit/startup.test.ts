@@ -444,6 +444,12 @@ describe("Windows persistent startup", () => {
     expect(onlineUpdateTest).toContain(
       "Assert-ReleaseChecksum $oldRuntimeArchive",
     );
+    expect(onlineUpdateTest).toContain(
+      '$baselineRuntimeArchive = Join-Path $CandidateDirectory "ngt-studio-runtime-$TargetTag.zip"',
+    );
+    expect(onlineUpdateTest).toContain(
+      "Candidate baseline runtime archive extraction failed.",
+    );
     const baselinePathNormalization = onlineUpdateTest.indexOf(
       "Normalize-LegacyBaselineDocumentationPaths -Root $baselineRoot",
     );
