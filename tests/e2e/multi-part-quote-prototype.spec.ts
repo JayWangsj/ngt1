@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const route = "/ui-prototypes/multi-part-quotes";
 const evidence = ".local/multi-part-quote-prototype-evidence";

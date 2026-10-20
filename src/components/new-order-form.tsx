@@ -220,6 +220,7 @@ export function NewOrderWizard({
   const today = useBusinessDay();
   const router = useRouter();
   const [requestId] = useState(() => crypto.randomUUID());
+  const autoAdvanceTimer = useRef<number | null>(null);
   const [selectedStep, setSelectedStep] = useState<number | null>(0);
   const [expandedStep, setExpandedStep] = useState<number | null>(0);
   const [customer, setCustomer] = useState<CustomerDetail>(null);
@@ -302,6 +303,10 @@ export function NewOrderWizard({
   );
 
   function toggleStep(index: number) {
+    if (autoAdvanceTimer.current !== null) {
+      window.clearTimeout(autoAdvanceTimer.current);
+      autoAdvanceTimer.current = null;
+    }
     if (selectedStep === index && expandedStep === index) {
       setExpandedStep(null);
       setSelectedStep(null);
@@ -420,6 +425,13 @@ export function NewOrderWizard({
     validQuote ? "completed" : validStep2 ? "in-progress" : "not-started",
     safeCents(deposit) > 0 ? "completed" : "not-started",
   ] as const;
+  useEffect(
+    () => () => {
+      if (autoAdvanceTimer.current !== null)
+        window.clearTimeout(autoAdvanceTimer.current);
+    },
+    [],
+  );
   useEffect(() => {
     const values = [validCustomer, validStep2, validQuote];
     const completedIndex = values.findIndex(
@@ -437,7 +449,8 @@ export function NewOrderWizard({
     const closeTimer = window.setTimeout(() => {
       setExpandedStep(null);
       setSelectedStep(null);
-      window.setTimeout(() => {
+      autoAdvanceTimer.current = window.setTimeout(() => {
+        autoAdvanceTimer.current = null;
         setSelectedStep(completedIndex + 1);
         setExpandedStep(completedIndex + 1);
       }, 70);

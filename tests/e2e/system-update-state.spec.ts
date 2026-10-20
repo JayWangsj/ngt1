@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
+import type { Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -503,6 +504,7 @@ test("localizes the manual-review guidance for an interrupted update", async ({
     document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
   });
   await page.reload();
+  await page.waitForLoadState("networkidle");
   await expect(page.locator(".update-task-compact")).toContainText(
     "上次更新的恢复状态无法确认，已阻止再次更新。",
   );
@@ -829,10 +831,10 @@ test("retries the first status read automatically and keeps the update page as a
   expect(updateChecks).toBe(0);
 
   await page.goto("/settings/system-update");
+  await expect.poll(() => updateChecks).toBe(1);
   await expect(
     page.getByRole("button", { name: "Controlla aggiornamenti", exact: true }),
   ).toBeEnabled();
-  expect(updateChecks).toBe(1);
   await page
     .getByRole("button", { name: "Controlla aggiornamenti", exact: true })
     .click();

@@ -260,10 +260,12 @@ export default async function Detail({
           },
         ]
       : []),
-    ...order.products.map((product) => ({
-      label: `${product.productName} × ${product.quantity}`,
-      amount: money(cents(product.unitPrice) * product.quantity),
-    })),
+    ...order.products
+      .filter((product) => product.kind !== "REPAIR_PART")
+      .map((product) => ({
+        label: `${product.productName} × ${product.quantity}`,
+        amount: money(cents(product.unitPrice) * product.quantity),
+      })),
     ...(totals.afterSalesTotal > 0
       ? [
           {
@@ -722,6 +724,7 @@ export default async function Detail({
                     priceOptionName: item.priceOptionName,
                     suggested: item.suggested?.toString(),
                     requiredProductId: item.requiredProductId ?? "",
+                    requiredProductName: item.requiredProductName,
                     requiredQuantity: item.requiredQuantity,
                     source: `${it.levels[item.matchLevel as keyof typeof it.levels]} · ${order.device.brand} ${order.device.model}`,
                     requiredProduct: item.requiredProduct

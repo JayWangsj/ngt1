@@ -33,6 +33,8 @@ const errors: Record<string, string> = {
     "还有未登记扣减的维修配件，请先完成配件库存核对。",
   "Per modificare i ricambi richiesti, riaprire prima la riparazione.":
     "要修改所需维修配件，请先重新打开维修流程。",
+  "Non puoi cambiare il ricambio di un'opzione già usata in una scheda. Crea una nuova opzione.":
+    "已被维修单引用的报价方案不能更换配件；请新建报价方案。",
   "Verifica i ricambi non contabilizzati prima di modificare il preventivo.":
     "报价修改前，请先核对尚未登记的维修配件。",
   "L'incassato supera il nuovo totale: registra prima il rimborso.":

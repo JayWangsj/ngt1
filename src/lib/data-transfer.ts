@@ -31,6 +31,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { BusinessError, type Actor } from "./domain";
 import { normalizeBrand, normalizeModel } from "./catalog";
+import { syncLegacyDefaultPriceOption } from "./service";
 
 export const BACKUP_FORMAT = "ngt-repair-data";
 export const BACKUP_VERSION = 10;
@@ -360,6 +361,8 @@ export async function importBusinessData(
     const deviceIds = new Map<string, string>();
     const priceIds = new Map<string, string>();
     const priceOptionIds = new Map<string, string>();
+    const legacyPriceOptionIds = new Map<string, string>();
+    const priceOptionRuleIds = new Set<string>();
     const orderIds = new Map<string, string>();
     const existingOrderIds = new Set<string>();
     const saleIds = new Map<string, string>();
@@ -369,6 +372,9 @@ export async function importBusinessData(
     const itemIds = new Map<string, string>();
     const reworkSessionIds = new Map<string, string>();
     const orderSourceIds = new Set(backup.data.orders.map((order) => order.id));
+    const productNames = new Map(
+      backup.data.products.map(({ id, name }) => [id, name]),
+    );
 
     for (const source of backup.data.inventoryCategories) {
       const existing = await tx.inventoryCategory.findFirst({
@@ -764,8 +770,59 @@ export async function importBusinessData(
         imported++;
       } else skipped++;
       priceOptionIds.set(source.id, target.id);
+      priceOptionRuleIds.add(ruleId);
       entityIds.set(source.id, target.id);
     }
+    if (backup.version < 10) {
+      for (const source of backup.data.prices) {
+        if (!source.requiredProductId) continue;
+        const ruleId = priceIds.get(source.id);
+        const product = await tx.product.findUnique({
+          where: { id: source.requiredProductId },
+        });
+        if (!ruleId || !product) {
+          skipped++;
+          continue;
+        }
+        let option = await tx.priceRuleOption.findUnique({
+          where: {
+            ruleId_productId: {
+              ruleId,
+              productId: product.id,
+            },
+          },
+        });
+        if (option) skipped++;
+        else {
+          option = await tx.priceRuleOption.create({
+            data: {
+              ruleId,
+              productId: product.id,
+              name: product.name,
+              suggested: source.suggested,
+              cost: source.cost ?? product.costPrice,
+              quantity: source.requiredQuantity ?? 1,
+              minutes: source.minutes,
+              warrantyDays: 0,
+              enabled:
+                source.enabled && product.enabled && product.usage === "REPAIR",
+              isDefault: false,
+              sortOrder: 0,
+              notes: source.notes,
+              updatedAt: date(source.updatedAt) ?? new Date(),
+            },
+          });
+          imported++;
+        }
+        legacyPriceOptionIds.set(
+          `${source.id}\u0000${source.requiredProductId}`,
+          option.id,
+        );
+        priceOptionRuleIds.add(ruleId);
+      }
+    }
+    for (const ruleId of priceOptionRuleIds)
+      await syncLegacyDefaultPriceOption(tx, ruleId);
     for (const source of backup.data.orders) {
       const deviceId = deviceIds.get(source.deviceId);
       if (!deviceId) {
@@ -869,6 +926,21 @@ export async function importBusinessData(
       });
       if (exists) skipped++;
       else {
+        const legacyOptionId =
+          source.ruleId && source.requiredProductId
+            ? legacyPriceOptionIds.get(
+                `${source.ruleId}\u0000${source.requiredProductId}`,
+              )
+            : undefined;
+        const fallbackOption = legacyOptionId
+          ? await tx.priceRuleOption.findUnique({
+              where: { id: legacyOptionId },
+              select: { name: true },
+            })
+          : null;
+        const historicalProductName = source.requiredProductId
+          ? productNames.get(source.requiredProductId)
+          : undefined;
         await tx.workOrderItem.create({
           data: {
             id: source.id,
@@ -878,8 +950,12 @@ export async function importBusinessData(
               : null,
             priceOptionId: source.priceOptionId
               ? (priceOptionIds.get(source.priceOptionId) ?? null)
-              : null,
-            priceOptionName: source.priceOptionName ?? "",
+              : (legacyOptionId ?? null),
+            priceOptionName:
+              source.priceOptionName ??
+              (legacyOptionId
+                ? (historicalProductName ?? fallbackOption?.name ?? "")
+                : ""),
             quickServiceId: source.quickServiceId
               ? ((
                   await tx.quickService.findUnique({
@@ -895,7 +971,8 @@ export async function importBusinessData(
             adjustmentReason: source.adjustmentReason,
             minutes: source.minutes,
             requiredProductId: source.requiredProductId ?? null,
-            requiredProductName: source.requiredProductName ?? "",
+            requiredProductName:
+              source.requiredProductName ?? historicalProductName ?? "",
             requiredQuantity: source.requiredQuantity ?? 1,
             warrantyStart: date(source.warrantyStart),
             warrantyDays: source.warrantyDays ?? 0,

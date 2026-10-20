@@ -6,11 +6,13 @@ import { cents, money } from "@/lib/domain";
 import {
   ItemsEditor,
   QuoteItemsDraftForm,
+  removePartPricePatch,
   type CategoryView,
   type ItemView,
   type RuleView,
 } from "./forms";
 import { useMessages } from "./language";
+import { matchRule } from "@/lib/domain";
 import {
   useOrderDetailEdit,
   type OrderDetailEditTarget,
@@ -24,16 +26,14 @@ type Product = {
   reserved: number;
   available: number;
 };
-type SummaryItem = ItemView & {
-  source: string;
-  priceOptionName?: string;
-  suggested?: string;
-  requiredProduct?: Product | null;
-};
+type SummaryItem = ItemView & { source?: string };
 
 function removeDraftTarget(
-  items: ItemView[],
+  items: SummaryItem[],
   target: OrderDetailEditTarget | null | undefined,
+  rules: RuleView[],
+  device: { category: string; brand: string; series: string; model: string },
+  protectPrice: boolean,
 ) {
   if (target?.action !== "remove") return items;
   if (target.field === "project")
@@ -42,12 +42,11 @@ function removeDraftTarget(
     index === target.index
       ? {
           ...item,
-          priceOptionId: "",
-          priceOptionName: "",
-          suggested: "",
-          requiredProductId: "",
-          requiredQuantity: 1,
-          requiredProductRemoved: true,
+          ...removePartPricePatch(
+            item,
+            matchRule(rules, device, item.project)?.rule.suggested ?? "",
+            protectPrice,
+          ),
         }
       : item,
   );
@@ -83,11 +82,26 @@ export function WorkOrderRepairSummary({
   const session = cardEdit?.session ?? 0;
   const [draft, setDraft] = useState<{ session: number; items: ItemView[] }>({
     session,
-    items: removeDraftTarget(items, cardEdit?.target),
+    items: removeDraftTarget(
+      items,
+      cardEdit?.target,
+      rules,
+      device,
+      protectPriceOnOptionSwitch,
+    ),
   });
   const [minimumNotice, setMinimumNotice] = useState(false);
   if (cardEdit?.editing && draft.session !== session)
-    setDraft({ session, items: removeDraftTarget(items, cardEdit.target) });
+    setDraft({
+      session,
+      items: removeDraftTarget(
+        items,
+        cardEdit.target,
+        rules,
+        device,
+        protectPriceOnOptionSwitch,
+      ),
+    });
   const draftItems = draft.items;
   const setDraftItems = (next: ItemView[]) =>
     setDraft({ session, items: next });
@@ -118,7 +132,7 @@ export function WorkOrderRepairSummary({
       />
     </div>
   );
-  const displayedItems = cardEdit?.editing ? draftItems : items;
+  const displayedItems: SummaryItem[] = cardEdit?.editing ? draftItems : items;
   const removable = !locked;
 
   function removeProject(index: number) {
@@ -146,12 +160,11 @@ export function WorkOrderRepairSummary({
         itemIndex === index
           ? {
               ...item,
-              priceOptionId: "",
-              priceOptionName: "",
-              suggested: "",
-              requiredProductId: "",
-              requiredQuantity: 1,
-              requiredProductRemoved: true,
+              ...removePartPricePatch(
+                item,
+                matchRule(rules, device, item.project)?.rule.suggested ?? "",
+                protectPriceOnOptionSwitch,
+              ),
             }
           : item,
       );
@@ -196,6 +209,10 @@ export function WorkOrderRepairSummary({
         const product = products.find(
           (candidate) => candidate.id === item.requiredProductId,
         );
+        const historicalProductName =
+          item.requiredProductName?.trim() ||
+          item.requiredProduct?.name ||
+          product?.name;
         return (
           <div
             className="detail-repair-summary"
@@ -263,13 +280,15 @@ export function WorkOrderRepairSummary({
                 </span>
                 <div className="selection-summary-copy">
                   <strong>
-                    {item.priceOptionName ||
-                      product?.name ||
+                    {historicalProductName ||
+                      item.priceOptionName ||
                       it.afterSales.noPart}
                   </strong>
                   {product && (
                     <small>
-                      {item.priceOptionName && `${product.name} · `}
+                      {item.priceOptionName &&
+                        item.priceOptionName !== historicalProductName &&
+                        `${item.priceOptionName} · `}
                       {product.category} · {it.actualStock} {product.stock} ·{" "}
                       {it.reservedStock} {product.reserved} ·{" "}
                       {it.availableStock} {product.available} ·{" "}
@@ -283,6 +302,11 @@ export function WorkOrderRepairSummary({
                       </span>
                     </small>
                   )}
+                  {!product &&
+                    item.priceOptionName &&
+                    item.priceOptionName !== historicalProductName && (
+                      <small>{item.priceOptionName}</small>
+                    )}
                 </div>
                 {item.suggested && (
                   <div className="selection-summary-value">
@@ -304,11 +328,11 @@ export function WorkOrderRepairSummary({
                       </span>
                       <ChevronRight size={15} aria-hidden="true" />
                     </button>
-                    {removable && product && (
+                    {removable && historicalProductName && (
                       <button
                         type="button"
                         className="quick-service-remove"
-                        aria-label={`${it.remove} ${product.name}`}
+                        aria-label={`${it.remove} ${historicalProductName}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           removePart(index);
