@@ -57,6 +57,7 @@ foreach ($sourcePath in $SourcePaths) {
       elseif ((Split-Path -Leaf $sourcePath) -match '^update-launch-[0-9a-fA-F-]{36}\.jsonl$') { "update-launch.jsonl" }
       elseif ((Split-Path -Leaf $sourcePath) -match '^update-executor-[0-9a-fA-F-]{36}\.jsonl$') { "update-executor.jsonl" }
       elseif ((Split-Path -Leaf $sourcePath) -eq "legacy-updater-probe.jsonl") { "update-executor-probe.jsonl" }
+      elseif ((Split-Path -Leaf $sourcePath) -eq "legacy-updater-process-probe.jsonl") { "update-launch-process-probe.jsonl" }
       elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
       else { $null }
     }

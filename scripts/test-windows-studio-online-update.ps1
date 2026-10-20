@@ -144,6 +144,9 @@ if (Test-Path -LiteralPath $installRoot) {
 
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-online-update-" + [guid]::NewGuid().ToString("N"))
 $legacyUpdaterProbePath = Join-Path $testRoot "legacy-updater-probe.jsonl"
+$legacyUpdaterProcessProbePath = Join-Path $testRoot "legacy-updater-process-probe.jsonl"
+$previousNodeOptions = $env:NODE_OPTIONS
+$previousUpdateTraceFile = $env:NGT_READY_UPDATE_TRACE_FILE
 $downloadRoot = Join-Path $testRoot "downloads"
 $baselineRoot = Join-Path $testRoot "baseline"
 $dataRoot = if ($ManualInstaller) { Join-Path $installRoot "data-store" } else { Join-Path $testRoot "data-store" }
@@ -417,6 +420,12 @@ Write-NgtAcceptanceUpdateProbe "script-started"
   $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
 
   $installationAttempted = $true
+  $spawnTracePreload = [System.IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot "windows-studio-ready-update-spawn-trace.cjs")
+  ).Replace("\", "/")
+  $env:NGT_READY_UPDATE_TRACE_FILE = [System.IO.Path]::GetFullPath($legacyUpdaterProcessProbePath)
+  $spawnTraceArgument = '--require="' + $spawnTracePreload + '"'
+  $env:NODE_OPTIONS = (@($env:NODE_OPTIONS, $spawnTraceArgument) | Where-Object { $_ }) -join " "
   & (Join-Path $baselineRoot "scripts\install-windows-studio.ps1") `
     -DataRoot $dataRoot -InstallRoot $installRoot
   if ($LASTEXITCODE -ne 0) { throw "Baseline studio installation failed." }
@@ -616,6 +625,7 @@ Write-NgtAcceptanceUpdateProbe "script-started"
     if ($updateLaunchLog -and (Test-Path -LiteralPath $updateLaunchLog -PathType Leaf)) { $diagnosticSources += $updateLaunchLog }
     if ($updateExecutorLog -and (Test-Path -LiteralPath $updateExecutorLog -PathType Leaf)) { $diagnosticSources += $updateExecutorLog }
     if (Test-Path -LiteralPath $legacyUpdaterProbePath -PathType Leaf) { $diagnosticSources += $legacyUpdaterProbePath }
+    if (Test-Path -LiteralPath $legacyUpdaterProcessProbePath -PathType Leaf) { $diagnosticSources += $legacyUpdaterProcessProbePath }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }
     $diagnosticSources += @(
       (Join-Path $installRoot "install-preflight.log"),
@@ -684,6 +694,8 @@ Write-NgtAcceptanceUpdateProbe "script-started"
   } elseif (Test-Path -LiteralPath $testRoot) {
     Write-Warning "Retained the isolated test data at $testRoot because its services could not be verified stopped."
   }
+  $env:NODE_OPTIONS = $previousNodeOptions
+  $env:NGT_READY_UPDATE_TRACE_FILE = $previousUpdateTraceFile
   if (-not $cleanupSafe -and -not $acceptanceFailed) {
     throw "Windows update acceptance cleanup could not be verified."
   }
