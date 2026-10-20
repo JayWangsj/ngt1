@@ -170,11 +170,11 @@ function Normalize-LegacyBaselineDocumentationPaths([string]$Root) {
   }
 }
 
-function Invoke-BusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string]$Code) {
+function Invoke-BusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string]$Code, [string]$SnapshotPath) {
   $probePath = Join-Path $PSScriptRoot "windows-studio-business-probe.cjs"
   $node = Join-Path $ReleaseRoot "runtime\node.exe"
   $client = Join-Path $ReleaseRoot ".next\standalone\node_modules\@prisma\client"
-  & $node $probePath $Action (Join-Path $ReleaseRoot ".env") $client $Code
+  & $node $probePath $Action (Join-Path $ReleaseRoot ".env") $client $Code $SnapshotPath
   if ($LASTEXITCODE -ne 0) { throw "Isolated business database $Action probe failed for $ReleaseRoot." }
 }
 
@@ -345,7 +345,8 @@ try {
   $ordersResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($ordersResponse.StatusCode -ne 200) { throw "The previous studio orders page did not load." }
   $businessCode = "CI-UPDATE-" + [guid]::NewGuid().ToString("N")
-  Invoke-BusinessDataProbe -ReleaseRoot (Join-Path $installRoot ("releases\$oldTag")) -Action "seed" -Code $businessCode
+  $businessSnapshotPath = Join-Path $testRoot "business-data-snapshot.json"
+  Invoke-BusinessDataProbe -ReleaseRoot (Join-Path $installRoot ("releases\$oldTag")) -Action "seed" -Code $businessCode -SnapshotPath $businessSnapshotPath
 
   $taskRoot = Join-Path $installRoot ("releases\$oldTag")
   $taskConfig = Get-Content -LiteralPath (Join-Path $installRoot ".local\studio.json") -Raw | ConvertFrom-Json
@@ -421,7 +422,7 @@ try {
   if ([string]$newHealth.currentVersion -ne $targetVersion) { throw "The new release health version is incorrect." }
   $newOrders = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($newOrders.StatusCode -ne 200) { throw "The new release orders page did not load." }
-  Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode
+  Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
   if ($ManualInstaller) {
     $repairLog = Join-Path $testRoot "manual-repair-installer.log"
     $repair = Start-Process -FilePath $installerPath `
@@ -435,7 +436,7 @@ try {
         $repairStatus.installMode -ne "repair" -or (Test-Path -LiteralPath $maintenanceFile)) {
       throw "Manual repair did not finish with a clean verified status."
     }
-    Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode
+    Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
   }
   $node = Join-Path $activeReleaseRoot "runtime\node.exe"
   $prisma = Join-Path $activeReleaseRoot "node_modules\prisma\build\index.js"
