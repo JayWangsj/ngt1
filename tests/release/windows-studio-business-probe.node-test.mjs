@@ -49,6 +49,11 @@ function createDatabase() {
       name,
       {
         async create({ data }) {
+          if (name === "statusHistory" && Object.hasOwn(data, "at")) {
+            throw new Error(
+              "Unknown argument `at` in v2.0.18 StatusHistory.create",
+            );
+          }
           for (const fields of uniqueFields[name] ?? []) {
             if (
               tables[name].some((record) =>
@@ -142,6 +147,27 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
   const code = "CI-TEST-LEGACY-FIXTURE";
   let snapshot = await runProbe(db, "seed", code);
   assert.equal(Object.hasOwn(snapshot.data.device, "createdAt"), false);
+  assert.equal(tables.statusHistory.length, 4);
+  assert.ok(
+    tables.statusHistory.every((history) =>
+      Object.hasOwn(history, "createdAt"),
+    ),
+  );
+  assert.ok(
+    tables.statusHistory.every((history) => !Object.hasOwn(history, "at")),
+  );
+  assert.deepEqual(
+    tables.statusHistory.map(({ to, createdAt }) => [
+      to,
+      createdAt.toISOString(),
+    ]),
+    [
+      ["RECEIVED", "2026-01-09T10:00:00.000Z"],
+      ["READY", "2026-01-11T11:00:00.000Z"],
+      ["COMPLETED", "2026-01-11T12:00:00.000Z"],
+      ["REPAIRING", "2026-01-10T11:00:00.000Z"],
+    ],
+  );
   assert.equal(snapshot.data.rule.suggested, "100.00");
   assert.equal(snapshot.data.product.stockQuantity, 6);
   assert.equal(snapshot.data.rule.requiredQuantity, 2);

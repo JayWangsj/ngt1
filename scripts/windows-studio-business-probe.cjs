@@ -291,7 +291,10 @@ async function seedFixture(db, code) {
     statusRows.push(
       await db.statusHistory.create({
         data: {
-          ...entry,
+          orderId: entry.orderId,
+          from: entry.from,
+          to: entry.to,
+          note: entry.note,
           actorId: actor.id,
           actorName: actor.name,
           createdAt: entry.at,
