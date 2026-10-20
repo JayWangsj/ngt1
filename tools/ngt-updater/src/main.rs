@@ -209,12 +209,9 @@ fn run() -> Result<()> {
     fs::rename(&checksum_partial, &checksum_path)?;
     let expected_hash = parse_checksum(&checksum_text, &installer_name)?;
     if !digest_matches(&downloaded_hash, &expected_hash)
-        || installer_asset
-            .digest
-            .as_deref()
-            .is_some_and(|digest| {
-                !digest.eq_ignore_ascii_case(&format!("sha256:{}", expected_hash))
-            })
+        || installer_asset.digest.as_deref().is_some_and(|digest| {
+            !digest.eq_ignore_ascii_case(&format!("sha256:{}", expected_hash))
+        })
     {
         let _ = fs::remove_file(&installer_path);
         let _ = fs::remove_file(&checksum_path);
@@ -255,7 +252,10 @@ fn run() -> Result<()> {
             "progressKnown": false,
         }),
     )?;
-    append_log(&log_path, "Installed release and application health verified.")?;
+    append_log(
+        &log_path,
+        "Installed release and application health verified.",
+    )?;
     let _ = fs::remove_file(&installer_path);
     let _ = fs::remove_file(&checksum_path);
     Ok(())
@@ -336,11 +336,9 @@ fn validate_release(release: &Release, args: &Args) -> Result<()> {
             || !fields
                 .get("sha")
                 .is_some_and(|sha| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()))
-            || !fields
-                .get("identity")
-                .is_some_and(|identity| {
-                    identity.len() == 64 && identity.bytes().all(|b| b.is_ascii_hexdigit())
-                })
+            || !fields.get("identity").is_some_and(|identity| {
+                identity.len() == 64 && identity.bytes().all(|b| b.is_ascii_hexdigit())
+            })
         {
             return Err(UpdateError::new(
                 "checking",
@@ -402,7 +400,10 @@ fn get_release(client: &Client, args: &Args, token: Option<&str>) -> Result<Rele
     if !response.status().is_success() {
         return Err(UpdateError::new(
             "checking",
-            format!("GitHub Release lookup failed with HTTP {}.", response.status()),
+            format!(
+                "GitHub Release lookup failed with HTTP {}.",
+                response.status()
+            ),
         ));
     }
     response
@@ -459,7 +460,10 @@ fn download_asset(
             format!("Installer download failed with HTTP {}.", response.status()),
         ));
     }
-    if response.content_length().is_some_and(|size| size != asset.size) {
+    if response
+        .content_length()
+        .is_some_and(|size| size != asset.size)
+    {
         return Err(UpdateError::new(
             "downloading",
             "The installer response size does not match the Release asset size.",
@@ -555,7 +559,10 @@ fn download_small_asset(
     if !response.status().is_success() {
         return Err(UpdateError::new(
             "verifying",
-            format!("Release checksum download failed with HTTP {}.", response.status()),
+            format!(
+                "Release checksum download failed with HTTP {}.",
+                response.status()
+            ),
         ));
     }
     let bytes = response
@@ -636,12 +643,11 @@ fn parse_checksum(contents: &str, expected_filename: &str) -> Result<String> {
 
 fn check_install_space(args: &Args, context: &InstallContext, installer_size: u64) -> Result<()> {
     let release_size = directory_size(&context.active_release)?;
-    let data_size = directory_size(&context.data_root.join("data"))?
-        .saturating_add(
-            fs::metadata(context.data_root.join("local-secrets.json"))
-                .map(|metadata| metadata.len())
-                .unwrap_or(0),
-        );
+    let data_size = directory_size(&context.data_root.join("data"))?.saturating_add(
+        fs::metadata(context.data_root.join("local-secrets.json"))
+            .map(|metadata| metadata.len())
+            .unwrap_or(0),
+    );
     let temp_dir = env::temp_dir();
     let mut required = installer_size
         .saturating_add(release_size)
@@ -680,8 +686,8 @@ fn require_space(directory: &Path, required: u64) -> Result<()> {
 }
 
 fn directory_size(directory: &Path) -> Result<u64> {
-    let entries = fs::read_dir(directory)
-        .map_err(|error| UpdateError::new("checking", error.to_string()))?;
+    let entries =
+        fs::read_dir(directory).map_err(|error| UpdateError::new("checking", error.to_string()))?;
     let mut total = 0_u64;
     for entry in entries {
         let entry = entry.map_err(|error| UpdateError::new("checking", error.to_string()))?;
@@ -786,9 +792,7 @@ fn verify_installed_release(args: &Args, client: &Client, installer_ok: bool) ->
         {
             if response.status().is_success() {
                 if let Ok(body) = response.json::<Value>() {
-                    if body["status"] == "ok"
-                        && body["currentVersion"] == args.target_version
-                    {
+                    if body["status"] == "ok" && body["currentVersion"] == args.target_version {
                         return Ok(());
                     }
                 }
@@ -877,7 +881,11 @@ fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
             state["recoveryStatus"] = json!("not-started");
         }
         if state["recoveryStatus"] == "failed"
-            || args.install_root.join(".local").join("update-maintenance.json").exists()
+            || args
+                .install_root
+                .join(".local")
+                .join("update-maintenance.json")
+                .exists()
         {
             state["manualReview"] = json!(true);
         }
@@ -897,7 +905,9 @@ fn remove_owned_partial(install_root: &Path, update_id: &str) -> Result<()> {
         if path
             .file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with(update_id))
-            && path.extension().is_some_and(|extension| extension == "partial")
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "partial")
         {
             fs::remove_file(path)?;
         }
@@ -911,7 +921,10 @@ fn parse_args() -> Result<Args> {
     while let Some(key) = arguments.next() {
         let key = key.to_string_lossy().into_owned();
         if !key.starts_with("--") {
-            return Err(UpdateError::new("starting", "Updater arguments are invalid."));
+            return Err(UpdateError::new(
+                "starting",
+                "Updater arguments are invalid.",
+            ));
         }
         let value = arguments
             .next()
@@ -950,7 +963,10 @@ fn parse_args() -> Result<Args> {
         })
         .ok_or_else(|| UpdateError::new("starting", "The Release repository is invalid."))?;
     if !values.is_empty() {
-        return Err(UpdateError::new("starting", "Updater arguments contain unknown values."));
+        return Err(UpdateError::new(
+            "starting",
+            "Updater arguments contain unknown values.",
+        ));
     }
     Ok(Args {
         install_root,
@@ -968,13 +984,12 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
             format!("Unable to read {}: {}", path.display(), error),
         )
     })?;
-    serde_json::from_str(text.trim_start_matches('\u{feff}'))
-        .map_err(|error| {
-            UpdateError::new(
-                "starting",
-                format!("Unable to parse {}: {}", path.display(), error),
-            )
-        })
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|error| {
+        UpdateError::new(
+            "starting",
+            format!("Unable to parse {}: {}", path.display(), error),
+        )
+    })
 }
 
 fn write_json_atomic(path: &Path, value: &Value) -> Result<()> {
@@ -1011,7 +1026,11 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
     let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let result = unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -1020,15 +1039,17 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
         )
     };
     if result == 0 {
-        return Err(UpdateError::new("running", "Unable to atomically save update state."));
+        return Err(UpdateError::new(
+            "running",
+            "Unable to atomically save update state.",
+        ));
     }
     Ok(())
 }
 
 #[cfg(not(windows))]
 fn replace_file(source: &Path, destination: &Path) -> Result<()> {
-    fs::rename(source, destination)
-        .map_err(|error| UpdateError::new("running", error.to_string()))
+    fs::rename(source, destination).map_err(|error| UpdateError::new("running", error.to_string()))
 }
 
 fn with_update_mutex<T>(install_root: &Path, action: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -1051,14 +1072,19 @@ impl WindowsMutex {
             CreateMutexW, ReleaseMutex, WaitForSingleObject, INFINITE,
         };
         let path = canonical(install_root)?;
-        let digest = hex_digest(&Sha256::digest(path.to_string_lossy().to_lowercase().as_bytes()));
+        let digest = hex_digest(&Sha256::digest(
+            path.to_string_lossy().to_lowercase().as_bytes(),
+        ));
         let name: Vec<u16> = format!("Global\\NGTStudioUpdate-{}", digest)
             .encode_utf16()
             .chain(Some(0))
             .collect();
         let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
         if handle.is_null() {
-            return Err(UpdateError::new("running", "Unable to create the update mutex."));
+            return Err(UpdateError::new(
+                "running",
+                "Unable to create the update mutex.",
+            ));
         }
         let result = unsafe { WaitForSingleObject(handle, INFINITE) };
         if result != WAIT_OBJECT_0 && result != WAIT_ABANDONED {
@@ -1066,7 +1092,10 @@ impl WindowsMutex {
                 ReleaseMutex(handle);
                 windows_sys::Win32::Foundation::CloseHandle(handle);
             }
-            return Err(UpdateError::new("running", "Unable to acquire the update mutex."));
+            return Err(UpdateError::new(
+                "running",
+                "Unable to acquire the update mutex.",
+            ));
         }
         Ok(Self(handle))
     }
@@ -1098,13 +1127,12 @@ fn update_log_path(install_root: &Path, update_id: &str) -> PathBuf {
 }
 
 fn canonical(path: &Path) -> Result<PathBuf> {
-    fs::canonicalize(path)
-        .map_err(|error| {
-            UpdateError::new(
-                "checking",
-                format!("Unable to resolve installation path: {}", error),
-            )
-        })
+    fs::canonicalize(path).map_err(|error| {
+        UpdateError::new(
+            "checking",
+            format!("Unable to resolve installation path: {}", error),
+        )
+    })
 }
 
 fn now() -> String {
@@ -1135,13 +1163,10 @@ fn redact(message: &str) -> String {
 
 fn is_uuid(value: &str) -> bool {
     value.len() == 36
-        && value
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| match index {
-                8 | 13 | 18 | 23 => byte == b'-',
-                _ => byte.is_ascii_hexdigit(),
-            })
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
 }
 
 #[cfg(test)]

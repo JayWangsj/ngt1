@@ -385,7 +385,11 @@ function inspectUpdaterProcess(
   if (process.platform !== "win32") return Promise.resolve(undefined);
   if (!options.updaterPath) return Promise.resolve(false);
   const targetPath = path.resolve(options.updaterPath).toLowerCase();
-  const cacheKey = [targetPath, options.executorPid || "scan", options.updateId || "legacy"].join(":");
+  const cacheKey = [
+    targetPath,
+    options.executorPid || "scan",
+    options.updateId || "legacy",
+  ].join(":");
   const cached = processInspectionCache.get(cacheKey);
   if (cached && Date.now() - cached.checkedAt < 3_000)
     return Promise.resolve(cached.alive);
@@ -1111,23 +1115,22 @@ async function performStudioUpdateCheck(
   const useGitHubCli =
     !acceptanceReleaseApi &&
     (context.repository !== repository ||
-      Boolean(requestedTag && (process.env.GH_TOKEN || process.env.GITHUB_TOKEN)));
+      Boolean(
+        requestedTag && (process.env.GH_TOKEN || process.env.GITHUB_TOKEN),
+      ));
   if (!useGitHubCli) {
     const releaseApi = acceptanceReleaseApi || "https://api.github.com";
     const releaseUrl = requestedTag
       ? releaseApi + "/repos/" + repository + "/releases/tags/" + requestedTag
       : releaseApi + "/repos/" + repository + "/releases/latest";
-    const response = await fetchImpl(
-      releaseUrl,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "NGT-Studio-Updater",
-        },
-        signal: AbortSignal.timeout(30_000),
+    const response = await fetchImpl(releaseUrl, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "NGT-Studio-Updater",
       },
-    );
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!response.ok)
       throw new Error(
         `Unable to read the public GitHub release: HTTP ${response.status}.`,
@@ -1196,7 +1199,8 @@ async function performStudioUpdateCheck(
     (asset) => asset.name === `ngt-studio-runtime-${latest.tagName}.zip.sha256`,
   );
   const installer = latest.assets?.find(
-    (asset) => asset.name === "ngt-studio-windows-setup-" + latest.tagName + ".exe",
+    (asset) =>
+      asset.name === "ngt-studio-windows-setup-" + latest.tagName + ".exe",
   );
   const installerChecksum = latest.assets?.find(
     (asset) =>
@@ -1206,11 +1210,11 @@ async function performStudioUpdateCheck(
   const isNewer = compareVersions(latestVersion, context.currentVersion) > 0;
   const installable = Boolean(
     studioArchive &&
-      studioChecksum &&
-      runtimeArchive &&
-      runtimeChecksum &&
-      installer &&
-      installerChecksum,
+    studioChecksum &&
+    runtimeArchive &&
+    runtimeChecksum &&
+    installer &&
+    installerChecksum,
   );
   return {
     installed: true,
@@ -1241,7 +1245,10 @@ export function checkStudioUpdate(
   } = {},
 ): Promise<StudioUpdateInfo> {
   const root = resolveStudioRoot(options.root);
-  const key = [path.resolve(root).toLowerCase(), options.targetVersion || "latest"].join(":");
+  const key = [
+    path.resolve(root).toLowerCase(),
+    options.targetVersion || "latest",
+  ].join(":");
   const pending = updateChecksInFlight.get(key);
   if (pending) return pending;
   const request = performStudioUpdateCheck({ ...options, root }).finally(() => {
@@ -1640,10 +1647,13 @@ export async function startStudioUpdate(
         (async () => {
           const deadline = Date.now() + 15_000;
           while (Date.now() < deadline) {
-            const saved = await readJsonState<StudioUpdateStatus>(taskStatusFile);
-            if (saved.unreadable)
-              throw new Error("update_status_unreadable");
-            if (saved.value?.updateId === updateId && saved.value.status === "failed")
+            const saved =
+              await readJsonState<StudioUpdateStatus>(taskStatusFile);
+            if (saved.unreadable) throw new Error("update_status_unreadable");
+            if (
+              saved.value?.updateId === updateId &&
+              saved.value.status === "failed"
+            )
               throw new Error(saved.value.message || "studio_updater_failed");
             if (
               saved.value?.updateId === updateId &&
@@ -1652,10 +1662,7 @@ export async function startStudioUpdate(
               samePath(saved.value.executorPath, updaterPath)
             )
               return saved.value;
-            if (
-              child.exitCode !== null &&
-              child.exitCode !== undefined
-            )
+            if (child.exitCode !== null && child.exitCode !== undefined)
               throw new Error("updater_exited_before_handshake");
             if (child.signalCode !== null && child.signalCode !== undefined)
               throw new Error("updater_exited_before_handshake");
@@ -1665,7 +1672,9 @@ export async function startStudioUpdate(
         })(),
         new Promise<never>((_resolve, reject) => {
           child.once("error", (error) =>
-            reject(new Error("Unable to start the Rust updater: " + error.message)),
+            reject(
+              new Error("Unable to start the Rust updater: " + error.message),
+            ),
           );
         }),
       ]);

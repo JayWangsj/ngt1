@@ -392,7 +392,10 @@ describe("Windows persistent startup", () => {
       "scripts/test-windows-studio-online-update.ps1",
       "utf8",
     );
-    const innoInstaller = await readFile("installer/windows-studio.iss", "utf8");
+    const innoInstaller = await readFile(
+      "installer/windows-studio.iss",
+      "utf8",
+    );
     const ciWorkflow = await readFile(".github/workflows/ci.yml", "utf8");
     expect(backup).toContain('"SHA256SUMS.txt"');
     expect(backup).toContain("Stop-NgtStudioProcesses");
@@ -426,7 +429,9 @@ describe("Windows persistent startup", () => {
     expect(updater).toContain("update_log_path");
     expect(onlineUpdateTest).toContain("Get-NgtUpdaterVisibleWindows");
     expect(onlineUpdateTest).toContain("Get-NgtVisibleWindowProcessIds");
-    expect(onlineUpdateTest).toContain("silent online update displayed a visible installer");
+    expect(onlineUpdateTest).toContain(
+      "silent online update displayed a visible installer",
+    );
     expect(onlineUpdateTest).toContain("100 MiB design target");
     expect(onlineUpdateTest).toContain("Rust updater peak working set");
     expect(onlineUpdateTest).toContain("NGT_TEST_RELEASE_API_URL");

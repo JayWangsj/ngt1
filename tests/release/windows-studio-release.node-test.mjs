@@ -735,16 +735,16 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(acceptanceAction, /windows-studio-release\.mjs download-draft/);
   assert.match(acceptanceAction, /windows-studio-release\.mjs verify-artifact/);
   assert.match(acceptanceAction, /actions\/download-artifact@v4/);
-  assert.match(acceptanceAction, /ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
+  assert.match(
+    acceptanceAction,
+    /ngt-updater-acceptance-\$\{\{ github\.sha \}\}/,
+  );
   assert.match(ready, /workflow_dispatch:/);
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
-  assert.match(
-    onlineAcceptanceWorkflow,
-    /build-windows-studio-candidate/,
-  );
+  assert.match(onlineAcceptanceWorkflow, /build-windows-studio-candidate/);
   assert.match(
     onlineAcceptanceWorkflow,
     /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance online-update/,
@@ -768,7 +768,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Get-NgtUpdaterVisibleWindows/);
   assert.match(online, /silent online update displayed a visible installer/);
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
-  assert.match(online, /Acceptance did not observe both the independent NGT outage state and automatic reconnection/);
+  assert.match(
+    online,
+    /Acceptance did not observe both the independent NGT outage state and automatic reconnection/,
+  );
   assert.match(online, /Rust updater peak working set/);
   assert.doesNotMatch(packageBuilder, /update-windows-studio\.ps1/);
   assert.doesNotMatch(releaseVerifier, /download-public-release-asset\.ps1/);

@@ -207,7 +207,10 @@ describe("studio update", () => {
               { name: "ngt-studio-windows-v1.11.58.zip.sha256" },
               { name: "ngt-studio-runtime-v1.11.58.zip" },
               { name: "ngt-studio-runtime-v1.11.58.zip.sha256" },
-              { name: "ngt-studio-windows-setup-v1.11.58.exe", size: 96_000_000 },
+              {
+                name: "ngt-studio-windows-setup-v1.11.58.exe",
+                size: 96_000_000,
+              },
               { name: "ngt-studio-windows-setup-v1.11.58.exe.sha256" },
             ],
           }),
@@ -793,11 +796,16 @@ describe("studio update", () => {
         root,
         inspect: async () => false,
         launch: (executable, args) => {
-          setTimeout(() => child.emit("error", new Error("simulated spawn failure")), 0);
+          setTimeout(
+            () => child.emit("error", new Error("simulated spawn failure")),
+            0,
+          );
           return child.process;
         },
       }),
-    ).rejects.toThrow("Unable to start the Rust updater: simulated spawn failure");
+    ).rejects.toThrow(
+      "Unable to start the Rust updater: simulated spawn failure",
+    );
     await expect
       .poll(async () => {
         const status = JSON.parse(
