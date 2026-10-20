@@ -807,7 +807,12 @@ fn verify_installed_release(args: &Args, client: &Client, installer_ok: bool) ->
     ))
 }
 
-fn write_progress(args: &Args, status: &str, stage: &str, fields: Value) -> Result<()> {
+fn write_progress(
+    args: &Args,
+    status: &'static str,
+    stage: &'static str,
+    fields: Value,
+) -> Result<()> {
     with_update_mutex(&args.install_root, || {
         let lock_path = args.install_root.join("update.lock");
         let mut lock: Value = read_json(&lock_path)?;
@@ -866,7 +871,8 @@ fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
             .as_str()
             .or_else(|| state["stage"].as_str())
             .filter(|stage| !stage.is_empty())
-            .unwrap_or(error.stage);
+            .unwrap_or(error.stage)
+            .to_owned();
         state["status"] = json!("failed");
         state["stage"] = json!(installer_stage);
         state["failedStage"] = json!(installer_stage);
@@ -1066,7 +1072,6 @@ struct WindowsMutex(windows_sys::Win32::Foundation::HANDLE);
 #[cfg(windows)]
 impl WindowsMutex {
     fn acquire(install_root: &Path) -> Result<Self> {
-        use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{
             CreateMutexW, ReleaseMutex, WaitForSingleObject, INFINITE,
