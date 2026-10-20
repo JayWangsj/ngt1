@@ -37,26 +37,38 @@ function New-NgtInstallFixture([string]$Root) {
 
 try {
   $executorId = [guid]::NewGuid().ToString()
-  $executorScript = Join-Path $testRoot "scripts\update-windows-studio.ps1"
+  $executorScript = Join-Path $testRoot "releases\v2.0.11\scripts\update-windows-studio.ps1"
+  $legacyRelease = Split-Path (Split-Path $executorScript -Parent) -Parent
   $staleExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
     updateId = $executorId
-    executorScriptPath = $executorScript
-  }) $testRoot
+  }) $legacyRelease
   if ($staleExecutor -ne $false) { throw "A queued task without an executor was not recognized as inactive." }
   $script:InstallerTestProcesses = @([pscustomobject]@{
     Name = "powershell.exe"
     ProcessId = 45678
+    ExecutablePath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
     CommandLine = "powershell.exe -File `"$executorScript`" -UpdateId $executorId"
   })
   $activeExecutor = & $script:ProductionGetNgtUpdateExecutorState `
     ([pscustomobject]@{ executorPid = 45678; updateId = $executorId; executorScriptPath = $executorScript }) `
-    ([pscustomobject]@{ updateId = $executorId }) $testRoot
-  if ($activeExecutor -ne $true) { throw "A matching online update executor was not recognized as active." }
+    ([pscustomobject]@{ updateId = $executorId }) $legacyRelease
+  if ($activeExecutor -ne $true) { throw "A matching legacy online update executor was not recognized as active." }
+  $updaterPath = Join-Path $legacyRelease "tools\NGTUpdater.exe"
+  $script:InstallerTestProcesses = @([pscustomobject]@{
+    Name = "NGTUpdater.exe"
+    ProcessId = 45679
+    ExecutablePath = $updaterPath
+    CommandLine = "`"$updaterPath`" --update-id $executorId"
+  })
+  $activeRustExecutor = & $script:ProductionGetNgtUpdateExecutorState `
+    ([pscustomobject]@{ executorPid = 45679; updateId = $executorId; executorPath = $updaterPath }) `
+    ([pscustomobject]@{ updateId = $executorId; executorPath = $updaterPath }) $legacyRelease
+  if ($activeRustExecutor -ne $true) { throw "A matching Rust online update executor was not recognized as active." }
   $script:InstallerTestProcessQueryFails = $true
   $unverifiedExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
     updateId = $executorId
-    executorScriptPath = $executorScript
-  }) $testRoot
+    executorPath = $updaterPath
+  }) $legacyRelease
   if ($null -ne $unverifiedExecutor) { throw "A failed process query was not kept in the unverified state." }
   $script:InstallerTestProcessQueryFails = $false
   $script:InstallerTestProcesses = @()
@@ -102,10 +114,13 @@ try {
   $legacyLockPlan = Start-NgtStudioManualInstall -InstallRoot $legacyLock.installRoot -TargetVersion "2.0.15"
   $legacyLockReservation = Get-NgtManualInstallReservation $legacyLock.installRoot
   $legacyLockHistory = Get-NgtInstallJson ([string](Get-NgtInstallJson (Join-Path $legacyLock.installRoot ".local\update-maintenance.json")).historyPath)
+  $archivedLegacyTimestamp = ([System.DateTimeOffset]$legacyLockHistory.previousLock.createdAt).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
   if ($legacyLockPlan.mode -ne "upgrade" -or
       $legacyLockReservation.lock.operation -ne "manual-install" -or
-      $legacyLockHistory.previousLock.createdAt -ne $legacyLockTimestamp) {
-    throw "A safe legacy timestamp lock was not archived and replaced by the manual installer."
+      $archivedLegacyTimestamp -ne $legacyLockTimestamp) {
+    throw ("A safe legacy timestamp lock was not archived and replaced by the manual installer. " +
+      "mode=$($legacyLockPlan.mode); operation=$($legacyLockReservation.lock.operation); " +
+      "archived=$($legacyLockHistory.previousLock.createdAt); expected=$legacyLockTimestamp")
   }
 
   $unsafeLegacyLock = New-NgtInstallFixture (Join-Path $testRoot "unsafe-legacy-timestamp-lock")

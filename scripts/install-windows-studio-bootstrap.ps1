@@ -3,6 +3,7 @@ param(
   [string]$DataRoot,
   [Parameter(Mandatory = $true)]
   [string]$InstallRoot,
+  [string]$UpdateId,
   [Parameter(Mandatory = $true)]
   [string]$LogPath
 )
@@ -12,7 +13,8 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Nu
 Start-Transcript -LiteralPath $LogPath -Force
 try {
   & (Join-Path $PSScriptRoot "install-windows-studio.ps1") `
-    -DataRoot $DataRoot -InstallRoot $InstallRoot
+    -DataRoot $DataRoot -InstallRoot $InstallRoot -UpdateId $UpdateId `
+    -OnlineUpdate:([bool]$UpdateId)
 } catch {
   Write-Error $_
   exit 1

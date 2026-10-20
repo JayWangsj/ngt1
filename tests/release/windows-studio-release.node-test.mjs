@@ -649,6 +649,12 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const ready = (
     await readText(".github/workflows/windows-studio-release-ready.yml", "utf8")
   ).replace(/\r\n/g, "\n");
+  const onlineAcceptanceWorkflow = (
+    await readText(
+      ".github/workflows/windows-studio-online-update-acceptance.yml",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
   const acceptanceAction = (
     await readText(
       ".github/actions/windows-studio-acceptance/action.yml",
@@ -656,7 +662,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     )
   ).replace(/\r\n/g, "\n");
   const updater = (
-    await readText("scripts/update-windows-studio.ps1", "utf8")
+    await readText("tools/ngt-updater/src/main.rs", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const packageBuilder = (
+    await readText("scripts/build-windows-studio-package.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const releaseVerifier = (
+    await readText("scripts/verify-windows-studio-release.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
@@ -722,15 +734,44 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(release, /\.\/\.github\/actions\/windows-studio-acceptance/);
   assert.match(acceptanceAction, /windows-studio-release\.mjs download-draft/);
   assert.match(acceptanceAction, /windows-studio-release\.mjs verify-artifact/);
+  assert.match(acceptanceAction, /actions\/download-artifact@v4/);
+  assert.match(acceptanceAction, /ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
   assert.match(ready, /workflow_dispatch:/);
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
-  assert.doesNotMatch(release, /actions\/(?:upload|download)-artifact@v4/);
+  assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /build-windows-studio-candidate/,
+  );
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance online-update/,
+  );
+  assert.match(release, /actions\/upload-artifact@v4/);
+  assert.match(release, /name: ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(ci, /actions\/upload-artifact@v4/);
   assert.doesNotMatch(release, /prepare-candidate:/);
-  assert.match(updater, /\$releaseArguments = @\("release", "view"\)/);
-  assert.match(updater, /if \(\$ExpectedTargetVersion\)/);
+  assert.match(updater, /fn get_release\(/);
+  assert.match(updater, /fn github_api_base\(/);
+  assert.match(updater, /fn download_asset\(/);
+  assert.match(updater, /fn run_installer\(/);
+  assert.match(updater, /\/VERYSILENT/);
+  assert.match(updater, /\/SUPPRESSMSGBOXES/);
+  assert.match(updater, /\/NORESTART/);
+  assert.match(updater, /fn hide_console\(/);
+  assert.match(updater, /0x08000000/);
+  assert.match(updater, /check_install_space/);
+  assert.match(updater, /fn finish_failed\(/);
+  assert.match(updater, /"actualVersion"/);
+  assert.match(online, /Get-NgtUpdaterVisibleWindows/);
+  assert.match(online, /silent online update displayed a visible installer/);
+  assert.match(online, /NGT_TEST_RELEASE_API_URL/);
+  assert.match(online, /Acceptance did not observe both the independent NGT outage state and automatic reconnection/);
+  assert.match(online, /Rust updater peak working set/);
+  assert.doesNotMatch(packageBuilder, /update-windows-studio\.ps1/);
+  assert.doesNotMatch(releaseVerifier, /download-public-release-asset\.ps1/);
   assert.match(
     online,
     /node scripts\/windows-studio-release\.mjs find-update-baseline \$TargetTag/,

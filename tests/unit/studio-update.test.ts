@@ -12,7 +12,7 @@ import {
   getStudioUpdateLog,
   getStudioUpdateStatus,
   startGitHubLogin,
-  startStudioUpdate,
+  startStudioUpdate as startStudioUpdateWithOptions,
 } from "../../src/lib/studio-update";
 
 const temporaryRoots: string[] = [];
@@ -45,10 +45,65 @@ function updateProcess() {
   return {
     process: {
       pid: 4242,
+      exitCode: null,
+      signalCode: null,
       unref() {},
+      on: events.on.bind(events),
       once: events.once.bind(events),
     } as unknown as ChildProcess,
     emit: events.emit.bind(events),
+  };
+}
+
+function updateRelease(tag = "v1.11.58") {
+  return {
+    tag_name: tag,
+    assets: [
+      { name: `ngt-studio-windows-${tag}.zip`, size: 240_000_000 },
+      { name: `ngt-studio-windows-${tag}.zip.sha256`, size: 90 },
+      { name: `ngt-studio-runtime-${tag}.zip`, size: 150_000_000 },
+      { name: `ngt-studio-runtime-${tag}.zip.sha256`, size: 90 },
+      { name: `ngt-studio-windows-setup-${tag}.exe`, size: 96_000_000 },
+      { name: `ngt-studio-windows-setup-${tag}.exe.sha256`, size: 92 },
+    ],
+  };
+}
+
+function startStudioUpdate(
+  options: Parameters<typeof startStudioUpdateWithOptions>[0] = {},
+) {
+  return startStudioUpdateWithOptions({
+    ...options,
+    fetchImpl:
+      options.fetchImpl ||
+      (async () =>
+        new Response(JSON.stringify(updateRelease()), { status: 200 })),
+  });
+}
+
+function launchUpdater(
+  root: string,
+  child: ReturnType<typeof updateProcess>,
+  launches?: { executable: string; args: string[] }[],
+) {
+  return (executable: string, args: string[]) => {
+    launches?.push({ executable, args });
+    const updateId = args[args.indexOf("--update-id") + 1];
+    void writeFile(
+      path.join(root, "installed", "update-status.json"),
+      JSON.stringify({
+        status: "checking",
+        stage: "checking",
+        operation: "online-update",
+        updateId,
+        targetVersion: args[args.indexOf("--target-version") + 1],
+        previousVersion: "1.11.57",
+        executorConfirmed: true,
+        executorPid: child.process.pid,
+        executorPath: executable,
+      }),
+    );
+    return child.process;
   };
 }
 
@@ -60,6 +115,7 @@ async function studioRoot(repository = "JayWangsj/ngt1") {
     mkdir(path.join(root, "runtime"), { recursive: true }),
     mkdir(path.join(root, ".local"), { recursive: true }),
     mkdir(path.join(root, "scripts"), { recursive: true }),
+    mkdir(path.join(root, "tools"), { recursive: true }),
     mkdir(installRoot, { recursive: true }),
   ]);
   await mkdir(path.join(installRoot, ".local"), { recursive: true });
@@ -69,7 +125,7 @@ async function studioRoot(repository = "JayWangsj/ngt1") {
       JSON.stringify({ version: "1.11.57" }),
     ),
     writeFile(path.join(root, "runtime", "gh.exe"), "test"),
-    writeFile(path.join(root, "scripts", "update-windows-studio.ps1"), ""),
+    writeFile(path.join(root, "tools", "NGTUpdater.exe"), "test binary"),
     writeFile(
       path.join(root, ".local", "studio.json"),
       JSON.stringify({
@@ -151,6 +207,8 @@ describe("studio update", () => {
               { name: "ngt-studio-windows-v1.11.58.zip.sha256" },
               { name: "ngt-studio-runtime-v1.11.58.zip" },
               { name: "ngt-studio-runtime-v1.11.58.zip.sha256" },
+              { name: "ngt-studio-windows-setup-v1.11.58.exe", size: 96_000_000 },
+              { name: "ngt-studio-windows-setup-v1.11.58.exe.sha256" },
             ],
           }),
           { status: 200 },
@@ -214,6 +272,11 @@ describe("studio update", () => {
                     { name: "ngt-studio-windows-v1.11.58.zip.sha256" },
                     { name: "ngt-studio-runtime-v1.11.58.zip" },
                     { name: "ngt-studio-runtime-v1.11.58.zip.sha256" },
+                    {
+                      name: "ngt-studio-windows-setup-v1.11.58.exe",
+                      size: 96_000_000,
+                    },
+                    { name: "ngt-studio-windows-setup-v1.11.58.exe.sha256" },
                   ],
                 })
               : "",
@@ -235,7 +298,7 @@ describe("studio update", () => {
       latestVersion: "1.11.58",
       releaseName: "NGT 1.11.58",
       releaseNotes: "Correzioni e miglioramenti",
-      downloadSize: 240_000_000,
+      downloadSize: 96_000_000,
     });
     expect(calls[1]).toContain("tagName,name,body,url,publishedAt,assets");
   });
@@ -335,9 +398,9 @@ describe("studio update", () => {
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: () => child.process,
+        launch: launchUpdater(root, child),
       }),
-    ).resolves.toMatchObject({ status: "starting" });
+    ).resolves.toMatchObject({ status: "checking" });
     const nextLock = JSON.parse(await readFile(lockFile, "utf8")) as {
       updateId: string;
     };
@@ -425,11 +488,7 @@ describe("studio update", () => {
         JSON.stringify({
           updateId,
           executorPid: 4242,
-          executorScriptPath: path.join(
-            root,
-            "scripts",
-            "update-windows-studio.ps1",
-          ),
+          executorPath: path.join(root, "tools", "NGTUpdater.exe"),
           createdAt: "2020-01-01T00:00:00.000Z",
         }),
       ),
@@ -595,22 +654,11 @@ describe("studio update", () => {
       }),
     );
 
-    let inspectionCount = 0;
-    let releaseFirstInspection!: () => void;
-    const firstInspection = new Promise<void>((resolve) => {
-      releaseFirstInspection = resolve;
-    });
     let launchCount = 0;
-    const inspect = async () => {
-      inspectionCount += 1;
-      if (inspectionCount <= 2) return false;
-      if (inspectionCount === 3) await firstInspection;
-      return false;
-    };
-    const launch = () => {
+    const inspect = async () => false;
+    const launch = (executable: string, args: string[]) => {
       launchCount += 1;
-      if (launchCount === 1) releaseFirstInspection();
-      return updateProcess().process;
+      return launchUpdater(root, updateProcess())(executable, args);
     };
 
     const results = await Promise.allSettled([
@@ -634,17 +682,17 @@ describe("studio update", () => {
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: () => {
+        launch: (executable, args) => {
           launchCount += 1;
-          return updateProcess().process;
+          return launchUpdater(root, updateProcess())(executable, args);
         },
       }),
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: () => {
+        launch: (executable, args) => {
           launchCount += 1;
-          return updateProcess().process;
+          return launchUpdater(root, updateProcess())(executable, args);
         },
       }),
     ]);
@@ -661,7 +709,7 @@ describe("studio update", () => {
   it("does not let a late old executor callback overwrite a newer task", async () => {
     const { root, installRoot } = await studioRoot();
     const child = updateProcess();
-    await startStudioUpdate({ root, launch: () => child.process });
+    await startStudioUpdate({ root, launch: launchUpdater(root, child) });
     const nextId = "ce931cdf-1b06-40a2-a356-14c17e08dfb2";
     await Promise.all([
       writeFile(
@@ -740,26 +788,24 @@ describe("studio update", () => {
   it("records an asynchronous process start failure as a terminal task result", async () => {
     const { root, installRoot } = await studioRoot();
     const child = updateProcess();
-    await startStudioUpdate({ root, launch: () => child.process });
-    child.emit("error", new Error("simulated spawn failure"));
-
-    await expect
-      .poll(
-        async () => {
-          const status = JSON.parse(
-            await readFile(
-              path.join(installRoot, "update-status.json"),
-              "utf8",
-            ),
-          ) as { status: string; message?: string };
-          return status;
+    await expect(
+      startStudioUpdate({
+        root,
+        inspect: async () => false,
+        launch: (executable, args) => {
+          setTimeout(() => child.emit("error", new Error("simulated spawn failure")), 0);
+          return child.process;
         },
-        { timeout: 5_000 },
-      )
-      .toMatchObject({
-        status: "failed",
-        message: "Unable to start the update executor: simulated spawn failure",
-      });
+      }),
+    ).rejects.toThrow("Unable to start the Rust updater: simulated spawn failure");
+    await expect
+      .poll(async () => {
+        const status = JSON.parse(
+          await readFile(path.join(installRoot, "update-status.json"), "utf8"),
+        ) as { status: string };
+        return status.status;
+      })
+      .toBe("failed");
     await expect(
       readFile(path.join(installRoot, "update.lock"), "utf8"),
     ).rejects.toMatchObject({
@@ -843,21 +889,16 @@ describe("studio update", () => {
     const updateChild = updateProcess();
     await startStudioUpdate({
       root,
-      launch: (executable, args) => {
-        updateLaunches.push({ executable, args });
-        return updateChild.process;
-      },
+      launch: launchUpdater(root, updateChild, updateLaunches),
     });
-    expect(updateLaunches[0].executable).toBe("powershell.exe");
-    expect(
-      updateLaunches[0].args.some((argument) =>
-        argument.endsWith("update-windows-studio.ps1"),
-      ),
-    ).toBe(true);
+    expect(updateLaunches[0].executable).toBe(
+      path.join(root, "tools", "NGTUpdater.exe"),
+    );
+    expect(updateLaunches[0].args).toContain("--update-id");
     const status = JSON.parse(
       await readFile(path.join(installRoot, "update-status.json"), "utf8"),
     ) as { status: string };
-    expect(status.status).toBe("starting");
+    expect(status.status).toBe("checking");
     await expect(startStudioUpdate({ root })).rejects.toThrow(
       "studio_update_in_progress",
     );

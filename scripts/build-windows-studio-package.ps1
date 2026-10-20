@@ -22,6 +22,13 @@ if (($env:GITHUB_REF_TYPE -eq "tag") -and ($env:GITHUB_REF_NAME -ne ("v" + $vers
 }
 
 $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
+$updaterManifest = Join-Path $projectRoot "tools\ngt-updater\Cargo.toml"
+& cargo build --release --manifest-path $updaterManifest
+if ($LASTEXITCODE -ne 0) { throw "Rust updater release build failed." }
+$updaterBinary = Join-Path $projectRoot "tools\ngt-updater\target\release\NGTUpdater.exe"
+if (-not (Test-Path -LiteralPath $updaterBinary -PathType Leaf)) {
+  throw "Rust updater executable is missing after the release build."
+}
 $stage = Join-Path $projectRoot ".local\studio-package"
 if (Test-Path -LiteralPath $stage) {
   Remove-Item -LiteralPath $stage -Recurse -Force
@@ -128,11 +135,13 @@ Copy-Item -LiteralPath "prisma" -Destination (Join-Path $stage "prisma") -Recurs
 $stageAssets = Join-Path $stage "assets"
 New-Item -ItemType Directory -Path $stageAssets -Force | Out-Null
 Copy-Item -LiteralPath "assets\ngt-studio.ico" -Destination $stageAssets -Force
+$stageTools = Join-Path $stage "tools"
+New-Item -ItemType Directory -Path $stageTools -Force | Out-Null
+Copy-Item -LiteralPath $updaterBinary -Destination (Join-Path $stageTools "NGTUpdater.exe") -Force
 
 $runtimeScripts = @(
   "backup-windows-studio.ps1",
   "check-windows-credential-store.ps1",
-  "download-public-release-asset.ps1",
   "test-windows-studio-backup.ps1",
   "test-windows-studio-install-coordination.ps1",
   "test-windows-studio-update-safety.ps1",
@@ -145,7 +154,6 @@ $runtimeScripts = @(
   "start.mjs",
   "uninstall-windows-startup.ps1",
   "uninstall-windows-studio.ps1",
-  "update-windows-studio.ps1",
   "verify-windows-studio-release.ps1",
   "windows-db.mjs",
   "windows-service.ps1",

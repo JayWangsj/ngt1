@@ -13,21 +13,22 @@ function Get-NgtUpdateLock([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
   try {
     $contents = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF)
-    try {
-      return $contents | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-      $legacyTimestamp = $contents.Trim()
+    $legacyTimestamp = $contents.Trim()
+    if ($legacyTimestamp -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') {
       $parsedTimestamp = [System.DateTimeOffset]::MinValue
-      $isLegacyTimestamp = [System.DateTimeOffset]::TryParseExact(
+      if ([System.DateTimeOffset]::TryParseExact(
         $legacyTimestamp,
         "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
         [System.Globalization.CultureInfo]::InvariantCulture,
         [System.Globalization.DateTimeStyles]::AssumeUniversal,
         [ref]$parsedTimestamp
-      )
-      if ($isLegacyTimestamp) {
+      )) {
         return [pscustomobject]@{ createdAt = $legacyTimestamp }
       }
+    }
+    try {
+      return $contents | ConvertFrom-Json -ErrorAction Stop
+    } catch {
       throw "Expected JSON or a legacy ISO-8601 UTC timestamp. $($_.Exception.Message)"
     }
   } catch {
@@ -94,28 +95,51 @@ function Get-NgtUpdateExecutorState(
   [string]$ActiveRelease
 ) {
   try {
-    $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop |
-      Where-Object { $_.Name -match '^(?i)(powershell|pwsh)\.exe$' })
+    $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
   } catch {
     return $null
   }
   $executorPid = if ($Lock.executorPid) { [int]$Lock.executorPid } elseif ($Status.executorPid) { [int]$Status.executorPid } else { 0 }
   $updateId = if ($Lock.updateId) { [string]$Lock.updateId } else { [string]$Status.updateId }
-  $scriptPath = if ($Lock.executorScriptPath) {
+  if (-not $updateId) { return $false }
+  $executorPath = if ($Lock.executorPath) {
+    [string]$Lock.executorPath
+  } elseif ($Status.executorPath) {
+    [string]$Status.executorPath
+  } else {
+    Join-Path $ActiveRelease "tools\NGTUpdater.exe"
+  }
+  $legacyScript = if ($Lock.executorScriptPath) {
     [string]$Lock.executorScriptPath
   } elseif ($Status.executorScriptPath) {
     [string]$Status.executorScriptPath
   } else {
-    Join-Path $ActiveRelease "scripts\update-windows-studio.ps1"
+    $null
   }
-  $target = [System.IO.Path]::GetFullPath($scriptPath)
+  try { $target = [System.IO.Path]::GetFullPath($executorPath) } catch { return $null }
+  $legacyTarget = $null
+  if ($legacyScript) {
+    try { $legacyTarget = [System.IO.Path]::GetFullPath($legacyScript) } catch { return $null }
+  }
+  $unverified = $false
   foreach ($process in $processes) {
     if ($executorPid -gt 0 -and [int]$process.ProcessId -ne $executorPid) { continue }
+    if ($process.Name -ine "NGTUpdater.exe" -and $process.Name -notmatch '^(powershell|pwsh)(\.exe)?$') { continue }
     $commandLine = [string]$process.CommandLine
-    if (-not $commandLine -or $commandLine.IndexOf($target, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-    if ($updateId -and $commandLine.IndexOf($updateId, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-    return $true
+    if (-not $commandLine) { $unverified = $true; continue }
+    if ($process.Name -ieq "NGTUpdater.exe") {
+      try { $processPath = [System.IO.Path]::GetFullPath([string]$process.ExecutablePath) } catch { $unverified = $true; continue }
+      if ($processPath.Equals($target, [System.StringComparison]::OrdinalIgnoreCase) -and
+          $commandLine.IndexOf($updateId, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+      continue
+    }
+    if ($legacyTarget -and $process.Name -match '^(powershell|pwsh)(\.exe)?$') {
+      $quotedScript = '"' + [regex]::Escape($legacyTarget) + '"'
+      $taskArgument = '(?i)-UpdateId\s+["'']?' + [regex]::Escape($updateId) + '(?:["'']|\s|$)'
+      if ($commandLine -match $quotedScript -and $commandLine -match $taskArgument) { return $true }
+    }
   }
+  if ($unverified) { return $null }
   return $false
 }
 
@@ -594,11 +618,175 @@ function Start-NgtStudioManualInstall([string]$InstallRoot, [string]$TargetVersi
   }
 }
 
+function Start-NgtStudioOnlineUpdateInstall(
+  [string]$InstallRoot,
+  [string]$TargetVersion,
+  [string]$UpdateId
+) {
+  $state = Invoke-NgtStudioInstallMutex $InstallRoot {
+    $root = [System.IO.Path]::GetFullPath($InstallRoot)
+    $reservation = Get-NgtManualInstallReservation $root
+    $lock = $reservation.lock
+    $status = $reservation.status
+    if (-not $UpdateId -or
+        [string]$lock.updateId -ne $UpdateId -or
+        [string]$status.updateId -ne $UpdateId -or
+        [string]$lock.operation -ne "online-update" -or
+        [string]$status.operation -ne "online-update" -or
+        [string]$lock.targetVersion -ne $TargetVersion -or
+        [string]$status.targetVersion -ne $TargetVersion -or
+        -not $status.executorConfirmed -or
+        [int]$status.executorPid -le 0 -or
+        -not (Get-NgtUpdateExecutorState $lock $status ([string](Get-NgtInstallJson (Join-Path $root ".local\studio.json")).activeRelease))) {
+      throw "The Rust updater does not own a verifiable online installation task."
+    }
+    if ($reservation.marker) {
+      if ([string]$reservation.marker.operation -ne "online-update" -or
+          [string]$reservation.marker.updateId -ne $UpdateId -or
+          [string]$reservation.marker.targetVersion -ne $TargetVersion) {
+        throw "A different or unverifiable maintenance operation is already present."
+      }
+      return [pscustomobject]@{
+        plan = Get-NgtStudioInstallPlan $root $TargetVersion $reservation.marker
+        backupRoot = [string]$reservation.marker.backupRoot
+        backupVerified = [bool]$reservation.marker.backupVerified
+      }
+    }
+    $plan = Get-NgtStudioInstallPlan $root $TargetVersion $null
+    $marker = [pscustomobject]@{
+      operation = "online-update"
+      updateId = $UpdateId
+      targetVersion = $TargetVersion
+      previousVersion = $plan.previousVersion
+      previousRelease = $plan.previousRelease
+      dataRoot = $plan.dataRoot
+      installMode = $plan.mode
+      updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    }
+    Write-NgtInstallJsonAtomic (Join-Path $root ".local\update-maintenance.json") $marker
+    return [pscustomobject]@{
+      plan = $plan
+      backupRoot = ""
+      backupVerified = $false
+    }
+  }
+
+  if ($state.backupVerified -and $state.backupRoot) {
+    $testScript = Join-Path $state.plan.previousRelease "scripts\test-windows-studio-backup.ps1"
+    if (-not (Test-Path -LiteralPath $testScript -PathType Leaf)) {
+      throw "The existing online-update backup cannot be verified because its checker is missing."
+    }
+    & $testScript -BackupRoot $state.backupRoot | Out-Null
+    return $state.plan
+  }
+
+  $backupScript = Join-Path $state.plan.previousRelease "scripts\backup-windows-studio.ps1"
+  $testScript = Join-Path $state.plan.previousRelease "scripts\test-windows-studio-backup.ps1"
+  if (-not (Test-Path -LiteralPath $backupScript -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $testScript -PathType Leaf)) {
+    throw "The active release does not provide verified database backup support."
+  }
+  Set-NgtStudioOnlineUpdateStage -InstallRoot $InstallRoot -UpdateId $UpdateId -Stage "backing-up"
+  try {
+    $backupOutput = @(& $backupScript -LeaveStopped)
+    $backupLine = @($backupOutput | Where-Object { [string]$_ -like "Studio backup created: *" } | Select-Object -Last 1)
+    if (-not $backupLine) { throw "The online update backup did not return its destination." }
+    $backupRoot = [string]$backupLine[0].Substring("Studio backup created: ".Length)
+    & $testScript -BackupRoot $backupRoot | Out-Null
+    Set-NgtStudioOnlineUpdateBackup -InstallRoot $InstallRoot -UpdateId $UpdateId -BackupRoot $backupRoot
+    return $state.plan
+  } catch {
+    $failure = $_
+    try {
+      $startupScript = Join-Path $state.plan.previousRelease "scripts\install-windows-startup.ps1"
+      if (-not (Test-Path -LiteralPath $startupScript -PathType Leaf)) {
+        throw "The previous release startup script is missing after the database backup failed."
+      }
+      & $startupScript -InstallRoot $InstallRoot
+      $deadline = (Get-Date).AddMinutes(2)
+      $healthy = $false
+      do {
+        try {
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health" -TimeoutSec 5
+          $healthy = [string]$health.status -eq "ok" -and [string]$health.currentVersion -eq [string]$state.plan.previousVersion
+        } catch { }
+        if ($healthy) { break }
+        Start-Sleep -Seconds 2
+      } while ((Get-Date) -lt $deadline)
+      if (-not $healthy) { throw "The previous release could not be restarted after the database backup failed." }
+      Invoke-NgtStudioInstallMutex $InstallRoot {
+        $reservation = Get-NgtManualInstallReservation $InstallRoot
+        if ([string]$reservation.marker.updateId -eq $UpdateId -and
+            -not $reservation.marker.backupVerified) {
+          Remove-Item -LiteralPath (Join-Path $InstallRoot ".local\update-maintenance.json") -Force
+        }
+      }
+    } catch {
+      throw ("The online update backup failed and automatic restart verification failed: " + $_.Exception.Message)
+    }
+    throw $failure
+  }
+}
+
+function Set-NgtStudioOnlineUpdateStage(
+  [string]$InstallRoot,
+  [string]$UpdateId,
+  [string]$Stage
+) {
+  Invoke-NgtStudioInstallMutex $InstallRoot {
+    $reservation = Get-NgtManualInstallReservation $InstallRoot
+    if ([string]$reservation.marker.operation -ne "online-update" -or
+        [string]$reservation.marker.updateId -ne $UpdateId -or
+        [string]$reservation.lock.updateId -ne $UpdateId -or
+        [string]$reservation.status.updateId -ne $UpdateId) {
+      throw "The online installer no longer owns its update stage."
+    }
+    $status = $reservation.status
+    $status.status = if ($Stage -eq "validating") { "validating" } else { "installing" }
+    $status.stage = $Stage
+    $status.updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    Write-NgtInstallJsonAtomic (Join-Path $InstallRoot "update-status.json") $status
+  }
+}
+
+function Set-NgtStudioOnlineUpdateBackup(
+  [string]$InstallRoot,
+  [string]$UpdateId,
+  [string]$BackupRoot
+) {
+  Invoke-NgtStudioInstallMutex $InstallRoot {
+    $reservation = Get-NgtManualInstallReservation $InstallRoot
+    if ([string]$reservation.marker.operation -ne "online-update" -or
+        [string]$reservation.marker.updateId -ne $UpdateId -or
+        [string]$reservation.lock.updateId -ne $UpdateId -or
+        [string]$reservation.status.updateId -ne $UpdateId) {
+      throw "The online installer no longer owns the verified database backup."
+    }
+    $backupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
+    $allowedBackupRoot = [System.IO.Path]::GetFullPath((Join-Path ([string]$reservation.marker.dataRoot) "backups")).TrimEnd("\") + "\"
+    if (-not $backupRoot.StartsWith($allowedBackupRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "The online installer backup is outside the configured data directory."
+    }
+    $reservation.marker.backupRoot = $backupRoot
+    $reservation.marker.backupVerified = $true
+    $reservation.marker.updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    Write-NgtInstallJsonAtomic (Join-Path $InstallRoot ".local\update-maintenance.json") $reservation.marker
+    $status = $reservation.status
+    $status.status = "installing"
+    $status.stage = "backing-up"
+    $status.backupRoot = $backupRoot
+    $status.backupVerified = $true
+    $status.updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    Write-NgtInstallJsonAtomic (Join-Path $InstallRoot "update-status.json") $status
+  }
+}
+
 function Complete-NgtStudioManualInstall(
   [string]$InstallRoot,
   [string]$ReleaseRoot,
   [string]$VerifiedVersion,
-  [switch]$HealthVerified
+  [switch]$HealthVerified,
+  [switch]$OnlineUpdate
 ) {
   if (-not $HealthVerified) { throw "A successful application and database health check is required before installation state can be finalized." }
   Invoke-NgtStudioInstallMutex $InstallRoot {
@@ -606,16 +794,24 @@ function Complete-NgtStudioManualInstall(
     $reservation = Get-NgtManualInstallReservation $root
     $marker = $reservation.marker
     $lock = $reservation.lock
-    if (-not $marker -or $marker.operation -ne "manual-install" -or
+    $expectedOperation = if ($OnlineUpdate) { "online-update" } else { "manual-install" }
+    if (-not $marker -or $marker.operation -ne $expectedOperation -or
         [string]$marker.updateId -ne [string]$lock.updateId -or
-        [string]$marker.updateId -ne [string]$reservation.status.manualInstallId -or
+        [string]$marker.updateId -ne [string]$(if ($marker.operation -eq "manual-install") { $reservation.status.manualInstallId } else { $reservation.status.updateId }) -or
         [string]$marker.targetVersion -ne $VerifiedVersion) {
-      throw "Manual install does not own the maintenance marker and update lock."
+      throw "The installer does not own the maintenance marker and update lock."
     }
     $activeRelease = [System.IO.Path]::GetFullPath([string](Get-NgtInstallJson (Join-Path $root ".local\studio.json")).activeRelease)
     $release = Get-NgtInstallJson (Join-Path $activeRelease "studio-release.json")
     if ($activeRelease -ine [System.IO.Path]::GetFullPath($ReleaseRoot) -or [string]$release.version -ne $VerifiedVersion) {
       throw "The active release does not match the health-verified installer version."
+    }
+    if ($marker.operation -eq "online-update") {
+      if (-not $marker.backupVerified -or -not $marker.backupRoot) {
+        throw "The online update cannot finish without a verified database backup."
+      }
+      Remove-Item -LiteralPath (Join-Path $root ".local\update-maintenance.json") -Force -ErrorAction Stop
+      return
     }
     if ($reservation.status.status -in @("complete", "superseded", "idle") -and
         [string]$reservation.status.manualInstallId -eq [string]$marker.updateId) {
@@ -683,6 +879,7 @@ function Complete-NgtStudioManualInstallRollback(
   [string]$VerifiedVersion,
   [string]$FailureMessage,
   [string]$FailedStage,
+  [switch]$OnlineUpdate,
   [switch]$HealthVerified
 ) {
   if (-not $HealthVerified) { throw "A successful rollback health check is required before maintenance can be cleared." }
@@ -690,11 +887,12 @@ function Complete-NgtStudioManualInstallRollback(
     $root = [System.IO.Path]::GetFullPath($InstallRoot)
     $reservation = Get-NgtManualInstallReservation $root
     $marker = $reservation.marker
-    if (-not $marker -or $marker.operation -ne "manual-install" -or
+    $expectedOperation = if ($OnlineUpdate) { "online-update" } else { "manual-install" }
+    if (-not $marker -or $marker.operation -ne $expectedOperation -or
         -not $marker.backupVerified -or
         [string]$marker.updateId -ne [string]$reservation.lock.updateId -or
-        [string]$marker.updateId -ne [string]$reservation.status.manualInstallId) {
-      throw "Manual install does not own a verified backup and maintenance marker."
+        [string]$marker.updateId -ne [string]$(if ($marker.operation -eq "manual-install") { $reservation.status.manualInstallId } else { $reservation.status.updateId })) {
+      throw "The installer does not own a verified backup and maintenance marker."
     }
     if (-not (Test-Path -LiteralPath ([string]$marker.backupRoot) -PathType Container)) {
       throw "The verified rollback backup is no longer available."
@@ -710,9 +908,9 @@ function Complete-NgtStudioManualInstallRollback(
       status = "failed"
       stage = "rolling-back"
       failedStage = $FailedStage
-      operation = "manual-install"
+      operation = [string]$marker.operation
       updateId = [string]$marker.updateId
-      manualInstallId = [string]$marker.updateId
+      manualInstallId = if ($marker.operation -eq "manual-install") { [string]$marker.updateId } else { $null }
       targetVersion = [string]$marker.targetVersion
       previousVersion = $VerifiedVersion
       currentVersion = $VerifiedVersion
@@ -725,7 +923,9 @@ function Complete-NgtStudioManualInstallRollback(
     }
     Write-NgtInstallJsonAtomic (Join-Path $root "update-status.json") $status
     Remove-Item -LiteralPath (Join-Path $root ".local\update-maintenance.json") -Force -ErrorAction Stop
-    Remove-Item -LiteralPath (Join-Path $root "update.lock") -Force -ErrorAction Stop
+    if ($marker.operation -eq "manual-install") {
+      Remove-Item -LiteralPath (Join-Path $root "update.lock") -Force -ErrorAction Stop
+    }
   }
 }
 
@@ -737,14 +937,16 @@ function Set-NgtStudioManualInstallFailure(
 ) {
   Invoke-NgtStudioInstallMutex $InstallRoot {
     $reservation = Get-NgtManualInstallReservation $InstallRoot
-    if (-not $reservation.marker -or [string]$reservation.marker.updateId -ne [string]$reservation.lock.updateId) { return }
+    if (-not $reservation.marker -or
+        [string]$reservation.marker.operation -notin @("manual-install", "online-update") -or
+        [string]$reservation.marker.updateId -ne [string]$reservation.lock.updateId) { return }
     $status = [pscustomobject]@{
       status = "failed"
       stage = $Stage
       failedStage = $Stage
-      operation = "manual-install"
+      operation = [string]$reservation.marker.operation
       updateId = [string]$reservation.marker.updateId
-      manualInstallId = [string]$reservation.marker.updateId
+      manualInstallId = if ($reservation.marker.operation -eq "manual-install") { [string]$reservation.marker.updateId } else { $null }
       targetVersion = [string]$reservation.marker.targetVersion
       previousVersion = [string]$reservation.marker.previousVersion
       installMode = [string]$reservation.marker.installMode

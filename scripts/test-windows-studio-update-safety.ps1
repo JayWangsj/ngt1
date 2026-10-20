@@ -26,11 +26,11 @@ try {
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture ".next\standalone") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture ".local") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture "scripts") -Force | Out-Null
+  New-Item -ItemType Directory -Path (Join-Path $releaseFixture "tools") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture "prisma") -Force | Out-Null
   $releaseFiles = @(
     ".next/standalone/server.js",
-    "scripts/update-windows-studio.ps1",
-    "scripts/download-public-release-asset.ps1",
+    "tools/NGTUpdater.exe",
     "scripts/check-windows-credential-store.ps1",
     "scripts/install-windows-studio.ps1",
     "scripts/prepare-windows-studio-install.ps1",
@@ -63,7 +63,7 @@ try {
   } catch { $unlistedRejected = $true }
   if (-not $unlistedRejected) { throw "Release integrity validation accepted an unlisted file." }
   Remove-Item -LiteralPath (Join-Path $releaseFixture "scripts\unlisted.ps1") -Force
-  Set-Content -LiteralPath (Join-Path $releaseFixture "scripts\update-windows-studio.ps1") `
+  Set-Content -LiteralPath (Join-Path $releaseFixture "tools\NGTUpdater.exe") `
     -Value "tampered" -Encoding ascii
   $integrityRejected = $false
   try {

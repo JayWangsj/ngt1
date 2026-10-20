@@ -119,18 +119,6 @@ describe("Windows persistent startup", () => {
       "$startupManifestEntry.Value = (Get-FileHash -LiteralPath $baselineStartupScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()",
     );
     expect(acceptance).toContain(
-      '$baselineUpdaterScriptPath = Join-Path $baselineRoot "scripts\\update-windows-studio.ps1"',
-    );
-    expect(acceptance).toContain(
-      '$releaseOutput = & $githubCli release view $ExpectedTargetVersion --repo $repository --json "tagName,assets"',
-    );
-    expect(acceptance).toContain(
-      "Baseline updater script failed integrity validation before runner adaptation.",
-    );
-    expect(acceptance).toContain(
-      "$updaterManifestEntry.Value = (Get-FileHash -LiteralPath $baselineUpdaterScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()",
-    );
-    expect(acceptance).toContain(
       "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1",
     );
     expect(acceptance).toContain(
@@ -380,7 +368,7 @@ describe("Windows persistent startup", () => {
 
   it("backs up and verifies private releases before switching the studio", async () => {
     const backup = await readFile("scripts/backup-windows-studio.ps1", "utf8");
-    const updater = await readFile("scripts/update-windows-studio.ps1", "utf8");
+    const updater = await readFile("tools/ngt-updater/src/main.rs", "utf8");
     const studioCommon = await readFile(
       "scripts/windows-studio-common.ps1",
       "utf8",
@@ -404,6 +392,7 @@ describe("Windows persistent startup", () => {
       "scripts/test-windows-studio-online-update.ps1",
       "utf8",
     );
+    const innoInstaller = await readFile("installer/windows-studio.iss", "utf8");
     const ciWorkflow = await readFile(".github/workflows/ci.yml", "utf8");
     expect(backup).toContain('"SHA256SUMS.txt"');
     expect(backup).toContain("Stop-NgtStudioProcesses");
@@ -418,28 +407,34 @@ describe("Windows persistent startup", () => {
       studioCommon.indexOf("& $pgCtl -D $recordedData -m fast stop 2>$null"),
     );
     const fileReplaceCalls = [
-      ...updater.matchAll(/\[System\.IO\.File\]::Replace\([^\r\n]+/g),
       ...studioCommon.matchAll(/\[System\.IO\.File\]::Replace\([^\r\n]+/g),
     ];
     expect(fileReplaceCalls.length).toBeGreaterThan(0);
     for (const replaceCall of fileReplaceCalls) {
       expect(replaceCall[0]).not.toMatch(/,\s*\$null\s*\)/);
     }
-    expect(updater).toContain('"release", "download"');
-    expect(updater).toContain("Get-FileHash");
-    expect(updater).toContain("backup-windows-studio.ps1");
-    expect(updater).toContain("Wait-NgtStudioHealth");
-    expect(updater).toContain('Write-NgtUpdateStatus "downloading"');
-    expect(updater).toContain(
-      "https://api.github.com/repos/$repository/releases/latest",
-    );
-    expect(updater).toContain("download-public-release-asset.ps1");
-    expect(updater).toContain('"JayWangsj/ngt-repair-system"');
-    expect(updater).toContain('"JayWangsj/ngt1"');
-    expect(onlineUpdateTest).toContain("download-public-release-asset.ps1");
+    expect(updater).toContain("https://api.github.com");
+    expect(updater).toContain("The installer checksum sidecar is invalid.");
+    expect(updater).toContain("Installer size and SHA-256 verified.");
+    expect(updater).toContain("CREATE_NO_WINDOW");
+    expect(updater).toContain('"/VERYSILENT"');
+    expect(updater).toContain('"/SUPPRESSMSGBOXES"');
+    expect(updater).toContain('"/NORESTART"');
+    expect(updater).toContain("check_install_space");
+    expect(updater).toContain('"actualVersion": args.target_version');
+    expect(updater).toContain("finish_failed");
+    expect(updater).toContain("update_log_path");
+    expect(onlineUpdateTest).toContain("Get-NgtUpdaterVisibleWindows");
+    expect(onlineUpdateTest).toContain("Get-NgtVisibleWindowProcessIds");
+    expect(onlineUpdateTest).toContain("silent online update displayed a visible installer");
+    expect(onlineUpdateTest).toContain("100 MiB design target");
+    expect(onlineUpdateTest).toContain("Rust updater peak working set");
+    expect(onlineUpdateTest).toContain("NGT_TEST_RELEASE_API_URL");
     expect(onlineUpdateTest).toContain(
-      "Anonymous public Release asset download",
+      "The API started a process other than the versioned Rust updater.",
     );
+    expect(innoInstaller).toContain("SW_HIDE, ewWaitUntilTerminated");
+    expect(innoInstaller).toContain("skipifsilent");
     expect(onlineUpdateTest).toContain("Assert-ReleaseChecksum $oldAppArchive");
     expect(onlineUpdateTest).toContain(
       "Assert-ReleaseChecksum $oldRuntimeArchive",
@@ -470,7 +465,7 @@ describe("Windows persistent startup", () => {
     );
     expect(onlineTestRootCreation).toBeGreaterThanOrEqual(0);
     expect(onlineTestRootCreation).toBeLessThan(
-      onlineUpdateTest.indexOf("$anonymousChecksumPath = Join-Path $testRoot"),
+      onlineUpdateTest.indexOf("$taskRoot = Join-Path $installRoot"),
     );
     const onlineTestCleanupDirectoryReset = onlineUpdateTest.indexOf(
       "Set-Location -LiteralPath ([System.IO.Path]::GetTempPath())",
@@ -480,30 +475,6 @@ describe("Windows persistent startup", () => {
     );
     expect(onlineTestCleanupDirectoryReset).toBeGreaterThanOrEqual(0);
     expect(onlineTestCleanupDirectoryReset).toBeLessThan(onlineTestRootCleanup);
-    expect(updater).toContain("bytesDownloaded");
-    expect(updater).toContain("bytesPerSecond");
-    expect(updater).toContain("bytesDownloaded = $downloadedBytes");
-    expect(updater).toContain('Write-NgtUpdateStatus "verifying"');
-    expect(updater).toContain('Write-NgtUpdateStatus "backing-up"');
-    expect(updater).toContain('Write-NgtUpdateStatus "installing"');
-    expect(updater).toContain('Write-NgtUpdateStatus "validating"');
-    expect(updater).toContain('Write-NgtUpdateStatus "preparing-runtime"');
-    expect(updater).toContain(
-      "Move-Item -LiteralPath $dataDirectory -Destination $failedDataDirectory",
-    );
-    expect(updater).toContain('Write-NgtUpdateStatus "rolling-back"');
-    expect(updater).toContain(
-      "An incomplete target release was isolated and will be downloaded again.",
-    );
-    expect(updater).toContain(
-      "& tar.exe -xf $archive.FullName -C $stagingRoot",
-    );
-    expect(updater).toContain(
-      "Remove-Item -LiteralPath $downloadRoot -Recurse -Force -ErrorAction Stop",
-    );
-    expect(updater.indexOf('Write-NgtUpdateStatus "backing-up"')).toBeLessThan(
-      updater.indexOf('Write-NgtUpdateStatus "installing"'),
-    );
     expect(workflow).toContain('tags:\n      - "v*"');
     expect(workflow).toContain("runs-on: windows-2022");
     expect(ciWorkflow).toContain("--config.node-linker=hoisted");
@@ -523,13 +494,11 @@ describe("Windows persistent startup", () => {
       "scripts/verify-windows-studio-release.ps1",
       "utf8",
     );
-    expect(packageBuilder).toContain('"download-public-release-asset.ps1"');
-    expect(updateSafetyTest).toContain(
-      '"scripts/download-public-release-asset.ps1"',
-    );
-    expect(releaseVerifier).toContain(
-      '"scripts/download-public-release-asset.ps1"',
-    );
+    expect(packageBuilder).toContain("cargo build --release");
+    expect(packageBuilder).toContain('"NGTUpdater.exe"');
+    expect(updateSafetyTest).toContain('"tools/NGTUpdater.exe"');
+    expect(releaseVerifier).toContain('"tools/NGTUpdater.exe"');
+    expect(packageBuilder).not.toContain('"update-windows-studio.ps1"');
     expect(workflow).not.toContain("actions/download-artifact@v4");
     expect(workflow).not.toContain("windows-studio-package-${{ github.sha }}");
     expect(workflow).not.toContain("prepare-candidate:");

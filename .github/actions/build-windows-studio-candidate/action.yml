@@ -11,6 +11,26 @@ runs:
       with:
         node-version: 24
         cache: pnpm
+    - uses: actions-rust-lang/setup-rust-toolchain@v2
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+        components: rustfmt
+        rust-src-dir: tools/ngt-updater
+    - name: Test and format-check the native updater
+      shell: powershell
+      run: |
+        cargo fmt --manifest-path tools/ngt-updater/Cargo.toml -- --check
+        if ($LASTEXITCODE -ne 0) { throw "Rust updater formatting check failed." }
+        cargo test --manifest-path tools/ngt-updater/Cargo.toml
+        if ($LASTEXITCODE -ne 0) { throw "Rust updater tests failed." }
+        $acceptanceTarget = Join-Path $env:GITHUB_WORKSPACE "tools\ngt-updater\target\acceptance"
+        cargo build --release --features acceptance-api --manifest-path tools/ngt-updater/Cargo.toml --target-dir $acceptanceTarget
+        if ($LASTEXITCODE -ne 0) { throw "Acceptance updater build failed." }
+        $acceptanceOutput = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance"
+        New-Item -ItemType Directory -Path $acceptanceOutput -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $acceptanceTarget "release\NGTUpdater.exe") `
+          -Destination (Join-Path $acceptanceOutput "NGTUpdater.exe") -Force
     - name: Install pinned dependencies
       shell: powershell
       run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy

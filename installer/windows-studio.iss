@@ -82,6 +82,7 @@ var
   PowerShellPath: String;
   Parameters: String;
   PreflightLogPath: String;
+  OnlineUpdateId: String;
 begin
   ExtractTemporaryFile('prepare-windows-studio-install.ps1');
   ExtractTemporaryFile('windows-studio-install-coordination.ps1');
@@ -91,6 +92,9 @@ begin
     ExpandConstant('{tmp}\prepare-windows-studio-install.ps1') +
     '" -InstallRoot "' + ExpandConstant('{localappdata}\NGT') +
     '" -TargetVersion "{#AppVersion}" -LogPath "' + PreflightLogPath + '"';
+  OnlineUpdateId := ExpandConstant('{param:NGTUpdateId|}');
+  if OnlineUpdateId <> '' then
+    Parameters := Parameters + ' -UpdateId "' + OnlineUpdateId + '"';
   if (not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
     (ResultCode <> 0) then
   begin
@@ -105,6 +109,7 @@ var
   ResultCode: Integer;
   PowerShellPath: String;
   Parameters: String;
+  OnlineUpdateId: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -125,6 +130,9 @@ begin
     '" -DataRoot "' + ExpandConstant('{localappdata}\NGT\data-store') +
     '" -InstallRoot "' + ExpandConstant('{localappdata}\NGT') +
     '" -LogPath "' + ExpandConstant('{localappdata}\NGT\install.log') + '"';
+  OnlineUpdateId := ExpandConstant('{param:NGTUpdateId|}');
+  if OnlineUpdateId <> '' then
+    Parameters := Parameters + ' -UpdateId "' + OnlineUpdateId + '"';
 
   if (not Exec(PowerShellPath, Parameters, ExpandConstant('{tmp}\NGTStudioPackage'),
     SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then

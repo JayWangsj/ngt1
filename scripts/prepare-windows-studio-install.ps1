@@ -3,6 +3,7 @@ param(
   [string]$InstallRoot,
   [Parameter(Mandatory = $true)]
   [string]$TargetVersion,
+  [string]$UpdateId,
   [Parameter(Mandatory = $true)]
   [string]$LogPath
 )
@@ -12,7 +13,12 @@ $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Null
 Set-Content -LiteralPath $LogPath -Value ((Get-Date).ToUniversalTime().ToString("o") + " Starting installer preflight.") -Encoding utf8
 try {
-  $plan = Start-NgtStudioManualInstall -InstallRoot $InstallRoot -TargetVersion $TargetVersion
+  if ($UpdateId) {
+    $plan = Start-NgtStudioOnlineUpdateInstall -InstallRoot $InstallRoot `
+      -TargetVersion $TargetVersion -UpdateId $UpdateId
+  } else {
+    $plan = Start-NgtStudioManualInstall -InstallRoot $InstallRoot -TargetVersion $TargetVersion
+  }
   Add-Content -LiteralPath $LogPath -Value ("{0:o} Prepared {1} for v{2}." -f (Get-Date).ToUniversalTime(), $plan.mode, $TargetVersion)
   Write-Output ("NGT_INSTALL_MODE=" + $plan.mode)
 } catch {
