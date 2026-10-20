@@ -834,11 +834,11 @@ export class GitHubReleaseApi {
     return Buffer.from(await response.arrayBuffer());
   }
 
-  async listVerifyRuns(sha) {
+  async listVerifyRuns(sha, { branch = "master", event = "push" } = {}) {
     const query = new URLSearchParams({
       head_sha: sha,
-      branch: "master",
-      event: "push",
+      branch,
+      event,
       per_page: "100",
     });
     return this.json(this.repoPath("/actions/runs?" + query.toString()));
@@ -919,6 +919,8 @@ export async function qualifyRelease({
   now = Date.now,
   sleep = delay,
   requireTag = true,
+  verifyBranch = "master",
+  verifyEvent = "push",
 }) {
   if (tag !== "v" + version || !/^[a-f0-9]{40}$/i.test(sha)) {
     throw new Error(
@@ -939,17 +941,19 @@ export async function qualifyRelease({
 
   const deadline = now() + timeoutMs;
   let backoff = 5000;
-  let lastState =
-    "No Verify MVP push run is visible for this exact Commit SHA yet.";
+  let lastState = "No Verify MVP run is visible for this exact Commit SHA yet.";
   while (now() < deadline) {
-    const response = await api.listVerifyRuns(sha);
+    const response = await api.listVerifyRuns(sha, {
+      branch: verifyBranch,
+      event: verifyEvent,
+    });
     const runs = (response.workflow_runs || [])
       .filter(
         (run) =>
           run.path === ".github/workflows/ci.yml" &&
           run.head_sha === sha.toLowerCase() &&
-          run.head_branch === "master" &&
-          run.event === "push",
+          run.head_branch === verifyBranch &&
+          run.event === verifyEvent,
       )
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
     const run = runs[0];
@@ -1025,7 +1029,8 @@ export async function requireReleaseReady(api, sha) {
     "Release Ready qualification",
     "Release Ready candidate build",
     "Release Ready installer acceptance",
-    "Release Ready online-update acceptance",
+    "Release Ready online-update acceptance (v2.0.18)",
+    "Release Ready online-update acceptance (v2.0.19)",
     "Release Ready manual upgrade and repair acceptance",
     "Release Ready",
   ];
@@ -1215,12 +1220,10 @@ async function main() {
     return;
   }
   if (command === "qualify-candidate") {
-    if (
-      process.env.GITHUB_REF !== "refs/heads/master" ||
-      process.env.GITHUB_EVENT_NAME !== "workflow_dispatch"
-    ) {
+    const branch = process.env.GITHUB_REF?.match(/^refs\/heads\/(.+)$/)?.[1];
+    if (!branch || process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
       throw new Error(
-        "Release Ready must be dispatched for the master commit before tagging.",
+        "Release Ready must be dispatched for a branch commit before candidate qualification.",
       );
     }
     const { tag, sha, version } = await readExpectedEnvironment(true);
@@ -1233,6 +1236,8 @@ async function main() {
       sha,
       version,
       requireTag: false,
+      verifyBranch: branch,
+      verifyEvent: branch === "master" ? "push" : "pull_request",
     });
     console.log(
       "Exact-SHA Verify MVP passed for Release Ready candidate: " +

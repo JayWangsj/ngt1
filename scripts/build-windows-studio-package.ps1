@@ -143,6 +143,7 @@ $runtimeScripts = @(
   "retain-windows-studio-releases.ps1",
   "studio-runtime.ps1",
   "start.mjs",
+  "start-windows-studio-update.ps1",
   "uninstall-windows-startup.ps1",
   "uninstall-windows-studio.ps1",
   "update-windows-studio.ps1",

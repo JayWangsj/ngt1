@@ -58,6 +58,7 @@ $parameters = switch ($Acceptance) {
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
       CandidateDirectory = if ($env:NGT_RELEASE_READY -eq "true") { Join-Path $env:GITHUB_WORKSPACE "release-assets" } else { "" }
+      BaselineTag = $env:NGT_ACCEPTANCE_BASELINE_TAG
     }
   }
   "manual-installer" {
@@ -66,6 +67,7 @@ $parameters = switch ($Acceptance) {
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
       CandidateDirectory = if ($env:NGT_RELEASE_READY -eq "true") { Join-Path $env:GITHUB_WORKSPACE "release-assets" } else { "" }
+      BaselineTag = ""
       ManualInstaller = $true
     }
   }
@@ -133,6 +135,7 @@ try {
       GITHUB_SHA = $env:GITHUB_SHA
       GITHUB_REF_NAME = $env:GITHUB_REF_NAME
       NGT_RELEASE_READY = $env:NGT_RELEASE_READY
+      NGT_ACCEPTANCE_BASELINE_TAG = $env:NGT_ACCEPTANCE_BASELINE_TAG
       GITHUB_WORKSPACE = $workspace
       RUNNER_TEMP = $isolatedTemp
       GH_TOKEN = $env:GH_TOKEN

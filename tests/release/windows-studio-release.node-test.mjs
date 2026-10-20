@@ -22,6 +22,7 @@ import {
   verifyArtifact,
   verifyWindowsPackageArtifact,
 } from "../../scripts/windows-studio-release.mjs";
+import readyFetch from "../../scripts/windows-studio-ready-fetch.cjs";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const sourceSha = "a".repeat(40);
@@ -172,6 +173,32 @@ test("findRelease discovers Draft Releases through the paginated release list", 
   assert.match(requests[2], /\/releases\?per_page=100&page=2$/);
 });
 
+test("Verify MVP lookup can target the exact pull-request branch run", async () => {
+  let requestedUrl;
+  const api = new GitHubReleaseApi({
+    token: "test-token",
+    repository: "JayWangsj/ngt1",
+    fetchImpl: async (url) => {
+      requestedUrl = new URL(url);
+      return new Response(JSON.stringify({ workflow_runs: [] }), {
+        status: 200,
+      });
+    },
+  });
+
+  await api.listVerifyRuns(sourceSha, {
+    branch: "fix/windows-online-update-api",
+    event: "pull_request",
+  });
+
+  assert.equal(requestedUrl.searchParams.get("head_sha"), sourceSha);
+  assert.equal(
+    requestedUrl.searchParams.get("branch"),
+    "fix/windows-online-update-api",
+  );
+  assert.equal(requestedUrl.searchParams.get("event"), "pull_request");
+});
+
 test("deleteRelease removes a stale Draft by release ID", async () => {
   const requests = [];
   const api = new GitHubReleaseApi({
@@ -246,6 +273,61 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
   assert.equal(baseline.tag_name, "v2.0.13");
   assert.equal(requests.length, 1);
   assert.match(requests[0], /\/releases\?per_page=100&page=1$/);
+});
+
+test("candidate update discovery serves only the exact public latest-release request", async (t) => {
+  const { assets, manifest } = await makeFixture(t);
+  const calls = [];
+  const fetch = readyFetch.createCandidateReleaseFetch(
+    async (input) => {
+      calls.push(String(input));
+      return new Response("upstream");
+    },
+    path.join(assets, "release-manifest.json"),
+    manifest.tag,
+  );
+
+  const response = await fetch(
+    "https://api.github.com/repos/JayWangsj/ngt1/releases/latest",
+  );
+  const candidate = await response.json();
+  assert.equal(candidate.tag_name, manifest.tag);
+  assert.deepEqual(
+    candidate.assets.map(({ name, size }) => ({ name, size })),
+    manifest.assets.map(({ name, size }) => ({ name, size })),
+  );
+
+  await fetch("https://api.github.com/repos/other/project/releases/latest");
+  await fetch("https://api.github.com/repos/JayWangsj/ngt1/releases/latest", {
+    method: "POST",
+  });
+  assert.equal(calls.length, 2);
+
+  const preloadPath = path
+    .resolve("scripts/windows-studio-ready-fetch.cjs")
+    .replaceAll("\\", "/");
+  const output = execFileSync(
+    process.execPath,
+    [
+      "-e",
+      'fetch("https://api.github.com/repos/JayWangsj/ngt1/releases/latest").then(async (response) => process.stdout.write(JSON.stringify(await response.json())))',
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require="${preloadPath}"`]
+          .filter(Boolean)
+          .join(" "),
+        NGT_READY_CANDIDATE_MANIFEST: path.join(
+          assets,
+          "release-manifest.json",
+        ),
+        NGT_READY_CANDIDATE_TAG: manifest.tag,
+      },
+    },
+  );
+  assert.equal(JSON.parse(output).tag_name, manifest.tag);
 });
 
 test("Draft creation survives an ambiguous upload response without duplicating assets", async (t) => {
@@ -481,6 +563,35 @@ test("same-SHA qualification requires all named Verify MVP gates to succeed", as
   });
   assert.equal(accepted.run.id, run.id);
 
+  let requestedVerification = null;
+  api.listVerifyRuns = async (_sha, filter) => {
+    requestedVerification = filter;
+    return {
+      workflow_runs: [
+        {
+          ...run,
+          head_branch: "fix/windows-online-update-api",
+          event: "pull_request",
+        },
+      ],
+    };
+  };
+  const candidate = await qualifyRelease({
+    api,
+    tag,
+    sha: sourceSha,
+    version,
+    timeoutMs: 100,
+    verifyBranch: "fix/windows-online-update-api",
+    verifyEvent: "pull_request",
+  });
+  assert.equal(candidate.run.head_branch, "fix/windows-online-update-api");
+  assert.deepEqual(requestedVerification, {
+    branch: "fix/windows-online-update-api",
+    event: "pull_request",
+  });
+  api.listVerifyRuns = async () => ({ workflow_runs: [run] });
+
   api.listRunJobs = async () => ({
     jobs: names.map((name) => ({
       name,
@@ -498,7 +609,8 @@ test("Release Ready rejects missing, stale, and incomplete exact-SHA Windows run
     "Release Ready qualification",
     "Release Ready candidate build",
     "Release Ready installer acceptance",
-    "Release Ready online-update acceptance",
+    "Release Ready online-update acceptance (v2.0.18)",
+    "Release Ready online-update acceptance (v2.0.19)",
     "Release Ready manual upgrade and repair acceptance",
     "Release Ready",
   ];
@@ -525,7 +637,9 @@ test("Release Ready rejects missing, stale, and incomplete exact-SHA Windows run
   assert.equal((await requireReleaseReady(api, sourceSha)).id, run.id);
   api.listRunJobs = async () => ({
     jobs: required
-      .filter((name) => name !== "Release Ready online-update acceptance")
+      .filter(
+        (name) => name !== "Release Ready online-update acceptance (v2.0.18)",
+      )
       .map((name) => ({ name, conclusion: "success" })),
   });
   await assert.rejects(

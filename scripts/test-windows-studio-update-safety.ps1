@@ -29,6 +29,7 @@ try {
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture "prisma") -Force | Out-Null
   $releaseFiles = @(
     ".next/standalone/server.js",
+    "scripts/start-windows-studio-update.ps1",
     "scripts/update-windows-studio.ps1",
     "scripts/download-public-release-asset.ps1",
     "scripts/check-windows-credential-store.ps1",
@@ -379,6 +380,73 @@ try {
       -not $secondSlot -or $secondSlot -eq $firstSlot -or $events[3] -ne "end-$secondSlot") {
     throw "The update mutex allowed concurrent owners."
   }
+
+  $bootstrapRoot = Join-Path $testRoot "bootstrap-no-final"
+  New-Item -ItemType Directory -Path $bootstrapRoot -Force | Out-Null
+  $bootstrapId = [guid]::NewGuid().ToString()
+  $bootstrapStatus = Join-Path $bootstrapRoot "update-status.json"
+  $bootstrapLock = Join-Path $bootstrapRoot "update.lock"
+  $bootstrapUpdater = Join-Path $bootstrapRoot "updater.ps1"
+  $bootstrapTranscript = Join-Path $bootstrapRoot "update.log"
+  $bootstrapDiagnostics = Join-Path $bootstrapRoot "executor.jsonl"
+  @{ status = "starting"; stage = "starting"; updateId = $bootstrapId } |
+    ConvertTo-Json | Set-Content -LiteralPath $bootstrapStatus -Encoding utf8
+  @{ updateId = $bootstrapId; createdAt = (Get-Date).ToUniversalTime().ToString("o") } |
+    ConvertTo-Json | Set-Content -LiteralPath $bootstrapLock -Encoding utf8
+  "return" | Set-Content -LiteralPath $bootstrapUpdater -Encoding utf8
+  $missingFinalStatusFailed = $false
+  try {
+    & (Join-Path $PSScriptRoot "start-windows-studio-update.ps1") `
+      -UpdaterScriptPath $bootstrapUpdater `
+      -UpdateId $bootstrapId `
+      -ExpectedTargetVersion "2.0.20" `
+      -StatusFile $bootstrapStatus `
+      -UpdateLockFile $bootstrapLock `
+      -LogFile $bootstrapTranscript `
+      -DiagnosticFile $bootstrapDiagnostics
+  } catch { $missingFinalStatusFailed = $true }
+  if (-not $missingFinalStatusFailed) {
+    throw "The update bootstrap accepted an updater that returned without a terminal status."
+  }
+  $bootstrapResult = Get-Content -LiteralPath $bootstrapStatus -Raw | ConvertFrom-Json
+  if ($bootstrapResult.status -ne "failed" -or $bootstrapResult.failedStage -ne "starting" -or
+      (Test-Path -LiteralPath $bootstrapLock)) {
+    throw "The update bootstrap did not persist a safe startup failure state."
+  }
+
+  $errorBootstrapRoot = Join-Path $testRoot "bootstrap-exception"
+  New-Item -ItemType Directory -Path $errorBootstrapRoot -Force | Out-Null
+  $errorBootstrapId = [guid]::NewGuid().ToString()
+  $errorStatus = Join-Path $errorBootstrapRoot "update-status.json"
+  $errorLock = Join-Path $errorBootstrapRoot "update.lock"
+  $errorUpdater = Join-Path $errorBootstrapRoot "updater.ps1"
+  $errorDiagnostics = Join-Path $errorBootstrapRoot "executor.jsonl"
+  @{ status = "starting"; stage = "starting"; updateId = $errorBootstrapId } |
+    ConvertTo-Json | Set-Content -LiteralPath $errorStatus -Encoding utf8
+  @{ updateId = $errorBootstrapId; createdAt = (Get-Date).ToUniversalTime().ToString("o") } |
+    ConvertTo-Json | Set-Content -LiteralPath $errorLock -Encoding utf8
+  'throw "token=ghp_123456789012345678901234567890123456 postgresql://user:password@localhost/ngt Authorization: Bearer private-auth-secret password=''private phrase''"' |
+    Set-Content -LiteralPath $errorUpdater -Encoding utf8
+  $scriptErrorFailed = $false
+  try {
+    & (Join-Path $PSScriptRoot "start-windows-studio-update.ps1") `
+      -UpdaterScriptPath $errorUpdater `
+      -UpdateId $errorBootstrapId `
+      -ExpectedTargetVersion "2.0.20" `
+      -StatusFile $errorStatus `
+      -UpdateLockFile $errorLock `
+      -LogFile (Join-Path $errorBootstrapRoot "update.log") `
+      -DiagnosticFile $errorDiagnostics
+  } catch { $scriptErrorFailed = $true }
+  $errorLog = Get-Content -LiteralPath $errorDiagnostics -Raw
+  $errorResult = Get-Content -LiteralPath $errorStatus -Raw | ConvertFrom-Json
+  if (-not $scriptErrorFailed -or $errorResult.status -ne "failed" -or
+      $errorLog -notmatch "token=\[redacted\]" -or
+      $errorLog -notmatch "\[redacted connection string\]" -or
+      $errorLog -match "ghp_123456789012345678901234567890123456|postgresql://user:password|private-auth-secret|private phrase") {
+    throw "The update bootstrap did not capture a redacted early PowerShell error."
+  }
+
   & (Join-Path $PSScriptRoot "test-windows-studio-install-coordination.ps1")
   Write-Output "Windows update safety behavior tests passed."
 } finally {

@@ -6,6 +6,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedManifestPath,
   [string]$CandidateDirectory = "",
+  [string]$BaselineTag = "",
   [switch]$ManualInstaller
 )
 $ErrorActionPreference = "Stop"
@@ -95,10 +96,33 @@ if ($CandidateDirectory) {
   }
 }
 
-$baselineOutput = & node scripts/windows-studio-release.mjs find-update-baseline $TargetTag
-if ($LASTEXITCODE -ne 0) { throw "Unable to find a supported published release for the update baseline." }
-$baseline = ($baselineOutput | Out-String) | ConvertFrom-Json
-if (-not $baseline) { throw "No published release with supported online-update assets was found." }
+if ($BaselineTag) {
+  if ($BaselineTag -notmatch '^v\d+\.\d+\.\d+$') {
+    throw "Online update baseline must be an exact stable release tag."
+  }
+  $baselineOutput = & $githubCli release view $BaselineTag --repo $repository --json tagName,isDraft,isPrerelease,assets
+  if ($LASTEXITCODE -ne 0) { throw "The requested online update baseline is not readable: $BaselineTag" }
+  $baseline = ($baselineOutput | Out-String) | ConvertFrom-Json
+  if ($baseline.tagName -ne $BaselineTag -or $baseline.isDraft -or $baseline.isPrerelease) {
+    throw "The requested online update baseline is not a published stable release: $BaselineTag"
+  }
+  $baselineAssetNames = @($baseline.assets | ForEach-Object name)
+  foreach ($assetName in @(
+    "ngt-studio-windows-$BaselineTag.zip",
+    "ngt-studio-windows-$BaselineTag.zip.sha256",
+    "ngt-studio-runtime-$BaselineTag.zip",
+    "ngt-studio-runtime-$BaselineTag.zip.sha256"
+  )) {
+    if ($baselineAssetNames -notcontains $assetName) {
+      throw "The requested online update baseline is missing $assetName."
+    }
+  }
+} else {
+  $baselineOutput = & node scripts/windows-studio-release.mjs find-update-baseline $TargetTag
+  if ($LASTEXITCODE -ne 0) { throw "Unable to find a supported published release for the update baseline." }
+  $baseline = ($baselineOutput | Out-String) | ConvertFrom-Json
+  if (-not $baseline) { throw "No published release with supported online-update assets was found." }
+}
 
 $baselineVersion = [version]($baseline.tagName -replace "^v", "")
 if ($baselineVersion -ge [version]$targetVersion) {
@@ -125,6 +149,8 @@ $dataRoot = if ($ManualInstaller) { Join-Path $installRoot "data-store" } else {
 $updateLock = Join-Path $installRoot "update.lock"
 $updateStatus = Join-Path $installRoot "update-status.json"
 $updateLog = Join-Path $installRoot "logs\online-update.log"
+$updateLaunchLog = $null
+$updateExecutorLog = $null
 $updateProcess = $null
 $installationAttempted = $false
 $cleanupSafe = $true
@@ -190,7 +216,16 @@ try {
     $env:NGT_READY_GH_SHIM = $shimCommand
     $env:NGT_READY_CANDIDATE_DIR = [System.IO.Path]::GetFullPath($CandidateDirectory)
     $env:NGT_READY_CANDIDATE_TAG = $TargetTag
+    $env:NGT_READY_CANDIDATE_MANIFEST = [System.IO.Path]::GetFullPath(
+      (Join-Path $CandidateDirectory "release-manifest.json")
+    )
+    $candidateFetchPreload = [System.IO.Path]::GetFullPath(
+      (Join-Path $PSScriptRoot "windows-studio-ready-fetch.cjs")
+    ).Replace("\", "/")
+    $preloadArgument = '--require="' + $candidateFetchPreload + '"'
+    $env:NODE_OPTIONS = (@($env:NODE_OPTIONS, $preloadArgument) | Where-Object { $_ }) -join " "
     $env:PATH = "$shimRoot;$env:PATH"
+    Write-Output "The isolated baseline application will discover only this local candidate through its normal latest-release API request."
   }
   if ($candidateNeedsContentCheck) {
     $candidateVerifyRoot = Join-Path $testRoot "candidate-assets"
@@ -374,38 +409,87 @@ try {
       throw "Manual upgrade did not supersede the old queued update task."
     }
   } else {
-    New-Item -ItemType Directory -Path (Split-Path -Parent $updateLog) -Force | Out-Null
-    @{ updateId = $updateId; createdAt = (Get-Date).ToUniversalTime().ToString("o") } |
-      ConvertTo-Json | Set-Content -LiteralPath $updateLock -Encoding utf8
-
-    $updaterPath = Join-Path $taskRoot "scripts\update-windows-studio.ps1"
-    $arguments = @(
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $updaterPath,
-      "-UpdateId", $updateId, "-ExpectedTargetVersion", $TargetTag,
-      "-StatusFile", $updateStatus, "-UpdateLockFile", $updateLock, "-LogFile", $updateLog
-    )
-    $argumentLine = ($arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join " "
-    $updateProcess = Start-Process -FilePath (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe") `
-      -ArgumentList $argumentLine -WindowStyle Hidden -PassThru
+    $apiStartUrl = "http://127.0.0.1:3000/api/system-update"
+    $apiBody = @{ targetVersion = $TargetTag } | ConvertTo-Json -Compress
+    try {
+      $apiStartResponse = Invoke-WebRequest -Uri $apiStartUrl `
+        -Method Post `
+        -Headers @{ Origin = "http://127.0.0.1:3000" } `
+        -ContentType "application/json" `
+        -Body $apiBody `
+        -UseBasicParsing `
+        -TimeoutSec 30
+    } catch {
+      $apiStatusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+      throw "The installed version's online-update API rejected the request (HTTP $apiStatusCode)."
+    }
+    if ([int]$apiStartResponse.StatusCode -ne 202) {
+      throw "The installed version's online-update API returned HTTP $($apiStartResponse.StatusCode), expected 202."
+    }
+    $apiStart = ([string]$apiStartResponse.Content | ConvertFrom-Json)
+    if ($apiStart.started -ne $true -or $apiStart.status -ne "starting" -or
+        -not $apiStart.updateId -or $apiStart.executorConfirmed -ne $false) {
+      throw "The installed version's online-update API returned an invalid task-start response."
+    }
+    $updateId = [string]$apiStart.updateId
+    $updateLog = Join-Path $installRoot "logs\update-$updateId.log"
+    $updateLaunchLog = Join-Path $installRoot "logs\update-launch-$updateId.jsonl"
+    $updateExecutorLog = Join-Path $installRoot "logs\update-executor-$updateId.jsonl"
+    Write-Output "Online update was started through POST /api/system-update (HTTP 202, update $updateId)."
 
     $deadline = (Get-Date).AddMinutes(50)
     $finalStatus = $null
+    $executorConfirmed = $false
+    $executorPidObserved = $false
+    $executorIdentityVerified = $false
+    $runningStageObserved = $false
+    $observedStages = @()
+    $expectedUpdaterPath = [System.IO.Path]::GetFullPath((Join-Path $taskRoot "scripts\update-windows-studio.ps1"))
     do {
-      if (Test-Path -LiteralPath $updateStatus) {
-        $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-        if ($finalStatus.status -eq "failed") {
-          if (-not $updateProcess.HasExited) { [void]$updateProcess.WaitForExit(30000) }
-          throw "Online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+      if (-not (Test-Path -LiteralPath $updateStatus -PathType Leaf)) {
+        throw "The update API accepted the request, but no persistent task status file appeared."
+      }
+      $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+      if ([string]$finalStatus.updateId -ne $updateId) {
+        throw "The update status changed to a different task after API acceptance."
+      }
+      if ($finalStatus.stage -and $observedStages -notcontains [string]$finalStatus.stage) {
+        $observedStages += [string]$finalStatus.stage
+      }
+      if ($finalStatus.status -eq "failed") {
+        throw "Online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+      }
+      if ($finalStatus.status -eq "running" -or $finalStatus.executorConfirmed -eq $true) {
+        $executorConfirmed = $finalStatus.executorConfirmed -eq $true
+        $runningStageObserved = $finalStatus.status -eq "running"
+      }
+      if ($finalStatus.executorPid -as [int]) {
+        $executorPidObserved = $true
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$finalStatus.executorPid)" -ErrorAction SilentlyContinue
+        if ($process) {
+          $commandLine = [string]$process.CommandLine
+          $updateArgument = '(?i)(?:^|\s)-UpdateId\s+"?' + [regex]::Escape($updateId) + '"?(?:\s|$)'
+          if ($process.Name -notmatch '(?i)^powershell\.exe$' -or
+              -not $commandLine.Contains($expectedUpdaterPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+              $commandLine -notmatch $updateArgument) {
+            throw "The reported executor PID does not match the PowerShell script and update ID."
+          }
+          $executorIdentityVerified = $true
+          $updateProcess = Get-Process -Id ([int]$finalStatus.executorPid) -ErrorAction SilentlyContinue
         }
       }
-      if ($updateProcess.HasExited -and -not (Test-Path -LiteralPath $updateLock)) { break }
-      Start-Sleep -Seconds 2
+      if ($finalStatus.status -eq "complete") { break }
+      $pollInterval = if ($executorConfirmed -and $executorIdentityVerified -and $runningStageObserved) { 500 } else { 100 }
+      Start-Sleep -Milliseconds $pollInterval
     } while ((Get-Date) -lt $deadline)
-    if (-not $updateProcess.HasExited) { throw "Online update executor exceeded its 50-minute limit." }
-    $updateProcess.WaitForExit()
-    if ($updateProcess.ExitCode -ne 0) { throw "Online update executor exited with code $($updateProcess.ExitCode)." }
-    if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
-        $finalStatus.actualVersion -ne $targetVersion -or $finalStatus.cleanupWarning) {
+    if (-not $finalStatus -or $finalStatus.status -ne "complete") {
+      throw "Online update did not reach a terminal status within 50 minutes."
+    }
+    if (-not $executorConfirmed -or -not $executorPidObserved -or
+        -not $executorIdentityVerified -or -not $runningStageObserved) {
+      throw "The online-update API task did not prove PowerShell process creation, executor confirmation, and a running stage."
+    }
+    if ($finalStatus.actualVersion -ne $targetVersion -or $finalStatus.cleanupWarning) {
       throw "Online update did not reach a clean completed state for $TargetTag."
     }
   }
@@ -472,6 +556,8 @@ try {
       $diagnosticSources += @(@($installerLog, $repairLog) | Where-Object { $_ })
     }
     if (Test-Path -LiteralPath $updateLog -PathType Leaf) { $diagnosticSources += $updateLog }
+    if ($updateLaunchLog -and (Test-Path -LiteralPath $updateLaunchLog -PathType Leaf)) { $diagnosticSources += $updateLaunchLog }
+    if ($updateExecutorLog -and (Test-Path -LiteralPath $updateExecutorLog -PathType Leaf)) { $diagnosticSources += $updateExecutorLog }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }
     $diagnosticSources += @(
       (Join-Path $installRoot "install-preflight.log"),

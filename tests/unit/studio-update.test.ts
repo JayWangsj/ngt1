@@ -1,4 +1,12 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -765,6 +773,169 @@ describe("studio update", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
+    const launchLog = await readFile(
+      path.join(
+        installRoot,
+        "logs",
+        `update-launch-${
+          JSON.parse(
+            await readFile(
+              path.join(installRoot, "update-status.json"),
+              "utf8",
+            ),
+          ).updateId
+        }.jsonl`,
+      ),
+      "utf8",
+    );
+    expect(launchLog).toContain('"event":"process-error"');
+    expect(launchLog).toContain('"error":"simulated spawn failure"');
+  });
+
+  it("fails when PowerShell exits with code zero before confirming script startup", async () => {
+    const { root, installRoot } = await studioRoot();
+    const child = updateProcess();
+    const initial = await startStudioUpdate({
+      root,
+      launch: () => child.process,
+    });
+    child.emit("spawn");
+    child.emit("close", 0, null);
+
+    await expect
+      .poll(async () => {
+        const status = JSON.parse(
+          await readFile(path.join(installRoot, "update-status.json"), "utf8"),
+        );
+        return status;
+      })
+      .toMatchObject({
+        status: "failed",
+        stage: "starting",
+        failedStage: "starting",
+        executorConfirmed: false,
+        message:
+          "The PowerShell executor exited before confirming script startup (code 0).",
+      });
+    const log = await getStudioUpdateLog(root);
+    expect(initial.logAvailable).toBe(true);
+    expect(log).toContain('"event":"process-created"');
+    expect(log).toContain('"event":"process-exited"');
+    expect(log).toContain('"event":"failure-status-persisted"');
+    await expect(
+      readFile(path.join(installRoot, "update.lock"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails a confirmed executor that exits with code zero without terminal status", async () => {
+    const { root, installRoot } = await studioRoot();
+    const child = updateProcess();
+    await startStudioUpdate({ root, launch: () => child.process });
+    const statusPath = path.join(installRoot, "update-status.json");
+    const status = JSON.parse(await readFile(statusPath, "utf8"));
+    await writeFile(
+      statusPath,
+      JSON.stringify({
+        ...status,
+        status: "running",
+        stage: "reading-release",
+        executorConfirmed: true,
+      }),
+    );
+
+    child.emit("close", 0, null);
+    await expect
+      .poll(async () => JSON.parse(await readFile(statusPath, "utf8")))
+      .toMatchObject({
+        status: "failed",
+        stage: "reading-release",
+        failedStage: "reading-release",
+        executorConfirmed: true,
+        message:
+          "The update executor exited without recording a final result (code 0).",
+      });
+  });
+
+  it("records a starting-status write failure and does not launch PowerShell", async () => {
+    const { root, installRoot } = await studioRoot();
+    const statusPath = path.join(installRoot, "update-status.json");
+    await writeFile(statusPath, JSON.stringify({ status: "idle" }));
+    await chmod(statusPath, 0o444);
+    let launchCount = 0;
+    try {
+      await expect(
+        startStudioUpdate({
+          root,
+          launch: () => {
+            launchCount += 1;
+            return updateProcess().process;
+          },
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await chmod(statusPath, 0o666);
+    }
+
+    expect(launchCount).toBe(0);
+    await expect(
+      readFile(path.join(installRoot, "update.lock"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    const logNames = await readdir(path.join(installRoot, "logs"));
+    const launchLogName = logNames.find((name) =>
+      name.startsWith("update-launch-"),
+    );
+    expect(launchLogName).toBeDefined();
+    const launchLog = await readFile(
+      path.join(installRoot, "logs", launchLogName!),
+      "utf8",
+    );
+    expect(launchLog).toContain('"event":"request-accepted"');
+    expect(launchLog).toContain('"event":"process-launch-failed"');
+  });
+
+  it("keeps startup diagnostics readable after the API process restarts", async () => {
+    const { root, installRoot } = await studioRoot();
+    await startStudioUpdate({ root, launch: () => updateProcess().process });
+    const statusPath = path.join(installRoot, "update-status.json");
+    const status = JSON.parse(await readFile(statusPath, "utf8"));
+    await writeFile(
+      statusPath,
+      JSON.stringify({
+        ...status,
+        createdAt: "2020-01-01T00:00:00.000Z",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await expect(
+      getStudioUpdateStatus(root, { inspect: async () => false }),
+    ).resolves.toMatchObject({ status: "interrupted" });
+    const log = await getStudioUpdateLog(root);
+    expect(log).toContain('"event":"request-accepted"');
+    expect(log).toContain("Node launcher");
+  });
+
+  it("rejects a status and lock that identify different update tasks", async () => {
+    const { root, installRoot } = await studioRoot();
+    const oldId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
+    await Promise.all([
+      writeFile(
+        path.join(installRoot, "update-status.json"),
+        JSON.stringify({ status: "starting", updateId: oldId }),
+      ),
+      writeFile(
+        path.join(installRoot, "update.lock"),
+        JSON.stringify({
+          updateId: "ce931cdf-1b06-40a2-a356-14c17e08dfb2",
+          createdAt: new Date().toISOString(),
+        }),
+      ),
+    ]);
+
+    await expect(getStudioUpdateStatus(root)).resolves.toMatchObject({
+      status: "verifying-task",
+      manualReview: true,
+    });
   });
 
   it("redacts tokens from diagnostic logs read from an isolated install root", async () => {
@@ -785,10 +956,19 @@ describe("studio update", () => {
       path.join(installRoot, "logs", `update-${updateId}.log`),
       "failed request token: ghp_123456789012345678901234567890123456\n",
     );
+    await writeFile(
+      path.join(installRoot, "logs", `update-launch-${updateId}.jsonl`),
+      'postgresql://ngt:secret@localhost/ngt token=ghp_123456789012345678901234567890123456 Authorization: Bearer private-auth-secret {"password":"private phrase","api_key":"private-key"}\n',
+    );
 
     const log = await getStudioUpdateLog(root);
     expect(log).toContain("[redacted]");
+    expect(log).toContain("[redacted connection string]");
     expect(log).not.toContain("ghp_");
+    expect(log).not.toContain("postgresql://ngt:secret");
+    expect(log).not.toContain("private-auth-secret");
+    expect(log).not.toContain("private phrase");
+    expect(log).not.toContain("private-key");
   });
 
   it("advances browser authorization and verifies private release access", async () => {

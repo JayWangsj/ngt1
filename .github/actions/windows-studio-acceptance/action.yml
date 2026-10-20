@@ -11,6 +11,10 @@ inputs:
     description: Release Ready only; simulate an isolated installer acceptance failure.
     required: false
     default: none
+  baseline_tag:
+    description: Exact published release to install before online-update acceptance.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -44,6 +48,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         NGT_RELEASE_READY: ${{ inputs.mode == 'ready' }}
+        NGT_ACCEPTANCE_BASELINE_TAG: ${{ inputs.baseline_tag }}
       run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}
     - name: Keep sanitized failure diagnostics
       if: failure()
