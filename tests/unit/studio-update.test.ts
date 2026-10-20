@@ -103,6 +103,7 @@ function launchUpdater(
         executorConfirmed: true,
         executorPid: child.process.pid,
         executorPath: executable,
+        updatedAt: new Date().toISOString(),
       }),
     );
     return child.process;
