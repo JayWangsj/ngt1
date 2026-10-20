@@ -392,6 +392,10 @@ describe("Windows persistent startup", () => {
       "scripts/test-windows-studio-online-update.ps1",
       "utf8",
     );
+    const acceptanceServer = await readFile(
+      "scripts/windows-studio-updater-acceptance-server.cjs",
+      "utf8",
+    );
     const innoInstaller = await readFile(
       "installer/windows-studio.iss",
       "utf8",
@@ -437,6 +441,9 @@ describe("Windows persistent startup", () => {
     expect(onlineUpdateTest).toContain("NGT_TEST_RELEASE_API_URL");
     expect(onlineUpdateTest).toContain(
       "The API started a process other than the versioned Rust updater.",
+    );
+    expect(acceptanceServer).toContain(
+      'request.url === "/repos/JayWangsj/ngt1/releases/latest"',
     );
     expect(innoInstaller).toContain("SW_HIDE, ewWaitUntilTerminated");
     expect(innoInstaller).toContain("skipifsilent");

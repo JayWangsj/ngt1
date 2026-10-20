@@ -57,7 +57,8 @@ const server = http.createServer((request, response) => {
   }
   if (
     request.method === "GET" &&
-    request.url === "/repos/JayWangsj/ngt1/releases/tags/" + tag
+    (request.url === "/repos/JayWangsj/ngt1/releases/latest" ||
+      request.url === "/repos/JayWangsj/ngt1/releases/tags/" + tag)
   ) {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(release));
