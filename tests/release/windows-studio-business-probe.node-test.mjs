@@ -240,3 +240,17 @@ test("release probe rejects invalid actions and requires snapshot for migration 
   assert.equal(cli.status, 2);
   assert.match(cli.stderr, /Usage: business-probe/);
 });
+
+test("current-schema fixture preserves its existing price option across repeated verification", async () => {
+  const { db, tables } = createDatabase();
+  const code = "CI-TEST-CURRENT-FIXTURE";
+  let snapshot = await runProbe(db, "seed-current", code);
+  const optionId = tables.priceRuleOption[0].id;
+
+  snapshot = await runProbe(db, "verify-and-write", code, snapshot);
+  snapshot = await runProbe(db, "verify-and-write", code, snapshot);
+
+  assert.equal(tables.priceRuleOption.length, 1);
+  assert.equal(tables.priceRuleOption[0].id, optionId);
+  assert.equal(snapshot.refs.optionId, optionId);
+});

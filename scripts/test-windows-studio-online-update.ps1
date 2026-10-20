@@ -381,7 +381,9 @@ try {
   if ($ordersResponse.StatusCode -ne 200) { throw "The previous studio orders page did not load." }
   $businessCode = "CI-UPDATE-" + [guid]::NewGuid().ToString("N")
   $businessSnapshotPath = Join-Path $testRoot "business-data-snapshot.json"
-  Invoke-BusinessDataProbe -ReleaseRoot (Join-Path $installRoot ("releases\$oldTag")) -Action "seed" -Code $businessCode -SnapshotPath $businessSnapshotPath
+  # v2.0.19 already has the legacy-rule conversion migration; seed its existing option instead of post-migration legacy data.
+  $businessSeedAction = if ($oldTag -eq "v2.0.19") { "seed-current" } else { "seed" }
+  Invoke-BusinessDataProbe -ReleaseRoot (Join-Path $installRoot ("releases\$oldTag")) -Action $businessSeedAction -Code $businessCode -SnapshotPath $businessSnapshotPath
 
   $taskRoot = Join-Path $installRoot ("releases\$oldTag")
   $taskConfig = Get-Content -LiteralPath (Join-Path $installRoot ".local\studio.json") -Raw | ConvertFrom-Json
