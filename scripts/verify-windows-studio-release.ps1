@@ -58,6 +58,7 @@ foreach ($entry in $metadata.files.PSObject.Properties) {
 }
 foreach ($requiredFile in @(
   ".next/standalone/server.js",
+  "scripts/start-windows-studio-update.ps1",
   "scripts/update-windows-studio.ps1",
   "scripts/download-public-release-asset.ps1",
   "scripts/check-windows-credential-store.ps1",

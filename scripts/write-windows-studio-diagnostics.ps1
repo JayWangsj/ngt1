@@ -17,10 +17,11 @@ $ErrorActionPreference = "Stop"
 function Protect-DiagnosticText([string]$Text) {
   $safe = $Text
   $safe = [regex]::Replace($safe, "(?is)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", "[REDACTED PRIVATE KEY]")
+  $safe = [regex]::Replace($safe, "(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]")
+  $safe = [regex]::Replace($safe, '(?i)("(?:password|secret|token|authorization)"\s*:\s*)"(?:\\.|[^"\\])*"', '$1"[REDACTED]"')
   $safe = [regex]::Replace($safe, '(?i)(password|secret|token|authorization)(\s*[:=]\s*)[^\s,;"]+', '$1$2[REDACTED]')
   $safe = [regex]::Replace($safe, 'github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]{20,}', '[REDACTED TOKEN]')
   $safe = [regex]::Replace($safe, "(?i)(postgres(?:ql)?://)[^:/\s]+:[^@/\s]+@", '$1[REDACTED]@')
-  $safe = [regex]::Replace($safe, "(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]")
   if ($safe.Length -gt 700000) { $safe = $safe.Substring($safe.Length - 700000) }
   return $safe
 }
@@ -52,6 +53,11 @@ foreach ($sourcePath in $SourcePaths) {
     "online-update" {
       if ((Split-Path -Leaf $sourcePath) -eq "online-update.log") { "online-update.log" }
       elseif ((Split-Path -Leaf $sourcePath) -eq "update-status.json") { "update-status.json" }
+      elseif ((Split-Path -Leaf $sourcePath) -match '^update-[0-9a-fA-F-]{36}\.log$') { "update-transcript.log" }
+      elseif ((Split-Path -Leaf $sourcePath) -match '^update-launch-[0-9a-fA-F-]{36}\.jsonl$') { "update-launch.jsonl" }
+      elseif ((Split-Path -Leaf $sourcePath) -match '^update-executor-[0-9a-fA-F-]{36}\.jsonl$') { "update-executor.jsonl" }
+      elseif ((Split-Path -Leaf $sourcePath) -eq "legacy-updater-probe.jsonl") { "update-executor-probe.jsonl" }
+      elseif ((Split-Path -Leaf $sourcePath) -eq "legacy-updater-process-probe.jsonl") { "update-launch-process-probe.jsonl" }
       elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
       else { $null }
     }

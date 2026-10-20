@@ -102,9 +102,14 @@ try {
   $legacyLockPlan = Start-NgtStudioManualInstall -InstallRoot $legacyLock.installRoot -TargetVersion "2.0.15"
   $legacyLockReservation = Get-NgtManualInstallReservation $legacyLock.installRoot
   $legacyLockHistory = Get-NgtInstallJson ([string](Get-NgtInstallJson (Join-Path $legacyLock.installRoot ".local\update-maintenance.json")).historyPath)
+  $archivedLegacyTimestamp = [System.DateTimeOffset]$legacyLockHistory.previousLock.createdAt
+  $originalLegacyTimestamp = [System.DateTimeOffset]::Parse(
+    $legacyLockTimestamp,
+    [System.Globalization.CultureInfo]::InvariantCulture
+  )
   if ($legacyLockPlan.mode -ne "upgrade" -or
       $legacyLockReservation.lock.operation -ne "manual-install" -or
-      $legacyLockHistory.previousLock.createdAt -ne $legacyLockTimestamp) {
+      $archivedLegacyTimestamp -ne $originalLegacyTimestamp) {
     throw "A safe legacy timestamp lock was not archived and replaced by the manual installer."
   }
 

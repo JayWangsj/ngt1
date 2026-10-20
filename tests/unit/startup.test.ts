@@ -131,6 +131,39 @@ describe("Windows persistent startup", () => {
       "$updaterManifestEntry.Value = (Get-FileHash -LiteralPath $baselineUpdaterScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()",
     );
     expect(acceptance).toContain(
+      'Write-NgtAcceptanceUpdateProbe "script-started"',
+    );
+    expect(acceptance).toContain(
+      'Write-NgtAcceptanceUpdateProbe "transcript-started"',
+    );
+    expect(acceptance).toContain(
+      'Write-NgtAcceptanceUpdateProbe "executor-confirming"',
+    );
+    expect(acceptance).toContain(
+      '$legacyUpdaterProbePath = Join-Path $testRoot "legacy-updater-probe.jsonl"',
+    );
+    expect(acceptance).toContain(
+      "if (Test-Path -LiteralPath $legacyUpdaterProbePath -PathType Leaf) { $diagnosticSources += $legacyUpdaterProbePath }",
+    );
+    expect(acceptance).toContain(
+      '$legacyUpdaterProcessProbePath = Join-Path $testRoot "legacy-updater-process-probe.jsonl"',
+    );
+    expect(acceptance).toContain(
+      "$env:NGT_READY_UPDATE_TRACE_FILE = [System.IO.Path]::GetFullPath($legacyUpdaterProcessProbePath)",
+    );
+    expect(acceptance).toContain(
+      'Join-Path $PSScriptRoot "windows-studio-ready-update-spawn-trace.cjs"',
+    );
+    expect(acceptance).toContain(
+      "if (Test-Path -LiteralPath $legacyUpdaterProcessProbePath -PathType Leaf) { $diagnosticSources += $legacyUpdaterProcessProbePath }",
+    );
+    const spawnTrace = await readFile(
+      "scripts/windows-studio-ready-update-spawn-trace.cjs",
+      "utf8",
+    );
+    expect(spawnTrace).toContain('event: "hook-loaded"');
+    expect(spawnTrace).toContain("updaterScriptName");
+    expect(acceptance).toContain(
       "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1",
     );
     expect(acceptance).toContain(

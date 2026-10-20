@@ -1,7 +1,15 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { appVersion } from "./version";
 
@@ -383,6 +391,10 @@ function inspectUpdaterProcess(
 ): Promise<boolean | undefined> {
   if (process.platform !== "win32") return Promise.resolve(undefined);
   const targetPath = path.resolve(options.scriptPath).toLowerCase();
+  const bootstrapPath = path
+    .join(path.dirname(targetPath), "start-windows-studio-update.ps1")
+    .toLowerCase()
+    .replace(/'/g, "''");
   const cacheKey = `${targetPath}:${options.executorPid || "scan"}:${options.updateId || "legacy"}`;
   const cached = processInspectionCache.get(cacheKey);
   if (cached && Date.now() - cached.checkedAt < 3_000)
@@ -404,7 +416,7 @@ function inspectUpdaterProcess(
     "  for ($index = 0; $index -lt $arguments.Count - 1; $index++) {",
     "    if ($arguments[$index].TrimStart('-', '/').ToLowerInvariant() -ne 'file') { continue }",
     "    try { $candidateScript = [System.IO.Path]::GetFullPath($arguments[$index + 1]) } catch { continue }",
-    "    if (-not $candidateScript.Equals($target, [System.StringComparison]::OrdinalIgnoreCase)) { continue }",
+    `    if (-not $candidateScript.Equals($target, [System.StringComparison]::OrdinalIgnoreCase) -and -not $candidateScript.Equals('${bootstrapPath}', [System.StringComparison]::OrdinalIgnoreCase)) { continue }`,
     "    if (-not $expectedUpdateId) { $alive = $true; break }",
     "    for ($idIndex = 0; $idIndex -lt $arguments.Count - 1; $idIndex++) {",
     "      if ($arguments[$idIndex].TrimStart('-', '/').ToLowerInvariant() -eq 'updateid' -and $arguments[$idIndex + 1] -eq $expectedUpdateId) { $alive = $true; break }",
@@ -601,6 +613,44 @@ function maintenancePath(installRoot: string) {
 
 function updateLogPath(installRoot: string, updateId: string) {
   return path.join(installRoot, "logs", `update-${updateId}.log`);
+}
+
+function updateLaunchLogPath(installRoot: string, updateId: string) {
+  return path.join(installRoot, "logs", `update-launch-${updateId}.jsonl`);
+}
+
+function updateExecutorLogPath(installRoot: string, updateId: string) {
+  return path.join(installRoot, "logs", `update-executor-${updateId}.jsonl`);
+}
+
+async function appendUpdateDiagnostic(
+  filePath: string,
+  updateId: string,
+  event: string,
+  details: Record<string, string | number | boolean | null> = {},
+) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const entry = redactUpdateLog(
+    JSON.stringify({
+      at: new Date().toISOString(),
+      updateId,
+      event,
+      ...details,
+    }),
+  );
+  await appendFile(filePath, `${entry}\n`, "utf8");
+}
+
+function diagnosticError(
+  cause: unknown,
+): Record<string, string | number | boolean | null> {
+  if (!(cause instanceof Error))
+    return { errorCode: null, error: "unknown error" };
+  const error = cause as NodeJS.ErrnoException;
+  return {
+    errorCode: error.code || null,
+    error: sanitizeUpdateDiagnostic(cause.message),
+  };
 }
 
 function authStatusPath(installRoot: string) {
@@ -1005,22 +1055,40 @@ export async function getStudioUpdateLog(root?: string) {
   if (!installRoot) return "";
   const status = await getStudioUpdateStatus(studioRoot);
   if (!status.updateId) return "";
-  try {
-    const contents = await readFile(
-      updateLogPath(installRoot, status.previousUpdateId || status.updateId),
-      "utf8",
-    );
-    return redactUpdateLog(contents.slice(-20_000));
-  } catch {
-    return "";
-  }
+  const updateId = status.previousUpdateId || status.updateId;
+  const logs = await Promise.all(
+    [
+      ["Node launcher", updateLaunchLogPath(installRoot, updateId)],
+      ["PowerShell bootstrap", updateExecutorLogPath(installRoot, updateId)],
+      ["PowerShell transcript", updateLogPath(installRoot, updateId)],
+    ].map(async ([label, filePath]) => {
+      try {
+        const contents = await readFile(filePath, "utf8");
+        return `=== ${label} ===\n${contents}`;
+      } catch {
+        return "";
+      }
+    }),
+  );
+  return redactUpdateLog(logs.filter(Boolean).join("\n").slice(-20_000));
 }
 
 function redactUpdateLog(contents: string) {
   return contents
+    .replace(
+      /((?:"|')?authorization(?:"|')?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+(?:\s+[^\s,;}]+)?)/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /((?:"|')?(?:password|passwd|secret|token|api[_-]?key)(?:"|')?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /(?:postgres(?:ql)?|mysql):\/\/[^\s"'<>]+/gi,
+      "[redacted connection string]",
+    )
     .replace(/github_pat_[A-Za-z0-9_]+/g, "[redacted token]")
-    .replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, "[redacted token]")
-    .replace(/(token\s*[:=]\s*)\S+/gi, "$1[redacted]");
+    .replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, "[redacted token]");
 }
 
 export function sanitizeUpdateDiagnostic(value: string) {
@@ -1396,6 +1464,10 @@ export async function startStudioUpdate(
     root?: string;
     launch?: ProcessLauncher;
     inspect?: ProcessInspector;
+    persistStartingStatus?: (
+      filePath: string,
+      status: StudioUpdateStatus,
+    ) => Promise<void>;
     targetVersion?: string;
   } = {},
 ) {
@@ -1564,9 +1636,53 @@ export async function startStudioUpdate(
       executorConfirmed: false,
     };
     activeUpdateRoots.add(installRoot);
+    const logFile = updateLogPath(installRoot, updateId);
+    const launchLogFile = updateLaunchLogPath(installRoot, updateId);
+    const executorLogFile = updateExecutorLogPath(installRoot, updateId);
+    const bootstrapScriptPath = path.join(
+      root,
+      "scripts",
+      "start-windows-studio-update.ps1",
+    );
+    const record = async (
+      event: string,
+      details: Record<string, string | number | boolean | null> = {},
+    ) => {
+      try {
+        await appendUpdateDiagnostic(launchLogFile, updateId, event, details);
+      } catch (cause) {
+        console.error("Unable to persist Windows update diagnostics.", {
+          updateId,
+          event,
+          ...diagnosticError(cause),
+        });
+      }
+    };
+    let processLaunchAttempted = false;
     try {
-      await writeJsonAtomically(taskStatusFile, status);
-      const logFile = updateLogPath(installRoot, updateId);
+      await appendUpdateDiagnostic(
+        launchLogFile,
+        updateId,
+        "request-accepted",
+        {
+          targetVersion: targetVersion || null,
+          scriptPath: path.resolve(scriptPath),
+        },
+      );
+      try {
+        await (options.persistStartingStatus || writeJsonAtomically)(
+          taskStatusFile,
+          status,
+        );
+      } catch (cause) {
+        await record("starting-status-write-failed", diagnosticError(cause));
+        throw cause;
+      }
+      await record("starting-status-persisted");
+      await record("process-launch-requested", {
+        bootstrapScriptPath: path.resolve(bootstrapScriptPath),
+      });
+      processLaunchAttempted = true;
       const child = (options.launch || launchProcess)(
         "powershell.exe",
         [
@@ -1574,6 +1690,8 @@ export async function startStudioUpdate(
           "-ExecutionPolicy",
           "Bypass",
           "-File",
+          bootstrapScriptPath,
+          "-UpdaterScriptPath",
           scriptPath,
           "-UpdateId",
           updateId,
@@ -1585,34 +1703,65 @@ export async function startStudioUpdate(
           lockFile,
           "-LogFile",
           logFile,
+          "-DiagnosticFile",
+          executorLogFile,
         ],
         { cwd: root, detached: true, stdio: "ignore", windowsHide: true },
       );
       let finished = false;
-      const failBeforeCompletion = async (message: string) => {
+      const failBeforeCompletion = async (
+        event: string,
+        message: string,
+        details: Record<string, string | number | boolean | null> = {},
+      ) => {
         if (finished) return;
         finished = true;
-        await withUpdateOwnership(installRoot, updateId, async () => {
-          const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-          if (
-            latest?.updateId === updateId &&
-            latest.status !== "complete" &&
-            latest.status !== "failed"
-          )
-            await writeJsonAtomically(taskStatusFile, {
-              ...latest,
-              status: "failed",
-              stage: latest.stage || "starting",
-              failedStage: latest.stage || "starting",
-              message,
-              executorConfirmed: false,
-              updatedAt: new Date().toISOString(),
-            });
-          await unlink(lockFile).catch(() => undefined);
-        }).catch(() => undefined);
-        activeUpdateRoots.delete(installRoot);
+        await record(event, details);
+        let terminalStatusAvailable = false;
+        try {
+          const owned = await withUpdateOwnership(
+            installRoot,
+            updateId,
+            async () => {
+              const latestState =
+                await readJsonState<StudioUpdateStatus>(taskStatusFile);
+              const latest = latestState.value;
+              if (latestState.unreadable || latest?.updateId !== updateId) {
+                await record("failure-status-not-owned-or-unreadable");
+                return;
+              }
+              if (latest.status !== "complete" && latest.status !== "failed") {
+                await writeJsonAtomically(taskStatusFile, {
+                  ...latest,
+                  status: "failed",
+                  stage: latest.stage || "starting",
+                  failedStage: latest.stage || "starting",
+                  message,
+                  executorConfirmed: latest.executorConfirmed === true,
+                  updatedAt: new Date().toISOString(),
+                });
+                terminalStatusAvailable = true;
+              } else {
+                terminalStatusAvailable = true;
+              }
+              await unlink(lockFile).catch(() => undefined);
+            },
+          );
+          if (!owned) await record("failure-ignored-after-lock-owner-changed");
+          else
+            await record(
+              terminalStatusAvailable
+                ? "failure-terminal-status-available"
+                : "failure-terminal-status-unavailable",
+            );
+        } catch (cause) {
+          await record("failure-status-write-failed", diagnosticError(cause));
+        } finally {
+          activeUpdateRoots.delete(installRoot);
+        }
       };
       child.once("spawn", () => {
+        void record("process-created", { pid: child.pid || null });
         void withUpdateOwnership(installRoot, updateId, async (currentLock) => {
           if (!child.pid) return;
           const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
@@ -1621,54 +1770,113 @@ export async function startStudioUpdate(
             ...currentLock,
             executorPid: child.pid,
           });
-        }).catch(() => undefined);
+        }).catch((cause) => {
+          void record("process-pid-persist-failed", diagnosticError(cause));
+        });
       });
       child.once("error", (error) => {
         void failBeforeCompletion(
+          "process-error",
           `Unable to start the update executor: ${error.message}`,
+          diagnosticError(error),
         );
       });
-      child.once("close", (code) => {
+      child.once("close", (code, signal) => {
         void (async () => {
           if (finished) {
             activeUpdateRoots.delete(installRoot);
             return;
           }
           finished = true;
-          await withUpdateOwnership(installRoot, updateId, async () => {
-            const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-            if (latest?.updateId !== updateId) return;
-            if (latest.status === "complete" || latest.status === "failed") {
-              await unlink(lockFile).catch(() => undefined);
-              return;
-            }
-            await writeJsonAtomically(taskStatusFile, {
-              ...latest,
-              status: "failed",
-              stage: latest.stage || "starting",
-              failedStage: latest.stage || "starting",
-              message: `The update executor exited before recording a final result (code ${code ?? "unknown"}).`,
-              executorConfirmed: false,
-              updatedAt: new Date().toISOString(),
-            });
-            await unlink(lockFile).catch(() => undefined);
-          }).catch(() => undefined);
-          activeUpdateRoots.delete(installRoot);
+          await record("process-exited", {
+            exitCode: code,
+            signal: signal || null,
+          });
+          try {
+            const owned = await withUpdateOwnership(
+              installRoot,
+              updateId,
+              async () => {
+                const latestState =
+                  await readJsonState<StudioUpdateStatus>(taskStatusFile);
+                const latest = latestState.value;
+                if (latestState.unreadable || latest?.updateId !== updateId) {
+                  await record("process-exit-status-unreadable-or-replaced");
+                  return;
+                }
+                if (
+                  latest.status === "complete" ||
+                  latest.status === "failed"
+                ) {
+                  await unlink(lockFile).catch(() => undefined);
+                  await record("process-exited-after-terminal-status", {
+                    status: latest.status,
+                    exitCode: code,
+                  });
+                  return;
+                }
+                const confirmed = latest.executorConfirmed === true;
+                const exitCode = code ?? "unknown";
+                const message = confirmed
+                  ? `The update executor exited without recording a final result (code ${exitCode}).`
+                  : `The PowerShell executor exited before confirming script startup (code ${exitCode}).`;
+                await writeJsonAtomically(taskStatusFile, {
+                  ...latest,
+                  status: "failed",
+                  stage: latest.stage || "starting",
+                  failedStage: latest.stage || "starting",
+                  message,
+                  updatedAt: new Date().toISOString(),
+                });
+                await record("failure-status-persisted", {
+                  stage: latest.stage || "starting",
+                  executorConfirmed: confirmed,
+                  exitCode: code,
+                });
+                await unlink(lockFile).catch(() => undefined);
+              },
+            );
+            if (!owned)
+              await record("process-exit-ignored-after-lock-owner-changed");
+          } catch (cause) {
+            await record("failure-status-write-failed", diagnosticError(cause));
+          } finally {
+            activeUpdateRoots.delete(installRoot);
+          }
         })();
       });
       child.unref();
       return { ...status, logAvailable: true };
     } catch (cause) {
       activeUpdateRoots.delete(installRoot);
-      const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-      if (latest?.updateId === updateId && latest.status === "starting")
-        await writeJsonAtomically(taskStatusFile, {
-          ...latest,
-          status: "failed",
-          failedStage: "starting",
-          message: `Unable to create the update executor: ${cause instanceof Error ? cause.message : String(cause)}`,
-          updatedAt: new Date().toISOString(),
-        }).catch(() => undefined);
+      await record(
+        processLaunchAttempted
+          ? "process-launch-failed"
+          : "start-request-failed",
+        diagnosticError(cause),
+      );
+      try {
+        const latestState =
+          await readJsonState<StudioUpdateStatus>(taskStatusFile);
+        const latest = latestState.value;
+        if (
+          !latestState.unreadable &&
+          latest?.updateId === updateId &&
+          latest.status === "starting"
+        )
+          await writeJsonAtomically(taskStatusFile, {
+            ...latest,
+            status: "failed",
+            failedStage: "starting",
+            message: `Unable to create the update executor: ${cause instanceof Error ? sanitizeUpdateDiagnostic(cause.message) : "unknown error"}`,
+            updatedAt: new Date().toISOString(),
+          });
+      } catch (statusCause) {
+        await record(
+          "failure-status-write-failed",
+          diagnosticError(statusCause),
+        );
+      }
       const currentLock = await readUpdateLock(lockFile);
       if (currentLock.value?.updateId === updateId)
         await unlink(lockFile).catch(() => undefined);

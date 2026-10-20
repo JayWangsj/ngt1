@@ -46,7 +46,7 @@ async function assertUniqueConstraint(operation, description) {
   );
 }
 
-async function createLegacyOrder(db, data) {
+async function createLegacyOrder(db, data, option) {
   const order = await db.workOrder.create({
     data: {
       code: data.code,
@@ -67,6 +67,13 @@ async function createLegacyOrder(db, data) {
     data: {
       orderId: order.id,
       ruleId: data.ruleId,
+      ...(option
+        ? {
+            priceOptionId: option.id,
+            priceOptionName: option.name,
+            requiredProductName: option.name,
+          }
+        : {}),
       project: "Display",
       suggested: "100.00",
       discount: "0.00",
@@ -95,7 +102,7 @@ async function createLegacyOrder(db, data) {
   return { order, item, productLine };
 }
 
-async function seedFixture(db, code) {
+async function seedFixture(db, code, { existingOption = false } = {}) {
   const actor = await db.user.create({
     data: {
       email: `${code.toLowerCase()}@example.test`,
@@ -161,6 +168,24 @@ async function seedFixture(db, code) {
       updatedAt: initialStockAt,
     },
   });
+  const option = existingOption
+    ? await db.priceRuleOption.create({
+        data: {
+          ruleId: rule.id,
+          productId: product.id,
+          name: product.name,
+          suggested: rule.suggested,
+          cost: rule.cost,
+          quantity: rule.requiredQuantity,
+          minutes: rule.minutes,
+          warrantyDays: 0,
+          enabled: true,
+          isDefault: true,
+          sortOrder: 0,
+          notes: rule.notes,
+        },
+      })
+    : null;
   const initialMovement = await db.inventoryMovement.create({
     data: {
       requestId: `initial-stock:${code}`,
@@ -178,22 +203,26 @@ async function seedFixture(db, code) {
     },
   });
 
-  const paid = await createLegacyOrder(db, {
-    code: `${code}-PAID`,
-    status: "COMPLETED",
-    customerName: customer.name,
-    deviceId: device.id,
-    fault: "Historical paid LCD repair",
-    ruleId: rule.id,
-    productId: product.id,
-    productName: product.name,
-    requiredQuantity: rule.requiredQuantity,
-    consumedAt,
-    createdAt: receivedAt,
-    updatedAt: completedAt,
-    pickedUpAt: completedAt,
-    pickedUpBy: "Release acceptance customer",
-  });
+  const paid = await createLegacyOrder(
+    db,
+    {
+      code: `${code}-PAID`,
+      status: "COMPLETED",
+      customerName: customer.name,
+      deviceId: device.id,
+      fault: "Historical paid LCD repair",
+      ruleId: rule.id,
+      productId: product.id,
+      productName: product.name,
+      requiredQuantity: rule.requiredQuantity,
+      consumedAt,
+      createdAt: receivedAt,
+      updatedAt: completedAt,
+      pickedUpAt: completedAt,
+      pickedUpBy: "Release acceptance customer",
+    },
+    option,
+  );
   const stockAfterUse = await db.product.update({
     where: { id: product.id },
     data: { stockQuantity: 6, updatedAt: consumedAt },
@@ -215,20 +244,24 @@ async function seedFixture(db, code) {
       createdAt: consumedAt,
     },
   });
-  const reservation = await createLegacyOrder(db, {
-    code: `${code}-RESERVED`,
-    status: "REPAIRING",
-    customerName: customer.name,
-    deviceId: device.id,
-    fault: "Open repair with reserved LCD",
-    ruleId: rule.id,
-    productId: product.id,
-    productName: product.name,
-    requiredQuantity: rule.requiredQuantity,
-    consumedAt: null,
-    createdAt: reservationCreatedAt,
-    updatedAt: repairingAt,
-  });
+  const reservation = await createLegacyOrder(
+    db,
+    {
+      code: `${code}-RESERVED`,
+      status: "REPAIRING",
+      customerName: customer.name,
+      deviceId: device.id,
+      fault: "Open repair with reserved LCD",
+      ruleId: rule.id,
+      productId: product.id,
+      productName: product.name,
+      requiredQuantity: rule.requiredQuantity,
+      consumedAt: null,
+      createdAt: reservationCreatedAt,
+      updatedAt: repairingAt,
+    },
+    option,
+  );
 
   const payments = [];
   for (const entry of [
@@ -309,6 +342,7 @@ async function seedFixture(db, code) {
     actorId: actor.id,
     productId: product.id,
     ruleId: rule.id,
+    ...(option ? { optionId: option.id } : {}),
     compatibilityId: compatibility.id,
     paidOrderId: paid.order.id,
     paidItemId: paid.item.id,
@@ -574,6 +608,13 @@ async function verifyMigratedFixture(db, code, snapshot) {
     "The legacy rule must migrate to exactly one option.",
   );
   const option = options[0];
+  if (refs.optionId) {
+    assert.equal(
+      option.id,
+      refs.optionId,
+      "An existing quote option changed during upgrade.",
+    );
+  }
   assert.equal(option.productId, refs.productId);
   assert.equal(option.name, data.product.name);
   assert.equal(money(option.suggested), "100.00");
@@ -825,6 +866,8 @@ async function createPostMigrationOrder(db, refs, data, option) {
 
 async function runProbe(db, action, code, snapshot) {
   if (action === "seed") return seedFixture(db, code);
+  if (action === "seed-current")
+    return seedFixture(db, code, { existingOption: true });
   if (action === "verify-and-write")
     return verifyMigratedFixture(db, code, snapshot);
   throw new Error("Unknown business probe action: " + action);

@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Require master and exact-SHA Verify MVP before candidate build
+      - name: Require exact-SHA Verify MVP for candidate ref before build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           NGT_RELEASE_READY: "true"
@@ -72,7 +72,11 @@ jobs:
           failure_probe: ${{ inputs.failure_probe }}
 
   online-update-acceptance:
-    name: Release Ready online-update acceptance
+    name: Release Ready online-update acceptance (${{ matrix.baseline_tag }})
+    strategy:
+      fail-fast: false
+      matrix:
+        baseline_tag: [v2.0.18, v2.0.19]
     needs: build
     runs-on: windows-2022
     timeout-minutes: 120
@@ -84,6 +88,7 @@ jobs:
         with:
           mode: ready
           acceptance: online-update
+          baseline_tag: ${{ matrix.baseline_tag }}
 
   manual-installer-acceptance:
     name: Release Ready manual upgrade and repair acceptance
