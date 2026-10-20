@@ -433,6 +433,7 @@ describe("Windows persistent startup", () => {
     expect(updater).toContain("finish_failed");
     expect(updater).toContain("update_log_path");
     expect(onlineUpdateTest).toContain("Get-NgtUpdaterVisibleWindows");
+    expect(onlineUpdateTest).toContain("Get-NgtScreenVisibleWindows");
     expect(onlineUpdateTest).toContain("Get-NgtVisibleWindowProcessIds");
     expect(onlineUpdateTest).toContain("GetWindowRect");
     expect(onlineUpdateTest).toContain("windowBounds");

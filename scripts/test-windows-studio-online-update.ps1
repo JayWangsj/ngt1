@@ -203,14 +203,6 @@ public static class NgtUpdaterAcceptanceWindowProbe {
   [DllImport("user32.dll")]
   private static extern int GetSystemMetrics(int index);
 
-  public static int[] GetVisibleProcessIds() {
-    var processIds = new HashSet<int>();
-    foreach (var window in GetVisibleWindows()) processIds.Add(window.ProcessId);
-    var result = new int[processIds.Count];
-    processIds.CopyTo(result);
-    return result;
-  }
-
   public static WindowInfo[] GetVisibleWindows() {
     var windows = new List<WindowInfo>();
     EnumWindows((window, state) => {
@@ -249,6 +241,25 @@ public static class NgtUpdaterAcceptanceWindowProbe {
 }
 "@
 
+function Get-NgtScreenVisibleWindows {
+  $visibleWindows = [NgtUpdaterAcceptanceWindowProbe]::GetVisibleWindows()
+  return @($visibleWindows | Where-Object {
+    (-not $_.BoundsAvailable) -or
+    ((($_.Right -gt $_.Left) -and ($_.Bottom -gt $_.Top)) -and $_.OnScreen)
+  } | ForEach-Object {
+    $windowInfo = $_
+    $windowProcess = Get-Process -Id ([int]$windowInfo.ProcessId) -ErrorAction SilentlyContinue
+    [pscustomobject]@{
+      processId = [int]$windowInfo.ProcessId
+      windowTitle = [string]$windowProcess.MainWindowTitle
+      windowClass = [string]$windowInfo.ClassName
+      windowBounds = "[$($windowInfo.Left),$($windowInfo.Top),$($windowInfo.Right),$($windowInfo.Bottom)]"
+      boundsAvailable = [bool]$windowInfo.BoundsAvailable
+      onScreen = [bool]$windowInfo.OnScreen
+    }
+  })
+}
+
 function Get-NgtUpdaterVisibleWindows([int]$UpdaterPid) {
   $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
   $processIds = [System.Collections.Generic.HashSet[int]]::new()
@@ -262,32 +273,28 @@ function Get-NgtUpdaterVisibleWindows([int]$UpdaterPid) {
       }
     }
   } while ($added)
-  $visibleWindows = [NgtUpdaterAcceptanceWindowProbe]::GetVisibleWindows()
+  $visibleWindows = @(Get-NgtScreenVisibleWindows)
   return @($visibleWindows | Where-Object {
-    $processIds.Contains([int]$_.ProcessId) -and (
-      (-not $_.BoundsAvailable) -or
-      ((($_.Right -gt $_.Left) -and ($_.Bottom -gt $_.Top)) -and $_.OnScreen)
-    )
+    $processIds.Contains([int]$_.ProcessId)
   } | ForEach-Object {
     $windowInfo = $_
-    $windowProcess = Get-Process -Id ([int]$windowInfo.ProcessId) -ErrorAction SilentlyContinue
     $process = $processes | Where-Object { [int]$_.ProcessId -eq [int]$windowInfo.ProcessId } | Select-Object -First 1
     [pscustomobject]@{
       processId = [int]$windowInfo.ProcessId
       name = [string]$process.Name
       parentProcessId = [int]$process.ParentProcessId
-      windowTitle = [string]$windowProcess.MainWindowTitle
-      windowClass = [string]$windowInfo.ClassName
-      windowBounds = "[$($windowInfo.Left),$($windowInfo.Top),$($windowInfo.Right),$($windowInfo.Bottom)]"
-      boundsAvailable = [bool]$windowInfo.BoundsAvailable
-      onScreen = [bool]$windowInfo.OnScreen
+      windowTitle = [string]$windowInfo.windowTitle
+      windowClass = [string]$windowInfo.windowClass
+      windowBounds = [string]$windowInfo.windowBounds
+      boundsAvailable = [bool]$windowInfo.boundsAvailable
+      onScreen = [bool]$windowInfo.onScreen
       commandLine = [string]$process.CommandLine
     }
   })
 }
 
 function Get-NgtVisibleWindowProcessIds {
-  return @([NgtUpdaterAcceptanceWindowProbe]::GetVisibleProcessIds())
+  return @((Get-NgtScreenVisibleWindows | Select-Object -ExpandProperty processId -Unique))
 }
 
 function Normalize-LegacyBaselineDocumentationPaths([string]$Root) {
@@ -571,11 +578,14 @@ try {
       }
       $newVisibleWindowIds = @(Get-NgtVisibleWindowProcessIds | Where-Object { $_ -notin $visibleWindowBaseline })
       if ($newVisibleWindowIds.Count -gt 0) {
-        $windowOwners = ($newVisibleWindowIds | ForEach-Object {
-          $windowProcess = Get-Process -Id $_ -ErrorAction SilentlyContinue
+        $newVisibleWindows = @(Get-NgtScreenVisibleWindows | Where-Object {
+          $_.processId -in $newVisibleWindowIds
+        })
+        $windowOwners = ($newVisibleWindows | ForEach-Object {
+          $windowProcess = Get-Process -Id $_.processId -ErrorAction SilentlyContinue
           if ($windowProcess) {
-            "$($windowProcess.ProcessName)/PID $_ title='$($windowProcess.MainWindowTitle)'"
-          } else { "PID $_" }
+            "$($windowProcess.ProcessName)/PID $($_.processId) class='$($_.windowClass)' bounds=$($_.windowBounds) title='$($_.windowTitle)'"
+          } else { "PID $($_.processId) class='$($_.windowClass)' bounds=$($_.windowBounds)" }
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
