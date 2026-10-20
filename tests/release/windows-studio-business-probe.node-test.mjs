@@ -141,6 +141,7 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
   const { db, tables } = createDatabase();
   const code = "CI-TEST-LEGACY-FIXTURE";
   let snapshot = await runProbe(db, "seed", code);
+  assert.equal(Object.hasOwn(snapshot.data.device, "createdAt"), false);
   assert.equal(snapshot.data.rule.suggested, "100.00");
   assert.equal(snapshot.data.product.stockQuantity, 6);
   assert.equal(snapshot.data.rule.requiredQuantity, 2);
