@@ -699,3 +699,18 @@ describe("Windows persistent startup", () => {
     expect(icon.readUInt32LE(firstImageOffset)).toBe(40);
   });
 });
+
+describe("Windows installer failure diagnostics", () => {
+  it("logs the original PowerShell error and rethrows it without ScriptHalted", async () => {
+    const installer = await readFile(
+      "scripts/install-windows-studio.ps1",
+      "utf8",
+    );
+    expect(installer).toContain("$failureRecord = $_");
+    expect(installer).toContain(
+      "$failureRecord.InvocationInfo.PositionMessage",
+    );
+    expect(installer).toContain("$failureRecord.ScriptStackTrace");
+    expect(installer).toContain("throw $failureRecord");
+  });
+});

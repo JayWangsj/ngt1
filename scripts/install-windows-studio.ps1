@@ -144,8 +144,21 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
 }
 
 trap {
-  $installFailure = $_.Exception.Message
+  $failureRecord = $_
+  $installFailure = [string]$failureRecord.Exception.Message -replace "[\r\n]", " "
   $failedInstallStage = $script:NgtInstallStage
+  try {
+    $failureLog = Join-Path $env:LOCALAPPDATA "NGT\install-stages.log"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $failureLog) -Force | Out-Null
+    Add-Content -LiteralPath $failureLog -Value ("{0:o} FAILURE {1} type={2} reason={3}" -f `
+      (Get-Date).ToUniversalTime(), $failedInstallStage, $failureRecord.Exception.GetType().FullName, $installFailure)
+    if ($failureRecord.InvocationInfo.PositionMessage) {
+      Add-Content -LiteralPath $failureLog -Value ("POSITION {0}" -f $failureRecord.InvocationInfo.PositionMessage)
+    }
+    if ($failureRecord.ScriptStackTrace) {
+      Add-Content -LiteralPath $failureLog -Value ("STACK {0}" -f $failureRecord.ScriptStackTrace)
+    }
+  } catch { }
   if (($manualInstall -or $onlineInstall) -and (Get-Command Set-NgtStudioManualInstallFailure -ErrorAction SilentlyContinue)) {
     $recoveryStatus = "not-started"
     $restored = $false
@@ -165,7 +178,7 @@ trap {
         -RecoveryStatus $recoveryStatus
     } catch { }
   }
-  throw
+  throw $failureRecord
 }
 
 $sourceRoot = Split-Path -Parent $PSScriptRoot
