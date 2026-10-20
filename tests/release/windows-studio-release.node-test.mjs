@@ -804,6 +804,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /fn run_installer\(/);
   assert.match(updater, /\/VERYSILENT/);
   assert.match(updater, /\/SUPPRESSMSGBOXES/);
+  assert.match(updater, /\/SP-/);
   assert.match(updater, /\/NORESTART/);
   assert.match(updater, /fn hide_console\(/);
   assert.match(updater, /0x08000000/);

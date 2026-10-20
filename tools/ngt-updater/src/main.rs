@@ -734,6 +734,7 @@ fn run_installer(args: &Args, installer: &Path, log_path: &Path) -> Result<ExitS
     command
         .arg("/VERYSILENT")
         .arg("/SUPPRESSMSGBOXES")
+        .arg("/SP-")
         .arg("/NORESTART")
         .arg(format!("/LOG={}", installer_log.display()))
         .arg(format!("/NGTUpdateId={}", args.update_id));

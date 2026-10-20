@@ -426,6 +426,7 @@ describe("Windows persistent startup", () => {
     expect(updater).toContain("CREATE_NO_WINDOW");
     expect(updater).toContain('"/VERYSILENT"');
     expect(updater).toContain('"/SUPPRESSMSGBOXES"');
+    expect(updater).toContain('"/SP-"');
     expect(updater).toContain('"/NORESTART"');
     expect(updater).toContain("check_install_space");
     expect(updater).toContain('"actualVersion": args.target_version');
