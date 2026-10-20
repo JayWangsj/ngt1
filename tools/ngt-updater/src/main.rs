@@ -62,7 +62,6 @@ struct Asset {
     id: u64,
     name: String,
     size: u64,
-    browser_download_url: String,
     digest: Option<String>,
 }
 
@@ -1224,7 +1223,6 @@ mod tests {
                     id: id as u64,
                     name: name.clone(),
                     size: 10,
-                    browser_download_url: String::new(),
                     digest: None,
                 })
                 .collect(),
