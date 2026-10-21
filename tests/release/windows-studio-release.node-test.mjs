@@ -815,6 +815,19 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     candidateBuildAction,
     /cargo clippy --manifest-path tools\/ngt-updater\/Cargo\.toml --all-targets --all-features -- -D warnings/,
   );
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance manual-installer/,
+  );
+  assert.ok(
+    onlineAcceptanceWorkflow.indexOf("-Acceptance online-update") <
+      onlineAcceptanceWorkflow.indexOf("-Acceptance manual-installer"),
+    "manual upgrade and repair acceptance must follow online acceptance on the exact candidate",
+  );
+  assert.match(online, /Invoke-GhDownload -Tag \$oldTag/);
+  assert.match(online, /Assert-ReleaseChecksum \$oldAppArchive/);
+  assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
+  assert.match(online, /Manual repair installer/);
   assert.match(release, /actions\/upload-artifact@v4/);
   assert.match(release, /name: ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(ci, /actions\/upload-artifact@v4/);

@@ -56,3 +56,9 @@ jobs:
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
           Get-ChildItem -LiteralPath $candidate -Force | Copy-Item -Destination $destination -Recurse -Force
           ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update
+      - name: Verify the published v2.0.19 baseline upgrades and repairs with the candidate installer
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NGT_RELEASE_READY: "true"
+        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance manual-installer
