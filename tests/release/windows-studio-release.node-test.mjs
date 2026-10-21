@@ -822,11 +822,14 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /fn finish_failed\(/);
   assert.match(updater, /"actualVersion"/);
   assert.match(online, /Get-NgtUpdaterWindowDiagnostics/);
+  assert.match(online, /Start-Process -FilePath \$AcceptanceUpdaterPath/);
+  assert.match(online, /-ArgumentList @\("--test-mutex-name"/);
+  assert.match(online, /WaitForExit\(30000\)/);
   assert.match(
     online,
-    /--test-mutex-name \$mutexRootVariant \$mutexOutputPath/,
+    /\$mutexProcessExitCode = \$mutexDiagnosticProcess\.ExitCode/,
   );
-  assert.match(online, /\$mutexProcessExitCode = \$LASTEXITCODE/);
+  assert.match(online, /-WindowStyle Hidden -PassThru/);
   assert.match(online, /process exit code \{1\}; diagnostic: \{2\}/);
   assert.match(online, /different update mutex identities for path/);
   assert.match(online, /Get-NgtScreenVisibleWindows/);

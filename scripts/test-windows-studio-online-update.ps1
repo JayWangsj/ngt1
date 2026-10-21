@@ -605,8 +605,15 @@ try {
     New-Item -ItemType Junction -Path $mutexAlias -Target $installRoot | Out-Null
     foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
       $mutexOutputPath = Join-Path $testRoot ("mutex-name-" + [guid]::NewGuid().ToString("N") + ".txt")
-      $null = & $AcceptanceUpdaterPath --test-mutex-name $mutexRootVariant $mutexOutputPath
-      $mutexProcessExitCode = $LASTEXITCODE
+      $mutexDiagnosticProcess = Start-Process -FilePath $AcceptanceUpdaterPath `
+        -ArgumentList @("--test-mutex-name", ('"{0}"' -f $mutexRootVariant), ('"{0}"' -f $mutexOutputPath)) `
+        -WindowStyle Hidden -PassThru
+      if (-not $mutexDiagnosticProcess.WaitForExit(30000)) {
+        Stop-Process -Id $mutexDiagnosticProcess.Id -Force
+        throw "Rust updater mutex diagnostic timed out after 30 seconds."
+      }
+      $mutexDiagnosticProcess.Refresh()
+      $mutexProcessExitCode = $mutexDiagnosticProcess.ExitCode
       if (-not (Test-Path -LiteralPath $mutexOutputPath -PathType Leaf)) {
         throw ("Rust updater did not write the mutex identity diagnostic for path '{0}' (process exit code {1}; output file missing)." -f `
           $mutexRootVariant, $mutexProcessExitCode)
