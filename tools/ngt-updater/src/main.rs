@@ -1356,24 +1356,18 @@ fn redact_sensitive_assignment(message: &str, index: usize) -> Option<(usize, St
     if !sensitive {
         return None;
     }
-    let key_end = cursor;
-    let key_quote = if index > 0
+    if index > 0
         && matches!(bytes[index - 1], b'\'' | b'"')
         && bytes.get(cursor) == Some(&bytes[index - 1])
     {
-        let quote = bytes[cursor];
         cursor += 1;
-        Some(quote)
-    } else {
-        None
-    };
+    }
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
         cursor += 1;
     }
     if cursor == bytes.len() || !matches!(bytes[cursor], b'=' | b':') {
         return None;
     }
-    let delimiter = bytes[cursor] as char;
     cursor += 1;
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
         cursor += 1;
@@ -1382,11 +1376,7 @@ fn redact_sensitive_assignment(message: &str, index: usize) -> Option<(usize, St
     if end == cursor {
         return None;
     }
-    let mut key_name = message[index..key_end].to_owned();
-    if let Some(quote) = key_quote {
-        key_name.push(quote as char);
-    }
-    Some((end, format!("{}{}{}", key_name, delimiter, redacted)))
+    Some((end, format!("{}{}", &message[index..cursor], redacted)))
 }
 
 fn redact_value(message: &str, start: usize) -> (usize, String) {
