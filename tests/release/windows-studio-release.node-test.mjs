@@ -806,7 +806,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /fn download_asset\(/);
   assert.match(updater, /fn run_installer\(/);
   assert.match(updater, /--test-mutex-name/);
-  assert.match(updater, /acceptance_mutex_diagnostic\(update_mutex_name\(&root\)\)/);
+  assert.match(
+    updater,
+    /acceptance_mutex_diagnostic\(update_mutex_name\(&root\)\)/,
+  );
   assert.match(updater, /fs::write\(output_path, diagnostic\)/);
   assert.match(updater, /ERROR \{\}: \{\}/);
   assert.match(updater, /\/VERYSILENT/);
