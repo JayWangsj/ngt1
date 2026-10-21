@@ -929,7 +929,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /InstallerPath = Join-Path/);
   assert.match(standardUserAcceptance, /"manual-installer"/);
   assert.match(online, /if \(\$ManualInstaller\)/);
-  assert.doesNotMatch(online, /status = "queued"\s+previousVersion = \(\$oldTag/);
+  assert.doesNotMatch(
+    online,
+    /status = "queued"\s+previousVersion = \(\$oldTag/,
+  );
   assert.match(online, /\$repairStatus\.installMode -ne "repair"/);
   assert.match(installerAcceptance, /function Wait-NgtInstallerProcess/);
   assert.match(installerAcceptance, /\.WaitForExit\(15000\)/);
