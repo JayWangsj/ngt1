@@ -700,6 +700,12 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
       "utf8",
     )
   ).replace(/\r\n/g, "\n");
+  const candidateBuildAction = (
+    await readText(
+      ".github/actions/build-windows-studio-candidate/action.yml",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
   const acceptanceAction = (
     await readText(
       ".github/actions/windows-studio-acceptance/action.yml",
@@ -794,6 +800,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
   assert.match(onlineAcceptanceWorkflow, /build-windows-studio-candidate/);
   assert.match(
+    candidateBuildAction,
+    /Run Windows updater coordination and safety regressions[\s\S]*test-windows-studio-update-safety\.ps1/,
+  );
+  assert.match(
     onlineAcceptanceWorkflow,
     /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance online-update/,
   );
@@ -836,6 +846,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /process exit code \{1\}; diagnostic: \{2\}/);
   assert.match(online, /different update mutex identities for path/);
   assert.match(online, /Get-NgtScreenVisibleWindows/);
+  assert.ok(
+    online.indexOf("$windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics") <
+      online.indexOf(
+        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
+      ),
+    "window evidence must be collected before a failed update ends acceptance",
+  );
   assert.match(online, /silent online update displayed a visible installer/);
   assert.match(online, /Get-NgtInteractiveSessionEvidence/);
   assert.match(online, /activeConsoleSessionId/);

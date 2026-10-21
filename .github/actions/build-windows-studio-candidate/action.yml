@@ -35,6 +35,9 @@ runs:
     - name: Install pinned dependencies
       shell: powershell
       run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy
+    - name: Run Windows updater coordination and safety regressions
+      shell: powershell
+      run: ./scripts/test-windows-studio-update-safety.ps1
     - name: Build Windows application from qualified source
       shell: powershell
       run: pnpm build

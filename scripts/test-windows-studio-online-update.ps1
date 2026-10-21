@@ -671,13 +671,14 @@ try {
     $deadline = (Get-Date).AddMinutes(50)
     $finalStatus = $null
     do {
+      $failedUpdateMessage = $null
       if (Test-Path -LiteralPath $updateStatus) {
         $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
         if ([string]$finalStatus.updateId -ne $updateId) {
           throw "The persisted update state changed ownership during online update."
         }
         if ($finalStatus.status -eq "failed") {
-          throw "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+          $failedUpdateMessage = "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
         }
       }
       $windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics -UpdaterPid $updaterPid)
@@ -704,6 +705,7 @@ try {
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
+      if ($failedUpdateMessage) { throw $failedUpdateMessage }
       try {
         $updateProcess.Refresh()
         $peakUpdaterWorkingSet = [Math]::Max($peakUpdaterWorkingSet, [long]$updateProcess.PeakWorkingSet64)
@@ -768,6 +770,9 @@ try {
 
   $activeConfig = Get-Content -LiteralPath (Join-Path $installRoot ".local\studio.json") -Raw | ConvertFrom-Json
   $activeReleaseRoot = [System.IO.Path]::GetFullPath([string]$activeConfig.activeRelease)
+  if ([System.IO.Path]::GetFullPath([string]$activeConfig.dataRoot) -ine [System.IO.Path]::GetFullPath($dataRoot)) {
+    throw "The update changed the configured database data root."
+  }
   if ($activeReleaseRoot -ne [System.IO.Path]::GetFullPath((Join-Path $installRoot "releases\$TargetTag"))) {
     throw "The online update did not activate the candidate release."
   }
