@@ -653,6 +653,10 @@ try {
     $updaterPid = [int]$startResponse.executorPid
     $updaterPath = Join-Path $taskRoot "tools\NGTUpdater.exe"
     $updateProcess = Get-Process -Id $updaterPid -ErrorAction Stop
+    $updaterProcessHandle = $updateProcess.Handle
+    if ($updaterProcessHandle -eq [IntPtr]::Zero) {
+      throw "The acceptance could not retain a process handle for the Rust updater."
+    }
     if ([System.IO.Path]::GetFullPath($updateProcess.Path) -ine [System.IO.Path]::GetFullPath($updaterPath)) {
       throw "The API started a process other than the versioned Rust updater."
     }
@@ -683,7 +687,15 @@ try {
       }
       $windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics -UpdaterPid $updaterPid)
       foreach ($window in $windowDiagnostics) {
-        $observedWindowEvidence["$($window.handle)/$($window.processId)"] = $window
+        $windowKey = "$($window.handle)/$($window.processId)"
+        if (-not $observedWindowEvidence.ContainsKey($windowKey)) {
+          $observedWindowEvidence[$windowKey] = $window
+          Write-Output ("Window evidence: HWND={0} class='{1}' bounds={2} size={3}x{4} style={5} exstyle={6} visible={7} onScreen={8} pid={9} process='{10}' path='{11}' parent={12} session={13} user='{14}' title='{15}' command='{16}'" -f `
+            $window.handle, $window.windowClass, $window.windowBounds, $window.width, $window.height,
+            $window.style, $window.extendedStyle, $window.visible, $window.onScreen, $window.processId,
+            $window.processName, $window.processPath, $window.parentProcessId, $window.sessionId,
+            $window.user, $window.windowTitle, $window.commandLine)
+        }
       }
       $unexpectedUpdaterWindows = @($windowDiagnostics | Where-Object {
         $_.visible -and ((-not $_.boundsAvailable) -or
@@ -735,6 +747,9 @@ try {
     $updateProcess.Refresh()
     if (-not $updateProcess.HasExited) { throw "The Rust updater exceeded its 50-minute limit." }
     $updateProcess.WaitForExit()
+    Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
+      $sessionEvidence.sessionId, $observedWindowEvidence.Count)
+    Write-Output ("Rust updater process exit code: {0}." -f $updateProcess.ExitCode)
     if ($updateProcess.ExitCode -ne 0) { throw "Rust updater exited with code $($updateProcess.ExitCode)." }
     if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
         $finalStatus.actualVersion -ne $targetVersion) {
@@ -749,15 +764,6 @@ try {
       throw "The restarted NGT API did not report the verified installed version."
     }
     if (Test-Path -LiteralPath $updateLock) { throw "The updater left its task lock after exiting." }
-    Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
-      $sessionEvidence.sessionId, $observedWindowEvidence.Count)
-    foreach ($window in $observedWindowEvidence.Values) {
-      Write-Output ("Window evidence: HWND={0} class='{1}' bounds={2} size={3}x{4} style={5} exstyle={6} visible={7} onScreen={8} pid={9} process='{10}' path='{11}' parent={12} session={13} user='{14}' title='{15}' command='{16}'" -f `
-        $window.handle, $window.windowClass, $window.windowBounds, $window.width, $window.height,
-        $window.style, $window.extendedStyle, $window.visible, $window.onScreen, $window.processId,
-        $window.processName, $window.processPath, $window.parentProcessId, $window.sessionId,
-        $window.user, $window.windowTitle, $window.commandLine)
-    }
     Write-Output ("Rust updater peak working set: {0:N1} MiB; CPU time: {1:N1} s." -f `
       ($peakUpdaterWorkingSet / 1MB), $updateProcess.TotalProcessorTime.TotalSeconds)
     if ($peakUpdaterWorkingSet -gt 100MB) {

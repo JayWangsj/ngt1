@@ -727,6 +727,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
+  const updateSafety = (
+    await readText("scripts/test-windows-studio-update-safety.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
   const installerAcceptance = (
     await readText("scripts/test-windows-studio-installer.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -843,6 +846,17 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /\$mutexProcessExitCode = \$mutexDiagnosticProcess\.ExitCode/,
   );
   assert.match(online, /-WindowStyle Hidden -PassThru/);
+  assert.match(online, /\$updaterProcessHandle = \$updateProcess\.Handle/);
+  assert.match(
+    updateSafety,
+    /\$observedExitCodeHandle = \$observedExitCodeChild\.Handle/,
+  );
+  assert.match(updateSafety, /\$observedExitCodeChild\.ExitCode -ne 7/);
+  assert.ok(
+    online.indexOf("Interactive window probe completed") <
+      online.indexOf("if ($updateProcess.ExitCode -ne 0)"),
+    "window evidence must be emitted before updater exit-code checks can fail",
+  );
   assert.match(online, /process exit code \{1\}; diagnostic: \{2\}/);
   assert.match(online, /different update mutex identities for path/);
   assert.match(online, /Get-NgtScreenVisibleWindows/);
@@ -852,6 +866,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
         "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
       ),
     "window evidence must be collected before a failed update ends acceptance",
+  );
+  assert.ok(
+    online.indexOf('Write-Output ("Window evidence:') <
+      online.indexOf(
+        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
+      ),
+    "window evidence must be logged before a failed update ends acceptance",
   );
   assert.match(online, /silent online update displayed a visible installer/);
   assert.match(online, /Get-NgtInteractiveSessionEvidence/);

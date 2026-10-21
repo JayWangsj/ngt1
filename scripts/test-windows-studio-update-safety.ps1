@@ -324,6 +324,23 @@ try {
     throw "An unrelated scheduled-task executable was accepted as the NGT startup task."
   }
 
+  $exitCodeChild = Start-Process -FilePath (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe") `
+    -ArgumentList @("-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Milliseconds 750; exit 7") `
+    -WindowStyle Hidden -PassThru
+  $observedExitCodeChild = Get-Process -Id $exitCodeChild.Id -ErrorAction Stop
+  $observedExitCodeHandle = $observedExitCodeChild.Handle
+  if ($observedExitCodeHandle -eq [IntPtr]::Zero) {
+    throw "The process exit-code regression test could not retain a child process handle."
+  }
+  if (-not $exitCodeChild.WaitForExit(30000)) {
+    Stop-Process -Id $exitCodeChild.Id -Force -ErrorAction SilentlyContinue
+    throw "The process exit-code regression child did not exit within 30 seconds."
+  }
+  $observedExitCodeChild.WaitForExit()
+  if ($observedExitCodeChild.ExitCode -ne 7) {
+    throw "A retained process handle did not expose the child exit code after termination."
+  }
+
   $eventsPath = Join-Path $testRoot "mutex-events.txt"
   $firstOutput = Join-Path $testRoot "mutex-one.out"
   $firstError = Join-Path $testRoot "mutex-one.err"
