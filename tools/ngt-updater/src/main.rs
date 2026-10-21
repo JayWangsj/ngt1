@@ -1485,16 +1485,23 @@ fn run_acceptance_diagnostic() -> Option<ExitCode> {
     if command != OsStr::new("--test-mutex-name") {
         return None;
     }
-    let root = PathBuf::from(arguments.next()?);
+    let Some(root) = arguments.next().map(PathBuf::from) else {
+        return Some(ExitCode::FAILURE);
+    };
+    let Some(output_path) = arguments.next().map(PathBuf::from) else {
+        return Some(ExitCode::FAILURE);
+    };
+    if arguments.next().is_some() {
+        return Some(ExitCode::FAILURE);
+    }
     let mutex_name = match update_mutex_name(&root) {
         Ok(name) => name,
-        Err(error) => {
-            eprintln!("{}", error.message);
-            return Some(ExitCode::FAILURE);
-        }
+        Err(_) => return Some(ExitCode::FAILURE),
     };
-    println!("{}", mutex_name);
-    Some(ExitCode::SUCCESS)
+    match fs::write(output_path, mutex_name) {
+        Ok(()) => Some(ExitCode::SUCCESS),
+        Err(_) => Some(ExitCode::FAILURE),
+    }
 }
 
 fn is_uuid(value: &str) -> bool {
@@ -1738,3 +1745,4 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+

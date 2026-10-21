@@ -604,11 +604,16 @@ try {
     $mutexAlias = Join-Path $testRoot "install-root-junction"
     New-Item -ItemType Junction -Path $mutexAlias -Target $installRoot | Out-Null
     foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
-      $rustMutexName = & $AcceptanceUpdaterPath --test-mutex-name $mutexRootVariant
-      if ($LASTEXITCODE -ne 0) { throw "Rust updater could not compute the mutex name for $mutexRootVariant." }
+      $mutexOutputPath = Join-Path $testRoot ("mutex-name-" + [guid]::NewGuid().ToString("N") + ".txt")
+      $null = & $AcceptanceUpdaterPath --test-mutex-name $mutexRootVariant $mutexOutputPath
+      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $mutexOutputPath -PathType Leaf)) {
+        throw "Rust updater did not write the mutex identity diagnostic for path '$mutexRootVariant'."
+      }
+      $rustMutexName = [System.IO.File]::ReadAllText($mutexOutputPath).Trim()
       $powershellMutexName = Get-NgtStudioUpdateMutexName $mutexRootVariant
       if ([string]($rustMutexName | Out-String).Trim() -cne [string]$powershellMutexName) {
-        throw "Rust and PowerShell computed different update mutex identities for a path alias."
+        throw ("Rust and PowerShell computed different update mutex identities for path '{0}': Rust='{1}', PowerShell='{2}'." -f `
+          $mutexRootVariant, $rustMutexName, $powershellMutexName)
       }
     }
     Write-Output "Rust and PowerShell update mutex identity matched for case, trailing-separator, and junction aliases."
@@ -881,3 +886,4 @@ try {
     throw "Windows update acceptance cleanup could not be verified."
   }
 }
+

@@ -805,6 +805,8 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /fn github_api_base\(/);
   assert.match(updater, /fn download_asset\(/);
   assert.match(updater, /fn run_installer\(/);
+  assert.match(updater, /--test-mutex-name/);
+  assert.match(updater, /fs::write\(output_path, mutex_name\)/);
   assert.match(updater, /\/VERYSILENT/);
   assert.match(updater, /\/SUPPRESSMSGBOXES/);
   assert.match(updater, /\/SP-/);
@@ -815,6 +817,11 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /fn finish_failed\(/);
   assert.match(updater, /"actualVersion"/);
   assert.match(online, /Get-NgtUpdaterWindowDiagnostics/);
+  assert.match(
+    online,
+    /--test-mutex-name \$mutexRootVariant \$mutexOutputPath/,
+  );
+  assert.match(online, /different update mutex identities for path/);
   assert.match(online, /Get-NgtScreenVisibleWindows/);
   assert.match(online, /silent online update displayed a visible installer/);
   assert.match(online, /Get-NgtInteractiveSessionEvidence/);
@@ -899,3 +906,4 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /mode: ready\s+acceptance: installer/);
   assert.match(ready, /mode: ready\s+acceptance: manual-installer/);
 });
+
