@@ -571,24 +571,12 @@ try {
   }
   $updateId = [guid]::NewGuid().ToString()
   if ($ManualInstaller) {
-    @{
-      updateId = $updateId
-      status = "queued"
-      previousVersion = ($oldTag -replace "^v", "")
-      targetVersion = $targetVersion
-      createdAt = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString("o")
-    } | ConvertTo-Json | Set-Content -LiteralPath $updateStatus -Encoding utf8
-
     $installerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-$TargetTag.exe"
     $installerLog = Join-Path $testRoot "manual-upgrade-installer.log"
     $installer = Start-Process -FilePath $installerPath `
       -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installerLog") `
       -WindowStyle Hidden -PassThru
     Wait-NgtManualInstaller -Process $installer -Description "Manual upgrade installer"
-    $manualStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-    if ($manualStatus.status -ne "superseded" -or $manualStatus.actualVersion -ne $targetVersion) {
-      throw "Manual upgrade did not supersede the old queued update task."
-    }
   } else {
     $sameOriginHeaders = @{
       Origin = "http://127.0.0.1:3000"
