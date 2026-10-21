@@ -810,6 +810,11 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     onlineAcceptanceWorkflow,
     /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance online-update/,
   );
+  assert.match(candidateBuildAction, /components: clippy, rustfmt/);
+  assert.match(
+    candidateBuildAction,
+    /cargo clippy --manifest-path tools\/ngt-updater\/Cargo\.toml --all-targets --all-features -- -D warnings/,
+  );
   assert.match(release, /actions\/upload-artifact@v4/);
   assert.match(release, /name: ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(ci, /actions\/upload-artifact@v4/);

@@ -15,12 +15,14 @@ runs:
       with:
         toolchain: stable
         target: x86_64-pc-windows-msvc
-        components: rustfmt
+        components: clippy, rustfmt
         rust-src-dir: tools/ngt-updater
     - name: Test and format-check the native updater
       shell: powershell
       run: |
         $env:CARGO_TARGET_DIR = Join-Path $env:RUNNER_TEMP "ngt-updater-cargo"
+        cargo clippy --manifest-path tools/ngt-updater/Cargo.toml --all-targets --all-features -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "Rust updater Clippy check failed." }
         cargo fmt --manifest-path tools/ngt-updater/Cargo.toml -- --check
         if ($LASTEXITCODE -ne 0) { throw "Rust updater formatting check failed." }
         cargo test --manifest-path tools/ngt-updater/Cargo.toml
