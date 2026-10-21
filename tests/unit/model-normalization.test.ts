@@ -32,4 +32,11 @@ describe("model normalization", () => {
       "iPhone 13 Inline",
     );
   });
+
+  it("keeps MacBook casing and separates Galaxy J model years", () => {
+    expect(normalizeDeviceModel("Apple", "Macbook Pro")).toBe("MacBook Pro");
+    expect(normalizeDeviceModel("Samsung", "Galaxy J52017")).toBe(
+      "Galaxy J5 2017",
+    );
+  });
 });

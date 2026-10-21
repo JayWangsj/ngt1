@@ -6776,6 +6776,17 @@ test("new repair devices normalize custom models and remain selectable after cha
     exact: true,
   });
   await newModel.fill("modello non registrato");
+  await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "Seleziona il modello del dispositivo.",
+  );
+  await expect(dialog).toBeVisible();
+  await expect(
+    picker
+      .locator(".customer-device-row")
+      .filter({ hasText: "Apple Modello Non Registrato" }),
+  ).toHaveCount(0);
+  await newModel.fill("modello non registrato");
   await dialog
     .getByRole("button", { name: "Modello personalizzato", exact: true })
     .click();

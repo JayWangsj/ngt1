@@ -58,19 +58,22 @@ export function normalizeModel(value: string, catalog: string[] = []) {
     .replace(/([a-z])(\d)/i, "$1$2")
     .replace(/\s+/g, " ")
     .trim();
+  model = model.replace(/\b(j\d{1,2})(20\d{2})\b/i, "$1 $2");
   return model
     .split(" ")
     .map((token) =>
       token === "iPhone"
         ? token
-        : /^[45]g$/i.test(token)
-          ? token.toLocaleUpperCase("it")
-          : /^(?:[A-Za-z]+\d+|\d+[A-Za-z]+)$/.test(token)
-            ? token[0].toLocaleUpperCase("it") + token.slice(1)
-            : token
-              ? token[0].toLocaleUpperCase("it") +
-                token.slice(1).toLocaleLowerCase("it")
-              : token,
+        : token.toLocaleLowerCase("it") === "macbook"
+          ? "MacBook"
+          : /^[45]g$/i.test(token)
+            ? token.toLocaleUpperCase("it")
+            : /^(?:[A-Za-z]+\d+|\d+[A-Za-z]+)$/.test(token)
+              ? token[0].toLocaleUpperCase("it") + token.slice(1)
+              : token
+                ? token[0].toLocaleUpperCase("it") +
+                  token.slice(1).toLocaleLowerCase("it")
+                : token,
     )
     .join(" ");
 }

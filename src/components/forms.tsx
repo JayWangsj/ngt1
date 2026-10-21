@@ -5349,7 +5349,8 @@ export function DeviceForm({
       changeKey={JSON.stringify([category, brand, model])}
       onSuccess={onSuccess}
       onCancel={onCancel}
-      action={(data) => {
+      action={async (data) => {
+        if (!model.trim()) return { ok: false, error: it.selectModelError };
         const input = { ...Object.fromEntries(data), brand, model };
         return device
           ? deviceAction(device.id, input)
