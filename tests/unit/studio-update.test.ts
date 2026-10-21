@@ -798,7 +798,7 @@ describe("studio update", () => {
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: (executable, args) => {
+        launch: () => {
           setTimeout(
             () => child.emit("error", new Error("simulated spawn failure")),
             0,
@@ -821,6 +821,51 @@ describe("studio update", () => {
       readFile(path.join(installRoot, "update.lock"), "utf8"),
     ).rejects.toMatchObject({
       code: "ENOENT",
+    });
+  });
+
+  it("preserves the Rust updater's installer failure stage and diagnostics", async () => {
+    const { root, installRoot } = await studioRoot();
+    const child = updateProcess();
+    const installerFailure =
+      "Inno Setup exited with code 23. See update-setup.inno.log and install-preflight.log.";
+    await expect(
+      startStudioUpdate({
+        root,
+        inspect: async () => false,
+        launch: (executable, args) => {
+          const updateId = args[args.indexOf("--update-id") + 1];
+          writeFileSync(
+            path.join(installRoot, "update-status.json"),
+            JSON.stringify({
+              status: "failed",
+              stage: "installing",
+              failedStage: "installing",
+              updateId,
+              message: installerFailure,
+              executorConfirmed: true,
+              executorPid: child.process.pid,
+              executorPath: executable,
+            }),
+          );
+          return child.process;
+        },
+      }),
+    ).rejects.toThrow(installerFailure);
+
+    const saved = JSON.parse(
+      await readFile(path.join(installRoot, "update-status.json"), "utf8"),
+    ) as {
+      status: string;
+      stage: string;
+      failedStage: string;
+      message: string;
+    };
+    expect(saved).toMatchObject({
+      status: "failed",
+      stage: "installing",
+      failedStage: "installing",
+      message: installerFailure,
     });
   });
 

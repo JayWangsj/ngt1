@@ -87,12 +87,16 @@ struct ReleaseMetadata {
 }
 
 fn main() -> ExitCode {
+    #[cfg(all(feature = "acceptance-api", windows))]
+    if let Some(code) = run_acceptance_diagnostic() {
+        return code;
+    }
     if let Err(error) = run() {
         if let Ok(args) = parse_args() {
             let log_path = update_log_path(&args.install_root, &args.update_id);
             let _ = append_log(
                 &log_path,
-                &format!("FAILED {}: {}", error.stage, error.message),
+                &format!("FAILED {}: {}", error.stage, redact(&error.message)),
             );
             let _ = finish_failed(&args, &error);
         }
@@ -232,13 +236,27 @@ fn run() -> Result<()> {
         }),
     )?;
     let setup_result = run_installer(&args, &installer_path, &log_path)?;
+    if let Err(error) = ensure_installer_succeeded(&args, &setup_result) {
+        let _ = append_log(
+            &log_path,
+            &format!("Inno Setup failed with exit code {}.", exit_code(&setup_result)),
+        );
+        return Err(error);
+    }
     append_log(
         &log_path,
         &format!("Inno Setup exited with code {}.", exit_code(&setup_result)),
     )?;
 
     write_progress(&args, "validating", "validating", json!({}))?;
-    verify_installed_release(&args, &client, setup_result.success())?;
+    verify_installed_release(&args, &client)?;
+    append_log(
+        &log_path,
+        "Installed release and application health verified.",
+    )?;
+    let cleanup_warning = remove_owned_downloads(&args.install_root, &args.update_id)
+        .err()
+        .map(|error| redact(&error.to_string()));
     write_progress(
         &args,
         "complete",
@@ -249,14 +267,12 @@ fn run() -> Result<()> {
             "executorAlive": false,
             "executorConfirmed": true,
             "progressKnown": false,
+            "cleanupWarning": cleanup_warning.clone(),
         }),
     )?;
-    append_log(
-        &log_path,
-        "Installed release and application health verified.",
-    )?;
-    let _ = fs::remove_file(&installer_path);
-    let _ = fs::remove_file(&checksum_path);
+    if let Some(warning) = cleanup_warning {
+        let _ = append_log(&log_path, &format!("Post-update cleanup warning: {}", warning));
+    }
     Ok(())
 }
 
@@ -754,7 +770,7 @@ fn hide_console(command: &mut Command) {
     let _ = command;
 }
 
-fn verify_installed_release(args: &Args, client: &Client, installer_ok: bool) -> Result<()> {
+fn verify_installed_release(args: &Args, client: &Client) -> Result<()> {
     let config: InstallConfig = read_json(&args.install_root.join(".local").join("studio.json"))?;
     let active_release = canonical(&config.active_release)?;
     let expected_release = canonical(
@@ -774,12 +790,6 @@ fn verify_installed_release(args: &Args, client: &Client, installer_ok: bool) ->
         return Err(UpdateError::new(
             "validating",
             "The active application release version does not match the requested version.",
-        ));
-    }
-    if !installer_ok {
-        return Err(UpdateError::new(
-            "validating",
-            "Inno Setup reported a failure; the active release and health must be checked before retrying.",
         ));
     }
     let deadline = Instant::now() + Duration::from_secs(10 * 60);
@@ -805,6 +815,29 @@ fn verify_installed_release(args: &Args, client: &Client, installer_ok: bool) ->
         "validating",
         "The updated application did not pass its versioned health check within ten minutes.",
     ))
+}
+
+fn ensure_installer_succeeded(args: &Args, installer: &ExitStatus) -> Result<()> {
+    if installer.success() {
+        return Ok(());
+    }
+    Err(installer_exit_error(
+        &args.install_root,
+        &args.update_id,
+        exit_code(installer),
+    ))
+}
+
+fn installer_exit_error(install_root: &Path, update_id: &str, exit_code: String) -> UpdateError {
+    UpdateError::new(
+        "installing",
+        format!(
+            "Inno Setup exited with code {}. See {} and install-preflight.log for the original installer diagnostics.",
+            exit_code,
+            update_log_path(install_root, update_id)
+                .with_file_name(format!("update-{}.inno.log", update_id)).display()
+        ),
+    )
 }
 
 fn write_progress(
@@ -867,19 +900,19 @@ fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
         if state["updateId"] != args.update_id {
             return Ok(());
         }
-        let installer_stage = state["failedStage"]
-            .as_str()
-            .or_else(|| state["stage"].as_str())
-            .filter(|stage| !stage.is_empty())
-            .unwrap_or(error.stage)
-            .to_owned();
+        if state["status"] == "complete" {
+            return Ok(());
+        }
+        let installer_stage = failure_stage(&state, error);
         state["status"] = json!("failed");
         state["stage"] = json!(installer_stage);
         state["failedStage"] = json!(installer_stage);
         if state["message"].as_str().is_none_or(str::is_empty) {
-            state["message"] = json!(error.message);
+            state["message"] = json!(redact(&error.message));
+        } else if let Some(message) = state["message"].as_str() {
+            state["message"] = json!(redact(message));
         }
-        state["exitReason"] = json!(error.message);
+        state["exitReason"] = json!(redact(&error.message));
         state["executorAlive"] = json!(false);
         state["executorConfirmed"] = json!(true);
         state["updatedAt"] = json!(now());
@@ -896,25 +929,39 @@ fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
             state["manualReview"] = json!(true);
         }
         write_json_atomic(&status_path, &state)?;
-        let _ = remove_owned_partial(&args.install_root, &args.update_id);
+        let _ = remove_owned_downloads(&args.install_root, &args.update_id);
         Ok(())
     })
 }
 
-fn remove_owned_partial(install_root: &Path, update_id: &str) -> Result<()> {
+fn failure_stage(state: &Value, error: &UpdateError) -> String {
+    state["failedStage"]
+        .as_str()
+        .or_else(|| {
+            (state["status"] == "failed")
+                .then(|| state["stage"].as_str())
+                .flatten()
+        })
+        .filter(|stage| !stage.is_empty())
+        .unwrap_or(error.stage)
+        .to_owned()
+}
+
+fn remove_owned_downloads(install_root: &Path, update_id: &str) -> Result<()> {
     let directory = install_root.join(".local").join("updates");
     if !directory.exists() {
         return Ok(());
     }
+    let prefix = format!("{}-", update_id);
     for entry in fs::read_dir(directory)? {
         let path = entry?.path();
-        if path
+        let owned_name = path
             .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with(update_id))
-            && path
-                .extension()
-                .is_some_and(|extension| extension == "partial")
-        {
+            .is_some_and(|name| name.to_string_lossy().starts_with(&prefix));
+        let owned_download = path.extension().is_some_and(|extension| {
+            extension == "exe" || extension == "sha256" || extension == "partial"
+        });
+        if owned_name && owned_download && path.is_file() {
             fs::remove_file(path)?;
         }
     }
@@ -1073,14 +1120,9 @@ struct WindowsMutex(windows_sys::Win32::Foundation::HANDLE);
 impl WindowsMutex {
     fn acquire(install_root: &Path) -> Result<Self> {
         use windows_sys::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
-        use windows_sys::Win32::System::Threading::{
-            CreateMutexW, ReleaseMutex, WaitForSingleObject, INFINITE,
-        };
-        let path = canonical(install_root)?;
-        let digest = hex_digest(&Sha256::digest(
-            path.to_string_lossy().to_lowercase().as_bytes(),
-        ));
-        let name: Vec<u16> = format!("Global\\NGTStudioUpdate-{}", digest)
+        use windows_sys::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+        let mutex_name = update_mutex_name(install_root)?;
+        let name: Vec<u16> = mutex_name
             .encode_utf16()
             .chain(Some(0))
             .collect();
@@ -1091,19 +1133,45 @@ impl WindowsMutex {
                 "Unable to create the update mutex.",
             ));
         }
-        let result = unsafe { WaitForSingleObject(handle, INFINITE) };
+        let result = unsafe { WaitForSingleObject(handle, 15_000) };
         if result != WAIT_OBJECT_0 && result != WAIT_ABANDONED {
             unsafe {
-                ReleaseMutex(handle);
                 windows_sys::Win32::Foundation::CloseHandle(handle);
             }
             return Err(UpdateError::new(
                 "running",
-                "Unable to acquire the update mutex.",
+                if result == windows_sys::Win32::Foundation::WAIT_TIMEOUT {
+                    "Timed out waiting for the update mutex after 15 seconds."
+                } else {
+                    "Unable to acquire the update mutex."
+                },
             ));
         }
         Ok(Self(handle))
     }
+}
+
+fn update_mutex_name(install_root: &Path) -> Result<String> {
+    let path = canonical(install_root)?;
+    let identity = normalize_mutex_root(&path.to_string_lossy());
+    let digest = hex_digest(&Sha256::digest(identity.as_bytes()));
+    Ok(format!("Global\\NGTStudioUpdate-{}", digest))
+}
+
+fn normalize_mutex_root(path: &str) -> String {
+    let mut root = path.replace('/', "\\");
+    if root
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("\\\\?\\UNC\\"))
+    {
+        root = format!("\\\\{}", &root[8..]);
+    } else if root
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("\\\\?\\"))
+    {
+        root = root[4..].to_owned();
+    }
+    root.trim_end_matches('\\').to_lowercase()
 }
 
 #[cfg(windows)]
@@ -1160,10 +1228,274 @@ fn exit_code(status: &ExitStatus) -> String {
 }
 
 fn redact(message: &str) -> String {
-    message
-        .replace("github_pat_", "[redacted]")
-        .replace("ghp_", "[redacted]")
-        .replace("gho_", "[redacted]")
+    const GITHUB_TOKEN_PREFIXES: [&str; 6] = [
+        "github_pat_",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+    ];
+    let bytes = message.as_bytes();
+    let mut output = String::with_capacity(message.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if let Some((end, replacement)) = redact_header_value(message, index) {
+            output.push_str(&replacement);
+            index = end;
+            continue;
+        }
+        if let Some((end, replacement)) = redact_sensitive_assignment(message, index) {
+            output.push_str(&replacement);
+            index = end;
+            continue;
+        }
+        if let Some(prefix) = GITHUB_TOKEN_PREFIXES
+            .iter()
+            .find(|prefix| ascii_starts_with_ignore_case(message, index, prefix))
+        {
+            let mut end = index + prefix.len();
+            while end < bytes.len() && is_token_byte(bytes[end]) {
+                end += 1;
+            }
+            output.push_str("[redacted]");
+            index = end;
+            continue;
+        }
+        if let Some((end, replacement)) = redact_url_credentials(message, index) {
+            output.push_str(&replacement);
+            index = end;
+            continue;
+        }
+        let character = message[index..].chars().next().expect("valid UTF-8 boundary");
+        output.push(character);
+        index += character.len_utf8();
+    }
+    output
+}
+
+fn redact_header_value(message: &str, index: usize) -> Option<(usize, String)> {
+    let header = ["proxy-authorization", "authorization"]
+        .into_iter()
+        .find(|header| ascii_starts_with_ignore_case(message, index, header))?;
+    let bytes = message.as_bytes();
+    let mut cursor = index + header.len();
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor == bytes.len() || !matches!(bytes[cursor], b':' | b'=') {
+        return None;
+    }
+    let delimiter = bytes[cursor] as char;
+    cursor += 1;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    let scheme = ["Bearer", "Basic"]
+        .into_iter()
+        .find(|scheme| ascii_starts_with_ignore_case(message, cursor, scheme));
+    let mut replacement = format!("{}{}", header, delimiter);
+    if let Some(scheme) = scheme {
+        let after_scheme = cursor + scheme.len();
+        if after_scheme < bytes.len() && bytes[after_scheme].is_ascii_whitespace() {
+            let mut value_start = after_scheme;
+            while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+                value_start += 1;
+            }
+            replacement.push(' ');
+            replacement.push_str(scheme);
+            replacement.push(' ');
+            let (end, redacted) = redact_value(message, value_start);
+            replacement.push_str(&redacted);
+            cursor = end;
+            return Some((cursor, replacement));
+        }
+    }
+    let (end, redacted) = redact_value(message, cursor);
+    replacement.push_str(&redacted);
+    cursor = end;
+    Some((cursor, replacement))
+}
+
+fn redact_sensitive_assignment(message: &str, index: usize) -> Option<(usize, String)> {
+    let bytes = message.as_bytes();
+    if index > 0 && is_identifier_byte(bytes[index - 1]) {
+        return None;
+    }
+    let mut cursor = index;
+    while cursor < bytes.len() && (is_identifier_byte(bytes[cursor]) || bytes[cursor] == b'-') {
+        cursor += 1;
+    }
+    if cursor == index {
+        return None;
+    }
+    let key = message[index..cursor].to_ascii_lowercase().replace('-', "_");
+    let sensitive = [
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "authorization",
+        "credential",
+        "private_key",
+        "privatekey",
+        "api_key",
+        "apikey",
+        "client_secret",
+        "clientsecret",
+        "database_url",
+        "databaseurl",
+        "db_url",
+        "dburl",
+    ]
+    .iter()
+    .any(|marker| key.contains(marker));
+    if !sensitive {
+        return None;
+    }
+    let key_end = cursor;
+    let key_quote = if index > 0
+        && matches!(bytes[index - 1], b'\'' | b'"')
+        && bytes.get(cursor) == Some(&bytes[index - 1])
+    {
+        let quote = bytes[cursor];
+        cursor += 1;
+        Some(quote)
+    } else {
+        None
+    };
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor == bytes.len() || !matches!(bytes[cursor], b'=' | b':') {
+        return None;
+    }
+    let delimiter = bytes[cursor] as char;
+    cursor += 1;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    let (end, redacted) = redact_value(message, cursor);
+    if end == cursor {
+        return None;
+    }
+    let mut key_name = message[index..key_end].to_owned();
+    if let Some(quote) = key_quote {
+        key_name.push(quote as char);
+    }
+    Some((end, format!("{}{}{}", key_name, delimiter, redacted)))
+}
+
+fn redact_value(message: &str, start: usize) -> (usize, String) {
+    let bytes = message.as_bytes();
+    if start >= bytes.len() {
+        return (start, String::new());
+    }
+    if matches!(bytes[start], b'\'' | b'"') {
+        let quote = bytes[start];
+        let mut end = start + 1;
+        while end < bytes.len() {
+            if bytes[end] == b'\\' && end + 1 < bytes.len() {
+                end += 2;
+                continue;
+            }
+            if bytes[end] == quote {
+                return (end + 1, format!("{}[redacted]{}", quote as char, quote as char));
+            }
+            end += 1;
+        }
+        return (end, format!("{}[redacted]", quote as char));
+    }
+    let mut end = start;
+    while end < bytes.len() && !is_secret_delimiter(bytes[end]) {
+        end += 1;
+    }
+    if end == start {
+        (end, String::new())
+    } else {
+        (end, "[redacted]".to_owned())
+    }
+}
+
+fn redact_url_credentials(message: &str, index: usize) -> Option<(usize, String)> {
+    if index > 0 && is_identifier_byte(message.as_bytes()[index - 1]) {
+        return None;
+    }
+    let bytes = message.as_bytes();
+    let mut authority_start = index;
+    if !bytes.get(authority_start)?.is_ascii_alphabetic() {
+        return None;
+    }
+    authority_start += 1;
+    while authority_start < bytes.len()
+        && (bytes[authority_start].is_ascii_alphanumeric()
+            || matches!(bytes[authority_start], b'+' | b'-' | b'.'))
+    {
+        authority_start += 1;
+    }
+    if message.get(authority_start..authority_start + 3)? != "://" {
+        return None;
+    }
+    let start_of_authority = authority_start + 3;
+    let mut end = start_of_authority;
+    while end < bytes.len()
+        && !matches!(bytes[end], b'/' | b'?' | b'#' | b' ' | b'\t' | b'\r' | b'\n' | b'\'' | b'"' | b')')
+    {
+        end += 1;
+    }
+    let authority = &message[start_of_authority..end];
+    let user_info_end = authority.rfind('@')?;
+    let user_info = &authority[..user_info_end];
+    if !user_info.contains(':') {
+        return None;
+    }
+    Some((
+        end,
+        format!(
+            "{}://[redacted]@{}",
+            &message[index..authority_start],
+            &authority[user_info_end + 1..]
+        ),
+    ))
+}
+
+fn ascii_starts_with_ignore_case(value: &str, index: usize, needle: &str) -> bool {
+    value
+        .as_bytes()
+        .get(index..index.saturating_add(needle.len()))
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn is_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
+}
+
+fn is_secret_delimiter(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || matches!(byte, b',' | b';' | b'\'' | b'"' | b')')
+}
+
+#[cfg(all(feature = "acceptance-api", windows))]
+fn run_acceptance_diagnostic() -> Option<ExitCode> {
+    use std::ffi::OsStr;
+    let mut arguments = env::args_os().skip(1);
+    let command = arguments.next()?;
+    if command != OsStr::new("--test-mutex-name") {
+        return None;
+    }
+    let root = PathBuf::from(arguments.next()?);
+    let mutex_name = match update_mutex_name(&root) {
+        Ok(name) => name,
+        Err(error) => {
+            eprintln!("{}", error.message);
+            return Some(ExitCode::FAILURE);
+        }
+    };
+    println!("{}", mutex_name);
+    Some(ExitCode::SUCCESS)
 }
 
 fn is_uuid(value: &str) -> bool {
@@ -1262,6 +1594,130 @@ mod tests {
         fs::write(root.join("small.bin"), b"12345").unwrap();
         fs::write(root.join("nested").join("larger.bin"), b"1234567890").unwrap();
         assert_eq!(directory_size(&root).unwrap(), 15);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installer_exit_failure_keeps_the_installer_stage_and_log_location() {
+        let error = installer_exit_error(
+            Path::new("C:\\NGT"),
+            "00000000-0000-4000-8000-000000000001",
+            "23".to_owned(),
+        );
+        assert_eq!(error.stage, "installing");
+        assert!(error.message.contains("code 23"));
+        assert!(error.message.contains("update-00000000-0000-4000-8000-000000000001.inno.log"));
+        assert!(error.message.contains("install-preflight.log"));
+    }
+
+    #[test]
+    fn updater_redacts_complete_secrets_and_quoted_values() {
+        let message = redact(
+            "Authorization: Bearer   abc123; password=\"hunter2\"; \"password\" : \"json-secret\"; \"databaseUrl\":\"postgres://dbuser:dbpass@example.com/app\" url=https://user:pass@example.com/path token=ghp_abcdefghijklmnopqrstuvwxyz",
+        );
+        assert!(message.contains("Authorization: Bearer [redacted]"));
+        assert!(message.contains("password=\"[redacted]\""));
+        assert!(message.contains("\"password\" : \"[redacted]\""));
+        assert!(message.contains("\"databaseUrl\":\"[redacted]\""));
+        assert!(message.contains("https://[redacted]@example.com/path"));
+        assert!(message.contains("token=[redacted]"));
+        for secret in [
+            "abc123",
+            "hunter2",
+            "json-secret",
+            "dbuser:dbpass",
+            "user:pass",
+            "ghp_abcdefghijklmnopqrstuvwxyz",
+        ] {
+            assert!(!message.contains(secret));
+        }
+    }
+
+    #[test]
+    fn installer_failure_does_not_inherit_a_stale_backup_stage() {
+        let installer_error = UpdateError::new("installing", "installer failed");
+        assert_eq!(
+            failure_stage(
+                &json!({ "status": "installing", "stage": "backing-up" }),
+                &installer_error
+            ),
+            "installing"
+        );
+        assert_eq!(
+            failure_stage(
+                &json!({ "status": "failed", "stage": "preflight", "failedStage": "preflight" }),
+                &installer_error
+            ),
+            "preflight"
+        );
+    }
+
+    #[test]
+    fn mutex_root_normalization_handles_verbatim_and_unc_paths() {
+        assert_eq!(
+            normalize_mutex_root(r"\\?\C:\NGT\Install\"),
+            r"c:\ngt\install"
+        );
+        assert_eq!(
+            normalize_mutex_root(r"\\?\UNC\server\share\NGT\"),
+            r"\\server\share\ngt"
+        );
+    }
+
+    #[test]
+    fn completed_update_state_is_not_downgraded_by_late_failure() {
+        let root = env::temp_dir().join(format!(
+            "ngt-updater-complete-state-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join(".local")).unwrap();
+        let update_id = "00000000-0000-4000-8000-000000000001";
+        let state = root.join("update-status.json");
+        fs::write(
+            &state,
+            json!({"status":"complete", "updateId":update_id, "stage":"complete"}).to_string(),
+        )
+        .unwrap();
+        let args = Args {
+            install_root: root.clone(),
+            release_root: root.clone(),
+            update_id: update_id.to_owned(),
+            target_version: "2.1.0".to_owned(),
+            repository: "JayWangsj/ngt1".to_owned(),
+        };
+        finish_failed(&args, &UpdateError::new("running", "late log failure")).unwrap();
+        let saved: Value = read_json(&state).unwrap();
+        assert_eq!(saved["status"], "complete");
+        assert_eq!(saved["stage"], "complete");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_update_cleanup_removes_only_current_downloads() {
+        let root = env::temp_dir().join(format!(
+            "ngt-updater-owned-downloads-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let updates = root.join(".local").join("updates");
+        fs::create_dir_all(&updates).unwrap();
+        let update_id = "00000000-0000-4000-8000-000000000001";
+        fs::write(updates.join(format!("{}-setup.exe", update_id)), b"installer").unwrap();
+        fs::write(updates.join(format!("{}-setup.exe.sha256", update_id)), b"checksum").unwrap();
+        fs::write(updates.join("00000000-0000-4000-8000-000000000002-setup.exe"), b"other").unwrap();
+        fs::write(updates.join(format!("{}-backup.zip", update_id)), b"backup").unwrap();
+        remove_owned_downloads(&root, update_id).unwrap();
+        assert!(!updates.join(format!("{}-setup.exe", update_id)).exists());
+        assert!(!updates.join(format!("{}-setup.exe.sha256", update_id)).exists());
+        assert!(updates.join("00000000-0000-4000-8000-000000000002-setup.exe").exists());
+        assert!(updates.join(format!("{}-backup.zip", update_id)).exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -67,16 +67,7 @@ function Write-NgtInstallJsonAtomic([string]$Path, [object]$Value) {
 }
 
 function Invoke-NgtStudioInstallMutex([string]$InstallRoot, [scriptblock]$Action) {
-  $mutexRoot = [System.IO.Path]::GetFullPath($InstallRoot).TrimEnd("\").ToLowerInvariant()
-  $sha256 = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $rootHash = [System.BitConverter]::ToString(
-      $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($mutexRoot))
-    ).Replace("-", "").ToLowerInvariant()
-  } finally {
-    $sha256.Dispose()
-  }
-  $mutex = [System.Threading.Mutex]::new($false, "Global\NGTStudioUpdate-$rootHash")
+  $mutex = [System.Threading.Mutex]::new($false, (Get-NgtStudioUpdateMutexName $InstallRoot))
   $owned = $false
   try {
     try { $owned = $mutex.WaitOne(10000) }
@@ -87,6 +78,58 @@ function Invoke-NgtStudioInstallMutex([string]$InstallRoot, [scriptblock]$Action
     if ($owned) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
   }
+}
+
+function Get-NgtStudioUpdateMutexRoot([string]$InstallRoot) {
+  if (-not ("NgtUpdatePathIdentity" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+public static class NgtUpdatePathIdentity {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
+  private static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetFinalPathNameByHandleW")]
+  private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+
+  public static string GetNormalizedPath(string path) {
+    using (var handle = CreateFile(path, 0x80, 0x1 | 0x2 | 0x4, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+      if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+      var capacity = 512;
+      while (true) {
+        var buffer = new StringBuilder(capacity);
+        var length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length < buffer.Capacity) {
+          var result = buffer.ToString().Replace('/', '\\');
+          if (result.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) result = @"\\" + result.Substring(8);
+          else if (result.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)) result = result.Substring(4);
+          return result.TrimEnd('\\').ToLowerInvariant();
+        }
+        capacity = checked((int)length + 1);
+      }
+    }
+  }
+}
+"@
+  }
+  return [NgtUpdatePathIdentity]::GetNormalizedPath([System.IO.Path]::GetFullPath($InstallRoot))
+}
+
+function Get-NgtStudioUpdateMutexName([string]$InstallRoot) {
+  $mutexRoot = Get-NgtStudioUpdateMutexRoot $InstallRoot
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $rootHash = [System.BitConverter]::ToString(
+      $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($mutexRoot))
+    ).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+  return "Global\NGTStudioUpdate-$rootHash"
 }
 
 function Get-NgtUpdateExecutorState(
@@ -532,6 +575,33 @@ function Start-NgtStudioManualInstall([string]$InstallRoot, [string]$TargetVersi
           ([string]$reservation.lock.updateId -and [string]$reservation.lock.updateId -ne [string]$reservation.status.updateId)) {
         throw "The existing update lock does not match a readable task status."
       }
+      if ($reservation.lock.operation -eq "online-update" -and
+          [string]$reservation.status.status -eq "starting" -and
+          -not $reservation.status.executorConfirmed) {
+        $reservationCreatedAtValue = if ($reservation.status.createdAt) {
+          $reservation.status.createdAt
+        } else {
+          $reservation.lock.createdAt
+        }
+        $reservationCreatedAt = [System.DateTimeOffset]::MinValue
+        $hasReservationTimestamp = $false
+        if ($reservationCreatedAtValue -is [System.DateTime]) {
+          $reservationCreatedAt = [System.DateTimeOffset]::new($reservationCreatedAtValue.ToUniversalTime())
+          $hasReservationTimestamp = $true
+        } elseif ($reservationCreatedAtValue -is [System.DateTimeOffset]) {
+          $reservationCreatedAt = $reservationCreatedAtValue
+          $hasReservationTimestamp = $true
+        } else {
+          $hasReservationTimestamp = [System.DateTimeOffset]::TryParse(
+            [string]$reservationCreatedAtValue,
+            [ref]$reservationCreatedAt
+          )
+        }
+        if (-not $hasReservationTimestamp -or
+            ((Get-Date).ToUniversalTime() - $reservationCreatedAt.UtcDateTime).TotalSeconds -lt 20) {
+          throw "A new online update is reserving the installer; wait for its startup confirmation before manual installation."
+        }
+      }
       $alive = Get-NgtUpdateExecutorState $reservation.lock $reservation.status $plan.previousRelease
       if ($alive -ne $false) { throw "An online update executor is active or cannot be verified. Close it before installing." }
       if (-not (Test-NgtSafeStaleUpdate $reservation.status $plan.previousVersion)) {
@@ -661,6 +731,8 @@ function Start-NgtStudioOnlineUpdateInstall(
       previousRelease = $plan.previousRelease
       dataRoot = $plan.dataRoot
       installMode = $plan.mode
+      backupRoot = ""
+      backupVerified = $false
       updatedAt = (Get-Date).ToUniversalTime().ToString("o")
     }
     Write-NgtInstallJsonAtomic (Join-Path $root ".local\update-maintenance.json") $marker
@@ -767,16 +839,17 @@ function Set-NgtStudioOnlineUpdateBackup(
     if (-not $backupRoot.StartsWith($allowedBackupRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
       throw "The online installer backup is outside the configured data directory."
     }
-    $reservation.marker.backupRoot = $backupRoot
-    $reservation.marker.backupVerified = $true
-    $reservation.marker.updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    $reservation.marker | Add-Member -NotePropertyName backupRoot -NotePropertyValue $backupRoot -Force
+    $reservation.marker | Add-Member -NotePropertyName backupVerified -NotePropertyValue $true -Force
+    $updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    $reservation.marker | Add-Member -NotePropertyName updatedAt -NotePropertyValue $updatedAt -Force
     Write-NgtInstallJsonAtomic (Join-Path $InstallRoot ".local\update-maintenance.json") $reservation.marker
     $status = $reservation.status
     $status.status = "installing"
     $status.stage = "backing-up"
-    $status.backupRoot = $backupRoot
-    $status.backupVerified = $true
-    $status.updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    $status | Add-Member -NotePropertyName backupRoot -NotePropertyValue $backupRoot -Force
+    $status | Add-Member -NotePropertyName backupVerified -NotePropertyValue $true -Force
+    $status | Add-Member -NotePropertyName updatedAt -NotePropertyValue $updatedAt -Force
     Write-NgtInstallJsonAtomic (Join-Path $InstallRoot "update-status.json") $status
   }
 }
