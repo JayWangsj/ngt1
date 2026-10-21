@@ -90,6 +90,7 @@ try {
   if (-not $backupRejected) { throw "Backup validation accepted a modified database file." }
 
   . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
+  . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
   $processRoot = Join-Path $testRoot "process-fixture"
   $processInstallRoot = Join-Path $processRoot "install"
   $processReleaseRoot = Join-Path $processInstallRoot "releases\v-test"
