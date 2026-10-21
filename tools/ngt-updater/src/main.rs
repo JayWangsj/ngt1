@@ -1294,7 +1294,8 @@ fn redact_header_value(message: &str, index: usize) -> Option<(usize, String)> {
     let scheme = ["Bearer", "Basic"]
         .into_iter()
         .find(|scheme| ascii_starts_with_ignore_case(message, cursor, scheme));
-    let mut replacement = format!("{}{}", header, delimiter);
+    let original_header = &message[index..index + header.len()];
+    let mut replacement = format!("{}{}", original_header, delimiter);
     if let Some(scheme) = scheme {
         let after_scheme = cursor + scheme.len();
         if after_scheme < bytes.len() && bytes[after_scheme].is_ascii_whitespace() {
