@@ -328,13 +328,16 @@ try {
   $firstError = Join-Path $testRoot "mutex-one.err"
   $secondOutput = Join-Path $testRoot "mutex-two.out"
   $secondError = Join-Path $testRoot "mutex-two.err"
-  $mutexRoot = [System.IO.Path]::GetFullPath((Join-Path $testRoot "mutex-install")).TrimEnd("\").ToLowerInvariant()
-  $sha256 = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $rootBytes = [System.Text.Encoding]::UTF8.GetBytes($mutexRoot)
-    $rootHash = [System.BitConverter]::ToString($sha256.ComputeHash($rootBytes)).Replace("-", "").ToLowerInvariant()
-  } finally { $sha256.Dispose() }
-  $mutexName = "Global\NGTStudioUpdate-$rootHash"
+  $mutexInstallRoot = Join-Path $testRoot "mutex-install"
+  New-Item -ItemType Directory -Path $mutexInstallRoot -Force | Out-Null
+  $mutexAlias = Join-Path $testRoot "mutex-install-junction"
+  New-Item -ItemType Junction -Path $mutexAlias -Target $mutexInstallRoot | Out-Null
+  $mutexName = Get-NgtStudioUpdateMutexName $mutexInstallRoot
+  foreach ($mutexRootVariant in @($mutexInstallRoot, ($mutexInstallRoot + "\"), $mutexInstallRoot.ToUpperInvariant(), $mutexAlias)) {
+    if ((Get-NgtStudioUpdateMutexName $mutexRootVariant) -cne $mutexName) {
+      throw "The update mutex identity changed for a case, trailing-separator, or junction alias."
+    }
+  }
   $childScript = Join-Path $testRoot "mutex-child.ps1"
   @'
 param([string]$MutexName, [string]$EventsPath, [string]$Slot)

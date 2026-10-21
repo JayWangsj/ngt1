@@ -10,6 +10,7 @@ param(
   [switch]$ManualInstaller
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
@@ -177,9 +178,16 @@ public static class NgtUpdaterAcceptanceWindowProbe {
     public int Bottom;
   }
   public sealed class WindowInfo {
+    public long Handle;
+    public long ParentHandle;
+    public long OwnerHandle;
+    public int ThreadId;
     public int ProcessId;
     public string ClassName;
     public string Title;
+    public long Style;
+    public long ExtendedStyle;
+    public bool IsVisible;
     public int Left;
     public int Top;
     public int Right;
@@ -193,6 +201,12 @@ public static class NgtUpdaterAcceptanceWindowProbe {
   [DllImport("user32.dll")]
   private static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")]
+  private static extern IntPtr GetParent(IntPtr window);
+  [DllImport("user32.dll")]
+  private static extern IntPtr GetWindow(IntPtr window, uint command);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+  private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+  [DllImport("user32.dll")]
   private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   private static extern int GetClassName(IntPtr window, System.Text.StringBuilder className, int maxCount);
@@ -202,37 +216,46 @@ public static class NgtUpdaterAcceptanceWindowProbe {
   private static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
   [DllImport("user32.dll")]
   private static extern int GetSystemMetrics(int index);
+  [DllImport("kernel32.dll")]
+  private static extern uint WTSGetActiveConsoleSessionId();
 
-  public static WindowInfo[] GetVisibleWindows() {
+  public static uint GetActiveConsoleSessionId() { return WTSGetActiveConsoleSessionId(); }
+
+  public static WindowInfo[] GetTopLevelWindows() {
     var windows = new List<WindowInfo>();
     EnumWindows((window, state) => {
-      if (IsWindowVisible(window)) {
-        uint processId;
-        GetWindowThreadProcessId(window, out processId);
-        if (processId > 0) {
-          var className = new System.Text.StringBuilder(256);
-          var title = new System.Text.StringBuilder(512);
-          var rect = new WindowRect();
-          var boundsAvailable = GetWindowRect(window, out rect);
-          GetClassName(window, className, className.Capacity);
-          GetWindowText(window, title, title.Capacity);
-          var screenLeft = GetSystemMetrics(76);
-          var screenTop = GetSystemMetrics(77);
-          var screenRight = screenLeft + GetSystemMetrics(78);
-          var screenBottom = screenTop + GetSystemMetrics(79);
-          windows.Add(new WindowInfo {
-            ProcessId = (int)processId,
-            ClassName = className.ToString(),
-            Title = title.ToString(),
-            Left = rect.Left,
-            Top = rect.Top,
-            Right = rect.Right,
-            Bottom = rect.Bottom,
-            BoundsAvailable = boundsAvailable,
-            OnScreen = boundsAvailable && rect.Right > screenLeft && rect.Left < screenRight &&
-              rect.Bottom > screenTop && rect.Top < screenBottom
-          });
-        }
+      uint processId;
+      var threadId = GetWindowThreadProcessId(window, out processId);
+      if (processId > 0) {
+        var className = new System.Text.StringBuilder(256);
+        var title = new System.Text.StringBuilder(512);
+        var rect = new WindowRect();
+        var boundsAvailable = GetWindowRect(window, out rect);
+        GetClassName(window, className, className.Capacity);
+        GetWindowText(window, title, title.Capacity);
+        var screenLeft = GetSystemMetrics(76);
+        var screenTop = GetSystemMetrics(77);
+        var screenRight = screenLeft + GetSystemMetrics(78);
+        var screenBottom = screenTop + GetSystemMetrics(79);
+        windows.Add(new WindowInfo {
+          Handle = window.ToInt64(),
+          ParentHandle = GetParent(window).ToInt64(),
+          OwnerHandle = GetWindow(window, 4).ToInt64(),
+          ThreadId = (int)threadId,
+          ProcessId = (int)processId,
+          ClassName = className.ToString(),
+          Title = title.ToString(),
+          Style = GetWindowLongPtr(window, -16).ToInt64(),
+          ExtendedStyle = GetWindowLongPtr(window, -20).ToInt64(),
+          IsVisible = IsWindowVisible(window),
+          Left = rect.Left,
+          Top = rect.Top,
+          Right = rect.Right,
+          Bottom = rect.Bottom,
+          BoundsAvailable = boundsAvailable,
+          OnScreen = boundsAvailable && rect.Right > screenLeft && rect.Left < screenRight &&
+            rect.Bottom > screenTop && rect.Top < screenBottom
+        });
       }
       return true;
     }, IntPtr.Zero);
@@ -241,26 +264,80 @@ public static class NgtUpdaterAcceptanceWindowProbe {
 }
 "@
 
-function Get-NgtScreenVisibleWindows {
-  $visibleWindows = [NgtUpdaterAcceptanceWindowProbe]::GetVisibleWindows()
-  return @($visibleWindows | Where-Object {
-    (-not $_.BoundsAvailable) -or
-    ((($_.Right -gt $_.Left) -and ($_.Bottom -gt $_.Top)) -and $_.OnScreen)
-  } | ForEach-Object {
-    $windowInfo = $_
-    $windowProcess = Get-Process -Id ([int]$windowInfo.ProcessId) -ErrorAction SilentlyContinue
+function Get-NgtInteractiveSessionEvidence {
+  $currentProcess = Get-Process -Id $PID -ErrorAction Stop
+  $sessionId = [int]$currentProcess.SessionId
+  $activeSessionId = [uint32][NgtUpdaterAcceptanceWindowProbe]::GetActiveConsoleSessionId()
+  $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  return [pscustomobject]@{
+    user = $user
+    sessionId = $sessionId
+    activeConsoleSessionId = $activeSessionId
+    interactive = ($sessionId -gt 0 -and $activeSessionId -eq [uint32]$sessionId)
+  }
+}
+
+function Get-NgtTopLevelWindows(
+  [object[]]$Processes,
+  [System.Collections.Generic.HashSet[int]]$ProcessIds,
+  [switch]$IncludeProcessDetails
+) {
+  if ($IncludeProcessDetails -and $null -eq $Processes) {
+    $Processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+  }
+  $windows = [NgtUpdaterAcceptanceWindowProbe]::GetTopLevelWindows()
+  foreach ($windowInfo in $windows) {
+    if ($ProcessIds -and -not $ProcessIds.Contains([int]$windowInfo.ProcessId)) { continue }
+    $process = $null
+    if ($IncludeProcessDetails) {
+      $process = $Processes | Where-Object { [int]$_.ProcessId -eq [int]$windowInfo.ProcessId } | Select-Object -First 1
+      if (-not $process) { continue }
+    }
+    $owner = ""
+    $processPath = ""
+    $processSessionId = -1
+    if ($IncludeProcessDetails) {
+      try {
+        $ownerResult = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
+        if ($ownerResult.ReturnValue -eq 0) { $owner = "{0}\{1}" -f $ownerResult.Domain, $ownerResult.User }
+      } catch { }
+      $processPath = [string]$process.ExecutablePath
+      $processSessionId = [int]$process.SessionId
+    }
     [pscustomobject]@{
+      handle = "0x{0:X}" -f [long]$windowInfo.Handle
+      parentHandle = "0x{0:X}" -f [long]$windowInfo.ParentHandle
+      ownerHandle = "0x{0:X}" -f [long]$windowInfo.OwnerHandle
+      threadId = [int]$windowInfo.ThreadId
       processId = [int]$windowInfo.ProcessId
-      windowTitle = [string]$windowProcess.MainWindowTitle
+      processName = [string]$process.Name
+      processPath = $processPath
+      parentProcessId = if ($process) { [int]$process.ParentProcessId } else { -1 }
+      sessionId = $processSessionId
+      user = $owner
+      commandLine = if ($process) { [string]$process.CommandLine } else { "" }
+      windowTitle = [string]$windowInfo.Title
       windowClass = [string]$windowInfo.ClassName
+      visible = [bool]$windowInfo.IsVisible
+      style = "0x{0:X}" -f [long]$windowInfo.Style
+      extendedStyle = "0x{0:X}" -f [long]$windowInfo.ExtendedStyle
       windowBounds = "[$($windowInfo.Left),$($windowInfo.Top),$($windowInfo.Right),$($windowInfo.Bottom)]"
+      width = [int]($windowInfo.Right - $windowInfo.Left)
+      height = [int]($windowInfo.Bottom - $windowInfo.Top)
       boundsAvailable = [bool]$windowInfo.BoundsAvailable
       onScreen = [bool]$windowInfo.OnScreen
     }
+  }
+}
+
+function Get-NgtScreenVisibleWindows {
+  return @(Get-NgtTopLevelWindows | Where-Object {
+    $_.visible -and ((-not $_.boundsAvailable) -or
+      ($_.width -gt 0 -and $_.height -gt 0 -and $_.onScreen))
   })
 }
 
-function Get-NgtUpdaterVisibleWindows([int]$UpdaterPid) {
+function Get-NgtUpdaterWindowDiagnostics([int]$UpdaterPid) {
   $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
   $processIds = [System.Collections.Generic.HashSet[int]]::new()
   [void]$processIds.Add($UpdaterPid)
@@ -273,24 +350,7 @@ function Get-NgtUpdaterVisibleWindows([int]$UpdaterPid) {
       }
     }
   } while ($added)
-  $visibleWindows = @(Get-NgtScreenVisibleWindows)
-  return @($visibleWindows | Where-Object {
-    $processIds.Contains([int]$_.ProcessId)
-  } | ForEach-Object {
-    $windowInfo = $_
-    $process = $processes | Where-Object { [int]$_.ProcessId -eq [int]$windowInfo.ProcessId } | Select-Object -First 1
-    [pscustomobject]@{
-      processId = [int]$windowInfo.ProcessId
-      name = [string]$process.Name
-      parentProcessId = [int]$process.ParentProcessId
-      windowTitle = [string]$windowInfo.windowTitle
-      windowClass = [string]$windowInfo.windowClass
-      windowBounds = [string]$windowInfo.windowBounds
-      boundsAvailable = [bool]$windowInfo.boundsAvailable
-      onScreen = [bool]$windowInfo.onScreen
-      commandLine = [string]$process.CommandLine
-    }
-  })
+  return @(Get-NgtTopLevelWindows -Processes $processes -ProcessIds $processIds -IncludeProcessDetails)
 }
 
 function Get-NgtVisibleWindowProcessIds {
@@ -534,7 +594,24 @@ try {
     if (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
       throw "The installed NGT API did not offer the exact candidate version."
     }
+    $sessionEvidence = Get-NgtInteractiveSessionEvidence
+    Write-Output ("Interactive acceptance user={0}; session={1}; activeConsoleSession={2}." -f `
+      $sessionEvidence.user, $sessionEvidence.sessionId, $sessionEvidence.activeConsoleSessionId)
+    if (-not $sessionEvidence.interactive) {
+      throw "Window acceptance requires the active interactive Windows console session; this process is not attached to it."
+    }
     $visibleWindowBaseline = @(Get-NgtVisibleWindowProcessIds)
+    $mutexAlias = Join-Path $testRoot "install-root-junction"
+    New-Item -ItemType Junction -Path $mutexAlias -Target $installRoot | Out-Null
+    foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
+      $rustMutexName = & $AcceptanceUpdaterPath --test-mutex-name $mutexRootVariant
+      if ($LASTEXITCODE -ne 0) { throw "Rust updater could not compute the mutex name for $mutexRootVariant." }
+      $powershellMutexName = Get-NgtStudioUpdateMutexName $mutexRootVariant
+      if ([string]($rustMutexName | Out-String).Trim() -cne [string]$powershellMutexName) {
+        throw "Rust and PowerShell computed different update mutex identities for a path alias."
+      }
+    }
+    Write-Output "Rust and PowerShell update mutex identity matched for case, trailing-separator, and junction aliases."
     $startResponse = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
       -Method Post -Headers $sameOriginHeaders -ContentType "application/json" `
       -Body (@{ targetVersion = $TargetTag } | ConvertTo-Json -Compress) -TimeoutSec 30
@@ -549,6 +626,9 @@ try {
     if ([System.IO.Path]::GetFullPath($updateProcess.Path) -ine [System.IO.Path]::GetFullPath($updaterPath)) {
       throw "The API started a process other than the versioned Rust updater."
     }
+    if ([int]$updateProcess.SessionId -ne [int]$sessionEvidence.sessionId) {
+      throw "The Rust updater was not started in the tested interactive Windows user session."
+    }
 
     $computer = Get-CimInstance -ClassName Win32_ComputerSystem
     $cpuCount = (Get-CimInstance -ClassName Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
@@ -557,6 +637,7 @@ try {
     $peakUpdaterWorkingSet = 0L
     $apiDisconnectedObserved = $false
     $apiReconnectedAfterDisconnect = $false
+    $observedWindowEvidence = @{}
     $deadline = (Get-Date).AddMinutes(50)
     $finalStatus = $null
     do {
@@ -569,10 +650,17 @@ try {
           throw "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
         }
       }
-      $visibleWindows = @(Get-NgtUpdaterVisibleWindows -UpdaterPid $updaterPid)
-      if ($visibleWindows.Count -gt 0) {
-        $windowOwners = ($visibleWindows | ForEach-Object {
-          "$($_.name)/PID $($_.processId) parent=$($_.parentProcessId) class='$($_.windowClass)' bounds=$($_.windowBounds) boundsAvailable=$($_.boundsAvailable) onScreen=$($_.onScreen) title='$($_.windowTitle)' command='$($_.commandLine)'"
+      $windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics -UpdaterPid $updaterPid)
+      foreach ($window in $windowDiagnostics) {
+        $observedWindowEvidence["$($window.handle)/$($window.processId)"] = $window
+      }
+      $unexpectedUpdaterWindows = @($windowDiagnostics | Where-Object {
+        $_.visible -and ((-not $_.boundsAvailable) -or
+          ($_.width -gt 0 -and $_.height -gt 0 -and $_.onScreen))
+      })
+      if ($unexpectedUpdaterWindows.Count -gt 0) {
+        $windowOwners = ($unexpectedUpdaterWindows | ForEach-Object {
+          "HWND=$($_.handle) class='$($_.windowClass)' bounds=$($_.windowBounds) size=$($_.width)x$($_.height) style=$($_.style) exstyle=$($_.extendedStyle) visible=$($_.visible) onScreen=$($_.onScreen) pid=$($_.processId) process='$($_.processName)' path='$($_.processPath)' parent=$($_.parentProcessId) session=$($_.sessionId) user='$($_.user)' title='$($_.windowTitle)' command='$($_.commandLine)'"
         }) -join ", "
         throw "The silent online update displayed a visible installer, CMD, or PowerShell window: $windowOwners"
       }
@@ -582,10 +670,7 @@ try {
           $_.processId -in $newVisibleWindowIds
         })
         $windowOwners = ($newVisibleWindows | ForEach-Object {
-          $windowProcess = Get-Process -Id $_.processId -ErrorAction SilentlyContinue
-          if ($windowProcess) {
-            "$($windowProcess.ProcessName)/PID $($_.processId) class='$($_.windowClass)' bounds=$($_.windowBounds) title='$($_.windowTitle)'"
-          } else { "PID $($_.processId) class='$($_.windowClass)' bounds=$($_.windowBounds)" }
+          "HWND=$($_.handle) class='$($_.windowClass)' bounds=$($_.windowBounds) size=$($_.width)x$($_.height) style=$($_.style) exstyle=$($_.extendedStyle) visible=$($_.visible) onScreen=$($_.onScreen) pid=$($_.processId)"
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
@@ -613,7 +698,7 @@ try {
         $updateProcess.Refresh()
         if ($updateProcess.HasExited) { break }
       }
-      Start-Sleep -Milliseconds 500
+      Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
     $updateProcess.Refresh()
     if (-not $updateProcess.HasExited) { throw "The Rust updater exceeded its 50-minute limit." }
@@ -632,6 +717,15 @@ try {
       throw "The restarted NGT API did not report the verified installed version."
     }
     if (Test-Path -LiteralPath $updateLock) { throw "The updater left its task lock after exiting." }
+    Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
+      $sessionEvidence.sessionId, $observedWindowEvidence.Count)
+    foreach ($window in $observedWindowEvidence.Values) {
+      Write-Output ("Window evidence: HWND={0} class='{1}' bounds={2} size={3}x{4} style={5} exstyle={6} visible={7} onScreen={8} pid={9} process='{10}' path='{11}' parent={12} session={13} user='{14}' title='{15}' command='{16}'" -f `
+        $window.handle, $window.windowClass, $window.windowBounds, $window.width, $window.height,
+        $window.style, $window.extendedStyle, $window.visible, $window.onScreen, $window.processId,
+        $window.processName, $window.processPath, $window.parentProcessId, $window.sessionId,
+        $window.user, $window.windowTitle, $window.commandLine)
+    }
     Write-Output ("Rust updater peak working set: {0:N1} MiB; CPU time: {1:N1} s." -f `
       ($peakUpdaterWorkingSet / 1MB), $updateProcess.TotalProcessorTime.TotalSeconds)
     if ($peakUpdaterWorkingSet -gt 100MB) {

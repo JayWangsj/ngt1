@@ -83,6 +83,91 @@ try {
   if ($upgradePlan.mode -ne "upgrade" -or $repairPlan.mode -ne "repair") {
     throw "Upgrade and same-version repair modes were not distinguished."
   }
+  $onlineBackup = New-NgtInstallFixture (Join-Path $testRoot "online-backup-state")
+  $onlineUpdateId = [guid]::NewGuid().ToString()
+  $onlineBackupRoot = Join-Path $onlineBackup.installRoot "data-store\backups\verified-online"
+  New-Item -ItemType Directory -Path $onlineBackupRoot -Force | Out-Null
+  Write-NgtInstallJsonAtomic (Join-Path $onlineBackup.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $onlineUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineBackup.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $onlineUpdateId
+    operation = "online-update"
+    status = "installing"
+    stage = "backing-up"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineBackup.installRoot ".local\update-maintenance.json") ([pscustomobject]@{
+    updateId = $onlineUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+    dataRoot = Join-Path $onlineBackup.installRoot "data-store"
+  })
+  Set-NgtStudioOnlineUpdateBackup -InstallRoot $onlineBackup.installRoot `
+    -UpdateId $onlineUpdateId -BackupRoot $onlineBackupRoot
+  $onlineMarkerAfterBackup = Get-NgtInstallJson (Join-Path $onlineBackup.installRoot ".local\update-maintenance.json")
+  $onlineStatusAfterBackup = Get-NgtInstallJson (Join-Path $onlineBackup.installRoot "update-status.json")
+  if (-not $onlineMarkerAfterBackup.backupVerified -or
+      [string]$onlineMarkerAfterBackup.backupRoot -ne [System.IO.Path]::GetFullPath($onlineBackupRoot) -or
+      -not $onlineStatusAfterBackup.backupVerified -or
+      [string]$onlineStatusAfterBackup.backupRoot -ne [System.IO.Path]::GetFullPath($onlineBackupRoot) -or
+      [string]$onlineMarkerAfterBackup.updateId -ne $onlineUpdateId -or
+      [string]$onlineStatusAfterBackup.updateId -ne $onlineUpdateId) {
+    throw "Online backup state fields were not persisted for the current update ID."
+  }
+  $wrongBackupOwnerRejected = $false
+  try {
+    Set-NgtStudioOnlineUpdateBackup -InstallRoot $onlineBackup.installRoot `
+      -UpdateId ([guid]::NewGuid().ToString()) -BackupRoot $onlineBackupRoot
+  } catch { $wrongBackupOwnerRejected = $_.Exception.Message -like "The online installer no longer owns*" }
+  if (-not $wrongBackupOwnerRejected) {
+    throw "Online backup state accepted a non-current update ID."
+  }
+  $onlineStarting = New-NgtInstallFixture (Join-Path $testRoot "online-start-reservation")
+  $onlineStartingId = [guid]::NewGuid().ToString()
+  $onlineStartingTimestamp = (Get-Date).ToUniversalTime().ToString("o")
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $onlineStartingId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+    createdAt = $onlineStartingTimestamp
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $onlineStartingId
+    operation = "online-update"
+    status = "starting"
+    stage = "starting"
+    targetVersion = "2.0.15"
+    createdAt = $onlineStartingTimestamp
+    executorConfirmed = $false
+  })
+  $startupReservationProtected = $false
+  $startupReservationFailure = ""
+  try {
+    Start-NgtStudioManualInstall -InstallRoot $onlineStarting.installRoot -TargetVersion "2.0.15" | Out-Null
+  } catch {
+    $startupReservationFailure = $_.Exception.Message
+    $startupReservationProtected = $_.Exception.Message -like "A new online update is reserving the installer*"
+  }
+  if (-not $startupReservationProtected -or
+      -not (Test-Path -LiteralPath (Join-Path $onlineStarting.installRoot "update.lock")) -or
+      (Test-Path -LiteralPath (Join-Path $onlineStarting.installRoot ".local\update-maintenance.json"))) {
+    throw "A manual installer displaced an online update before the Rust startup handshake: $startupReservationFailure"
+  }
+  $oldOnlineStartingTimestamp = "2020-01-01T00:00:00.000Z"
+  $oldOnlineLock = Get-NgtInstallJson (Join-Path $onlineStarting.installRoot "update.lock")
+  $oldOnlineStatus = Get-NgtInstallJson (Join-Path $onlineStarting.installRoot "update-status.json")
+  $oldOnlineLock.createdAt = $oldOnlineStartingTimestamp
+  $oldOnlineStatus.createdAt = $oldOnlineStartingTimestamp
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update.lock") $oldOnlineLock
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update-status.json") $oldOnlineStatus
+  $staleReservationPlan = Start-NgtStudioManualInstall `
+    -InstallRoot $onlineStarting.installRoot -TargetVersion "2.0.15"
+  if ($staleReservationPlan.mode -ne "upgrade") {
+    throw "A stale unconfirmed online reservation could not be safely superseded."
+  }
   $queued = New-NgtInstallFixture (Join-Path $testRoot "queued-without-lock")
   Write-NgtInstallJsonAtomic (Join-Path $queued.installRoot "update-status.json") ([pscustomobject]@{
     status = "queued"

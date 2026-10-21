@@ -13,6 +13,21 @@ $ArchivePath = [System.IO.Path]::GetFullPath($ArchivePath)
 if (-not (Test-Path -LiteralPath $ArchivePath)) {
   throw "Studio package is missing: $ArchivePath"
 }
+$archiveEntries = @(& tar.exe -tf $ArchivePath)
+if ($LASTEXITCODE -ne 0) { throw "Studio package archive inventory could not be read." }
+$normalizedArchiveEntries = @($archiveEntries | ForEach-Object {
+  ([string]$_).Replace("\", "/").TrimStart([char[]]@('.', '/'))
+})
+$archiveUpdaterExecutables = @($normalizedArchiveEntries | Where-Object { $_ -match '(?i)(^|/)NGTUpdater\.exe$' })
+if ($archiveUpdaterExecutables.Count -ne 1 -or $archiveUpdaterExecutables[0] -ine "tools/NGTUpdater.exe") {
+  throw "Studio archive must contain only the production tools/NGTUpdater.exe binary."
+}
+$unexpectedArchiveEntries = @($normalizedArchiveEntries | Where-Object {
+  $_ -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
+})
+if ($unexpectedArchiveEntries.Count -gt 0) {
+  throw "Studio archive contains Rust source, acceptance/debug output, or symbols: $($unexpectedArchiveEntries[0])"
+}
 foreach ($port in @(3000, 55432)) {
   if ([bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
     throw "Studio smoke-test port is already in use: $port"
@@ -36,6 +51,19 @@ function Write-SmokeLogs {
 try {
   & tar.exe -xf $ArchivePath -C $releaseRoot
   if ($LASTEXITCODE -ne 0) { throw "Studio package extraction failed." }
+  $extractedFiles = @(Get-ChildItem -LiteralPath $releaseRoot -File -Recurse -Force)
+  $extractedUpdaterExecutables = @($extractedFiles | Where-Object { $_.Name -ieq "NGTUpdater.exe" })
+  if ($extractedUpdaterExecutables.Count -ne 1 -or
+      $extractedUpdaterExecutables[0].FullName -ine [System.IO.Path]::GetFullPath((Join-Path $releaseRoot "tools\NGTUpdater.exe"))) {
+    throw "Extracted Studio runtime must contain only the production tools\NGTUpdater.exe binary."
+  }
+  $unexpectedExtractedFiles = @($extractedFiles | Where-Object {
+    $relative = $_.FullName.Substring(([System.IO.Path]::GetFullPath($releaseRoot).TrimEnd("\") + "\").Length).Replace("\", "/")
+    $relative -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
+  })
+  if ($unexpectedExtractedFiles.Count -gt 0) {
+    throw "Extracted Studio runtime contains Rust source, acceptance/debug output, or symbols: $($unexpectedExtractedFiles[0].FullName)"
+  }
   & (Join-Path $releaseRoot "scripts\verify-windows-studio-release.ps1") `
     -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$package.version) | Out-Null
   & (Join-Path $releaseRoot "scripts\test-windows-studio-update-safety.ps1")
@@ -113,6 +141,8 @@ try {
       "--pwfile=$passwordFile"
     )
     Write-Output "Studio package integrity test passed."
+    Write-Output ("Archive size: {0:N0} bytes; production Rust updater: {1:N0} bytes." -f `
+      (Get-Item -LiteralPath $ArchivePath).Length, (Get-Item -LiteralPath (Join-Path $releaseRoot "tools\NGTUpdater.exe")).Length)
     return
   }
 
