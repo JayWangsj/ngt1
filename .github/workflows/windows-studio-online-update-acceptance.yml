@@ -1,0 +1,64 @@
+name: Windows Studio Online Update Acceptance
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/actions/build-windows-studio-candidate/**"
+      - ".github/actions/windows-studio-acceptance/**"
+      - ".github/workflows/windows-studio-online-update-acceptance.yml"
+      - "installer/windows-studio.iss"
+      - "package.json"
+      - "scripts/build-windows-studio-*.ps1"
+      - "scripts/backup-windows-studio.ps1"
+      - "scripts/install-windows-studio*.ps1"
+      - "scripts/prepare-windows-studio-install.ps1"
+      - "scripts/run-windows-studio-acceptance-as-standard-user.ps1"
+      - "scripts/test-windows-studio-backup.ps1"
+      - "scripts/test-windows-studio-install-coordination.ps1"
+      - "scripts/test-windows-studio-online-update.ps1"
+      - "scripts/test-windows-studio-update-safety.ps1"
+      - "scripts/studio-runtime.ps1"
+      - "scripts/windows-studio-common.ps1"
+      - "scripts/windows-studio-install-coordination.ps1"
+      - "scripts/windows-studio-updater-acceptance-server.cjs"
+      - "src/lib/studio-update.ts"
+      - "tools/ngt-updater/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-studio-online-update-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  online-update-acceptance:
+    name: Isolated Windows silent online-update acceptance
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/build-windows-studio-candidate
+        env:
+          NGT_RELEASE_READY: "true"
+      - name: Install the exact candidate as a disposable standard user
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NGT_RELEASE_READY: "true"
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP "ngt-windows-release-assets"
+          $destination = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Get-ChildItem -LiteralPath $candidate -Force | Copy-Item -Destination $destination -Recurse -Force
+          ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update
+      - name: Verify the published v2.0.19 baseline upgrades and repairs with the candidate installer
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NGT_RELEASE_READY: "true"
+        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance manual-installer

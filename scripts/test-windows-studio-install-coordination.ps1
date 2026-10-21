@@ -37,26 +37,38 @@ function New-NgtInstallFixture([string]$Root) {
 
 try {
   $executorId = [guid]::NewGuid().ToString()
-  $executorScript = Join-Path $testRoot "scripts\update-windows-studio.ps1"
+  $executorScript = Join-Path $testRoot "releases\v2.0.11\scripts\update-windows-studio.ps1"
+  $legacyRelease = Split-Path (Split-Path $executorScript -Parent) -Parent
   $staleExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
     updateId = $executorId
-    executorScriptPath = $executorScript
-  }) $testRoot
+  }) $legacyRelease
   if ($staleExecutor -ne $false) { throw "A queued task without an executor was not recognized as inactive." }
   $script:InstallerTestProcesses = @([pscustomobject]@{
     Name = "powershell.exe"
     ProcessId = 45678
+    ExecutablePath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
     CommandLine = "powershell.exe -File `"$executorScript`" -UpdateId $executorId"
   })
   $activeExecutor = & $script:ProductionGetNgtUpdateExecutorState `
     ([pscustomobject]@{ executorPid = 45678; updateId = $executorId; executorScriptPath = $executorScript }) `
-    ([pscustomobject]@{ updateId = $executorId }) $testRoot
-  if ($activeExecutor -ne $true) { throw "A matching online update executor was not recognized as active." }
+    ([pscustomobject]@{ updateId = $executorId }) $legacyRelease
+  if ($activeExecutor -ne $true) { throw "A matching legacy online update executor was not recognized as active." }
+  $updaterPath = Join-Path $legacyRelease "tools\NGTUpdater.exe"
+  $script:InstallerTestProcesses = @([pscustomobject]@{
+    Name = "NGTUpdater.exe"
+    ProcessId = 45679
+    ExecutablePath = $updaterPath
+    CommandLine = "`"$updaterPath`" --update-id $executorId"
+  })
+  $activeRustExecutor = & $script:ProductionGetNgtUpdateExecutorState `
+    ([pscustomobject]@{ executorPid = 45679; updateId = $executorId; executorPath = $updaterPath }) `
+    ([pscustomobject]@{ updateId = $executorId; executorPath = $updaterPath }) $legacyRelease
+  if ($activeRustExecutor -ne $true) { throw "A matching Rust online update executor was not recognized as active." }
   $script:InstallerTestProcessQueryFails = $true
   $unverifiedExecutor = & $script:ProductionGetNgtUpdateExecutorState $null ([pscustomobject]@{
     updateId = $executorId
-    executorScriptPath = $executorScript
-  }) $testRoot
+    executorPath = $updaterPath
+  }) $legacyRelease
   if ($null -ne $unverifiedExecutor) { throw "A failed process query was not kept in the unverified state." }
   $script:InstallerTestProcessQueryFails = $false
   $script:InstallerTestProcesses = @()
@@ -70,6 +82,91 @@ try {
   $repairPlan = Get-NgtStudioInstallPlan -InstallRoot $fixture.installRoot -TargetVersion "2.0.11"
   if ($upgradePlan.mode -ne "upgrade" -or $repairPlan.mode -ne "repair") {
     throw "Upgrade and same-version repair modes were not distinguished."
+  }
+  $onlineBackup = New-NgtInstallFixture (Join-Path $testRoot "online-backup-state")
+  $onlineUpdateId = [guid]::NewGuid().ToString()
+  $onlineBackupRoot = Join-Path $onlineBackup.installRoot "data-store\backups\verified-online"
+  New-Item -ItemType Directory -Path $onlineBackupRoot -Force | Out-Null
+  Write-NgtInstallJsonAtomic (Join-Path $onlineBackup.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $onlineUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineBackup.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $onlineUpdateId
+    operation = "online-update"
+    status = "installing"
+    stage = "backing-up"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineBackup.installRoot ".local\update-maintenance.json") ([pscustomobject]@{
+    updateId = $onlineUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+    dataRoot = Join-Path $onlineBackup.installRoot "data-store"
+  })
+  Set-NgtStudioOnlineUpdateBackup -InstallRoot $onlineBackup.installRoot `
+    -UpdateId $onlineUpdateId -BackupRoot $onlineBackupRoot
+  $onlineMarkerAfterBackup = Get-NgtInstallJson (Join-Path $onlineBackup.installRoot ".local\update-maintenance.json")
+  $onlineStatusAfterBackup = Get-NgtInstallJson (Join-Path $onlineBackup.installRoot "update-status.json")
+  if (-not $onlineMarkerAfterBackup.backupVerified -or
+      [string]$onlineMarkerAfterBackup.backupRoot -ne [System.IO.Path]::GetFullPath($onlineBackupRoot) -or
+      -not $onlineStatusAfterBackup.backupVerified -or
+      [string]$onlineStatusAfterBackup.backupRoot -ne [System.IO.Path]::GetFullPath($onlineBackupRoot) -or
+      [string]$onlineMarkerAfterBackup.updateId -ne $onlineUpdateId -or
+      [string]$onlineStatusAfterBackup.updateId -ne $onlineUpdateId) {
+    throw "Online backup state fields were not persisted for the current update ID."
+  }
+  $wrongBackupOwnerRejected = $false
+  try {
+    Set-NgtStudioOnlineUpdateBackup -InstallRoot $onlineBackup.installRoot `
+      -UpdateId ([guid]::NewGuid().ToString()) -BackupRoot $onlineBackupRoot
+  } catch { $wrongBackupOwnerRejected = $_.Exception.Message -like "The online installer no longer owns*" }
+  if (-not $wrongBackupOwnerRejected) {
+    throw "Online backup state accepted a non-current update ID."
+  }
+  $onlineStarting = New-NgtInstallFixture (Join-Path $testRoot "online-start-reservation")
+  $onlineStartingId = [guid]::NewGuid().ToString()
+  $onlineStartingTimestamp = (Get-Date).ToUniversalTime().ToString("o")
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $onlineStartingId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+    createdAt = $onlineStartingTimestamp
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $onlineStartingId
+    operation = "online-update"
+    status = "starting"
+    stage = "starting"
+    targetVersion = "2.0.15"
+    createdAt = $onlineStartingTimestamp
+    executorConfirmed = $false
+  })
+  $startupReservationProtected = $false
+  $startupReservationFailure = ""
+  try {
+    Start-NgtStudioManualInstall -InstallRoot $onlineStarting.installRoot -TargetVersion "2.0.15" | Out-Null
+  } catch {
+    $startupReservationFailure = $_.Exception.Message
+    $startupReservationProtected = $_.Exception.Message -like "A new online update is reserving the installer*"
+  }
+  if (-not $startupReservationProtected -or
+      -not (Test-Path -LiteralPath (Join-Path $onlineStarting.installRoot "update.lock")) -or
+      (Test-Path -LiteralPath (Join-Path $onlineStarting.installRoot ".local\update-maintenance.json"))) {
+    throw "A manual installer displaced an online update before the Rust startup handshake: $startupReservationFailure"
+  }
+  $oldOnlineStartingTimestamp = "2020-01-01T00:00:00.000Z"
+  $oldOnlineLock = Get-NgtInstallJson (Join-Path $onlineStarting.installRoot "update.lock")
+  $oldOnlineStatus = Get-NgtInstallJson (Join-Path $onlineStarting.installRoot "update-status.json")
+  $oldOnlineLock.createdAt = $oldOnlineStartingTimestamp
+  $oldOnlineStatus.createdAt = $oldOnlineStartingTimestamp
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update.lock") $oldOnlineLock
+  Write-NgtInstallJsonAtomic (Join-Path $onlineStarting.installRoot "update-status.json") $oldOnlineStatus
+  $staleReservationPlan = Start-NgtStudioManualInstall `
+    -InstallRoot $onlineStarting.installRoot -TargetVersion "2.0.15"
+  if ($staleReservationPlan.mode -ne "upgrade") {
+    throw "A stale unconfirmed online reservation could not be safely superseded."
   }
   $queued = New-NgtInstallFixture (Join-Path $testRoot "queued-without-lock")
   Write-NgtInstallJsonAtomic (Join-Path $queued.installRoot "update-status.json") ([pscustomobject]@{
@@ -102,10 +199,13 @@ try {
   $legacyLockPlan = Start-NgtStudioManualInstall -InstallRoot $legacyLock.installRoot -TargetVersion "2.0.15"
   $legacyLockReservation = Get-NgtManualInstallReservation $legacyLock.installRoot
   $legacyLockHistory = Get-NgtInstallJson ([string](Get-NgtInstallJson (Join-Path $legacyLock.installRoot ".local\update-maintenance.json")).historyPath)
+  $archivedLegacyTimestamp = ([System.DateTimeOffset]$legacyLockHistory.previousLock.createdAt).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
   if ($legacyLockPlan.mode -ne "upgrade" -or
       $legacyLockReservation.lock.operation -ne "manual-install" -or
-      $legacyLockHistory.previousLock.createdAt -ne $legacyLockTimestamp) {
-    throw "A safe legacy timestamp lock was not archived and replaced by the manual installer."
+      $archivedLegacyTimestamp -ne $legacyLockTimestamp) {
+    throw ("A safe legacy timestamp lock was not archived and replaced by the manual installer. " +
+      "mode=$($legacyLockPlan.mode); operation=$($legacyLockReservation.lock.operation); " +
+      "archived=$($legacyLockHistory.previousLock.createdAt); expected=$legacyLockTimestamp")
   }
 
   $unsafeLegacyLock = New-NgtInstallFixture (Join-Path $testRoot "unsafe-legacy-timestamp-lock")

@@ -22,6 +22,20 @@ if (($env:GITHUB_REF_TYPE -eq "tag") -and ($env:GITHUB_REF_NAME -ne ("v" + $vers
 }
 
 $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
+$updaterManifest = Join-Path $projectRoot "tools\ngt-updater\Cargo.toml"
+$cargoTarget = if ($env:CARGO_TARGET_DIR) {
+  [System.IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+} elseif ($env:RUNNER_TEMP) {
+  Join-Path $env:RUNNER_TEMP "ngt-updater-cargo"
+} else {
+  Join-Path $projectRoot "tools\ngt-updater\target"
+}
+& cargo build --release --manifest-path $updaterManifest --target-dir $cargoTarget
+if ($LASTEXITCODE -ne 0) { throw "Rust updater release build failed." }
+$updaterBinary = Join-Path $cargoTarget "release\NGTUpdater.exe"
+if (-not (Test-Path -LiteralPath $updaterBinary -PathType Leaf)) {
+  throw "Rust updater executable is missing after the release build."
+}
 $stage = Join-Path $projectRoot ".local\studio-package"
 if (Test-Path -LiteralPath $stage) {
   Remove-Item -LiteralPath $stage -Recurse -Force
@@ -32,6 +46,14 @@ $standaloneDestination = Join-Path $stage ".next\standalone"
   $standaloneBuild $standaloneDestination
 if ($LASTEXITCODE -ne 0) {
   throw "Standalone build copy failed."
+}
+$tracedUpdaterSource = Join-Path $standaloneDestination "tools\ngt-updater"
+if (Test-Path -LiteralPath $tracedUpdaterSource) {
+  Remove-Item -LiteralPath $tracedUpdaterSource -Recurse -Force
+}
+$tracedUpdaterBinary = Join-Path $standaloneDestination "tools\NGTUpdater.exe"
+if (Test-Path -LiteralPath $tracedUpdaterBinary -PathType Leaf) {
+  Remove-Item -LiteralPath $tracedUpdaterBinary -Force
 }
 $standalonePnpmStore = Join-Path $standaloneDestination "node_modules\.pnpm"
 if (Test-Path -LiteralPath $standalonePnpmStore) {
@@ -109,6 +131,10 @@ $requiredPrismaClient = ".next\standalone\node_modules\.prisma\client\default.js
 if (-not (Test-Path -LiteralPath (Join-Path $stage $requiredPrismaClient))) {
   throw "The standalone Prisma client is incomplete."
 }
+$standaloneUpdaterSource = Join-Path $standaloneDestination "tools\ngt-updater"
+if (Test-Path -LiteralPath $standaloneUpdaterSource) {
+  throw "The standalone package retained Rust updater source or build output."
+}
 Copy-Item -LiteralPath (Join-Path $BuildDirectory "static") -Destination (Join-Path $stage ".next\static") -Recurse -Force
 Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public") -Recurse -Force
 $nonWindowsSharpPackages = Get-ChildItem -LiteralPath $stage -Directory -Recurse -ErrorAction SilentlyContinue |
@@ -128,11 +154,13 @@ Copy-Item -LiteralPath "prisma" -Destination (Join-Path $stage "prisma") -Recurs
 $stageAssets = Join-Path $stage "assets"
 New-Item -ItemType Directory -Path $stageAssets -Force | Out-Null
 Copy-Item -LiteralPath "assets\ngt-studio.ico" -Destination $stageAssets -Force
+$stageTools = Join-Path $stage "tools"
+New-Item -ItemType Directory -Path $stageTools -Force | Out-Null
+Copy-Item -LiteralPath $updaterBinary -Destination (Join-Path $stageTools "NGTUpdater.exe") -Force
 
 $runtimeScripts = @(
   "backup-windows-studio.ps1",
   "check-windows-credential-store.ps1",
-  "download-public-release-asset.ps1",
   "test-windows-studio-backup.ps1",
   "test-windows-studio-install-coordination.ps1",
   "test-windows-studio-update-safety.ps1",
@@ -145,7 +173,6 @@ $runtimeScripts = @(
   "start.mjs",
   "uninstall-windows-startup.ps1",
   "uninstall-windows-studio.ps1",
-  "update-windows-studio.ps1",
   "verify-windows-studio-release.ps1",
   "windows-db.mjs",
   "windows-service.ps1",
@@ -238,7 +265,20 @@ Copy-Item -LiteralPath "licenses\github-cli.txt" `
 
 $runtimeHash = Get-NgtRuntimeHash $runtimeDirectory
 $fileManifest = @{}
-Get-ChildItem -LiteralPath $stage -File -Recurse -Force | ForEach-Object {
+$stageFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse -Force)
+$updaterExecutables = @($stageFiles | Where-Object { $_.Name -ieq "NGTUpdater.exe" })
+if ($updaterExecutables.Count -ne 1 -or
+    $updaterExecutables[0].FullName -ine [System.IO.Path]::GetFullPath((Join-Path $stage "tools\NGTUpdater.exe"))) {
+  throw "The staged runtime must contain only the production tools\NGTUpdater.exe binary."
+}
+$unexpectedUpdaterFiles = @($stageFiles | Where-Object {
+  $relative = $_.FullName.Substring(([System.IO.Path]::GetFullPath($stage).TrimEnd("\") + "\").Length).Replace("\", "/")
+  $relative -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
+})
+if ($unexpectedUpdaterFiles.Count -gt 0) {
+  throw "The staged runtime contains Rust source, acceptance/debug output, or symbols: $($unexpectedUpdaterFiles[0].FullName)"
+}
+$stageFiles | ForEach-Object {
   $relativePath = $_.FullName.Substring(([System.IO.Path]::GetFullPath($stage).TrimEnd("\") + "\").Length).Replace("\", "/")
   $fileManifest[$relativePath] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -277,7 +317,20 @@ if (-not ($archiveEntries | Where-Object { $_ -like ("*" + $requiredNextEnvironm
 if (-not ($archiveEntries | Where-Object { $_ -like ("*" + $requiredPrismaClientEntry) })) {
   throw "Studio archive is missing the generated Prisma client."
 }
+$normalizedArchiveEntries = @($archiveEntries | ForEach-Object { ([string]$_).Replace("\", "/").TrimStart([char[]]@('.', '/')) })
+$archiveUpdaterExecutables = @($normalizedArchiveEntries | Where-Object { $_ -match '(?i)(^|/)NGTUpdater\.exe$' })
+if ($archiveUpdaterExecutables.Count -ne 1 -or $archiveUpdaterExecutables[0] -ine "tools/NGTUpdater.exe") {
+  throw "The archive must contain only the production tools/NGTUpdater.exe binary."
+}
+$unexpectedArchiveEntries = @($normalizedArchiveEntries | Where-Object {
+  $_ -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
+})
+if ($unexpectedArchiveEntries.Count -gt 0) {
+  throw "The archive contains Rust source, acceptance/debug output, or symbols: $($unexpectedArchiveEntries[0])"
+}
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
 Set-Content -LiteralPath ($archive + ".sha256") -Value ("$hash  " + (Split-Path $archive -Leaf)) -Encoding ascii
 Write-Output $archive
+Write-Output ("Archive size: {0:N0} bytes; production Rust updater: {1:N0} bytes." -f `
+  (Get-Item -LiteralPath $archive).Length, (Get-Item -LiteralPath $updaterBinary).Length)
 Write-Output ("Excluded {0} source maps and {1} non-Windows Sharp packages." -f $sourceMaps.Count, $nonWindowsSharpPackages.Count)

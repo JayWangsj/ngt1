@@ -57,7 +57,8 @@ $parameters = switch ($Acceptance) {
       TargetTag = $targetTag
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
-      CandidateDirectory = if ($env:NGT_RELEASE_READY -eq "true") { Join-Path $env:GITHUB_WORKSPACE "release-assets" } else { "" }
+      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+      AcceptanceUpdaterPath = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance\NGTUpdater.exe"
     }
   }
   "manual-installer" {
@@ -65,7 +66,7 @@ $parameters = switch ($Acceptance) {
       TargetTag = $targetTag
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
-      CandidateDirectory = if ($env:NGT_RELEASE_READY -eq "true") { Join-Path $env:GITHUB_WORKSPACE "release-assets" } else { "" }
+      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
       ManualInstaller = $true
     }
   }
@@ -112,6 +113,7 @@ try {
     @{ Path = $workspace; Recursive = $false },
     @{ Path = (Join-Path $workspace "scripts"); Recursive = $true },
     @{ Path = (Join-Path $workspace "release-assets"); Recursive = $true },
+    @{ Path = (Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance"); Recursive = $true },
     @{ Path = (Join-Path $workspace "package.json"); Recursive = $false }
   ) | Where-Object { Test-Path -LiteralPath $_.Path }
   foreach ($entry in $workspaceAclPaths) {

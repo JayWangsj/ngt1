@@ -2,6 +2,7 @@ param(
   [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "NGT\data-store"),
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "NGT"),
   [string]$PreviousReleaseRoot,
+  [string]$UpdateId,
   [switch]$InPlace,
   [switch]$OnlineUpdate
 )
@@ -12,6 +13,15 @@ $ErrorActionPreference = "Stop"
 
 function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
   $script:NgtInstallStage = $Name
+  if ($script:NgtOnlineUpdateId) {
+    $onlineStage = switch ($Name) {
+      "database-backup" { "backing-up" }
+      "health-validation" { "validating" }
+      default { "installing" }
+    }
+    Set-NgtStudioOnlineUpdateStage -InstallRoot $InstallRoot `
+      -UpdateId $script:NgtOnlineUpdateId -Stage $onlineStage
+  }
   $logPath = Join-Path $env:LOCALAPPDATA "NGT\install-stages.log"
   New-Item -ItemType Directory -Path (Split-Path -Parent $logPath) -Force | Out-Null
   $startedAt = Get-Date
@@ -28,6 +38,8 @@ function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
 }
 
 $manualInstall = $false
+$onlineInstall = $false
+$script:NgtOnlineUpdateId = $UpdateId
 $script:NgtInstallStage = "preflight"
 function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [string]$FailureMessage, [string]$FailedStage) {
   if (-not (Get-Command Stop-NgtStudioProcesses -ErrorAction SilentlyContinue)) {
@@ -39,9 +51,9 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
   if (-not $marker -or -not $marker.backupVerified -or -not $marker.backupRoot) {
     return $false
   }
-  if ($marker.operation -ne "manual-install" -or
+  if ($marker.operation -notin @("manual-install", "online-update") -or
       [string]$marker.updateId -ne [string]$reservation.lock.updateId -or
-      [string]$marker.updateId -ne [string]$reservation.status.manualInstallId) {
+      [string]$marker.updateId -ne [string]$(if ($marker.operation -eq "manual-install") { $reservation.status.manualInstallId } else { $reservation.status.updateId })) {
     throw "The failed installer no longer owns the maintenance marker and lock."
   }
   $backupRoot = [System.IO.Path]::GetFullPath([string]$marker.backupRoot)
@@ -126,14 +138,28 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
     -VerifiedVersion ([string]$previousReleaseMetadata.version) `
     -FailureMessage ("Manual installation failed and the previous release and database backup were restored and health-checked. " + $FailureMessage) `
     -FailedStage $FailedStage `
+    -OnlineUpdate:($marker.operation -eq "online-update") `
     -HealthVerified
   return $true
 }
 
 trap {
-  $installFailure = $_.Exception.Message
+  $failureRecord = $_
+  $installFailure = [string]$failureRecord.Exception.Message -replace "[\r\n]", " "
   $failedInstallStage = $script:NgtInstallStage
-  if ($manualInstall -and (Get-Command Set-NgtStudioManualInstallFailure -ErrorAction SilentlyContinue)) {
+  try {
+    $failureLog = Join-Path $env:LOCALAPPDATA "NGT\install-stages.log"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $failureLog) -Force | Out-Null
+    Add-Content -LiteralPath $failureLog -Value ("{0:o} FAILURE {1} type={2} reason={3}" -f `
+      (Get-Date).ToUniversalTime(), $failedInstallStage, $failureRecord.Exception.GetType().FullName, $installFailure)
+    if ($failureRecord.InvocationInfo.PositionMessage) {
+      Add-Content -LiteralPath $failureLog -Value ("POSITION {0}" -f $failureRecord.InvocationInfo.PositionMessage)
+    }
+    if ($failureRecord.ScriptStackTrace) {
+      Add-Content -LiteralPath $failureLog -Value ("STACK {0}" -f $failureRecord.ScriptStackTrace)
+    }
+  } catch { }
+  if (($manualInstall -or $onlineInstall) -and (Get-Command Set-NgtStudioManualInstallFailure -ErrorAction SilentlyContinue)) {
     $recoveryStatus = "not-started"
     $restored = $false
     try {
@@ -152,7 +178,7 @@ trap {
         -RecoveryStatus $recoveryStatus
     } catch { }
   }
-  throw
+  throw $failureRecord
 }
 
 $sourceRoot = Split-Path -Parent $PSScriptRoot
@@ -161,33 +187,48 @@ $releaseFile = Join-Path $sourceRoot "studio-release.json"
 $release = if (Test-Path -LiteralPath $releaseFile) {
   Get-Content -LiteralPath $releaseFile -Raw | ConvertFrom-Json
 } else { $null }
-if ((Test-Path -LiteralPath $releaseFile) -and -not $OnlineUpdate) {
+if (Test-Path -LiteralPath $releaseFile) {
   . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
   $incomingRelease = Get-Content -LiteralPath $releaseFile -Raw | ConvertFrom-Json
-  $manualInstallPlan = Start-NgtStudioManualInstall `
-    -InstallRoot $InstallRoot -TargetVersion ([string]$incomingRelease.version)
-  $manualInstall = $true
+  if ($OnlineUpdate) {
+    if (-not $UpdateId) { throw "A Rust updater task ID is required for an online installation." }
+    $onlineInstallPlan = Start-NgtStudioOnlineUpdateInstall `
+      -InstallRoot $InstallRoot -TargetVersion ([string]$incomingRelease.version) -UpdateId $UpdateId
+    $onlineInstall = $true
+  } else {
+    $manualInstallPlan = Start-NgtStudioManualInstall `
+      -InstallRoot $InstallRoot -TargetVersion ([string]$incomingRelease.version)
+    $manualInstall = $true
+  }
 }
+$resolvedDataRoot = $DataRoot
+if ($onlineInstallPlan) {
+  $resolvedDataRoot = [string]$onlineInstallPlan.dataRoot
+} elseif ($manualInstallPlan -and $manualInstallPlan.mode -ne "first-install") {
+  $resolvedDataRoot = [string]$manualInstallPlan.dataRoot
+}
+$stableDataRoot = [System.IO.Path]::GetFullPath($resolvedDataRoot)
 if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
   $stableRoot = Join-Path ([System.IO.Path]::GetFullPath($InstallRoot)) ("releases\v" + $release.version)
   if ([System.IO.Path]::GetFullPath($sourceRoot) -ne [System.IO.Path]::GetFullPath($stableRoot)) {
     & (Join-Path $sourceRoot "scripts\verify-windows-studio-release.ps1") `
       -ReleaseRoot $sourceRoot -ExpectedVersion ([string]$release.version) | Out-Null
     if (Test-Path -LiteralPath $stableRoot) {
-      $manualReservation = if ($manualInstall) { Get-NgtManualInstallReservation $stableInstallRoot } else { $null }
+      $manualReservation = if ($manualInstall -or $onlineInstall) { Get-NgtManualInstallReservation $stableInstallRoot } else { $null }
       $previousRepairRelease = if ($manualReservation) { [string]$manualReservation.marker.previousRelease } else { "" }
-      if (-not $manualInstall -or $manualInstallPlan.mode -ne "repair" -or
+      $installMode = if ($onlineInstall) { $onlineInstallPlan.mode } else { $manualInstallPlan.mode }
+      if ((-not $manualInstall -and -not $onlineInstall) -or $installMode -ne "repair" -or
           -not $previousRepairRelease -or
           [System.IO.Path]::GetFullPath($previousRepairRelease) -ine [System.IO.Path]::GetFullPath($stableRoot)) {
-        if (-not $manualInstall -or $manualInstallPlan.mode -notin @("first-install", "upgrade")) {
+        if ((-not $manualInstall -and -not $onlineInstall) -or $installMode -notin @("first-install", "upgrade")) {
           throw "Studio release is already installed: $stableRoot"
         }
-        Invoke-NgtInstallStage "incomplete-release-recovery" {
+        if ($manualInstall) { Invoke-NgtInstallStage "incomplete-release-recovery" {
           Move-NgtStudioIncompleteCandidateRelease `
             -InstallRoot $stableInstallRoot `
             -ReleaseRoot $stableRoot `
             -UpdateId ([string](Get-NgtManualInstallReservation $stableInstallRoot).marker.updateId) | Out-Null
-        }
+        } }
       } else {
         Invoke-NgtInstallStage "release-backup" {
           Move-NgtStudioRepairReleaseToBackup `
@@ -206,7 +247,7 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
         -ReleaseRoot $stableRoot -ExpectedVersion ([string]$release.version) | Out-Null
     }
     & (Join-Path $stableRoot "scripts\install-windows-studio.ps1") `
-      -DataRoot $DataRoot -InstallRoot $InstallRoot -InPlace -OnlineUpdate:$OnlineUpdate
+      -DataRoot $DataRoot -InstallRoot $InstallRoot -UpdateId $UpdateId -InPlace -OnlineUpdate:$OnlineUpdate
     return
   }
 }
@@ -214,7 +255,6 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
 . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
 Set-Location -LiteralPath $script:NgtProjectRoot
 $projectRoot = [System.IO.Path]::GetFullPath($script:NgtProjectRoot)
-$stableDataRoot = [System.IO.Path]::GetFullPath($DataRoot)
 if ($stableDataRoot.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
   throw "Studio data must be stored outside the application release directory."
 }
@@ -239,12 +279,14 @@ if (Test-Path -LiteralPath $existingStableConfig) {
   }
 }
 
-if ((Test-Path -LiteralPath $existingStableConfig) -and -not $OnlineUpdate) {
+if (Test-Path -LiteralPath $existingStableConfig) {
   Invoke-NgtInstallStage "database-backup" {
-    $manualMarker = Get-NgtInstallJson (Join-Path $stableInstallRoot ".local\update-maintenance.json")
-    if ($manualMarker -and $manualMarker.backupVerified -and $manualMarker.backupRoot) {
+    $installMarker = if ($manualInstall -or $onlineInstall) {
+      Get-NgtInstallJson (Join-Path $stableInstallRoot ".local\update-maintenance.json")
+    } else { $null }
+    if ($installMarker -and $installMarker.backupVerified -and $installMarker.backupRoot) {
       & (Join-Path $PSScriptRoot "test-windows-studio-backup.ps1") `
-        -BackupRoot ([string]$manualMarker.backupRoot) | Out-Null
+        -BackupRoot ([string]$installMarker.backupRoot) | Out-Null
     } else {
       $backupOutput = @(& (Join-Path $PSScriptRoot "backup-windows-studio.ps1") -LeaveStopped)
       $backupLine = @($backupOutput | Where-Object { [string]$_ -like "Studio backup created: *" } | Select-Object -Last 1)
@@ -253,7 +295,12 @@ if ((Test-Path -LiteralPath $existingStableConfig) -and -not $OnlineUpdate) {
       & (Join-Path $PSScriptRoot "test-windows-studio-backup.ps1") -BackupRoot $backupRoot | Out-Null
       if ($manualInstall) {
         Set-NgtStudioManualInstallBackup -InstallRoot $stableInstallRoot `
-          -UpdateId ([string]$manualMarker.updateId) -BackupRoot $backupRoot
+          -UpdateId ([string]$installMarker.updateId) -BackupRoot $backupRoot
+      } elseif ($onlineInstall) {
+        & (Join-Path $stableInstallRoot "scripts\test-windows-studio-backup.ps1") `
+          -BackupRoot $backupRoot | Out-Null
+        Set-NgtStudioOnlineUpdateBackup -InstallRoot $stableInstallRoot `
+          -UpdateId $UpdateId -BackupRoot $backupRoot
       }
     }
   }
@@ -309,6 +356,8 @@ Invoke-NgtInstallStage "database" {
 }
 Invoke-NgtInstallStage "migrations" {
   if ($isRelease) {
+    # The updater inherits NGT's old environment; Prisma gives DATABASE_URL precedence over the new release .env.
+    Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
     Invoke-NgtCommand $nodeExecutable @($prismaCli, "migrate", "deploy")
   } else {
     Invoke-NgtCommand "pnpm" @("db:generate")
@@ -329,6 +378,12 @@ if ($manualInstall) {
     Complete-NgtStudioManualInstall -InstallRoot $stableInstallRoot `
       -ReleaseRoot $projectRoot -VerifiedVersion ([string]$release.version) `
       -HealthVerified
+  }
+} elseif ($onlineInstall) {
+  Invoke-NgtInstallStage "install-state-validation" {
+    Complete-NgtStudioManualInstall -InstallRoot $stableInstallRoot `
+      -ReleaseRoot $projectRoot -VerifiedVersion ([string]$release.version) `
+      -OnlineUpdate -HealthVerified
   }
 }
 try {

@@ -26,11 +26,11 @@ try {
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture ".next\standalone") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture ".local") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture "scripts") -Force | Out-Null
+  New-Item -ItemType Directory -Path (Join-Path $releaseFixture "tools") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture "prisma") -Force | Out-Null
   $releaseFiles = @(
     ".next/standalone/server.js",
-    "scripts/update-windows-studio.ps1",
-    "scripts/download-public-release-asset.ps1",
+    "tools/NGTUpdater.exe",
     "scripts/check-windows-credential-store.ps1",
     "scripts/install-windows-studio.ps1",
     "scripts/prepare-windows-studio-install.ps1",
@@ -63,7 +63,7 @@ try {
   } catch { $unlistedRejected = $true }
   if (-not $unlistedRejected) { throw "Release integrity validation accepted an unlisted file." }
   Remove-Item -LiteralPath (Join-Path $releaseFixture "scripts\unlisted.ps1") -Force
-  Set-Content -LiteralPath (Join-Path $releaseFixture "scripts\update-windows-studio.ps1") `
+  Set-Content -LiteralPath (Join-Path $releaseFixture "tools\NGTUpdater.exe") `
     -Value "tampered" -Encoding ascii
   $integrityRejected = $false
   try {
@@ -90,6 +90,7 @@ try {
   if (-not $backupRejected) { throw "Backup validation accepted a modified database file." }
 
   . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
+  . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
   $processRoot = Join-Path $testRoot "process-fixture"
   $processInstallRoot = Join-Path $processRoot "install"
   $processReleaseRoot = Join-Path $processInstallRoot "releases\v-test"
@@ -323,18 +324,47 @@ try {
     throw "An unrelated scheduled-task executable was accepted as the NGT startup task."
   }
 
+  $exitCodeChild = Start-Process -FilePath (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe") `
+    -ArgumentList @("-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Milliseconds 750; exit 7") `
+    -WindowStyle Hidden -PassThru
+  $observedExitCodeChild = Get-Process -Id $exitCodeChild.Id -ErrorAction Stop
+  $observedExitCodeHandle = $observedExitCodeChild.Handle
+  if ($observedExitCodeHandle -eq [IntPtr]::Zero) {
+    throw "The process exit-code regression test could not retain a child process handle."
+  }
+  if (-not $exitCodeChild.WaitForExit(30000)) {
+    Stop-Process -Id $exitCodeChild.Id -Force -ErrorAction SilentlyContinue
+    throw "The process exit-code regression child did not exit within 30 seconds."
+  }
+  $observedExitCodeChild.WaitForExit()
+  if ($observedExitCodeChild.ExitCode -ne 7) {
+    throw "A retained process handle did not expose the child exit code after termination."
+  }
+
   $eventsPath = Join-Path $testRoot "mutex-events.txt"
   $firstOutput = Join-Path $testRoot "mutex-one.out"
   $firstError = Join-Path $testRoot "mutex-one.err"
   $secondOutput = Join-Path $testRoot "mutex-two.out"
   $secondError = Join-Path $testRoot "mutex-two.err"
-  $mutexRoot = [System.IO.Path]::GetFullPath((Join-Path $testRoot "mutex-install")).TrimEnd("\").ToLowerInvariant()
-  $sha256 = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $rootBytes = [System.Text.Encoding]::UTF8.GetBytes($mutexRoot)
-    $rootHash = [System.BitConverter]::ToString($sha256.ComputeHash($rootBytes)).Replace("-", "").ToLowerInvariant()
-  } finally { $sha256.Dispose() }
-  $mutexName = "Global\NGTStudioUpdate-$rootHash"
+  $mutexInstallRoot = Join-Path $testRoot "mutex-install"
+  New-Item -ItemType Directory -Path $mutexInstallRoot -Force | Out-Null
+  $mutexAlias = Join-Path $testRoot "mutex-install-junction"
+  New-Item -ItemType Junction -Path $mutexAlias -Target $mutexInstallRoot | Out-Null
+  $mutexName = Get-NgtStudioUpdateMutexName $mutexInstallRoot
+  $missingMutexRoot = Join-Path $mutexAlias "not-created\install"
+  $missingMutexName = Get-NgtStudioUpdateMutexName $missingMutexRoot
+  if ($missingMutexName -cne (Get-NgtStudioUpdateMutexName (Join-Path $mutexInstallRoot "not-created\install"))) {
+    throw "The update mutex identity changed for a missing path under a junction alias."
+  }
+  New-Item -ItemType Directory -Path $missingMutexRoot -Force | Out-Null
+  if ((Get-NgtStudioUpdateMutexName $missingMutexRoot) -cne $missingMutexName) {
+    throw "The update mutex identity changed after the install directory was created."
+  }
+  foreach ($mutexRootVariant in @($mutexInstallRoot, ($mutexInstallRoot + "\"), $mutexInstallRoot.ToUpperInvariant(), $mutexAlias)) {
+    if ((Get-NgtStudioUpdateMutexName $mutexRootVariant) -cne $mutexName) {
+      throw "The update mutex identity changed for a case, trailing-separator, or junction alias."
+    }
+  }
   $childScript = Join-Path $testRoot "mutex-child.ps1"
   @'
 param([string]$MutexName, [string]$EventsPath, [string]$Slot)

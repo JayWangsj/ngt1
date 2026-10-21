@@ -67,6 +67,13 @@ async function createLegacyOrder(db, data) {
     data: {
       orderId: order.id,
       ruleId: data.ruleId,
+      ...(data.option
+        ? {
+            priceOptionId: data.option.id,
+            priceOptionName: data.option.name,
+            requiredProductName: data.option.name,
+          }
+        : {}),
       project: "Display",
       suggested: "100.00",
       discount: "0.00",
@@ -161,6 +168,25 @@ async function seedFixture(db, code) {
       updatedAt: initialStockAt,
     },
   });
+  const option = db.priceRuleOption
+    ? await db.priceRuleOption.create({
+        data: {
+          ruleId: rule.id,
+          productId: product.id,
+          name: product.name,
+          suggested: rule.suggested,
+          cost: rule.cost ?? product.costPrice,
+          quantity: rule.requiredQuantity,
+          minutes: rule.minutes,
+          warrantyDays: 0,
+          enabled: rule.enabled && product.enabled,
+          isDefault: true,
+          sortOrder: 0,
+          notes: rule.notes,
+          updatedAt: rule.updatedAt,
+        },
+      })
+    : null;
   const initialMovement = await db.inventoryMovement.create({
     data: {
       requestId: `initial-stock:${code}`,
@@ -185,6 +211,7 @@ async function seedFixture(db, code) {
     deviceId: device.id,
     fault: "Historical paid LCD repair",
     ruleId: rule.id,
+    option,
     productId: product.id,
     productName: product.name,
     requiredQuantity: rule.requiredQuantity,
@@ -222,6 +249,7 @@ async function seedFixture(db, code) {
     deviceId: device.id,
     fault: "Open repair with reserved LCD",
     ruleId: rule.id,
+    option,
     productId: product.id,
     productName: product.name,
     requiredQuantity: rule.requiredQuantity,
@@ -309,6 +337,7 @@ async function seedFixture(db, code) {
     actorId: actor.id,
     productId: product.id,
     ruleId: rule.id,
+    optionId: option?.id ?? null,
     compatibilityId: compatibility.id,
     paidOrderId: paid.order.id,
     paidItemId: paid.item.id,
@@ -420,12 +449,12 @@ async function captureSnapshot(db, refs) {
     readRecord(
       db.workOrderItem,
       refs.paidItemId,
-      "id orderId ruleId project suggested discount final matchLevel adjustmentReason minutes requiredProductId requiredQuantity warrantyDays warrantyNotes",
+      `id orderId ruleId ${refs.optionId ? "priceOptionId priceOptionName requiredProductName " : ""}project suggested discount final matchLevel adjustmentReason minutes requiredProductId requiredQuantity warrantyDays warrantyNotes`,
     ),
     readRecord(
       db.workOrderItem,
       refs.reservationItemId,
-      "id orderId ruleId project suggested discount final matchLevel adjustmentReason minutes requiredProductId requiredQuantity warrantyDays warrantyNotes",
+      `id orderId ruleId ${refs.optionId ? "priceOptionId priceOptionName requiredProductName " : ""}project suggested discount final matchLevel adjustmentReason minutes requiredProductId requiredQuantity warrantyDays warrantyNotes`,
     ),
     readRecords(
       db.payment,
@@ -453,6 +482,13 @@ async function captureSnapshot(db, refs) {
       "id requestId productId quantity stockBefore stockAfter type referenceType referenceId note actorId actorName createdAt",
     ),
   ]);
+  const option = refs.optionId
+    ? await readRecord(
+        db.priceRuleOption,
+        refs.optionId,
+        "id ruleId productId name suggested cost quantity minutes warrantyDays enabled isDefault sortOrder notes updatedAt",
+      )
+    : null;
 
   return {
     customer,
@@ -460,6 +496,7 @@ async function captureSnapshot(db, refs) {
     actor,
     product,
     rule,
+    option,
     compatibility,
     orders: [paidOrder, reservationOrder],
     items: [paidItem, reservationItem],
@@ -571,7 +608,7 @@ async function verifyMigratedFixture(db, code, snapshot) {
   assert.equal(
     options.length,
     1,
-    "The legacy rule must migrate to exactly one option.",
+    "The legacy rule must retain exactly one option.",
   );
   const option = options[0];
   assert.equal(option.productId, refs.productId);

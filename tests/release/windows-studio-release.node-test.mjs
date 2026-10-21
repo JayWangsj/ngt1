@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -129,6 +129,51 @@ test("manifest ties the six release assets to their sidecars and source Commit",
   );
   await writeFile(target, "tampered");
   await assert.rejects(verifyArtifact(assets, manifest), /SHA256 verification/);
+});
+
+test("candidate manifest accepts a GitHub pull-request merge ref", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ngt-release-candidate-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const assets = path.join(root, "assets");
+  await mkdir(assets, { recursive: true });
+  const packageVersion = JSON.parse(
+    await readFile(path.join(process.cwd(), "package.json"), "utf8"),
+  ).version;
+  const candidateTag = "v" + packageVersion;
+  for (const name of expectedAssetNames(candidateTag).filter(
+    (entry) => !entry.endsWith(".sha256"),
+  )) {
+    const bytes = Buffer.from("fixture asset: " + name);
+    await writeFile(path.join(assets, name), bytes);
+    await writeFile(
+      path.join(assets, name + ".sha256"),
+      sha256(bytes) + "  " + name + "\n",
+    );
+  }
+
+  execFileSync(
+    process.execPath,
+    [
+      path.join(process.cwd(), "scripts", "windows-studio-release.mjs"),
+      "manifest",
+      assets,
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        GITHUB_SHA: sourceSha,
+        GITHUB_REF_NAME: "28/merge",
+        NGT_RELEASE_READY: "true",
+      },
+      encoding: "utf8",
+    },
+  );
+  const manifest = JSON.parse(
+    await readFile(path.join(assets, "release-manifest.json"), "utf8"),
+  );
+  assert.equal(manifest.tag, candidateTag);
+  assert.equal(manifest.sha, sourceSha);
 });
 
 test("findRelease discovers Draft Releases through the paginated release list", async () => {
@@ -649,6 +694,18 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const ready = (
     await readText(".github/workflows/windows-studio-release-ready.yml", "utf8")
   ).replace(/\r\n/g, "\n");
+  const onlineAcceptanceWorkflow = (
+    await readText(
+      ".github/workflows/windows-studio-online-update-acceptance.yml",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
+  const candidateBuildAction = (
+    await readText(
+      ".github/actions/build-windows-studio-candidate/action.yml",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
   const acceptanceAction = (
     await readText(
       ".github/actions/windows-studio-acceptance/action.yml",
@@ -656,10 +713,22 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     )
   ).replace(/\r\n/g, "\n");
   const updater = (
-    await readText("scripts/update-windows-studio.ps1", "utf8")
+    await readText("tools/ngt-updater/src/main.rs", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const innoInstaller = (
+    await readText("installer/windows-studio.iss", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const packageBuilder = (
+    await readText("scripts/build-windows-studio-package.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const releaseVerifier = (
+    await readText("scripts/verify-windows-studio-release.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const updateSafety = (
+    await readText("scripts/test-windows-studio-update-safety.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
   const installerAcceptance = (
     await readText("scripts/test-windows-studio-installer.ps1", "utf8")
@@ -722,15 +791,126 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(release, /\.\/\.github\/actions\/windows-studio-acceptance/);
   assert.match(acceptanceAction, /windows-studio-release\.mjs download-draft/);
   assert.match(acceptanceAction, /windows-studio-release\.mjs verify-artifact/);
+  assert.match(acceptanceAction, /actions\/download-artifact@v4/);
+  assert.match(
+    acceptanceAction,
+    /ngt-updater-acceptance-\$\{\{ github\.sha \}\}/,
+  );
   assert.match(ready, /workflow_dispatch:/);
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
-  assert.doesNotMatch(release, /actions\/(?:upload|download)-artifact@v4/);
+  assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
+  assert.match(onlineAcceptanceWorkflow, /build-windows-studio-candidate/);
+  assert.match(
+    candidateBuildAction,
+    /Run Windows updater coordination and safety regressions[\s\S]*test-windows-studio-update-safety\.ps1/,
+  );
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance online-update/,
+  );
+  assert.match(candidateBuildAction, /components: clippy, rustfmt/);
+  assert.match(
+    candidateBuildAction,
+    /cargo clippy --manifest-path tools\/ngt-updater\/Cargo\.toml --all-targets --all-features -- -D warnings/,
+  );
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance manual-installer/,
+  );
+  assert.ok(
+    onlineAcceptanceWorkflow.indexOf("-Acceptance online-update") <
+      onlineAcceptanceWorkflow.indexOf("-Acceptance manual-installer"),
+    "manual upgrade and repair acceptance must follow online acceptance on the exact candidate",
+  );
+  assert.match(online, /Invoke-GhDownload -Tag \$oldTag/);
+  assert.match(online, /Assert-ReleaseChecksum \$oldAppArchive/);
+  assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
+  assert.match(online, /Manual repair installer/);
+  assert.match(release, /actions\/upload-artifact@v4/);
+  assert.match(release, /name: ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(ci, /actions\/upload-artifact@v4/);
   assert.doesNotMatch(release, /prepare-candidate:/);
-  assert.match(updater, /\$releaseArguments = @\("release", "view"\)/);
-  assert.match(updater, /if \(\$ExpectedTargetVersion\)/);
+  assert.match(updater, /fn get_release\(/);
+  assert.match(updater, /fn github_api_base\(/);
+  assert.match(updater, /fn download_asset\(/);
+  assert.match(updater, /fn run_installer\(/);
+  assert.match(updater, /--test-mutex-name/);
+  assert.match(
+    updater,
+    /acceptance_mutex_diagnostic\(update_mutex_name\(&root\)\)/,
+  );
+  assert.match(updater, /fs::write\(output_path, diagnostic\)/);
+  assert.match(updater, /ERROR \{\}: \{\}/);
+  assert.match(updater, /\/VERYSILENT/);
+  assert.match(updater, /\/SUPPRESSMSGBOXES/);
+  assert.match(updater, /\/SP-/);
+  assert.match(updater, /\/NORESTART/);
+  assert.match(updater, /fn hide_console\(/);
+  assert.match(updater, /0x08000000/);
+  assert.match(updater, /check_install_space/);
+  assert.match(updater, /fn finish_failed\(/);
+  assert.match(updater, /"actualVersion"/);
+  assert.match(online, /Get-NgtUpdaterWindowDiagnostics/);
+  assert.match(online, /Start-Process -FilePath \$AcceptanceUpdaterPath/);
+  assert.match(online, /-ArgumentList @\("--test-mutex-name"/);
+  assert.match(online, /function Quote-NgtWindowsPathArgument/);
+  assert.match(online, /Quote-NgtWindowsPathArgument \$mutexRootVariant/);
+  assert.match(online, /Quote-NgtWindowsPathArgument \$mutexOutputPath/);
+  assert.match(online, /WaitForExit\(30000\)/);
+  assert.match(
+    online,
+    /\$mutexProcessExitCode = \$mutexDiagnosticProcess\.ExitCode/,
+  );
+  assert.match(online, /-WindowStyle Hidden -PassThru/);
+  assert.match(online, /\$updaterProcessHandle = \$updateProcess\.Handle/);
+  assert.match(
+    updateSafety,
+    /\$observedExitCodeHandle = \$observedExitCodeChild\.Handle/,
+  );
+  assert.match(updateSafety, /\$observedExitCodeChild\.ExitCode -ne 7/);
+  assert.ok(
+    online.indexOf("Interactive window probe completed") <
+      online.indexOf("if ($updateProcess.ExitCode -ne 0)"),
+    "window evidence must be emitted before updater exit-code checks can fail",
+  );
+  assert.match(online, /process exit code \{1\}; diagnostic: \{2\}/);
+  assert.match(online, /different update mutex identities for path/);
+  assert.match(online, /Get-NgtScreenVisibleWindows/);
+  assert.ok(
+    online.indexOf("$windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics") <
+      online.indexOf(
+        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
+      ),
+    "window evidence must be collected before a failed update ends acceptance",
+  );
+  assert.ok(
+    online.indexOf('Write-Output ("Window evidence:') <
+      online.indexOf(
+        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
+      ),
+    "window evidence must be logged before a failed update ends acceptance",
+  );
+  assert.match(online, /silent online update displayed a visible installer/);
+  assert.match(online, /Get-NgtInteractiveSessionEvidence/);
+  assert.match(online, /activeConsoleSessionId/);
+  assert.match(online, /windowClass/);
+  assert.match(online, /extendedStyle/);
+  assert.match(online, /windowTitle/);
+  assert.match(online, /GetWindowRect/);
+  assert.match(online, /windowBounds/);
+  assert.match(online, /BoundsAvailable/);
+  assert.match(online, /OnScreen/);
+  assert.match(innoInstaller, /DisableStartupPrompt=yes/);
+  assert.match(online, /NGT_TEST_RELEASE_API_URL/);
+  assert.match(
+    online,
+    /Acceptance did not observe both the independent NGT outage state and automatic reconnection/,
+  );
+  assert.match(online, /Rust updater peak working set/);
+  assert.doesNotMatch(packageBuilder, /update-windows-studio\.ps1/);
+  assert.doesNotMatch(releaseVerifier, /download-public-release-asset\.ps1/);
   assert.match(
     online,
     /node scripts\/windows-studio-release\.mjs find-update-baseline \$TargetTag/,
@@ -749,7 +929,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /InstallerPath = Join-Path/);
   assert.match(standardUserAcceptance, /"manual-installer"/);
   assert.match(online, /if \(\$ManualInstaller\)/);
-  assert.match(online, /\$manualStatus\.status -ne "superseded"/);
+  assert.doesNotMatch(
+    online,
+    /status = "queued"\s+previousVersion = \(\$oldTag/,
+  );
   assert.match(online, /\$repairStatus\.installMode -ne "repair"/);
   assert.match(installerAcceptance, /function Wait-NgtInstallerProcess/);
   assert.match(installerAcceptance, /\.WaitForExit\(15000\)/);
@@ -782,6 +965,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(diagnostics, /Select-Object -Last 40/);
   assert.match(diagnostics, /lines matching failure indicators/);
   assert.match(diagnostics, /"application\.log", "application\.error\.log"/);
+  assert.match(diagnostics, /online-installer\.inno\.log/);
   assert.match(diagnostics, /studio-database\.error\.log/);
   assert.match(
     acceptanceAction,

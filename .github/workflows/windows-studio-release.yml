@@ -54,6 +54,12 @@ jobs:
         run: |
           node scripts/windows-studio-release.mjs prepare-draft "$env:RUNNER_TEMP\ngt-windows-release-assets"
           if ($LASTEXITCODE -ne 0) { throw "Direct Draft Release upload failed." }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ngt-updater-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/ngt-updater-acceptance/NGTUpdater.exe
+          if-no-files-found: error
+          retention-days: 3
 
   online-update-acceptance:
     name: Disposable Windows online-update acceptance

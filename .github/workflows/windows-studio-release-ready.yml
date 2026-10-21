@@ -55,6 +55,12 @@ jobs:
           path: ${{ runner.temp }}/ngt-windows-release-assets/
           if-no-files-found: error
           retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ngt-updater-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/ngt-updater-acceptance/NGTUpdater.exe
+          if-no-files-found: error
+          retention-days: 3
 
   installer-acceptance:
     name: Release Ready installer acceptance

@@ -14,7 +14,8 @@ type StudioUpdateLock = {
   targetVersion?: string;
   createdAt?: string;
   executorPid?: number;
-  executorScriptPath?: string;
+  executorPath?: string;
+  operation?: "online-update";
 };
 type StudioUpdateMaintenance = {
   updateId?: string;
@@ -31,7 +32,7 @@ type ProcessLauncher = (
 type ProcessInspector = (options: {
   updateId?: string;
   executorPid?: number;
-  scriptPath: string;
+  updaterPath?: string;
 }) => Promise<boolean | undefined>;
 type AuthProcess = {
   stdin: { write: (value: string) => boolean; end: () => void };
@@ -87,7 +88,7 @@ export type StudioUpdateStatus = {
   installInstanceId?: string;
   buildCommit?: string;
   executorPid?: number;
-  executorScriptPath?: string;
+  executorPath?: string;
   executorAlive?: boolean;
   executorConfirmed?: boolean;
   createdAt?: string;
@@ -101,7 +102,7 @@ export type StudioUpdateStatus = {
   previousStatus?: string;
   previousUpdateId?: string;
   manualInstallId?: string;
-  operation?: "manual-install";
+  operation?: "manual-install" | "online-update";
   installMode?: "first-install" | "upgrade" | "repair";
   bytesDownloaded?: number;
   totalBytes?: number;
@@ -147,19 +148,44 @@ const activeUpdateRoots = new Set<string>();
 const updateMutationTails = new Map<string, Promise<void>>();
 const updateChecksInFlight = new Map<string, Promise<StudioUpdateInfo>>();
 
-function updateMutexName(installRoot: string) {
-  const root = path
-    .resolve(installRoot)
-    .replace(/[\\/]+$/, "")
-    .toLowerCase();
-  const digest = createHash("sha256").update(root).digest("hex");
-  return `Global\\NGTStudioUpdate-${digest}`;
-}
-
 async function acquireUpdateMutationMutex(installRoot: string) {
-  const mutexName = updateMutexName(installRoot);
+  const encodedInstallRoot = path.resolve(installRoot).replace(/'/g, "''");
   const script = [
-    `$mutex = [System.Threading.Mutex]::new($false, '${mutexName}')`,
+    String.raw`Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+public static class NgtUpdatePathIdentity {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
+  private static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetFinalPathNameByHandleW")]
+  private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+  public static string GetNormalizedPath(string path) {
+    using (var handle = CreateFile(path, 0x80, 0x1 | 0x2 | 0x4, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+      if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+      var capacity = 512;
+      while (true) {
+        var buffer = new StringBuilder(capacity);
+        var length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length < buffer.Capacity) {
+          var result = buffer.ToString().Replace('/', '\\');
+          if (result.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) result = @"\\" + result.Substring(8);
+          else if (result.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)) result = result.Substring(4);
+          return result.TrimEnd('\\').ToLowerInvariant();
+        }
+        capacity = checked((int)length + 1);
+      }
+    }
+  }
+}
+'@`,
+    `$mutexRoot = [NgtUpdatePathIdentity]::GetNormalizedPath('${encodedInstallRoot}')`,
+    "$sha256 = [System.Security.Cryptography.SHA256]::Create()",
+    "try { $rootHash = [System.BitConverter]::ToString($sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($mutexRoot))).Replace('-', '').ToLowerInvariant() } finally { $sha256.Dispose() }",
+    '$mutex = [System.Threading.Mutex]::new($false, "Global\\NGTStudioUpdate-$rootHash")',
     "$owned = $false",
     "try {",
     "  try { $owned = $mutex.WaitOne(10000) } catch [System.Threading.AbandonedMutexException] { $owned = $true }",
@@ -382,36 +408,34 @@ function inspectUpdaterProcess(
   options: Parameters<ProcessInspector>[0],
 ): Promise<boolean | undefined> {
   if (process.platform !== "win32") return Promise.resolve(undefined);
-  const targetPath = path.resolve(options.scriptPath).toLowerCase();
-  const cacheKey = `${targetPath}:${options.executorPid || "scan"}:${options.updateId || "legacy"}`;
+  if (!options.updaterPath) return Promise.resolve(false);
+  const targetPath = path.resolve(options.updaterPath).toLowerCase();
+  const cacheKey = [
+    targetPath,
+    options.executorPid || "scan",
+    options.updateId || "legacy",
+  ].join(":");
   const cached = processInspectionCache.get(cacheKey);
   if (cached && Date.now() - cached.checkedAt < 3_000)
     return Promise.resolve(cached.alive);
 
-  const scriptPath = targetPath.replace(/'/g, "''");
+  const executablePath = targetPath.replace(/'/g, "''");
   const updateId = options.updateId?.match(/^[a-f\d-]{36}$/i)?.[0];
   const pid = Number.isInteger(options.executorPid) ? options.executorPid : 0;
   const script = [
-    `$target = '${scriptPath}'`,
-    `$expectedPid = ${pid}`,
-    `$expectedUpdateId = '${updateId || ""}'`,
-    "$processes = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -match '^(powershell|pwsh)\\.exe$' })",
+    "$target = '" + executablePath + "'",
+    "$expectedPid = " + pid,
+    "$expectedUpdateId = '" + (updateId || "") + "'",
+    "$processes = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -eq 'NGTUpdater.exe' })",
     "if ($expectedPid -gt 0) { $processes = @($processes | Where-Object { $_.ProcessId -eq $expectedPid }) }",
     "$target = [System.IO.Path]::GetFullPath($target)",
     "$alive = $false",
     "foreach ($candidate in $processes) {",
-    '  $arguments = @([regex]::Matches([string]$candidate.CommandLine, \'"([^"]*)"|(\\S+)\') | ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value } })',
-    "  for ($index = 0; $index -lt $arguments.Count - 1; $index++) {",
-    "    if ($arguments[$index].TrimStart('-', '/').ToLowerInvariant() -ne 'file') { continue }",
-    "    try { $candidateScript = [System.IO.Path]::GetFullPath($arguments[$index + 1]) } catch { continue }",
-    "    if (-not $candidateScript.Equals($target, [System.StringComparison]::OrdinalIgnoreCase)) { continue }",
-    "    if (-not $expectedUpdateId) { $alive = $true; break }",
-    "    for ($idIndex = 0; $idIndex -lt $arguments.Count - 1; $idIndex++) {",
-    "      if ($arguments[$idIndex].TrimStart('-', '/').ToLowerInvariant() -eq 'updateid' -and $arguments[$idIndex + 1] -eq $expectedUpdateId) { $alive = $true; break }",
-    "    }",
-    "    if ($alive) { break }",
-    "  }",
-    "  if ($alive) { break }",
+    "  try { $candidatePath = [System.IO.Path]::GetFullPath([string]$candidate.ExecutablePath) } catch { continue }",
+    "  if (-not $candidatePath.Equals($target, [System.StringComparison]::OrdinalIgnoreCase)) { continue }",
+    "  if (-not $expectedUpdateId -or ([string]$candidate.CommandLine -notmatch [regex]::Escape($expectedUpdateId))) { continue }",
+    "  $alive = $true",
+    "  break",
     "}",
     "if ($alive) { 'true' } else { 'false' }",
   ].join("; ");
@@ -560,6 +584,29 @@ export function compareVersions(left: string, right: string) {
 function resolveGitHubCli(root: string) {
   const bundled = path.join(root, "runtime", "gh.exe");
   return existsSync(bundled) ? bundled : "gh";
+}
+
+function getAcceptanceReleaseApiBase() {
+  if (process.env.GITHUB_ACTIONS !== "true") return undefined;
+  const value = process.env.NGT_TEST_RELEASE_API_URL;
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol === "http:" &&
+      url.hostname === "127.0.0.1" &&
+      Boolean(url.port) &&
+      !url.username &&
+      !url.password &&
+      url.pathname === "/" &&
+      !url.search &&
+      !url.hash
+    )
+      return value.replace(/\/$/, "");
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 async function getStudioContext(root: string) {
@@ -722,13 +769,13 @@ export async function getStudioUpdateStatus(
         currentVersion,
         message: "The update executor is starting.",
       };
-    const scriptPath =
-      lockFile.value?.executorScriptPath ||
-      path.join(studioRoot, "scripts", "update-windows-studio.ps1");
+    const updaterPath =
+      lockFile.value?.executorPath ||
+      path.join(studioRoot, "tools", "NGTUpdater.exe");
     const alive = await (options.inspect || inspectUpdaterProcess)({
       updateId: lockFile.value?.updateId,
       executorPid: lockFile.value?.executorPid,
-      scriptPath,
+      updaterPath,
     });
     return alive === false
       ? {
@@ -794,9 +841,9 @@ export async function getStudioUpdateStatus(
       const alive = await (options.inspect || inspectUpdaterProcess)({
         updateId: status.updateId,
         executorPid: lockFile.value?.executorPid,
-        scriptPath:
-          lockFile.value?.executorScriptPath ||
-          path.join(studioRoot, "scripts", "update-windows-studio.ps1"),
+        updaterPath:
+          lockFile.value?.executorPath ||
+          path.join(studioRoot, "tools", "NGTUpdater.exe"),
       });
       if (alive !== false)
         return {
@@ -824,8 +871,7 @@ export async function getStudioUpdateStatus(
           latestLock.value?.updateId !== status.updateId ||
           latestLock.value?.createdAt !== lockFile.value?.createdAt ||
           latestLock.value?.executorPid !== lockFile.value?.executorPid ||
-          latestLock.value?.executorScriptPath !==
-            lockFile.value?.executorScriptPath ||
+          latestLock.value?.executorPath !== lockFile.value?.executorPath ||
           latestMarker.unreadable ||
           latestMarker.exists
         )
@@ -927,14 +973,14 @@ export async function getStudioUpdateStatus(
   if (recentConfirmed)
     return { ...status, executorAlive: true, currentVersion };
 
-  const scriptPath =
-    status.executorScriptPath ||
-    lockFile.value?.executorScriptPath ||
-    path.join(studioRoot, "scripts", "update-windows-studio.ps1");
+  const updaterPath =
+    status.executorPath ||
+    lockFile.value?.executorPath ||
+    path.join(studioRoot, "tools", "NGTUpdater.exe");
   const alive = await (options.inspect || inspectUpdaterProcess)({
     updateId: status.updateId || lockFile.value?.updateId,
     executorPid: status.executorPid || lockFile.value?.executorPid,
-    scriptPath,
+    updaterPath,
   });
   if (alive === false) {
     const interrupted = statusMessage(status, currentVersion);
@@ -1054,6 +1100,7 @@ export async function getGitHubLoginStatus(
 async function performStudioUpdateCheck(
   options: {
     root?: string;
+    targetVersion?: string;
     run?: CommandRunner;
     inspect?: ProcessInspector;
     fetchImpl?: typeof fetch;
@@ -1086,18 +1133,29 @@ async function performStudioUpdateCheck(
     publishedAt?: string;
     assets?: { name?: string; size?: number }[];
   };
-  if (context.repository === repository) {
-    const response = await fetchImpl(
-      `https://api.github.com/repos/${repository}/releases/latest`,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "NGT-Studio-Updater",
-        },
-        signal: AbortSignal.timeout(30_000),
+  const requestedTag = options.targetVersion
+    ? "v" + options.targetVersion.replace(/^v/i, "")
+    : undefined;
+  const acceptanceReleaseApi = getAcceptanceReleaseApiBase();
+  const useGitHubCli =
+    !acceptanceReleaseApi &&
+    (context.repository !== repository ||
+      Boolean(
+        requestedTag && (process.env.GH_TOKEN || process.env.GITHUB_TOKEN),
+      ));
+  if (!useGitHubCli) {
+    const releaseApi = acceptanceReleaseApi || "https://api.github.com";
+    const releaseUrl = requestedTag
+      ? releaseApi + "/repos/" + repository + "/releases/tags/" + requestedTag
+      : releaseApi + "/repos/" + repository + "/releases/latest";
+    const response = await fetchImpl(releaseUrl, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "NGT-Studio-Updater",
       },
-    );
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!response.ok)
       throw new Error(
         `Unable to read the public GitHub release: HTTP ${response.status}.`,
@@ -1141,14 +1199,15 @@ async function performStudioUpdateCheck(
       };
     }
 
-    const result = await run(githubCli, [
-      "release",
-      "view",
+    const releaseArguments = ["release", "view"];
+    if (requestedTag) releaseArguments.push(requestedTag);
+    releaseArguments.push(
       "--repo",
       context.repository,
       "--json",
       "tagName,name,body,url,publishedAt,assets",
-    ]);
+    );
+    const result = await run(githubCli, releaseArguments);
     latest = JSON.parse(result.stdout) as typeof latest;
   }
   const latestVersion = normalizeVersion(latest.tagName);
@@ -1164,9 +1223,23 @@ async function performStudioUpdateCheck(
   const runtimeChecksum = latest.assets?.find(
     (asset) => asset.name === `ngt-studio-runtime-${latest.tagName}.zip.sha256`,
   );
+  const installer = latest.assets?.find(
+    (asset) =>
+      asset.name === "ngt-studio-windows-setup-" + latest.tagName + ".exe",
+  );
+  const installerChecksum = latest.assets?.find(
+    (asset) =>
+      asset.name ===
+      "ngt-studio-windows-setup-" + latest.tagName + ".exe.sha256",
+  );
   const isNewer = compareVersions(latestVersion, context.currentVersion) > 0;
   const installable = Boolean(
-    studioArchive && studioChecksum && runtimeArchive && runtimeChecksum,
+    studioArchive &&
+    studioChecksum &&
+    runtimeArchive &&
+    runtimeChecksum &&
+    installer &&
+    installerChecksum,
   );
   return {
     installed: true,
@@ -1180,7 +1253,7 @@ async function performStudioUpdateCheck(
     releaseNotes: latest.body?.trim() || undefined,
     publishedAt: latest.publishedAt,
     downloadSize:
-      typeof studioArchive?.size === "number" ? studioArchive.size : undefined,
+      typeof installer?.size === "number" ? installer.size : undefined,
     installInstanceId: context.installInstanceId,
     buildCommit: context.buildCommit,
     status,
@@ -1190,13 +1263,17 @@ async function performStudioUpdateCheck(
 export function checkStudioUpdate(
   options: {
     root?: string;
+    targetVersion?: string;
     run?: CommandRunner;
     inspect?: ProcessInspector;
     fetchImpl?: typeof fetch;
   } = {},
 ): Promise<StudioUpdateInfo> {
   const root = resolveStudioRoot(options.root);
-  const key = path.resolve(root).toLowerCase();
+  const key = [
+    path.resolve(root).toLowerCase(),
+    options.targetVersion || "latest",
+  ].join(":");
   const pending = updateChecksInFlight.get(key);
   if (pending) return pending;
   const request = performStudioUpdateCheck({ ...options, root }).finally(() => {
@@ -1397,6 +1474,8 @@ export async function startStudioUpdate(
     launch?: ProcessLauncher;
     inspect?: ProcessInspector;
     targetVersion?: string;
+    fetchImpl?: typeof fetch;
+    run?: CommandRunner;
   } = {},
 ) {
   const root = resolveStudioRoot(options.root);
@@ -1408,24 +1487,27 @@ export async function startStudioUpdate(
   const installRoot = studioConfig.installRoot;
   const lockFile = lockPath(installRoot);
   const taskStatusFile = statusPath(installRoot);
-  const scriptPath = path.join(root, "scripts", "update-windows-studio.ps1");
-  const targetVersion = options.targetVersion?.replace(/^v/i, "");
-  if (targetVersion) {
-    const checked = await checkStudioUpdate({
-      root,
-      inspect: options.inspect,
-    });
-    if (checked.latestVersion !== targetVersion)
-      throw new Error("update_target_changed");
-    if (!checked.updateAvailable)
-      throw new Error(
-        checked.notInstallable
-          ? "update_not_installable"
-          : "update_no_longer_available",
-      );
-  }
+  const updaterPath = path.resolve(root, "tools", "NGTUpdater.exe");
+  if (!existsSync(updaterPath)) throw new Error("update_not_installable");
+  const checked = await checkStudioUpdate({
+    root,
+    inspect: options.inspect,
+    targetVersion: options.targetVersion,
+    fetchImpl: options.fetchImpl,
+    run: options.run,
+  });
+  const targetVersion =
+    options.targetVersion?.replace(/^v/i, "") || checked.latestVersion;
+  if (!targetVersion || checked.latestVersion !== targetVersion)
+    throw new Error("update_target_changed");
+  if (!checked.updateAvailable)
+    throw new Error(
+      checked.notInstallable
+        ? "update_not_installable"
+        : "update_no_longer_available",
+    );
 
-  return withUpdateMutationMutex(installRoot, async () => {
+  const reservation = await withUpdateMutationMutex(installRoot, async () => {
     if (activeUpdateRoots.has(installRoot))
       throw new Error("studio_update_in_progress");
 
@@ -1511,7 +1593,7 @@ export async function startStudioUpdate(
       const alive = await (options.inspect || inspectUpdaterProcess)({
         updateId: lock?.updateId,
         executorPid: lock?.executorPid,
-        scriptPath: lock?.executorScriptPath || scriptPath,
+        updaterPath: lock?.executorPath || updaterPath,
       });
       if (alive === true || alive === undefined || recentlyCreated)
         throw new Error("studio_update_in_progress");
@@ -1523,7 +1605,7 @@ export async function startStudioUpdate(
         latestLock.value?.updateId !== lockUpdateId ||
         latestLock.value?.createdAt !== lock?.createdAt ||
         latestLock.value?.executorPid !== lock?.executorPid ||
-        latestLock.value?.executorScriptPath !== lock?.executorScriptPath
+        latestLock.value?.executorPath !== lock?.executorPath
       )
         throw new Error("studio_update_in_progress");
       await unlink(lockFile);
@@ -1535,7 +1617,8 @@ export async function startStudioUpdate(
       updateId,
       targetVersion,
       createdAt,
-      executorScriptPath: path.resolve(scriptPath),
+      executorPath: updaterPath,
+      operation: "online-update" as const,
     };
     let lockCreated = false;
     let lockHandle: Awaited<ReturnType<typeof open>> | undefined;
@@ -1558,121 +1641,106 @@ export async function startStudioUpdate(
       updateId,
       targetVersion,
       previousVersion: context.currentVersion,
-      executorScriptPath: path.resolve(scriptPath),
+      executorPath: updaterPath,
       createdAt,
       updatedAt: createdAt,
       executorConfirmed: false,
+      operation: "online-update",
     };
     activeUpdateRoots.add(installRoot);
     try {
       await writeJsonAtomically(taskStatusFile, status);
-      const logFile = updateLogPath(installRoot, updateId);
-      const child = (options.launch || launchProcess)(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          scriptPath,
-          "-UpdateId",
-          updateId,
-          "-ExpectedTargetVersion",
-          targetVersion || "",
-          "-StatusFile",
-          taskStatusFile,
-          "-UpdateLockFile",
-          lockFile,
-          "-LogFile",
-          logFile,
-        ],
-        { cwd: root, detached: true, stdio: "ignore", windowsHide: true },
-      );
-      let finished = false;
-      const failBeforeCompletion = async (message: string) => {
-        if (finished) return;
-        finished = true;
-        await withUpdateOwnership(installRoot, updateId, async () => {
-          const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-          if (
-            latest?.updateId === updateId &&
-            latest.status !== "complete" &&
-            latest.status !== "failed"
-          )
-            await writeJsonAtomically(taskStatusFile, {
-              ...latest,
-              status: "failed",
-              stage: latest.stage || "starting",
-              failedStage: latest.stage || "starting",
-              message,
-              executorConfirmed: false,
-              updatedAt: new Date().toISOString(),
-            });
-          await unlink(lockFile).catch(() => undefined);
-        }).catch(() => undefined);
-        activeUpdateRoots.delete(installRoot);
-      };
-      child.once("spawn", () => {
-        void withUpdateOwnership(installRoot, updateId, async (currentLock) => {
-          if (!child.pid) return;
-          const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-          if (latest?.updateId !== updateId) return;
-          await writeJsonAtomically(lockFile, {
-            ...currentLock,
-            executorPid: child.pid,
-          });
-        }).catch(() => undefined);
-      });
-      child.once("error", (error) => {
-        void failBeforeCompletion(
-          `Unable to start the update executor: ${error.message}`,
-        );
-      });
-      child.once("close", (code) => {
-        void (async () => {
-          if (finished) {
-            activeUpdateRoots.delete(installRoot);
-            return;
-          }
-          finished = true;
-          await withUpdateOwnership(installRoot, updateId, async () => {
-            const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-            if (latest?.updateId !== updateId) return;
-            if (latest.status === "complete" || latest.status === "failed") {
-              await unlink(lockFile).catch(() => undefined);
-              return;
-            }
-            await writeJsonAtomically(taskStatusFile, {
-              ...latest,
-              status: "failed",
-              stage: latest.stage || "starting",
-              failedStage: latest.stage || "starting",
-              message: `The update executor exited before recording a final result (code ${code ?? "unknown"}).`,
-              executorConfirmed: false,
-              updatedAt: new Date().toISOString(),
-            });
-            await unlink(lockFile).catch(() => undefined);
-          }).catch(() => undefined);
-          activeUpdateRoots.delete(installRoot);
-        })();
-      });
-      child.unref();
-      return { ...status, logAvailable: true };
     } catch (cause) {
       activeUpdateRoots.delete(installRoot);
-      const latest = await readJson<StudioUpdateStatus>(taskStatusFile);
-      if (latest?.updateId === updateId && latest.status === "starting")
-        await writeJsonAtomically(taskStatusFile, {
-          ...latest,
-          status: "failed",
-          failedStage: "starting",
-          message: `Unable to create the update executor: ${cause instanceof Error ? cause.message : String(cause)}`,
-          updatedAt: new Date().toISOString(),
-        }).catch(() => undefined);
-      const currentLock = await readUpdateLock(lockFile);
-      if (currentLock.value?.updateId === updateId)
+      const createdLock = await readUpdateLock(lockFile);
+      if (createdLock.value?.updateId === updateId)
         await unlink(lockFile).catch(() => undefined);
       throw cause;
     }
+    return { updateId };
   });
+
+  const { updateId } = reservation;
+  try {
+    const child = (options.launch || launchProcess)(
+      updaterPath,
+      [
+        "--install-root",
+        installRoot,
+        "--release-root",
+        root,
+        "--update-id",
+        updateId,
+        "--target-version",
+        targetVersion,
+        "--repository",
+        context.repository,
+      ],
+      { cwd: root, detached: true, stdio: "ignore", windowsHide: true },
+    );
+    child.unref();
+    child.on("error", () => undefined);
+    const handshake = await Promise.race([
+      (async () => {
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline) {
+          const saved = await readJsonState<StudioUpdateStatus>(taskStatusFile);
+          if (saved.unreadable) throw new Error("update_status_unreadable");
+          if (
+            saved.value?.updateId === updateId &&
+            saved.value.status === "failed"
+          )
+            throw new Error(saved.value.message || "studio_updater_failed");
+          if (
+            saved.value?.updateId === updateId &&
+            saved.value.executorConfirmed === true &&
+            saved.value.executorPid === child.pid &&
+            samePath(saved.value.executorPath, updaterPath)
+          )
+            return saved.value;
+          if (child.exitCode !== null && child.exitCode !== undefined)
+            throw new Error("updater_exited_before_handshake");
+          if (child.signalCode !== null && child.signalCode !== undefined)
+            throw new Error("updater_exited_before_handshake");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        throw new Error("updater_start_unconfirmed");
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        child.once("error", (error) =>
+          reject(
+            new Error("Unable to start the Rust updater: " + error.message),
+          ),
+        );
+      }),
+    ]);
+    activeUpdateRoots.delete(installRoot);
+    return { ...handshake, logAvailable: true };
+  } catch (cause) {
+    activeUpdateRoots.delete(installRoot);
+    const latest = await readJsonState<StudioUpdateStatus>(taskStatusFile);
+    const alive = await (options.inspect || inspectUpdaterProcess)({
+      updateId,
+      executorPid: latest.value?.executorPid,
+      updaterPath,
+    });
+    if (latest.value?.updateId === updateId && latest.value.status !== "failed")
+      await writeJsonAtomically(taskStatusFile, {
+        ...latest.value,
+        status: alive === false ? "failed" : "verifying-task",
+        stage: latest.value.stage || "starting",
+        failedStage: latest.value.stage || "starting",
+        message:
+          cause instanceof Error
+            ? cause.message
+            : "Unable to start the Rust updater.",
+        executorAlive: alive === false ? false : alive,
+        manualReview: alive !== false,
+        updatedAt: new Date().toISOString(),
+      }).catch(() => undefined);
+    const currentLock = await readUpdateLock(lockFile);
+    if (alive === false && currentLock.value?.updateId === updateId)
+      await unlink(lockFile).catch(() => undefined);
+    throw cause;
+  }
 }

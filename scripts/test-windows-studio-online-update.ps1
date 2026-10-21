@@ -6,12 +6,19 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedManifestPath,
   [string]$CandidateDirectory = "",
+  [string]$AcceptanceUpdaterPath = "",
   [switch]$ManualInstaller
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
+}
+
+function Quote-NgtWindowsPathArgument([string]$Path) {
+  if ($Path.EndsWith("\")) { $Path += "\" }
+  return ('"{0}"' -f $Path)
 }
 
 function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$Description) {
@@ -95,10 +102,21 @@ if ($CandidateDirectory) {
   }
 }
 
-$baselineOutput = & node scripts/windows-studio-release.mjs find-update-baseline $TargetTag
-if ($LASTEXITCODE -ne 0) { throw "Unable to find a supported published release for the update baseline." }
-$baseline = ($baselineOutput | Out-String) | ConvertFrom-Json
-if (-not $baseline) { throw "No published release with supported online-update assets was found." }
+if ($ManualInstaller) {
+  $baselineOutput = & node scripts/windows-studio-release.mjs find-update-baseline $TargetTag
+  if ($LASTEXITCODE -ne 0) { throw "Unable to find a supported published release for the manual-upgrade baseline." }
+  $baseline = ($baselineOutput | Out-String) | ConvertFrom-Json
+  if (-not $baseline) { throw "No published release was found for the manual-upgrade baseline." }
+} else {
+  if (-not $CandidateDirectory -or -not (Test-Path -LiteralPath $AcceptanceUpdaterPath -PathType Leaf)) {
+    throw "Online acceptance requires the verified candidate assets and the isolated acceptance updater."
+  }
+  $versionParts = $targetVersion.Split(".") | ForEach-Object { [int]$_ }
+  if ($versionParts.Count -ne 3 -or $versionParts[2] -lt 1) {
+    throw "Online acceptance requires a patch version greater than zero."
+  }
+  $baseline = [pscustomobject]@{ tagName = "v{0}.{1}.{2}" -f $versionParts[0], $versionParts[1], ($versionParts[2] - 1) }
+}
 
 $baselineVersion = [version]($baseline.tagName -replace "^v", "")
 if ($baselineVersion -ge [version]$targetVersion) {
@@ -126,6 +144,8 @@ $updateLock = Join-Path $installRoot "update.lock"
 $updateStatus = Join-Path $installRoot "update-status.json"
 $updateLog = Join-Path $installRoot "logs\online-update.log"
 $updateProcess = $null
+$acceptanceServerProcess = $null
+$previousTestApiUrl = $env:NGT_TEST_RELEASE_API_URL
 $installationAttempted = $false
 $cleanupSafe = $true
 $acceptanceFailed = $false
@@ -147,6 +167,199 @@ function Assert-ReleaseChecksum([string]$ArchivePath, [string]$ChecksumPath) {
   if ((Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash -ne $Matches[1]) {
     throw "Release checksum validation failed: $(Split-Path -Leaf $ArchivePath)"
   }
+}
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class NgtUpdaterAcceptanceWindowProbe {
+  private delegate bool EnumWindowsCallback(IntPtr window, IntPtr state);
+  private struct WindowRect {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+  public sealed class WindowInfo {
+    public long Handle;
+    public long ParentHandle;
+    public long OwnerHandle;
+    public int ThreadId;
+    public int ProcessId;
+    public string ClassName;
+    public string Title;
+    public long Style;
+    public long ExtendedStyle;
+    public bool IsVisible;
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+    public bool BoundsAvailable;
+    public bool OnScreen;
+  }
+
+  [DllImport("user32.dll")]
+  private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
+  [DllImport("user32.dll")]
+  private static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")]
+  private static extern IntPtr GetParent(IntPtr window);
+  [DllImport("user32.dll")]
+  private static extern IntPtr GetWindow(IntPtr window, uint command);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+  private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+  [DllImport("user32.dll")]
+  private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern int GetClassName(IntPtr window, System.Text.StringBuilder className, int maxCount);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder title, int maxCount);
+  [DllImport("user32.dll")]
+  private static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
+  [DllImport("user32.dll")]
+  private static extern int GetSystemMetrics(int index);
+  [DllImport("kernel32.dll")]
+  private static extern uint WTSGetActiveConsoleSessionId();
+
+  public static uint GetActiveConsoleSessionId() { return WTSGetActiveConsoleSessionId(); }
+
+  public static WindowInfo[] GetTopLevelWindows() {
+    var windows = new List<WindowInfo>();
+    EnumWindows((window, state) => {
+      uint processId;
+      var threadId = GetWindowThreadProcessId(window, out processId);
+      if (processId > 0) {
+        var className = new System.Text.StringBuilder(256);
+        var title = new System.Text.StringBuilder(512);
+        var rect = new WindowRect();
+        var boundsAvailable = GetWindowRect(window, out rect);
+        GetClassName(window, className, className.Capacity);
+        GetWindowText(window, title, title.Capacity);
+        var screenLeft = GetSystemMetrics(76);
+        var screenTop = GetSystemMetrics(77);
+        var screenRight = screenLeft + GetSystemMetrics(78);
+        var screenBottom = screenTop + GetSystemMetrics(79);
+        windows.Add(new WindowInfo {
+          Handle = window.ToInt64(),
+          ParentHandle = GetParent(window).ToInt64(),
+          OwnerHandle = GetWindow(window, 4).ToInt64(),
+          ThreadId = (int)threadId,
+          ProcessId = (int)processId,
+          ClassName = className.ToString(),
+          Title = title.ToString(),
+          Style = GetWindowLongPtr(window, -16).ToInt64(),
+          ExtendedStyle = GetWindowLongPtr(window, -20).ToInt64(),
+          IsVisible = IsWindowVisible(window),
+          Left = rect.Left,
+          Top = rect.Top,
+          Right = rect.Right,
+          Bottom = rect.Bottom,
+          BoundsAvailable = boundsAvailable,
+          OnScreen = boundsAvailable && rect.Right > screenLeft && rect.Left < screenRight &&
+            rect.Bottom > screenTop && rect.Top < screenBottom
+        });
+      }
+      return true;
+    }, IntPtr.Zero);
+    return windows.ToArray();
+  }
+}
+"@
+
+function Get-NgtInteractiveSessionEvidence {
+  $currentProcess = Get-Process -Id $PID -ErrorAction Stop
+  $sessionId = [int]$currentProcess.SessionId
+  $activeSessionId = [uint32][NgtUpdaterAcceptanceWindowProbe]::GetActiveConsoleSessionId()
+  $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  return [pscustomobject]@{
+    user = $user
+    sessionId = $sessionId
+    activeConsoleSessionId = $activeSessionId
+    interactive = ($sessionId -gt 0 -and $activeSessionId -eq [uint32]$sessionId)
+  }
+}
+
+function Get-NgtTopLevelWindows(
+  [object[]]$Processes,
+  [System.Collections.Generic.HashSet[int]]$ProcessIds,
+  [switch]$IncludeProcessDetails
+) {
+  if ($IncludeProcessDetails -and $null -eq $Processes) {
+    $Processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+  }
+  $windows = [NgtUpdaterAcceptanceWindowProbe]::GetTopLevelWindows()
+  foreach ($windowInfo in $windows) {
+    if ($ProcessIds -and -not $ProcessIds.Contains([int]$windowInfo.ProcessId)) { continue }
+    $process = $null
+    if ($IncludeProcessDetails) {
+      $process = $Processes | Where-Object { [int]$_.ProcessId -eq [int]$windowInfo.ProcessId } | Select-Object -First 1
+      if (-not $process) { continue }
+    }
+    $owner = ""
+    $processPath = ""
+    $processSessionId = -1
+    if ($IncludeProcessDetails) {
+      try {
+        $ownerResult = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
+        if ($ownerResult.ReturnValue -eq 0) { $owner = "{0}\{1}" -f $ownerResult.Domain, $ownerResult.User }
+      } catch { }
+      $processPath = [string]$process.ExecutablePath
+      $processSessionId = [int]$process.SessionId
+    }
+    [pscustomobject]@{
+      handle = "0x{0:X}" -f [long]$windowInfo.Handle
+      parentHandle = "0x{0:X}" -f [long]$windowInfo.ParentHandle
+      ownerHandle = "0x{0:X}" -f [long]$windowInfo.OwnerHandle
+      threadId = [int]$windowInfo.ThreadId
+      processId = [int]$windowInfo.ProcessId
+      processName = [string]$process.Name
+      processPath = $processPath
+      parentProcessId = if ($process) { [int]$process.ParentProcessId } else { -1 }
+      sessionId = $processSessionId
+      user = $owner
+      commandLine = if ($process) { [string]$process.CommandLine } else { "" }
+      windowTitle = [string]$windowInfo.Title
+      windowClass = [string]$windowInfo.ClassName
+      visible = [bool]$windowInfo.IsVisible
+      style = "0x{0:X}" -f [long]$windowInfo.Style
+      extendedStyle = "0x{0:X}" -f [long]$windowInfo.ExtendedStyle
+      windowBounds = "[$($windowInfo.Left),$($windowInfo.Top),$($windowInfo.Right),$($windowInfo.Bottom)]"
+      width = [int]($windowInfo.Right - $windowInfo.Left)
+      height = [int]($windowInfo.Bottom - $windowInfo.Top)
+      boundsAvailable = [bool]$windowInfo.BoundsAvailable
+      onScreen = [bool]$windowInfo.OnScreen
+    }
+  }
+}
+
+function Get-NgtScreenVisibleWindows {
+  return @(Get-NgtTopLevelWindows | Where-Object {
+    $_.visible -and ((-not $_.boundsAvailable) -or
+      ($_.width -gt 0 -and $_.height -gt 0 -and $_.onScreen))
+  })
+}
+
+function Get-NgtUpdaterWindowDiagnostics([int]$UpdaterPid) {
+  $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+  $processIds = [System.Collections.Generic.HashSet[int]]::new()
+  [void]$processIds.Add($UpdaterPid)
+  do {
+    $added = $false
+    foreach ($process in $processes) {
+      if ($processIds.Contains([int]$process.ParentProcessId) -and
+          $processIds.Add([int]$process.ProcessId)) {
+        $added = $true
+      }
+    }
+  } while ($added)
+  return @(Get-NgtTopLevelWindows -Processes $processes -ProcessIds $processIds -IncludeProcessDetails)
+}
+
+function Get-NgtVisibleWindowProcessIds {
+  return @((Get-NgtScreenVisibleWindows | Select-Object -ExpandProperty processId -Unique))
 }
 
 function Normalize-LegacyBaselineDocumentationPaths([string]$Root) {
@@ -180,6 +393,32 @@ function Invoke-BusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string
 
 try {
   New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+  if (-not $ManualInstaller) {
+    $portListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $portListener.Start()
+    $acceptancePort = [int]$portListener.LocalEndpoint.Port
+    $portListener.Stop()
+    $serverScript = Join-Path $PSScriptRoot "windows-studio-updater-acceptance-server.cjs"
+    $serverLog = Join-Path $testRoot "candidate-server.log"
+    $serverArguments = '"' + $serverScript + '" "' + $CandidateDirectory + '" "' + $ExpectedManifestPath + '" ' + $acceptancePort
+    $acceptanceServerProcess = Start-Process -FilePath (Get-Command node -ErrorAction Stop).Source `
+      -ArgumentList $serverArguments -WorkingDirectory $env:GITHUB_WORKSPACE `
+      -RedirectStandardOutput $serverLog -RedirectStandardError ($serverLog + ".error") `
+      -WindowStyle Hidden -PassThru
+    $env:NGT_TEST_RELEASE_API_URL = "http://127.0.0.1:$acceptancePort"
+    $serverReady = $false
+    $serverDeadline = (Get-Date).AddSeconds(15)
+    do {
+      try {
+        Invoke-RestMethod -Uri ($env:NGT_TEST_RELEASE_API_URL + "/health") -TimeoutSec 1 | Out-Null
+        $serverReady = $true
+        break
+      } catch { }
+      if ($acceptanceServerProcess.HasExited) { throw "The controlled candidate API server exited during startup." }
+      Start-Sleep -Milliseconds 200
+    } while ((Get-Date) -lt $serverDeadline)
+    if (-not $serverReady) { throw "The controlled candidate API server did not become ready." }
+  }
   if ($CandidateDirectory) {
     $shimRoot = Join-Path $testRoot "candidate-gh"
     New-Item -ItemType Directory -Path $shimRoot -Force | Out-Null
@@ -205,32 +444,44 @@ try {
     }
   }
   $oldTag = $baseline.tagName
-  $appName = "ngt-studio-windows-$oldTag.zip"
-  $appChecksumName = "$appName.sha256"
-  $runtimeName = "ngt-studio-runtime-$oldTag.zip"
-  $runtimeChecksumName = "$runtimeName.sha256"
-  $anonymousChecksumPath = Join-Path $testRoot "anonymous-runtime-checksum.sha256"
-  $anonymousAssetUrl = "https://github.com/$repository/releases/download/$oldTag/$runtimeChecksumName"
-  & (Join-Path $PSScriptRoot "download-public-release-asset.ps1") `
-    -AssetUrl $anonymousAssetUrl -Destination $anonymousChecksumPath
-  $anonymousChecksum = (Get-Content -LiteralPath $anonymousChecksumPath -Raw).Trim()
-  if ($anonymousChecksum -notmatch "^[A-Fa-f0-9]{64}\s+$([regex]::Escape($runtimeName))$") {
-    throw "Anonymous public Release asset download did not return the expected checksum file."
+  $appName = if ($ManualInstaller) { "ngt-studio-windows-$oldTag.zip" } else { "ngt-studio-windows-$TargetTag.zip" }
+  if ($ManualInstaller) {
+    $appChecksumName = "$appName.sha256"
+    $runtimeName = "ngt-studio-runtime-$oldTag.zip"
+    $runtimeChecksumName = "$runtimeName.sha256"
+    Invoke-GhDownload -Tag $oldTag -Directory $downloadRoot -AssetNames @(
+      $appName, $appChecksumName, $runtimeName, $runtimeChecksumName
+    )
+    $oldAppArchive = Join-Path $downloadRoot $appName
+    $oldRuntimeArchive = Join-Path $downloadRoot $runtimeName
+    Assert-ReleaseChecksum $oldAppArchive (Join-Path $downloadRoot $appChecksumName)
+    Assert-ReleaseChecksum $oldRuntimeArchive (Join-Path $downloadRoot $runtimeChecksumName)
+  } else {
+    $oldAppArchive = Join-Path $CandidateDirectory $appName
+    Assert-ReleaseChecksum $oldAppArchive (Join-Path $CandidateDirectory ($appName + ".sha256"))
   }
-  Invoke-GhDownload -Tag $oldTag -Directory $downloadRoot -AssetNames @(
-    $appName, $appChecksumName, $runtimeName, $runtimeChecksumName
-  )
-  $oldAppArchive = Join-Path $downloadRoot $appName
-  $oldRuntimeArchive = Join-Path $downloadRoot $runtimeName
-  Assert-ReleaseChecksum $oldAppArchive (Join-Path $downloadRoot $appChecksumName)
-  Assert-ReleaseChecksum $oldRuntimeArchive (Join-Path $downloadRoot $runtimeChecksumName)
-
   New-Item -ItemType Directory -Path $baselineRoot -Force | Out-Null
   & tar.exe -xf $oldAppArchive -C $baselineRoot
   if ($LASTEXITCODE -ne 0) { throw "Baseline application archive extraction failed." }
-  & tar.exe -xf $oldRuntimeArchive -C $baselineRoot
-  if ($LASTEXITCODE -ne 0) { throw "Baseline runtime archive extraction failed." }
-  Normalize-LegacyBaselineDocumentationPaths -Root $baselineRoot
+  if ($ManualInstaller) {
+    & tar.exe -xf $oldRuntimeArchive -C $baselineRoot
+    if ($LASTEXITCODE -ne 0) { throw "Baseline runtime archive extraction failed." }
+    Normalize-LegacyBaselineDocumentationPaths -Root $baselineRoot
+  } else {
+    $baselineRuntimeArchive = Join-Path $CandidateDirectory "ngt-studio-runtime-$TargetTag.zip"
+    Assert-ReleaseChecksum $baselineRuntimeArchive `
+      (Join-Path $CandidateDirectory ("ngt-studio-runtime-$TargetTag.zip.sha256"))
+    & tar.exe -xf $baselineRuntimeArchive -C $baselineRoot
+    if ($LASTEXITCODE -ne 0) { throw "Candidate baseline runtime archive extraction failed." }
+    $baselineMetadataPath = Join-Path $baselineRoot "studio-release.json"
+    $baselineMetadata = Get-Content -LiteralPath $baselineMetadataPath -Raw | ConvertFrom-Json
+    $baselineMetadata.version = $oldTag -replace "^v", ""
+    Copy-Item -LiteralPath $AcceptanceUpdaterPath -Destination (Join-Path $baselineRoot "tools\NGTUpdater.exe") -Force
+    $updaterEntry = $baselineMetadata.files.PSObject.Properties["tools/NGTUpdater.exe"]
+    if (-not $updaterEntry) { throw "Candidate package is missing the updater integrity entry." }
+    $updaterEntry.Value = (Get-FileHash -LiteralPath (Join-Path $baselineRoot "tools\NGTUpdater.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
+    $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+  }
 
   # GitHub's disposable standard user has no interactive Task Scheduler session.
   $baselineStartupScriptPath = Join-Path $baselineRoot "scripts\install-windows-startup.ps1"
@@ -257,46 +508,11 @@ try {
     throw "Baseline startup script has no supported immediate launcher command."
   }
 
-  $baselineUpdaterScriptPath = Join-Path $baselineRoot "scripts\update-windows-studio.ps1"
-  $baselineUpdaterScript = Get-Content -LiteralPath $baselineUpdaterScriptPath -Raw
-  $publicReleaseSelection = '$isPublicRepository = $repository -eq "JayWangsj/ngt1"'
-  $latestReleaseView = '$releaseOutput = & $githubCli release view --repo $repository --json "tagName,assets"'
-  $confirmedReleaseView = '$releaseOutput = & $githubCli release view $ExpectedTargetVersion --repo $repository --json "tagName,assets"'
-  if ($baselineUpdaterScript.Contains($publicReleaseSelection) -or
-      $baselineUpdaterScript.Contains($latestReleaseView)) {
-    $baselineMetadataPath = Join-Path $baselineRoot "studio-release.json"
-    $baselineMetadata = Get-Content -LiteralPath $baselineMetadataPath -Raw | ConvertFrom-Json
-    $updaterManifestEntry = $baselineMetadata.files.PSObject.Properties["scripts/update-windows-studio.ps1"]
-    if (-not $updaterManifestEntry) {
-      throw "Baseline updater script is missing its integrity manifest entry."
-    }
-    $originalUpdaterHash = (Get-FileHash -LiteralPath $baselineUpdaterScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($originalUpdaterHash -ne ([string]$updaterManifestEntry.Value).ToLowerInvariant()) {
-      throw "Baseline updater script failed integrity validation before runner adaptation."
-    }
-    if ($baselineUpdaterScript.Contains($publicReleaseSelection)) {
-      if (-not $baselineUpdaterScript.Contains('$releaseArguments += $requestedTag') -or
-          -not $baselineUpdaterScript.Contains('$releaseOutput = & $githubCli @releaseArguments')) {
-        throw "Baseline public updater has no supported Draft release lookup command."
-      }
-      $baselineUpdaterScript = $baselineUpdaterScript.Replace($publicReleaseSelection, '$isPublicRepository = $false')
-    } else {
-      $baselineUpdaterScript = $baselineUpdaterScript.Replace($latestReleaseView, $confirmedReleaseView)
-    }
-    Set-Content -LiteralPath $baselineUpdaterScriptPath -Value $baselineUpdaterScript -Encoding utf8
-    $updaterManifestEntry.Value = (Get-FileHash -LiteralPath $baselineUpdaterScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
-    Write-Output "Adapted the legacy baseline release lookup to the confirmed Draft tag."
-  } elseif (-not $baselineUpdaterScript.Contains($confirmedReleaseView)) {
-    throw "Baseline updater script has no supported release lookup command."
-  }
-
   $baselineMetadataPath = Join-Path $baselineRoot "studio-release.json"
   $baselineMetadata = Get-Content -LiteralPath $baselineMetadataPath -Raw | ConvertFrom-Json
   $legacyReplacePattern = '\[System\.IO\.File\]::Replace\((\$[A-Za-z0-9_:]+),\s*(\$[A-Za-z0-9_:]+),\s*\$null\)'
   $legacyReplaceFix = '[System.IO.File]::Replace($1, $2, "${1}.$([guid]::NewGuid().ToString(''N'')).bak")'
   foreach ($relativePath in @(
-    "scripts/update-windows-studio.ps1",
     "scripts/windows-studio-common.ps1"
   )) {
     $scriptPath = Join-Path $baselineRoot ($relativePath -replace '/', '\')
@@ -355,58 +571,191 @@ try {
   }
   $updateId = [guid]::NewGuid().ToString()
   if ($ManualInstaller) {
-    @{
-      updateId = $updateId
-      status = "queued"
-      previousVersion = ($oldTag -replace "^v", "")
-      targetVersion = $targetVersion
-      createdAt = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString("o")
-    } | ConvertTo-Json | Set-Content -LiteralPath $updateStatus -Encoding utf8
-
     $installerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-$TargetTag.exe"
     $installerLog = Join-Path $testRoot "manual-upgrade-installer.log"
     $installer = Start-Process -FilePath $installerPath `
       -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installerLog") `
       -WindowStyle Hidden -PassThru
     Wait-NgtManualInstaller -Process $installer -Description "Manual upgrade installer"
-    $manualStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-    if ($manualStatus.status -ne "superseded" -or $manualStatus.actualVersion -ne $targetVersion) {
-      throw "Manual upgrade did not supersede the old queued update task."
-    }
   } else {
-    New-Item -ItemType Directory -Path (Split-Path -Parent $updateLog) -Force | Out-Null
-    @{ updateId = $updateId; createdAt = (Get-Date).ToUniversalTime().ToString("o") } |
-      ConvertTo-Json | Set-Content -LiteralPath $updateLock -Encoding utf8
+    $sameOriginHeaders = @{
+      Origin = "http://127.0.0.1:3000"
+      "Sec-Fetch-Site" = "same-origin"
+    }
+    $updateInfo = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
+      -Headers $sameOriginHeaders -TimeoutSec 30
+    if (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
+      throw "The installed NGT API did not offer the exact candidate version."
+    }
+    $sessionEvidence = Get-NgtInteractiveSessionEvidence
+    Write-Output ("Interactive acceptance user={0}; session={1}; activeConsoleSession={2}." -f `
+      $sessionEvidence.user, $sessionEvidence.sessionId, $sessionEvidence.activeConsoleSessionId)
+    if (-not $sessionEvidence.interactive) {
+      throw "Window acceptance requires the active interactive Windows console session; this process is not attached to it."
+    }
+    $visibleWindowBaseline = @(Get-NgtVisibleWindowProcessIds)
+    $mutexAlias = Join-Path $testRoot "install-root-junction"
+    New-Item -ItemType Junction -Path $mutexAlias -Target $installRoot | Out-Null
+    foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
+      $mutexOutputPath = Join-Path $testRoot ("mutex-name-" + [guid]::NewGuid().ToString("N") + ".txt")
+      $mutexDiagnosticProcess = Start-Process -FilePath $AcceptanceUpdaterPath `
+        -ArgumentList @("--test-mutex-name", (Quote-NgtWindowsPathArgument $mutexRootVariant), `
+          (Quote-NgtWindowsPathArgument $mutexOutputPath)) `
+        -WindowStyle Hidden -PassThru
+      if (-not $mutexDiagnosticProcess.WaitForExit(30000)) {
+        Stop-Process -Id $mutexDiagnosticProcess.Id -Force
+        throw "Rust updater mutex diagnostic timed out after 30 seconds."
+      }
+      $mutexDiagnosticProcess.Refresh()
+      $mutexProcessExitCode = $mutexDiagnosticProcess.ExitCode
+      if (-not (Test-Path -LiteralPath $mutexOutputPath -PathType Leaf)) {
+        throw ("Rust updater did not write the mutex identity diagnostic for path '{0}' (process exit code {1}; output file missing)." -f `
+          $mutexRootVariant, $mutexProcessExitCode)
+      }
+      $mutexDiagnostic = [System.IO.File]::ReadAllText($mutexOutputPath)
+      if ($mutexProcessExitCode -ne 0) {
+        throw ("Rust updater mutex diagnostic failed for path '{0}' (process exit code {1}; diagnostic: {2})." -f `
+          $mutexRootVariant, $mutexProcessExitCode, $mutexDiagnostic.Trim())
+      }
+      $mutexDiagnosticLines = $mutexDiagnostic -split "`r?`n", 2
+      if ($mutexDiagnosticLines.Count -ne 2 -or $mutexDiagnosticLines[0] -cne "OK") {
+        throw ("Rust updater returned an invalid mutex diagnostic for path '{0}': {1}." -f `
+          $mutexRootVariant, $mutexDiagnostic.Trim())
+      }
+      $rustMutexName = $mutexDiagnosticLines[1].Trim()
+      $powershellMutexName = Get-NgtStudioUpdateMutexName $mutexRootVariant
+      if ([string]($rustMutexName | Out-String).Trim() -cne [string]$powershellMutexName) {
+        throw ("Rust and PowerShell computed different update mutex identities for path '{0}': Rust='{1}', PowerShell='{2}'." -f `
+          $mutexRootVariant, $rustMutexName, $powershellMutexName)
+      }
+    }
+    Write-Output "Rust and PowerShell update mutex identity matched for case, trailing-separator, and junction aliases."
+    $startResponse = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
+      -Method Post -Headers $sameOriginHeaders -ContentType "application/json" `
+      -Body (@{ targetVersion = $TargetTag } | ConvertTo-Json -Compress) -TimeoutSec 30
+    if (-not $startResponse.started -or -not $startResponse.executorConfirmed -or
+        [string]$startResponse.operation -ne "online-update") {
+      throw "The NGT API did not confirm the Rust updater startup handshake."
+    }
+    $updateId = [string]$startResponse.updateId
+    $updaterPid = [int]$startResponse.executorPid
+    $updaterPath = Join-Path $taskRoot "tools\NGTUpdater.exe"
+    $updateProcess = Get-Process -Id $updaterPid -ErrorAction Stop
+    $updaterProcessHandle = $updateProcess.Handle
+    if ($updaterProcessHandle -eq [IntPtr]::Zero) {
+      throw "The acceptance could not retain a process handle for the Rust updater."
+    }
+    if ([System.IO.Path]::GetFullPath($updateProcess.Path) -ine [System.IO.Path]::GetFullPath($updaterPath)) {
+      throw "The API started a process other than the versioned Rust updater."
+    }
+    if ([int]$updateProcess.SessionId -ne [int]$sessionEvidence.sessionId) {
+      throw "The Rust updater was not started in the tested interactive Windows user session."
+    }
 
-    $updaterPath = Join-Path $taskRoot "scripts\update-windows-studio.ps1"
-    $arguments = @(
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $updaterPath,
-      "-UpdateId", $updateId, "-ExpectedTargetVersion", $TargetTag,
-      "-StatusFile", $updateStatus, "-UpdateLockFile", $updateLock, "-LogFile", $updateLog
-    )
-    $argumentLine = ($arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join " "
-    $updateProcess = Start-Process -FilePath (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe") `
-      -ArgumentList $argumentLine -WindowStyle Hidden -PassThru
-
+    $computer = Get-CimInstance -ClassName Win32_ComputerSystem
+    $cpuCount = (Get-CimInstance -ClassName Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+    $memoryGiB = [Math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
+    Write-Output ("Acceptance host: {0} logical CPUs, {1} GiB RAM." -f $cpuCount, $memoryGiB)
+    $peakUpdaterWorkingSet = 0L
+    $apiDisconnectedObserved = $false
+    $apiReconnectedAfterDisconnect = $false
+    $observedWindowEvidence = @{}
     $deadline = (Get-Date).AddMinutes(50)
     $finalStatus = $null
     do {
+      $failedUpdateMessage = $null
       if (Test-Path -LiteralPath $updateStatus) {
         $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+        if ([string]$finalStatus.updateId -ne $updateId) {
+          throw "The persisted update state changed ownership during online update."
+        }
         if ($finalStatus.status -eq "failed") {
-          if (-not $updateProcess.HasExited) { [void]$updateProcess.WaitForExit(30000) }
-          throw "Online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+          $failedUpdateMessage = "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
         }
       }
-      if ($updateProcess.HasExited -and -not (Test-Path -LiteralPath $updateLock)) { break }
-      Start-Sleep -Seconds 2
+      $windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics -UpdaterPid $updaterPid)
+      foreach ($window in $windowDiagnostics) {
+        $windowKey = "$($window.handle)/$($window.processId)"
+        if (-not $observedWindowEvidence.ContainsKey($windowKey)) {
+          $observedWindowEvidence[$windowKey] = $window
+          Write-Output ("Window evidence: HWND={0} class='{1}' bounds={2} size={3}x{4} style={5} exstyle={6} visible={7} onScreen={8} pid={9} process='{10}' path='{11}' parent={12} session={13} user='{14}' title='{15}' command='{16}'" -f `
+            $window.handle, $window.windowClass, $window.windowBounds, $window.width, $window.height,
+            $window.style, $window.extendedStyle, $window.visible, $window.onScreen, $window.processId,
+            $window.processName, $window.processPath, $window.parentProcessId, $window.sessionId,
+            $window.user, $window.windowTitle, $window.commandLine)
+        }
+      }
+      $unexpectedUpdaterWindows = @($windowDiagnostics | Where-Object {
+        $_.visible -and ((-not $_.boundsAvailable) -or
+          ($_.width -gt 0 -and $_.height -gt 0 -and $_.onScreen))
+      })
+      if ($unexpectedUpdaterWindows.Count -gt 0) {
+        $windowOwners = ($unexpectedUpdaterWindows | ForEach-Object {
+          "HWND=$($_.handle) class='$($_.windowClass)' bounds=$($_.windowBounds) size=$($_.width)x$($_.height) style=$($_.style) exstyle=$($_.extendedStyle) visible=$($_.visible) onScreen=$($_.onScreen) pid=$($_.processId) process='$($_.processName)' path='$($_.processPath)' parent=$($_.parentProcessId) session=$($_.sessionId) user='$($_.user)' title='$($_.windowTitle)' command='$($_.commandLine)'"
+        }) -join ", "
+        throw "The silent online update displayed a visible installer, CMD, or PowerShell window: $windowOwners"
+      }
+      $newVisibleWindowIds = @(Get-NgtVisibleWindowProcessIds | Where-Object { $_ -notin $visibleWindowBaseline })
+      if ($newVisibleWindowIds.Count -gt 0) {
+        $newVisibleWindows = @(Get-NgtScreenVisibleWindows | Where-Object {
+          $_.processId -in $newVisibleWindowIds
+        })
+        $windowOwners = ($newVisibleWindows | ForEach-Object {
+          "HWND=$($_.handle) class='$($_.windowClass)' bounds=$($_.windowBounds) size=$($_.width)x$($_.height) style=$($_.style) exstyle=$($_.extendedStyle) visible=$($_.visible) onScreen=$($_.onScreen) pid=$($_.processId)"
+        }) -join ", "
+        throw "The silent online update created an unexpected visible window: $windowOwners"
+      }
+      if ($failedUpdateMessage) { throw $failedUpdateMessage }
+      try {
+        $updateProcess.Refresh()
+        $peakUpdaterWorkingSet = [Math]::Max($peakUpdaterWorkingSet, [long]$updateProcess.PeakWorkingSet64)
+      } catch { }
+      try {
+        $liveStatus = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update/status" `
+          -Headers $sameOriginHeaders -TimeoutSec 1
+        if ($apiDisconnectedObserved) { $apiReconnectedAfterDisconnect = $true }
+        if ($liveStatus.status -eq "failed") {
+          throw "NGT reported an online update failure at $($liveStatus.failedStage): $($liveStatus.message)"
+        }
+      } catch {
+        if ($_.Exception.Message -like "NGT reported an online update failure*") { throw }
+        $apiDisconnectedObserved = $true
+        $savedDuringDisconnect = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+        if ([string]$savedDuringDisconnect.updateId -ne $updateId -or
+            [string]$savedDuringDisconnect.stage -notin @("backing-up", "installing", "validating", "rolling-back")) {
+          throw "The independent update state was not recoverable while NGT was disconnected."
+        }
+      }
+      if ($finalStatus.status -eq "complete") {
+        $updateProcess.Refresh()
+        if ($updateProcess.HasExited) { break }
+      }
+      Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
-    if (-not $updateProcess.HasExited) { throw "Online update executor exceeded its 50-minute limit." }
+    $updateProcess.Refresh()
+    if (-not $updateProcess.HasExited) { throw "The Rust updater exceeded its 50-minute limit." }
     $updateProcess.WaitForExit()
-    if ($updateProcess.ExitCode -ne 0) { throw "Online update executor exited with code $($updateProcess.ExitCode)." }
+    Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
+      $sessionEvidence.sessionId, $observedWindowEvidence.Count)
+    Write-Output ("Rust updater process exit code: {0}." -f $updateProcess.ExitCode)
+    if ($updateProcess.ExitCode -ne 0) { throw "Rust updater exited with code $($updateProcess.ExitCode)." }
     if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
-        $finalStatus.actualVersion -ne $targetVersion -or $finalStatus.cleanupWarning) {
-      throw "Online update did not reach a clean completed state for $TargetTag."
+        $finalStatus.actualVersion -ne $targetVersion) {
+      throw "Rust online update did not reach a verified complete state for $TargetTag."
+    }
+    if (-not $apiDisconnectedObserved -or -not $apiReconnectedAfterDisconnect) {
+      throw "Acceptance did not observe both the independent NGT outage state and automatic reconnection."
+    }
+    $statusResult = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update/status" `
+      -Headers $sameOriginHeaders -TimeoutSec 15
+    if ($statusResult.status -ne "complete" -or $statusResult.actualVersion -ne $targetVersion) {
+      throw "The restarted NGT API did not report the verified installed version."
+    }
+    if (Test-Path -LiteralPath $updateLock) { throw "The updater left its task lock after exiting." }
+    Write-Output ("Rust updater peak working set: {0:N1} MiB; CPU time: {1:N1} s." -f `
+      ($peakUpdaterWorkingSet / 1MB), $updateProcess.TotalProcessorTime.TotalSeconds)
+    if ($peakUpdaterWorkingSet -gt 100MB) {
+      throw "Rust updater memory use exceeded the 100 MiB design target."
     }
   }
   if (Test-Path -LiteralPath $updateLock) { throw "Online update lock was not released." }
@@ -415,6 +764,9 @@ try {
 
   $activeConfig = Get-Content -LiteralPath (Join-Path $installRoot ".local\studio.json") -Raw | ConvertFrom-Json
   $activeReleaseRoot = [System.IO.Path]::GetFullPath([string]$activeConfig.activeRelease)
+  if ([System.IO.Path]::GetFullPath([string]$activeConfig.dataRoot) -ine [System.IO.Path]::GetFullPath($dataRoot)) {
+    throw "The update changed the configured database data root."
+  }
   if ($activeReleaseRoot -ne [System.IO.Path]::GetFullPath((Join-Path $installRoot "releases\$TargetTag"))) {
     throw "The online update did not activate the candidate release."
   }
@@ -470,6 +822,8 @@ try {
     $diagnosticSources = @()
     if ($ManualInstaller) {
       $diagnosticSources += @(@($installerLog, $repairLog) | Where-Object { $_ })
+    } elseif ($updateId) {
+      $diagnosticSources += Join-Path $installRoot "logs\update-$updateId.inno.log"
     }
     if (Test-Path -LiteralPath $updateLog -PathType Leaf) { $diagnosticSources += $updateLog }
     if (Test-Path -LiteralPath $updateStatus -PathType Leaf) { $diagnosticSources += $updateStatus }
@@ -498,6 +852,18 @@ try {
   }
   throw
 } finally {
+  if ($acceptanceServerProcess -and -not $acceptanceServerProcess.HasExited) {
+    $acceptanceServerProcess.Kill()
+    if (-not $acceptanceServerProcess.WaitForExit(5000)) {
+      $cleanupSafe = $false
+      Write-Warning "The controlled candidate API server could not be stopped."
+    }
+  }
+  if ($null -eq $previousTestApiUrl) {
+    Remove-Item Env:NGT_TEST_RELEASE_API_URL -ErrorAction SilentlyContinue
+  } else {
+    $env:NGT_TEST_RELEASE_API_URL = $previousTestApiUrl
+  }
   if ($updateProcess -and -not $updateProcess.HasExited) {
     & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $updateProcess.Id /T /F | Out-Null
     if (-not $updateProcess.WaitForExit(5000)) {
