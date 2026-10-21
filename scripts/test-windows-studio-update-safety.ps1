@@ -334,6 +334,15 @@ try {
   $mutexAlias = Join-Path $testRoot "mutex-install-junction"
   New-Item -ItemType Junction -Path $mutexAlias -Target $mutexInstallRoot | Out-Null
   $mutexName = Get-NgtStudioUpdateMutexName $mutexInstallRoot
+  $missingMutexRoot = Join-Path $mutexAlias "not-created\install"
+  $missingMutexName = Get-NgtStudioUpdateMutexName $missingMutexRoot
+  if ($missingMutexName -cne (Get-NgtStudioUpdateMutexName (Join-Path $mutexInstallRoot "not-created\install"))) {
+    throw "The update mutex identity changed for a missing path under a junction alias."
+  }
+  New-Item -ItemType Directory -Path $missingMutexRoot -Force | Out-Null
+  if ((Get-NgtStudioUpdateMutexName $missingMutexRoot) -cne $missingMutexName) {
+    throw "The update mutex identity changed after the install directory was created."
+  }
   foreach ($mutexRootVariant in @($mutexInstallRoot, ($mutexInstallRoot + "\"), $mutexInstallRoot.ToUpperInvariant(), $mutexAlias)) {
     if ((Get-NgtStudioUpdateMutexName $mutexRootVariant) -cne $mutexName) {
       throw "The update mutex identity changed for a case, trailing-separator, or junction alias."

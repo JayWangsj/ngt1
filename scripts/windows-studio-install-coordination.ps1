@@ -116,7 +116,26 @@ public static class NgtUpdatePathIdentity {
 }
 "@
   }
-  return [NgtUpdatePathIdentity]::GetNormalizedPath([System.IO.Path]::GetFullPath($InstallRoot))
+  $current = [System.IO.Path]::GetFullPath($InstallRoot)
+  $missingSegments = [System.Collections.Generic.List[string]]::new()
+  while ($true) {
+    try {
+      $mutexRoot = [NgtUpdatePathIdentity]::GetNormalizedPath($current)
+      break
+    } catch [System.ComponentModel.Win32Exception] {
+      if ($_.Exception.NativeErrorCode -notin @(2, 3)) { throw }
+      $trimmed = $current.TrimEnd([char[]]@('\', '/'))
+      $parent = [System.IO.Path]::GetDirectoryName($trimmed)
+      $leaf = [System.IO.Path]::GetFileName($trimmed)
+      if (-not $parent -or -not $leaf) { throw }
+      $missingSegments.Insert(0, $leaf)
+      $current = $parent
+    }
+  }
+  foreach ($segment in $missingSegments) {
+    $mutexRoot = $mutexRoot.TrimEnd("\") + "\" + $segment
+  }
+  return $mutexRoot.TrimEnd("\").ToLowerInvariant()
 }
 
 function Get-NgtStudioUpdateMutexName([string]$InstallRoot) {
