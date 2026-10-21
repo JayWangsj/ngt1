@@ -906,4 +906,3 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /mode: ready\s+acceptance: installer/);
   assert.match(ready, /mode: ready\s+acceptance: manual-installer/);
 });
-
