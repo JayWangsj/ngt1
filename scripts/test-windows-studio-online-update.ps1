@@ -16,6 +16,11 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hoste
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
 }
 
+function Quote-NgtWindowsPathArgument([string]$Path) {
+  if ($Path.EndsWith("\")) { $Path += "\" }
+  return ('"{0}"' -f $Path)
+}
+
 function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$Description) {
   if (-not $Process.WaitForExit(1800000)) {
     & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $Process.Id /T /F | Out-Null
@@ -606,7 +611,8 @@ try {
     foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
       $mutexOutputPath = Join-Path $testRoot ("mutex-name-" + [guid]::NewGuid().ToString("N") + ".txt")
       $mutexDiagnosticProcess = Start-Process -FilePath $AcceptanceUpdaterPath `
-        -ArgumentList @("--test-mutex-name", ('"{0}"' -f $mutexRootVariant), ('"{0}"' -f $mutexOutputPath)) `
+        -ArgumentList @("--test-mutex-name", (Quote-NgtWindowsPathArgument $mutexRootVariant), `
+          (Quote-NgtWindowsPathArgument $mutexOutputPath)) `
         -WindowStyle Hidden -PassThru
       if (-not $mutexDiagnosticProcess.WaitForExit(30000)) {
         Stop-Process -Id $mutexDiagnosticProcess.Id -Force

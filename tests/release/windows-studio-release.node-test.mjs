@@ -824,6 +824,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Get-NgtUpdaterWindowDiagnostics/);
   assert.match(online, /Start-Process -FilePath \$AcceptanceUpdaterPath/);
   assert.match(online, /-ArgumentList @\("--test-mutex-name"/);
+  assert.match(online, /function Quote-NgtWindowsPathArgument/);
+  assert.match(online, /Quote-NgtWindowsPathArgument \$mutexRootVariant/);
+  assert.match(online, /Quote-NgtWindowsPathArgument \$mutexOutputPath/);
   assert.match(online, /WaitForExit\(30000\)/);
   assert.match(
     online,
