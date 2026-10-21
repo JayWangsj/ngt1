@@ -36,6 +36,14 @@ impl UpdateError {
 
 type Result<T> = std::result::Result<T, UpdateError>;
 
+#[cfg(any(test, feature = "acceptance-api"))]
+fn acceptance_mutex_diagnostic(result: Result<String>) -> (String, bool) {
+    match result {
+        Ok(name) => (format!("OK\n{}", name), true),
+        Err(error) => (format!("ERROR {}: {}", error.stage, error.message), false),
+    }
+}
+
 impl From<std::io::Error> for UpdateError {
     fn from(error: std::io::Error) -> Self {
         Self::new("running", error.to_string())
@@ -1494,13 +1502,14 @@ fn run_acceptance_diagnostic() -> Option<ExitCode> {
     if arguments.next().is_some() {
         return Some(ExitCode::FAILURE);
     }
-    let mutex_name = match update_mutex_name(&root) {
-        Ok(name) => name,
-        Err(_) => return Some(ExitCode::FAILURE),
-    };
-    match fs::write(output_path, mutex_name) {
-        Ok(()) => Some(ExitCode::SUCCESS),
-        Err(_) => Some(ExitCode::FAILURE),
+    let (diagnostic, success) = acceptance_mutex_diagnostic(update_mutex_name(&root));
+    match fs::write(output_path, diagnostic) {
+        Ok(()) => Some(if success {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        }),
+        Err(_) => Some(ExitCode::from(2)),
     }
 }
 
@@ -1515,6 +1524,18 @@ fn is_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acceptance_mutex_diagnostic_preserves_success_and_failure_details() {
+        assert_eq!(
+            acceptance_mutex_diagnostic(Ok("Global\\NGTStudioUpdate-test".to_owned())),
+            ("OK\nGlobal\\NGTStudioUpdate-test".to_owned(), true)
+        );
+        assert_eq!(
+            acceptance_mutex_diagnostic(Err(UpdateError::new("checking", "path unavailable"))),
+            ("ERROR checking: path unavailable".to_owned(), false)
+        );
+    }
 
     #[test]
     fn checksum_requires_matching_filename_and_sha256() {

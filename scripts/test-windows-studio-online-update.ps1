@@ -606,10 +606,22 @@ try {
     foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
       $mutexOutputPath = Join-Path $testRoot ("mutex-name-" + [guid]::NewGuid().ToString("N") + ".txt")
       $null = & $AcceptanceUpdaterPath --test-mutex-name $mutexRootVariant $mutexOutputPath
-      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $mutexOutputPath -PathType Leaf)) {
-        throw "Rust updater did not write the mutex identity diagnostic for path '$mutexRootVariant'."
+      $mutexProcessExitCode = $LASTEXITCODE
+      if (-not (Test-Path -LiteralPath $mutexOutputPath -PathType Leaf)) {
+        throw ("Rust updater did not write the mutex identity diagnostic for path '{0}' (process exit code {1}; output file missing)." -f `
+          $mutexRootVariant, $mutexProcessExitCode)
       }
-      $rustMutexName = [System.IO.File]::ReadAllText($mutexOutputPath).Trim()
+      $mutexDiagnostic = [System.IO.File]::ReadAllText($mutexOutputPath)
+      if ($mutexProcessExitCode -ne 0) {
+        throw ("Rust updater mutex diagnostic failed for path '{0}' (process exit code {1}; diagnostic: {2})." -f `
+          $mutexRootVariant, $mutexProcessExitCode, $mutexDiagnostic.Trim())
+      }
+      $mutexDiagnosticLines = $mutexDiagnostic -split "`r?`n", 2
+      if ($mutexDiagnosticLines.Count -ne 2 -or $mutexDiagnosticLines[0] -cne "OK") {
+        throw ("Rust updater returned an invalid mutex diagnostic for path '{0}': {1}." -f `
+          $mutexRootVariant, $mutexDiagnostic.Trim())
+      }
+      $rustMutexName = $mutexDiagnosticLines[1].Trim()
       $powershellMutexName = Get-NgtStudioUpdateMutexName $mutexRootVariant
       if ([string]($rustMutexName | Out-String).Trim() -cne [string]$powershellMutexName) {
         throw ("Rust and PowerShell computed different update mutex identities for path '{0}': Rust='{1}', PowerShell='{2}'." -f `

@@ -806,7 +806,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /fn download_asset\(/);
   assert.match(updater, /fn run_installer\(/);
   assert.match(updater, /--test-mutex-name/);
-  assert.match(updater, /fs::write\(output_path, mutex_name\)/);
+  assert.match(updater, /acceptance_mutex_diagnostic\(update_mutex_name\(&root\)\)/);
+  assert.match(updater, /fs::write\(output_path, diagnostic\)/);
+  assert.match(updater, /ERROR \{\}: \{\}/);
   assert.match(updater, /\/VERYSILENT/);
   assert.match(updater, /\/SUPPRESSMSGBOXES/);
   assert.match(updater, /\/SP-/);
@@ -821,6 +823,8 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     online,
     /--test-mutex-name \$mutexRootVariant \$mutexOutputPath/,
   );
+  assert.match(online, /\$mutexProcessExitCode = \$LASTEXITCODE/);
+  assert.match(online, /process exit code \{1\}; diagnostic: \{2\}/);
   assert.match(online, /different update mutex identities for path/);
   assert.match(online, /Get-NgtScreenVisibleWindows/);
   assert.match(online, /silent online update displayed a visible installer/);
