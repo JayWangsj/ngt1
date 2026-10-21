@@ -814,9 +814,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updater, /check_install_space/);
   assert.match(updater, /fn finish_failed\(/);
   assert.match(updater, /"actualVersion"/);
-  assert.match(online, /Get-NgtUpdaterVisibleWindows/);
+  assert.match(online, /Get-NgtUpdaterWindowDiagnostics/);
   assert.match(online, /Get-NgtScreenVisibleWindows/);
   assert.match(online, /silent online update displayed a visible installer/);
+  assert.match(online, /Get-NgtInteractiveSessionEvidence/);
+  assert.match(online, /activeConsoleSessionId/);
+  assert.match(online, /windowClass/);
+  assert.match(online, /extendedStyle/);
   assert.match(online, /windowTitle/);
   assert.match(online, /GetWindowRect/);
   assert.match(online, /windowBounds/);
