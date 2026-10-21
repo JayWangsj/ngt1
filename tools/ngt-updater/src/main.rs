@@ -239,7 +239,10 @@ fn run() -> Result<()> {
     if let Err(error) = ensure_installer_succeeded(&args, &setup_result) {
         let _ = append_log(
             &log_path,
-            &format!("Inno Setup failed with exit code {}.", exit_code(&setup_result)),
+            &format!(
+                "Inno Setup failed with exit code {}.",
+                exit_code(&setup_result)
+            ),
         );
         return Err(error);
     }
@@ -256,7 +259,7 @@ fn run() -> Result<()> {
     )?;
     let cleanup_warning = remove_owned_downloads(&args.install_root, &args.update_id)
         .err()
-        .map(|error| redact(&error.to_string()));
+        .map(|error| redact(&format!("{}: {}", error.stage, error.message)));
     write_progress(
         &args,
         "complete",
@@ -271,7 +274,10 @@ fn run() -> Result<()> {
         }),
     )?;
     if let Some(warning) = cleanup_warning {
-        let _ = append_log(&log_path, &format!("Post-update cleanup warning: {}", warning));
+        let _ = append_log(
+            &log_path,
+            &format!("Post-update cleanup warning: {}", warning),
+        );
     }
     Ok(())
 }
@@ -1122,10 +1128,7 @@ impl WindowsMutex {
         use windows_sys::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
         let mutex_name = update_mutex_name(install_root)?;
-        let name: Vec<u16> = mutex_name
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
+        let name: Vec<u16> = mutex_name.encode_utf16().chain(Some(0)).collect();
         let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
         if handle.is_null() {
             return Err(UpdateError::new(
@@ -1228,14 +1231,8 @@ fn exit_code(status: &ExitStatus) -> String {
 }
 
 fn redact(message: &str) -> String {
-    const GITHUB_TOKEN_PREFIXES: [&str; 6] = [
-        "github_pat_",
-        "ghp_",
-        "gho_",
-        "ghu_",
-        "ghs_",
-        "ghr_",
-    ];
+    const GITHUB_TOKEN_PREFIXES: [&str; 6] =
+        ["github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"];
     let bytes = message.as_bytes();
     let mut output = String::with_capacity(message.len());
     let mut index = 0;
@@ -1267,7 +1264,10 @@ fn redact(message: &str) -> String {
             index = end;
             continue;
         }
-        let character = message[index..].chars().next().expect("valid UTF-8 boundary");
+        let character = message[index..]
+            .chars()
+            .next()
+            .expect("valid UTF-8 boundary");
         output.push(character);
         index += character.len_utf8();
     }
@@ -1329,7 +1329,9 @@ fn redact_sensitive_assignment(message: &str, index: usize) -> Option<(usize, St
     if cursor == index {
         return None;
     }
-    let key = message[index..cursor].to_ascii_lowercase().replace('-', "_");
+    let key = message[index..cursor]
+        .to_ascii_lowercase()
+        .replace('-', "_");
     let sensitive = [
         "token",
         "secret",
@@ -1400,7 +1402,10 @@ fn redact_value(message: &str, start: usize) -> (usize, String) {
                 continue;
             }
             if bytes[end] == quote {
-                return (end + 1, format!("{}[redacted]{}", quote as char, quote as char));
+                return (
+                    end + 1,
+                    format!("{}[redacted]{}", quote as char, quote as char),
+                );
             }
             end += 1;
         }
@@ -1439,7 +1444,10 @@ fn redact_url_credentials(message: &str, index: usize) -> Option<(usize, String)
     let start_of_authority = authority_start + 3;
     let mut end = start_of_authority;
     while end < bytes.len()
-        && !matches!(bytes[end], b'/' | b'?' | b'#' | b' ' | b'\t' | b'\r' | b'\n' | b'\'' | b'"' | b')')
+        && !matches!(
+            bytes[end],
+            b'/' | b'?' | b'#' | b' ' | b'\t' | b'\r' | b'\n' | b'\'' | b'"' | b')'
+        )
     {
         end += 1;
     }
@@ -1606,7 +1614,9 @@ mod tests {
         );
         assert_eq!(error.stage, "installing");
         assert!(error.message.contains("code 23"));
-        assert!(error.message.contains("update-00000000-0000-4000-8000-000000000001.inno.log"));
+        assert!(error
+            .message
+            .contains("update-00000000-0000-4000-8000-000000000001.inno.log"));
         assert!(error.message.contains("install-preflight.log"));
     }
 
@@ -1709,14 +1719,30 @@ mod tests {
         let updates = root.join(".local").join("updates");
         fs::create_dir_all(&updates).unwrap();
         let update_id = "00000000-0000-4000-8000-000000000001";
-        fs::write(updates.join(format!("{}-setup.exe", update_id)), b"installer").unwrap();
-        fs::write(updates.join(format!("{}-setup.exe.sha256", update_id)), b"checksum").unwrap();
-        fs::write(updates.join("00000000-0000-4000-8000-000000000002-setup.exe"), b"other").unwrap();
+        fs::write(
+            updates.join(format!("{}-setup.exe", update_id)),
+            b"installer",
+        )
+        .unwrap();
+        fs::write(
+            updates.join(format!("{}-setup.exe.sha256", update_id)),
+            b"checksum",
+        )
+        .unwrap();
+        fs::write(
+            updates.join("00000000-0000-4000-8000-000000000002-setup.exe"),
+            b"other",
+        )
+        .unwrap();
         fs::write(updates.join(format!("{}-backup.zip", update_id)), b"backup").unwrap();
         remove_owned_downloads(&root, update_id).unwrap();
         assert!(!updates.join(format!("{}-setup.exe", update_id)).exists());
-        assert!(!updates.join(format!("{}-setup.exe.sha256", update_id)).exists());
-        assert!(updates.join("00000000-0000-4000-8000-000000000002-setup.exe").exists());
+        assert!(!updates
+            .join(format!("{}-setup.exe.sha256", update_id))
+            .exists());
+        assert!(updates
+            .join("00000000-0000-4000-8000-000000000002-setup.exe")
+            .exists());
         assert!(updates.join(format!("{}-backup.zip", update_id)).exists());
         fs::remove_dir_all(root).unwrap();
     }
