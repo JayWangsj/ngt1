@@ -532,11 +532,7 @@ fn download_asset(
             let elapsed = last_update.elapsed().as_secs_f64();
             let bytes_per_second =
                 ((downloaded - last_reported_bytes) as f64 / elapsed).round() as u64;
-            let eta_seconds = if bytes_per_second > 0 {
-                Some((asset.size - downloaded) / bytes_per_second)
-            } else {
-                None
-            };
+            let eta_seconds = (asset.size - downloaded).checked_div(bytes_per_second);
             write_progress(
                 args,
                 "downloading",
@@ -748,7 +744,7 @@ fn same_volume(left: &Path, right: &Path) -> bool {
                 _ => None,
             })
         };
-        return volume(left).is_some() && volume(left) == volume(right);
+        volume(left).is_some() && volume(left) == volume(right)
     }
     #[cfg(not(windows))]
     {
@@ -1524,6 +1520,23 @@ fn is_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn same_volume_compares_drive_prefix_case_insensitively() {
+        assert!(same_volume(
+            Path::new(r"C:\NGT\Install"),
+            Path::new(r"c:\NGT\Data"),
+        ));
+        assert!(!same_volume(
+            Path::new(r"C:\NGT\Install"),
+            Path::new(r"D:\NGT\Data"),
+        ));
+        assert!(!same_volume(
+            Path::new("relative"),
+            Path::new(r"C:\NGT\Data"),
+        ));
+    }
 
     #[test]
     fn acceptance_mutex_diagnostic_preserves_success_and_failure_details() {
