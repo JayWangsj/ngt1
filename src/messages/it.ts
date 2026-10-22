@@ -434,6 +434,10 @@ export const it = {
   dashboard: {
     receiptsTitle: "Incassi",
     monthToDate: "Incassi del mese",
+    monthlyReceipts: "Incassi mensili",
+    monthlyReceiptsDescription:
+      "Seleziona un mese e confrontalo con gli stessi mesi degli ultimi tre anni.",
+    selectedMonthTotal: "Totale del periodo",
     yearOverYear: "Stesso periodo degli anni precedenti",
     revenue7: "Incassi degli ultimi 7 giorni",
     repairRevenue: "Riparazioni",

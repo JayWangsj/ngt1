@@ -62,6 +62,54 @@ async function seedDashboardReceipts() {
           },
         },
       }),
+      db.payment.create({
+        data: {
+          requestId: "e2e-dashboard-2025-october",
+          saleId: sale.id,
+          amount: "80.00",
+          method: "CASH",
+          kind: "OTHER",
+          receivedAt: new Date("2025-10-03T10:00:00Z"),
+          actorId: owner.id,
+          actorName: owner.name,
+        },
+      }),
+      db.payment.create({
+        data: {
+          requestId: "e2e-dashboard-2024-october",
+          saleId: sale.id,
+          amount: "40.00",
+          method: "CASH",
+          kind: "OTHER",
+          receivedAt: new Date("2024-10-03T10:00:00Z"),
+          actorId: owner.id,
+          actorName: owner.name,
+        },
+      }),
+      db.payment.create({
+        data: {
+          requestId: "e2e-dashboard-2025-september",
+          saleId: sale.id,
+          amount: "50.00",
+          method: "CASH",
+          kind: "OTHER",
+          receivedAt: new Date("2025-09-30T10:00:00Z"),
+          actorId: owner.id,
+          actorName: owner.name,
+        },
+      }),
+      db.payment.create({
+        data: {
+          requestId: "e2e-dashboard-2024-september",
+          saleId: sale.id,
+          amount: "25.00",
+          method: "CASH",
+          kind: "OTHER",
+          receivedAt: new Date("2024-09-30T10:00:00Z"),
+          actorId: owner.id,
+          actorName: owner.name,
+        },
+      }),
     ]);
   } finally {
     await db.$disconnect();
@@ -962,8 +1010,16 @@ test("single operator opens every business page without login", async ({
     page.getByRole("button", { name: "Statistiche dettagliate", exact: true }),
   ).toHaveCount(0);
   await page.goto("/reports?day=2026-10-03");
-  await expect(page).toHaveURL(/\/\?day=2026-10-03$/);
+  await expect(page).toHaveURL(/\/\?receipts=2026-10&day=2026-10-03$/);
   await expect(page.locator(".dashboard-receipts")).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "Incassi mensili" }),
+  ).toBeVisible();
+  await page.goto("/reports?month=2025-09");
+  await expect(page).toHaveURL(/\/\?receipts=2025-09$/);
+  await expect(
+    page.getByRole("dialog", { name: "Incassi mensili" }),
+  ).toBeVisible();
   await page.goto("/settings");
   await expect(page.getByRole("link", { name: /Lingua/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /^Dati / })).toBeVisible();
@@ -2409,7 +2465,7 @@ test("manages one quick service for held service orders and retail checkout", as
   ).toBeVisible();
 });
 
-test("dashboard shows month-to-date receipts and same-month comparisons", async ({
+test("dashboard opens monthly receipts and keeps receipt charts", async ({
   page,
 }) => {
   await seedDashboardReceipts();
@@ -2417,10 +2473,24 @@ test("dashboard shows month-to-date receipts and same-month comparisons", async 
   const receipts = page.locator(".dashboard-receipts");
   await expect(receipts).toBeVisible();
   await expect(receipts.getByText("Incassi del mese")).toBeVisible();
-  await expect(
-    receipts.getByText("Stesso periodo degli anni precedenti"),
-  ).toBeVisible();
-  await expect(receipts.locator(".dashboard-year-comparison")).toHaveCount(3);
+  await expect(receipts.locator(".monthly-receipt-comparison")).toHaveCount(0);
+  const monthlyReceipts = receipts.getByRole("button", {
+    name: "Incassi mensili",
+    exact: true,
+  });
+  await expect(monthlyReceipts).toHaveCSS(
+    "border-top-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(monthlyReceipts).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await monthlyReceipts.hover();
+  await expect(monthlyReceipts).not.toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
   const charts = page.locator(".dashboard-charts");
   await expect(
     charts.getByRole("heading", { name: "Incassi degli ultimi 7 giorni" }),
@@ -2439,6 +2509,39 @@ test("dashboard shows month-to-date receipts and same-month comparisons", async 
   await expect(
     page.getByRole("button", { name: "Statistiche dettagliate", exact: true }),
   ).toHaveCount(0);
+
+  await monthlyReceipts.click();
+  await expect(page).toHaveURL(/day=2026-10-03.*receipts=2026-10/);
+  const dialog = page.getByRole("dialog", { name: "Incassi mensili" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".monthly-receipt-total")).toContainText(
+    "140,00 €",
+  );
+  await expect(dialog.locator(".monthly-receipt-comparison")).toHaveCount(3);
+  await expect(
+    dialog.locator(".monthly-receipt-comparison").filter({ hasText: "2025" }),
+  ).toContainText("+75%");
+
+  const monthInput = dialog.locator('input[type="month"]');
+  await monthInput.fill("2025-09");
+  await expect(page).toHaveURL(/day=2026-10-03.*receipts=2025-09/);
+  await expect(dialog.locator(".monthly-receipt-total")).toContainText(
+    "50,00 €",
+  );
+  await expect(
+    dialog.locator(".monthly-receipt-comparison").filter({ hasText: "2024" }),
+  ).toContainText("+100%");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+    "monthly receipt dialog overflows at 390px",
+  ).toBe(true);
+  await dialog.getByRole("button", { name: "Chiudi", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(/\/\?day=2026-10-03$/);
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -2487,6 +2590,53 @@ test("dashboard shows month-to-date receipts and same-month comparisons", async 
     "background-color",
     "rgb(255, 248, 220)",
   );
+});
+
+test("staff cannot open receipt data from the dashboard or reports route", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const db = new PrismaClient();
+  try {
+    await db.user.update({
+      where: { email: "local-operator@ngt.invalid" },
+      data: { role: "STAFF" },
+    });
+    await page.reload();
+    await expect(page.locator(".dashboard-receipts")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Incassi mensili", exact: true }),
+    ).toHaveCount(0);
+
+    await page.goto("/reports?month=2025-09");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page).not.toHaveURL(/receipts=/);
+  } finally {
+    await db.user.update({
+      where: { email: "local-operator@ngt.invalid" },
+      data: { role: "OWNER" },
+    });
+    await db.$disconnect();
+  }
+});
+
+test("reports route opens the requested monthly receipt dialog", async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto("/reports?day=2026-10-03");
+  await expect(page).toHaveURL(/\/\?receipts=2026-10&day=2026-10-03$/);
+  await expect(
+    page.getByRole("dialog", { name: "Incassi mensili" }),
+  ).toBeVisible();
+
+  await page.goto("/reports?month=2025-09");
+  await expect(page).toHaveURL(/\/\?receipts=2025-09$/);
+  await expect(
+    page.getByRole("dialog", { name: "Incassi mensili" }),
+  ).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });
 
 test("workspace and print views use the shared NGT brand", async ({ page }) => {

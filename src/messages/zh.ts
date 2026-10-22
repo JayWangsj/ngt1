@@ -339,6 +339,9 @@ export const zh: typeof it = {
   dashboard: {
     receiptsTitle: "收款",
     monthToDate: "本月累计",
+    monthlyReceipts: "月度收款",
+    monthlyReceiptsDescription: "选择月份，查看累计收款及前三年同月对比。",
+    selectedMonthTotal: "所选月份累计",
     yearOverYear: "往年同月同期",
     revenue7: "最近 7 天收款趋势",
     repairRevenue: "维修收入",

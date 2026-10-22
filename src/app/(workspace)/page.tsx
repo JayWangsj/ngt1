@@ -13,9 +13,12 @@ import { db } from "@/lib/db";
 import { isActiveOrderStatus, money, orderCode } from "@/lib/domain";
 import {
   canViewReceiptData,
+  monthlyReceiptPeriods,
   monthToDatePeriods,
+  normalizeReceiptMonth,
   recentRomeDays,
   revenueSeries,
+  summarizeMonthlyReceipts,
   summarizeMonthToDateReceipts,
   summarizePayments,
 } from "@/lib/business-metrics";
@@ -29,6 +32,7 @@ import {
   validBusinessDate,
 } from "@/lib/business-date";
 import { DatePicker } from "@/components/business-select";
+import { MonthlyReceiptsDialog } from "@/components/monthly-receipts-dialog";
 
 function percentage(value: number, total: number) {
   return total > 0 ? Math.round((value / total) * 100) : 0;
@@ -37,7 +41,7 @@ function percentage(value: number, total: number) {
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ day?: string }>;
+  searchParams: Promise<{ day?: string; receipts?: string }>;
 }) {
   const it = await getMessages();
   const locale = await getLocale();
@@ -50,57 +54,89 @@ export default async function Dashboard({
       ? requestedDay
       : businessToday;
   const canViewReceipts = canViewReceiptData(actor.role);
-  const paymentPeriods = monthToDatePeriods(today);
+  const receiptDialogOpen = canViewReceipts && query.receipts !== undefined;
+  const defaultReceiptMonth = normalizeReceiptMonth(
+    today.slice(0, 7),
+    businessToday,
+  );
+  const receiptMonth = normalizeReceiptMonth(
+    receiptDialogOpen ? query.receipts : defaultReceiptMonth,
+    businessToday,
+  );
+  const paymentPeriods = monthToDatePeriods(today, 0);
+  const receiptDialogPeriods = receiptDialogOpen
+    ? monthlyReceiptPeriods(receiptMonth, businessToday)
+    : [];
   const weekStart = recentRomeDays(today, 7)[0];
   const closedStatuses = ["COMPLETED", "CANCELLED", "REFUNDED"] as const;
-  const [orderStatusRows, overdueCount, stockLevels, payments, recentOrders] =
-    await Promise.all([
-      db.workOrder.groupBy({ by: ["status"], _count: { _all: true } }),
-      db.workOrder.count({
-        where: {
-          status: { notIn: [...closedStatuses] },
-          dueDate: { lt: businessToday },
-        },
-      }),
-      db.product.findMany({
-        where: { enabled: true },
-        select: { stockQuantity: true, minStock: true },
-      }),
-      canViewReceipts
-        ? db.payment.findMany({
-            where: {
-              OR: [
-                ...paymentPeriods.map((period) => ({
-                  receivedAt: romeDateRange(
-                    period.startDay,
-                    period.endDayExclusive,
-                  ),
-                })),
-                {
-                  receivedAt: romeDateRange(
-                    weekStart,
-                    paymentPeriods[0].endDayExclusive,
-                  ),
-                },
-              ],
-            },
-            include: { allocations: true },
-            orderBy: { receivedAt: "asc" },
-          })
-        : Promise.resolve([]),
-      db.workOrder.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        select: {
-          id: true,
-          code: true,
-          status: true,
-          createdAt: true,
-          updatedAt: true,
-          device: { select: { brand: true, model: true } },
-        },
-      }),
-    ]);
+  const [
+    orderStatusRows,
+    overdueCount,
+    stockLevels,
+    payments,
+    receiptDialogPayments,
+    recentOrders,
+  ] = await Promise.all([
+    db.workOrder.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.workOrder.count({
+      where: {
+        status: { notIn: [...closedStatuses] },
+        dueDate: { lt: businessToday },
+      },
+    }),
+    db.product.findMany({
+      where: { enabled: true },
+      select: { stockQuantity: true, minStock: true },
+    }),
+    canViewReceipts
+      ? db.payment.findMany({
+          where: {
+            OR: [
+              ...paymentPeriods.map((period) => ({
+                receivedAt: romeDateRange(
+                  period.startDay,
+                  period.endDayExclusive,
+                ),
+              })),
+              {
+                receivedAt: romeDateRange(
+                  weekStart,
+                  paymentPeriods[0].endDayExclusive,
+                ),
+              },
+            ],
+          },
+          include: { allocations: true },
+          orderBy: { receivedAt: "asc" },
+        })
+      : Promise.resolve([]),
+    receiptDialogOpen
+      ? db.payment.findMany({
+          where: {
+            OR: receiptDialogPeriods.map((period) => ({
+              receivedAt: romeDateRange(
+                period.startDay,
+                period.endDayExclusive,
+              ),
+            })),
+          },
+          select: { amount: true, receivedAt: true },
+          orderBy: { receivedAt: "asc" },
+        })
+      : Promise.resolve([]),
+    db.workOrder.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        device: { select: { brand: true, model: true } },
+      },
+    }),
+  ]);
   const statusCounts = new Map(
     orderStatusRows.map((row) => [row.status, row._count._all]),
   );
@@ -116,7 +152,14 @@ export default async function Dashboard({
     (product) => product.stockQuantity <= 0,
   ).length;
   const receiptSummary = canViewReceipts
-    ? summarizeMonthToDateReceipts(payments, today)
+    ? summarizeMonthToDateReceipts(payments, today, 0)
+    : null;
+  const receiptDialogSummary = receiptDialogOpen
+    ? summarizeMonthlyReceipts(
+        receiptDialogPayments,
+        receiptMonth,
+        businessToday,
+      )
     : null;
   const todayRevenue = canViewReceipts
     ? summarizePayments(payments, today)
@@ -188,6 +231,9 @@ export default async function Dashboard({
   const monthRangeLabel = receiptSummary
     ? `${formatDate(paymentPeriods[0].startDay, { day: "numeric", month: "short" })} – ${formatDate(paymentPeriods[0].endDay, { day: "numeric", month: "short", year: "numeric" })}`
     : "";
+  const receiptDialogRangeLabel = receiptDialogSummary
+    ? `${formatDate(receiptDialogSummary.startDay, { day: "numeric", month: "short" })} – ${formatDate(receiptDialogSummary.endDay, { day: "numeric", month: "short", year: "numeric" })}`
+    : "";
 
   return (
     <DashboardMotion fingerprint={fingerprint} locale={locale}>
@@ -226,35 +272,14 @@ export default async function Dashboard({
                   {money(receiptSummary.monthToDate)}
                 </strong>
               </div>
-              <div className="dashboard-year-section">
-                <h3 className="dashboard-year-heading">
-                  {it.dashboard.yearOverYear}
-                </h3>
-                <div className="dashboard-year-comparisons">
-                  {receiptSummary.comparisons.map((comparison) => (
-                    <div
-                      className="dashboard-year-comparison"
-                      key={comparison.year}
-                    >
-                      <span>{comparison.year}</span>
-                      <strong>{money(comparison.amount)}</strong>
-                      <small
-                        className={
-                          comparison.changePercentage === null
-                            ? ""
-                            : comparison.changePercentage >= 0
-                              ? "is-positive"
-                              : "is-negative"
-                        }
-                      >
-                        {comparison.changePercentage === null
-                          ? "—"
-                          : `${comparison.changePercentage > 0 ? "+" : ""}${comparison.changePercentage}%`}
-                      </small>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <MonthlyReceiptsDialog
+                open={receiptDialogOpen}
+                defaultMonth={defaultReceiptMonth}
+                month={receiptMonth}
+                maxMonth={businessToday.slice(0, 7)}
+                rangeLabel={receiptDialogRangeLabel}
+                summary={receiptDialogSummary}
+              />
             </div>
           </div>
         </section>

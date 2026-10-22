@@ -3440,8 +3440,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   gap: 16px;
   margin-bottom: 20px;
 }
-.dashboard-receipts-heading h2,
-.dashboard-year-heading {
+.dashboard-receipts-heading h2 {
   margin: 0;
   color: var(--ink);
   font-size: 17px;
@@ -3475,7 +3474,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .dashboard-month-receipts {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(150px, 1fr) auto;
   align-items: center;
   gap: 20px;
 }
@@ -3494,40 +3493,78 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
 }
-.dashboard-year-heading {
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 11px;
+.dashboard-month-entry {
+  align-self: center;
 }
-.dashboard-year-comparisons {
+.form-dialog:has(.monthly-receipt-dialog) {
+  width: min(560px, calc(100vw - 32px));
+}
+.monthly-receipt-dialog {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 20px;
 }
-.dashboard-year-comparison {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  border-left: 1px solid var(--line);
-  padding-left: 10px;
-}
-.dashboard-year-comparison > span,
-.dashboard-year-comparison > small {
+.monthly-receipt-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
 }
-.dashboard-year-comparison > strong {
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 13px;
+.monthly-receipt-picker .date-picker {
+  width: min(250px, 100%);
+}
+.monthly-receipt-picker input {
+  width: 100%;
+}
+.monthly-receipt-total {
+  display: grid;
+  gap: 4px;
+  border-radius: 12px;
+  padding: 20px;
+  background: #fff9e8;
+}
+.monthly-receipt-total > span,
+.monthly-receipt-total > small,
+.monthly-receipt-comparisons h3,
+.monthly-receipt-comparison > small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.monthly-receipt-total > strong {
+  color: var(--teal-dark);
+  font-size: 30px;
   font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.2;
 }
-.dashboard-year-comparison > small.is-positive {
+.monthly-receipt-comparisons h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.monthly-receipt-comparison {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  border-top: 1px solid var(--line);
+}
+.monthly-receipt-comparison > strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.monthly-receipt-comparison > small {
+  min-width: 44px;
+  text-align: right;
+}
+.monthly-receipt-comparison > small.is-positive {
   color: #377b50;
 }
-.dashboard-year-comparison > small.is-negative {
+.monthly-receipt-comparison > small.is-negative {
   color: #ab4444;
 }
 .dashboard-charts {
@@ -3927,16 +3964,8 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     border-bottom: 1px solid var(--line);
     padding: 0 0 14px;
   }
-  .dashboard-year-comparisons {
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
-  .dashboard-year-comparison {
-    grid-template-columns: 56px minmax(0, 1fr) auto;
-    align-items: center;
-    border-top: 1px solid var(--line);
-    border-left: 0;
-    padding: 8px 0;
+  .dashboard-month-entry {
+    justify-self: start;
   }
   .dashboard-date-filter {
     flex-wrap: wrap;
@@ -3945,6 +3974,16 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   .revenue-source-content {
     grid-template-columns: 1fr;
     justify-items: center;
+  }
+}
+@media (max-width: 480px) {
+  .monthly-receipt-picker {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .monthly-receipt-picker .date-picker {
+    width: 100%;
   }
 }
 @media (prefers-reduced-motion: reduce) {
