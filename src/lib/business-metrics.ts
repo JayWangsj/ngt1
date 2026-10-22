@@ -1,5 +1,6 @@
 import { cents, romeDay } from "./domain";
 import type { Actor } from "./domain";
+import { daysInMonth, monthParts } from "./date-picker";
 
 type Allocation = {
   source: "REPAIR" | "RETAIL" | "QUICK_SERVICE";
@@ -21,6 +22,10 @@ export type MonthToDatePeriod = {
   endDayExclusive: string;
 };
 
+export type MonthlyReceiptPeriod = MonthToDatePeriod & {
+  month: string;
+};
+
 export function canViewReceiptData(role: Actor["role"]) {
   return role === "OWNER";
 }
@@ -29,6 +34,90 @@ function nextDay(day: string) {
   const date = new Date(`${day}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+export function normalizeReceiptMonth(
+  requestedMonth: string | undefined,
+  businessToday: string,
+) {
+  const currentMonth = businessToday.slice(0, 7);
+  return requestedMonth &&
+    monthParts(requestedMonth) &&
+    requestedMonth <= currentMonth
+    ? requestedMonth
+    : currentMonth;
+}
+
+export function monthlyReceiptPeriods(
+  requestedMonth: string | undefined,
+  businessToday: string,
+  previousYears = 3,
+) {
+  const month = normalizeReceiptMonth(requestedMonth, businessToday);
+  const { year: selectedYear, month: selectedMonth } = monthParts(month)!;
+  const currentMonth = businessToday.slice(0, 7);
+  const currentDay = Number(businessToday.slice(8, 10));
+  const useCurrentCutoff = month === currentMonth;
+
+  return Array.from({ length: previousYears + 1 }, (_, offset) => {
+    const year = selectedYear - offset;
+    const monthText = String(selectedMonth).padStart(2, "0");
+    const lastDay = daysInMonth(year, selectedMonth);
+    const endDate = useCurrentCutoff ? Math.min(currentDay, lastDay) : lastDay;
+    const endDay = `${year}-${monthText}-${String(endDate).padStart(2, "0")}`;
+
+    return {
+      year,
+      month: `${year}-${monthText}`,
+      startDay: `${year}-${monthText}-01`,
+      endDay,
+      endDayExclusive: nextDay(endDay),
+    };
+  });
+}
+
+export function summarizeMonthlyReceipts(
+  payments: Pick<BusinessPayment, "amount" | "receivedAt">[],
+  requestedMonth: string | undefined,
+  businessToday: string,
+  previousYears = 3,
+) {
+  const periods = monthlyReceiptPeriods(
+    requestedMonth,
+    businessToday,
+    previousYears,
+  );
+  const totalBetween = (startDay: string, endDayExclusive: string) =>
+    payments.reduce((total, payment) => {
+      const day = romeDay(new Date(payment.receivedAt));
+      return day >= startDay && day < endDayExclusive
+        ? total + cents(payment.amount)
+        : total;
+    }, 0);
+  const amount = totalBetween(periods[0].startDay, periods[0].endDayExclusive);
+
+  return {
+    month: periods[0].month,
+    amount,
+    startDay: periods[0].startDay,
+    endDay: periods[0].endDay,
+    comparisons: periods.slice(1).map((period) => {
+      const comparisonAmount = totalBetween(
+        period.startDay,
+        period.endDayExclusive,
+      );
+      return {
+        year: period.year,
+        amount: comparisonAmount,
+        changePercentage:
+          comparisonAmount === 0
+            ? null
+            : Math.round(
+                ((amount - comparisonAmount) / comparisonAmount) * 100,
+              ),
+      };
+    }),
+  };
 }
 
 export function monthToDatePeriods(selectedDay: string, previousYears = 3) {
