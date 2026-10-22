@@ -68,6 +68,12 @@ export function DashboardMotion({
     const counts = Array.from(
       element.querySelectorAll<HTMLElement>("[data-count]"),
     );
+    const bars = Array.from(
+      element.querySelectorAll<HTMLElement>("[data-bar]"),
+    );
+    const donutSegments = Array.from(
+      element.querySelectorAll<SVGCircleElement>("[data-donut-segment]"),
+    );
     const moneyFormat = new Intl.NumberFormat(
       locale === "zh" ? "zh-CN" : "it-IT",
       { style: "currency", currency: "EUR" },
@@ -79,6 +85,11 @@ export function DashboardMotion({
     counts.forEach((node) => {
       node.textContent =
         node.dataset.countType === "money" ? moneyFormat.format(0) : "0";
+    });
+    bars.forEach((node) => (node.style.transform = "scaleY(0)"));
+    donutSegments.forEach((node) => {
+      node.style.strokeDasharray = "0 100";
+      node.style.strokeDashoffset = node.dataset.donutOffset ?? "0";
     });
     void element.offsetHeight;
 
@@ -99,6 +110,16 @@ export function DashboardMotion({
           node.dataset.countType === "money"
             ? moneyFormat.format(value / 100)
             : integerFormat.format(value);
+      });
+      bars.forEach((node, index) => {
+        const barProgress = progressAt(elapsed, 180 + (index % 3) * 45, 850);
+        node.style.transform = `scaleY(${barProgress})`;
+      });
+      donutSegments.forEach((node, index) => {
+        const target = Number(node.dataset.donutSegment ?? 0);
+        const donutProgress = progressAt(elapsed, 260 + index * 60, 800);
+        const value = target * donutProgress;
+        node.style.strokeDasharray = `${value} ${100 - value}`;
       });
       if (elapsed < animationDuration) frame = requestAnimationFrame(animate);
       else {

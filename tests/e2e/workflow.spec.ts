@@ -11,6 +11,63 @@ test.beforeEach(async () => {
   await seedTestDatabase();
 });
 
+async function seedDashboardReceipts() {
+  const db = new PrismaClient();
+  try {
+    const owner = await db.user.findFirstOrThrow({ where: { role: "OWNER" } });
+    const sale = await db.retailSale.create({
+      data: {
+        code: "E2E-DASHBOARD-SALE",
+        requestId: "e2e-dashboard-sale",
+        subtotal: "140.00",
+        total: "140.00",
+        itemCount: 1,
+        actorId: owner.id,
+        actorName: owner.name,
+        createdAt: new Date("2026-10-03T10:00:00Z"),
+      },
+    });
+    await db.$transaction([
+      db.payment.create({
+        data: {
+          requestId: "e2e-dashboard-previous-day",
+          saleId: sale.id,
+          amount: "40.00",
+          method: "CASH",
+          kind: "OTHER",
+          receivedAt: new Date("2026-10-02T10:00:00Z"),
+          actorId: owner.id,
+          actorName: owner.name,
+          allocations: {
+            create: [{ source: "REPAIR", amount: "40.00" }],
+          },
+        },
+      }),
+      db.payment.create({
+        data: {
+          requestId: "e2e-dashboard-selected-day",
+          saleId: sale.id,
+          amount: "100.00",
+          method: "CARD",
+          kind: "OTHER",
+          receivedAt: new Date("2026-10-03T10:00:00Z"),
+          actorId: owner.id,
+          actorName: owner.name,
+          allocations: {
+            create: [
+              { source: "REPAIR", amount: "60.00" },
+              { source: "RETAIL", amount: "30.00" },
+              { source: "QUICK_SERVICE", amount: "10.00" },
+            ],
+          },
+        },
+      }),
+    ]);
+  } finally {
+    await db.$disconnect();
+  }
+}
+
 const retirementFixture = {
   productName: "Retirement fixture LCD Test",
   project: "sostituzione display retirement fixture",
@@ -2355,6 +2412,7 @@ test("manages one quick service for held service orders and retail checkout", as
 test("dashboard shows month-to-date receipts and same-month comparisons", async ({
   page,
 }) => {
+  await seedDashboardReceipts();
   await page.goto("/?day=2026-10-03");
   const receipts = page.locator(".dashboard-receipts");
   await expect(receipts).toBeVisible();
@@ -2363,10 +2421,20 @@ test("dashboard shows month-to-date receipts and same-month comparisons", async 
     receipts.getByText("Stesso periodo degli anni precedenti"),
   ).toBeVisible();
   await expect(receipts.locator(".dashboard-year-comparison")).toHaveCount(3);
-  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  const charts = page.locator(".dashboard-charts");
   await expect(
-    page.locator(".dashboard-charts, .dashboard-workflow"),
-  ).toHaveCount(0);
+    charts.getByRole("heading", { name: "Incassi degli ultimi 7 giorni" }),
+  ).toBeVisible();
+  await expect(
+    charts.getByRole("heading", { name: "Composizione incassi di oggi" }),
+  ).toBeVisible();
+  await expect(charts.locator(".revenue-bar")).toHaveCount(21);
+  await expect(charts.locator(".donut-segment")).toHaveCount(3);
+  await expect(charts.locator(".revenue-source-card")).toContainText(
+    "100,00 €",
+  );
+  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  await expect(page.locator(".dashboard-workflow")).toHaveCount(0);
   await expect(page.locator(".dashboard-lists > section")).toHaveCount(2);
   await expect(
     page.getByRole("button", { name: "Statistiche dettagliate", exact: true }),
@@ -2692,7 +2760,8 @@ test("service order print renders mirrored copies from live order data", async (
 test("dashboard animates on entry and data changes while respecting reduced motion", async ({
   page,
 }) => {
-  await page.goto("/");
+  await seedDashboardReceipts();
+  await page.goto("/?day=2026-10-03");
   const dashboard = page.getByTestId("dashboard-motion");
   await expect(dashboard).toBeVisible();
   await expect(dashboard).toHaveClass(/dashboard-animating/);
@@ -2701,6 +2770,24 @@ test("dashboard animates on entry and data changes while respecting reduced moti
   });
   await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
   await expect(page.locator(".dashboard-receipts")).toBeVisible();
+  await expect(page.locator(".revenue-bar")).toHaveCount(21);
+  await expect(page.locator(".donut-segment")).toHaveCount(3);
+  await expect
+    .poll(() =>
+      page
+        .locator(".revenue-bar")
+        .last()
+        .evaluate((element) => element.style.transform),
+    )
+    .toBe("scaleY(1)");
+  await expect
+    .poll(() =>
+      page
+        .locator(".donut-segment")
+        .first()
+        .evaluate((element) => element.style.strokeDasharray),
+    )
+    .toBe("60, 40");
   const dashboardActions = page.locator(".dashboard-action-link");
   await expect(dashboardActions).toHaveCount(1);
   await expect(dashboardActions.locator("svg")).toHaveCount(1);
