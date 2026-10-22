@@ -903,12 +903,10 @@ test("single operator opens every business page without login", async ({
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Statistiche dettagliate", exact: true }),
-  ).toBeVisible();
-  await page.goto("/reports");
-  await expect(page).toHaveURL(/\?stats=1/);
-  await expect(
-    page.getByRole("dialog", { name: "Andamento", exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await page.goto("/reports?day=2026-10-03");
+  await expect(page).toHaveURL(/\/\?day=2026-10-03$/);
+  await expect(page.locator(".dashboard-receipts")).toBeVisible();
   await page.goto("/settings");
   await expect(page.getByRole("link", { name: /Lingua/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /^Dati / })).toBeVisible();
@@ -2354,19 +2352,73 @@ test("manages one quick service for held service orders and retail checkout", as
   ).toBeVisible();
 });
 
-test("business statistics keeps the open balance summary without the unpaid list", async ({
+test("dashboard shows month-to-date receipts and same-month comparisons", async ({
   page,
 }) => {
-  await page.goto("/");
-  await page.locator(".dashboard-action-link").first().click();
+  await page.goto("/?day=2026-10-03");
+  const receipts = page.locator(".dashboard-receipts");
+  await expect(receipts).toBeVisible();
+  await expect(receipts.getByText("Incassi del mese")).toBeVisible();
+  await expect(
+    receipts.getByText("Stesso periodo degli anni precedenti"),
+  ).toBeVisible();
+  await expect(receipts.locator(".dashboard-year-comparison")).toHaveCount(3);
+  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  await expect(
+    page.locator(".dashboard-charts, .dashboard-workflow"),
+  ).toHaveCount(0);
+  await expect(page.locator(".dashboard-lists > section")).toHaveCount(2);
+  await expect(
+    page.getByRole("button", { name: "Statistiche dettagliate", exact: true }),
+  ).toHaveCount(0);
 
-  const statsDialog = page.getByRole("dialog", {
-    name: "Andamento",
-    exact: true,
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+      `dashboard overflows at ${width}px`,
+    ).toBe(true);
+  }
+
+  await page.evaluate(() => {
+    const controls = document.createElement("div");
+    controls.innerHTML =
+      '<button id="primary-button-probe" class="button button-primary" type="button">Primary</button><button id="button-focus-before" type="button">Before</button><button id="secondary-button-probe" class="button button-outline" type="button">Secondary</button>';
+    document.body.prepend(controls);
   });
-  await expect(statsDialog).toBeVisible();
-  await expect(statsDialog.getByText("Totale da incassare")).toBeVisible();
-  await expect(statsDialog.locator(".order-table")).toHaveCount(0);
+  const primaryButton = page.locator("#primary-button-probe");
+  await expect(primaryButton).toHaveCSS(
+    "background-color",
+    "rgb(244, 198, 45)",
+  );
+  await primaryButton.hover();
+  await expect(primaryButton).toHaveCSS(
+    "background-color",
+    "rgb(228, 182, 25)",
+  );
+  const secondaryButton = page.locator("#secondary-button-probe");
+  await expect(secondaryButton).toHaveCSS(
+    "border-top-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(secondaryButton).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await secondaryButton.hover();
+  await expect(secondaryButton).toHaveCSS(
+    "background-color",
+    "rgb(255, 248, 220)",
+  );
+  await page.locator("#button-focus-before").focus();
+  await page.keyboard.press("Tab");
+  await expect(secondaryButton).toBeFocused();
+  await expect(secondaryButton).toHaveCSS(
+    "background-color",
+    "rgb(255, 248, 220)",
+  );
 });
 
 test("workspace and print views use the shared NGT brand", async ({ page }) => {
@@ -2647,11 +2699,11 @@ test("dashboard animates on entry and data changes while respecting reduced moti
   await expect(dashboard).not.toHaveClass(/dashboard-animating/, {
     timeout: 2000,
   });
-  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(7);
-  await expect(page.locator(".payment-method-row")).toHaveCount(3);
+  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  await expect(page.locator(".dashboard-receipts")).toBeVisible();
   const dashboardActions = page.locator(".dashboard-action-link");
-  await expect(dashboardActions).toHaveCount(4);
-  await expect(dashboardActions.locator("svg")).toHaveCount(4);
+  await expect(dashboardActions).toHaveCount(1);
+  await expect(dashboardActions.locator("svg")).toHaveCount(1);
   await expect(dashboardActions.locator("svg").first()).toHaveAttribute(
     "width",
     "15",
@@ -2660,7 +2712,7 @@ test("dashboard animates on entry and data changes while respecting reduced moti
     await dashboardActions.evaluateAll((links) =>
       links.map((link) => getComputedStyle(link).textDecorationLine),
     ),
-  ).toEqual(["none", "none", "none", "none"]);
+  ).toEqual(["none"]);
   const firstDashboardAction = dashboardActions.first();
   expect(
     await firstDashboardAction
@@ -2688,21 +2740,13 @@ test("dashboard animates on entry and data changes while respecting reduced moti
         })),
     )
     .toEqual({ height: "1px", opacity: "1" });
-  await firstDashboardAction.click();
-  const statsDialog = page.getByRole("dialog", {
-    name: "Andamento",
-    exact: true,
-  });
-  await expect(statsDialog).toBeVisible();
-  await expect(statsDialog.getByText("Incassi del giorno")).toBeVisible();
-  await statsDialog
-    .getByRole("button", { name: "Chiudi", exact: true })
-    .click();
-  await expect(statsDialog).toHaveCount(0);
   await expect(page.locator(".attention-card")).toHaveCSS(
     "border-color",
     "rgb(239, 210, 124)",
   );
+  await firstDashboardAction.click();
+  await expect(page).toHaveURL(/\/orders$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.goto("/orders");
   await page.goto("/");

@@ -1,4 +1,5 @@
 import { cents, romeDay } from "./domain";
+import type { Actor } from "./domain";
 
 type Allocation = {
   source: "REPAIR" | "RETAIL" | "QUICK_SERVICE";
@@ -12,6 +13,79 @@ export type BusinessPayment = {
   saleId?: string | null;
   allocations?: Allocation[];
 };
+
+export type MonthToDatePeriod = {
+  year: number;
+  startDay: string;
+  endDay: string;
+  endDayExclusive: string;
+};
+
+export function canViewReceiptData(role: Actor["role"]) {
+  return role === "OWNER";
+}
+
+function nextDay(day: string) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function monthToDatePeriods(selectedDay: string, previousYears = 3) {
+  const [selectedYear, month, selectedDate] = selectedDay
+    .split("-")
+    .map(Number);
+  const monthText = String(month).padStart(2, "0");
+
+  return Array.from({ length: previousYears + 1 }, (_, offset) => {
+    const year = selectedYear - offset;
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const day = String(Math.min(selectedDate, lastDay)).padStart(2, "0");
+    const endDay = `${year}-${monthText}-${day}`;
+
+    return {
+      year,
+      startDay: `${year}-${monthText}-01`,
+      endDay,
+      endDayExclusive: nextDay(endDay),
+    };
+  });
+}
+
+export function summarizeMonthToDateReceipts(
+  payments: Pick<BusinessPayment, "amount" | "receivedAt">[],
+  selectedDay: string,
+  previousYears = 3,
+) {
+  const periods = monthToDatePeriods(selectedDay, previousYears);
+  const totalBetween = (startDay: string, endDayExclusive: string) =>
+    payments.reduce((total, payment) => {
+      const day = romeDay(new Date(payment.receivedAt));
+      return day >= startDay && day < endDayExclusive
+        ? total + cents(payment.amount)
+        : total;
+    }, 0);
+  const monthToDate = totalBetween(
+    periods[0].startDay,
+    periods[0].endDayExclusive,
+  );
+
+  return {
+    selectedDay: totalBetween(selectedDay, nextDay(selectedDay)),
+    monthToDate,
+    comparisons: periods.slice(1).map((period) => {
+      const amount = totalBetween(period.startDay, period.endDayExclusive);
+      return {
+        year: period.year,
+        amount,
+        changePercentage:
+          amount === 0
+            ? null
+            : Math.round(((monthToDate - amount) / amount) * 100),
+      };
+    }),
+  };
+}
 
 export function revenueParts(payment: BusinessPayment) {
   if (payment.allocations?.length) {

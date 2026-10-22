@@ -68,15 +68,6 @@ export function DashboardMotion({
     const counts = Array.from(
       element.querySelectorAll<HTMLElement>("[data-count]"),
     );
-    const bars = Array.from(
-      element.querySelectorAll<HTMLElement>("[data-bar]"),
-    );
-    const progress = Array.from(
-      element.querySelectorAll<HTMLElement>("[data-progress]"),
-    );
-    const donutSegments = Array.from(
-      element.querySelectorAll<SVGCircleElement>("[data-donut-segment]"),
-    );
     const moneyFormat = new Intl.NumberFormat(
       locale === "zh" ? "zh-CN" : "it-IT",
       { style: "currency", currency: "EUR" },
@@ -89,13 +80,6 @@ export function DashboardMotion({
       node.textContent =
         node.dataset.countType === "money" ? moneyFormat.format(0) : "0";
     });
-    bars.forEach((node) => (node.style.transform = "scaleY(0)"));
-    progress.forEach((node) => (node.style.transform = "scaleX(0)"));
-    donutSegments.forEach((node) => {
-      node.style.strokeDasharray = "0 100";
-      node.style.strokeDashoffset = node.dataset.donutOffset ?? "0";
-    });
-
     void element.offsetHeight;
 
     let frame = 0;
@@ -115,19 +99,6 @@ export function DashboardMotion({
           node.dataset.countType === "money"
             ? moneyFormat.format(value / 100)
             : integerFormat.format(value);
-      });
-      bars.forEach((node, index) => {
-        const barProgress = progressAt(elapsed, 180 + (index % 2) * 70, 850);
-        node.style.transform = `scaleY(${barProgress})`;
-      });
-      progress.forEach((node) => {
-        node.style.transform = `scaleX(${progressAt(elapsed, 380, 700)})`;
-      });
-      donutSegments.forEach((node, index) => {
-        const target = Number(node.dataset.donutSegment ?? 0);
-        const donutProgress = progressAt(elapsed, 260 + index * 60, 800);
-        const value = target * donutProgress;
-        node.style.strokeDasharray = `${value} ${100 - value}`;
       });
       if (elapsed < animationDuration) frame = requestAnimationFrame(animate);
       else {
