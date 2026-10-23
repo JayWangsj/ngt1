@@ -7715,6 +7715,10 @@ test("inventory repair products retain their compatibility editor", async ({
   const dialog = page.getByRole("dialog", {
     name: "Modifica dispositivi compatibili",
   });
+  await expect(
+    dialog.locator(":scope > .dialog-body[data-product-compatibility-dialog]"),
+  ).toBeVisible();
+  await expect(dialog.locator(":scope > .dialog-footer")).toBeVisible();
   const compatibilityAdd = dialog.getByRole("button", {
     name: "Compatibilità",
     exact: true,
@@ -7730,6 +7734,12 @@ test("inventory repair products retain their compatibility editor", async ({
   const editorDialog = page.getByRole("dialog", {
     name: "Aggiungi dispositivo compatibile",
   });
+  await expect(
+    editorDialog.locator(
+      ":scope > .dialog-body[data-product-compatibility-dialog]",
+    ),
+  ).toBeVisible();
+  await expect(editorDialog.locator(":scope > .dialog-footer")).toBeVisible();
   await expect(editorDialog.locator(".compatibility-device-fields")).toHaveCSS(
     "grid-template-columns",
     /.+ .+ .+/,
@@ -7766,6 +7776,10 @@ test("inventory repair products retain their compatibility editor", async ({
   const projectPicker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
+  await expect(
+    projectPicker.locator(":scope > .dialog-body.compatibility-project-picker"),
+  ).toBeVisible();
+  await expect(projectPicker.locator(":scope > .dialog-footer")).toBeVisible();
   const batteryProject = projectPicker.getByRole("button", {
     name: "sostituzione batteria",
     exact: true,
@@ -7848,6 +7862,14 @@ test("new repair products add compatible devices in a modal", async ({
     name: "Aggiungi dispositivo compatibile",
     exact: true,
   });
+  await expect(
+    compatibilityDialog.locator(
+      ":scope > .dialog-body[data-product-compatibility-dialog]",
+    ),
+  ).toBeVisible();
+  await expect(
+    compatibilityDialog.locator(":scope > .dialog-footer"),
+  ).toBeVisible();
   await compatibilityDialog
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
@@ -7873,6 +7895,10 @@ test("new repair products add compatible devices in a modal", async ({
   const projectPicker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
+  await expect(
+    projectPicker.locator(":scope > .dialog-body.compatibility-project-picker"),
+  ).toBeVisible();
+  await expect(projectPicker.locator(":scope > .dialog-footer")).toBeVisible();
   await projectPicker
     .getByRole("button", { name: "sostituzione display", exact: true })
     .click();
@@ -7881,6 +7907,14 @@ test("new repair products add compatible devices in a modal", async ({
   let newProjectDialog = page.getByRole("dialog", {
     name: "Nuovo intervento",
   });
+  await expect(
+    newProjectDialog.locator(
+      ":scope > .dialog-body.compatibility-new-project-dialog",
+    ),
+  ).toBeVisible();
+  await expect(
+    newProjectDialog.locator(":scope > .dialog-footer"),
+  ).toBeVisible();
   await newProjectDialog.getByRole("button", { name: "Annulla" }).click();
   await expect(newProjectDialog).toHaveCount(0);
   await expect(projectPicker).toBeVisible();

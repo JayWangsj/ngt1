@@ -9,7 +9,7 @@ import { uniqueOptions } from "@/lib/options";
 import { useLanguage, useMessages } from "./language";
 import { EditableSelect } from "./editable-select";
 import { SimpleSelect } from "./business-select";
-import { FormDialog } from "./forms";
+import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { Button } from "./ui/button";
 import type {
   DeviceCatalogDeletionView,
@@ -188,7 +188,7 @@ export function CompatibilityAddEditor({
             setProjectError("");
           }}
         >
-          <div data-form-dialog-body className="compatibility-project-picker">
+          <DialogBody className="compatibility-project-picker">
             <div className="compatibility-project-choices">
               {unselectedProjects.length ? (
                 unselectedProjects.map((project) => (
@@ -226,28 +226,28 @@ export function CompatibilityAddEditor({
             >
               <Plus size={16} /> {it.newRepairProject}
             </button>
-            <div className="dialog-actions">
-              <Button
-                type="button"
-                variant="cancel"
-                onClick={() => setProjectPickerOpen(false)}
-              >
-                {it.cancel}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  onChange({
-                    ...value,
-                    projects: [...value.projects, ...pickerProjects],
-                  });
-                  setProjectPickerOpen(false);
-                }}
-              >
-                {it.confirmSelection}
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="cancel"
+              onClick={() => setProjectPickerOpen(false)}
+            >
+              {it.cancel}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                onChange({
+                  ...value,
+                  projects: [...value.projects, ...pickerProjects],
+                });
+                setProjectPickerOpen(false);
+              }}
+            >
+              {it.confirmSelection}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
       {creatingProject && (
@@ -258,10 +258,7 @@ export function CompatibilityAddEditor({
             setProjectError("");
           }}
         >
-          <div
-            data-form-dialog-body
-            className="compatibility-new-project-dialog"
-          >
+          <DialogBody className="compatibility-new-project-dialog">
             <div className="compatibility-new-project">
               <label>
                 {it.project}
@@ -293,62 +290,60 @@ export function CompatibilityAddEditor({
                 </p>
               )}
             </div>
-            <div className="dialog-actions">
-              <Button
-                type="button"
-                variant="cancel"
-                onClick={() => setCreatingProject(false)}
-              >
-                {it.cancel}
-              </Button>
-              <Button
-                type="button"
-                disabled={
-                  savingProject || !newProject.trim() || !newPrice.trim()
-                }
-                onClick={async () => {
-                  setSavingProject(true);
-                  setProjectError("");
-                  try {
-                    const result = await ruleAction(null, {
-                      category: value.category,
-                      brand: value.brand,
-                      model: value.model,
-                      series: "",
-                      project: newProject,
-                      suggested: newPrice,
-                      cost: newCost,
-                      notes: "",
-                      requiredProductId: "",
-                      requiredQuantity: 1,
-                      minutes: 60,
-                      enabled: true,
-                    });
-                    if (!result.ok) {
-                      setProjectError(result.error ?? "Errore");
-                      return;
-                    }
-                    setExtraProjects((current) => [
-                      ...current,
-                      { ...value, project: newProject },
-                    ]);
-                    setPickerProjects((current) => [...current, newProject]);
-                    setCreatingProject(false);
-                    setNewProject("");
-                    setNewPrice("");
-                    setNewCost("");
-                    router.refresh();
-                  } catch {
-                    setProjectError(it.connectionError);
-                  } finally {
-                    setSavingProject(false);
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="cancel"
+              onClick={() => setCreatingProject(false)}
+            >
+              {it.cancel}
+            </Button>
+            <Button
+              type="button"
+              disabled={savingProject || !newProject.trim() || !newPrice.trim()}
+              onClick={async () => {
+                setSavingProject(true);
+                setProjectError("");
+                try {
+                  const result = await ruleAction(null, {
+                    category: value.category,
+                    brand: value.brand,
+                    model: value.model,
+                    series: "",
+                    project: newProject,
+                    suggested: newPrice,
+                    cost: newCost,
+                    notes: "",
+                    requiredProductId: "",
+                    requiredQuantity: 1,
+                    minutes: 60,
+                    enabled: true,
+                  });
+                  if (!result.ok) {
+                    setProjectError(result.error ?? "Errore");
+                    return;
                   }
-                }}
-              >
-                {savingProject ? it.saving : it.save}
-              </Button>
-            </div>
-          </div>
+                  setExtraProjects((current) => [
+                    ...current,
+                    { ...value, project: newProject },
+                  ]);
+                  setPickerProjects((current) => [...current, newProject]);
+                  setCreatingProject(false);
+                  setNewProject("");
+                  setNewPrice("");
+                  setNewCost("");
+                  router.refresh();
+                } catch {
+                  setProjectError(it.connectionError);
+                } finally {
+                  setSavingProject(false);
+                }
+              }}
+            >
+              {savingProject ? it.saving : it.save}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
     </div>

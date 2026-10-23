@@ -614,7 +614,7 @@ export function ProductCompatibilityFields({
           subtitle={it.inventory.compatibilityEditorHelp}
           onClose={() => setDialogOpen(false)}
         >
-          <div data-form-dialog-body data-product-compatibility-dialog>
+          <DialogBody data-product-compatibility-dialog>
             <CompatibilityAddEditor
               value={draft}
               onChange={setDraft}
@@ -622,44 +622,44 @@ export function ProductCompatibilityFields({
               associated={value}
               defaultCost={defaultCost}
             />
-            <div className="dialog-actions">
-              <Button
-                type="button"
-                variant="cancel"
-                onClick={() => setDialogOpen(false)}
-              >
-                {it.cancel}
-              </Button>
-              <Button
-                type="button"
-                disabled={
-                  !draft.brand.trim() ||
-                  !draft.model.trim() ||
-                  !draft.projects.length
-                }
-                onClick={() => {
-                  onChange([
-                    ...value.filter(
-                      (entry) =>
-                        entry.category !== draft.category ||
-                        entry.brand.toLocaleLowerCase("it") !==
-                          draft.brand.toLocaleLowerCase("it") ||
-                        modelKey(entry.model) !== modelKey(draft.model),
-                    ),
-                    ...draft.projects.map((project) => ({
-                      category: draft.category,
-                      brand: draft.brand,
-                      model: draft.model,
-                      project,
-                    })),
-                  ]);
-                  setDialogOpen(false);
-                }}
-              >
-                {it.confirm}
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="cancel"
+              onClick={() => setDialogOpen(false)}
+            >
+              {it.cancel}
+            </Button>
+            <Button
+              type="button"
+              disabled={
+                !draft.brand.trim() ||
+                !draft.model.trim() ||
+                !draft.projects.length
+              }
+              onClick={() => {
+                onChange([
+                  ...value.filter(
+                    (entry) =>
+                      entry.category !== draft.category ||
+                      entry.brand.toLocaleLowerCase("it") !==
+                        draft.brand.toLocaleLowerCase("it") ||
+                      modelKey(entry.model) !== modelKey(draft.model),
+                  ),
+                  ...draft.projects.map((project) => ({
+                    category: draft.category,
+                    brand: draft.brand,
+                    model: draft.model,
+                    project,
+                  })),
+                ]);
+                setDialogOpen(false);
+              }}
+            >
+              {it.confirm}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
     </>

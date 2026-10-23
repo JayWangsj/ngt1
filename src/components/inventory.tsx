@@ -31,6 +31,7 @@ import { decimal, inventoryStatus, money } from "@/lib/domain";
 import { useLanguage, useMessages } from "./language";
 import {
   DialogBody,
+  DialogFooter,
   FormDialog,
   ProductForm,
   type CategoryView,
@@ -211,7 +212,7 @@ function ProductCompatibilityDialog({
       }
       onClose={() => (adding ? setAdding(null) : onClose())}
     >
-      <div data-form-dialog-body data-product-compatibility-dialog>
+      <DialogBody data-product-compatibility-dialog>
         {adding ? (
           <CompatibilityAddEditor
             value={adding}
@@ -316,27 +317,27 @@ function ProductCompatibilityDialog({
             </Button>
           </div>
         )}
-        <div className="dialog-actions">
-          <Button
-            type="button"
-            variant="cancel"
-            onClick={() => (adding ? setAdding(null) : onClose())}
-          >
-            {it.cancel}
-          </Button>
-          <Button
-            type="button"
-            disabled={Boolean(
-              adding
-                ? !adding.brand || !adding.model || adding.projects.length === 0
-                : unchanged,
-            )}
-            onClick={() => (adding ? confirmAdding() : onSave(value))}
-          >
-            {adding ? it.confirm : it.save}
-          </Button>
-        </div>
-      </div>
+      </DialogBody>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="cancel"
+          onClick={() => (adding ? setAdding(null) : onClose())}
+        >
+          {it.cancel}
+        </Button>
+        <Button
+          type="button"
+          disabled={Boolean(
+            adding
+              ? !adding.brand || !adding.model || adding.projects.length === 0
+              : unchanged,
+          )}
+          onClick={() => (adding ? confirmAdding() : onSave(value))}
+        >
+          {adding ? it.confirm : it.save}
+        </Button>
+      </DialogFooter>
     </FormDialog>
   );
 }
