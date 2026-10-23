@@ -116,6 +116,21 @@ async function seedDashboardReceipts() {
   }
 }
 
+async function clearDashboardAttention() {
+  const db = new PrismaClient();
+  try {
+    await db.$transaction([
+      db.workOrder.updateMany({ data: { dueDate: null } }),
+      db.product.updateMany({
+        where: { enabled: true },
+        data: { minStock: 0, stockQuantity: 1 },
+      }),
+    ]);
+  } finally {
+    await db.$disconnect();
+  }
+}
+
 const retirementFixture = {
   productName: "Retirement fixture LCD Test",
   project: "sostituzione display retirement fixture",
@@ -2472,6 +2487,9 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await page.goto("/?day=2026-10-03");
   const receipts = page.locator(".dashboard-receipts");
   await expect(receipts).toBeVisible();
+  await expect(receipts.locator(".dashboard-date-filter > span")).toHaveCount(
+    0,
+  );
   await expect(receipts.getByText("Incassi del mese")).toBeVisible();
   await expect(receipts.locator(".monthly-receipt-comparison")).toHaveCount(0);
   const monthlyReceipts = receipts.getByRole("button", {
@@ -2504,11 +2522,24 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
     "100,00 €",
   );
   await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  await expect(page.locator(".dashboard-kpis .metric > small")).toHaveCount(0);
   await expect(page.locator(".dashboard-workflow")).toHaveCount(0);
   await expect(page.locator(".dashboard-lists > section")).toHaveCount(2);
   await expect(
     page.getByRole("button", { name: "Statistiche dettagliate", exact: true }),
   ).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  const [receiptBox, chartBox, kpiBox, listBox] = await Promise.all([
+    receipts.boundingBox(),
+    charts.boundingBox(),
+    page.locator(".dashboard-kpis").boundingBox(),
+    page.locator(".dashboard-lists").boundingBox(),
+  ]);
+  expect(receiptBox!.y + receiptBox!.height).toBeLessThanOrEqual(chartBox!.y);
+  expect(chartBox!.y + chartBox!.height).toBeLessThanOrEqual(kpiBox!.y);
+  expect(kpiBox!.y + kpiBox!.height).toBeLessThanOrEqual(listBox!.y);
+  await expect(charts.locator(".revenue-bars")).toHaveCSS("height", "220px");
 
   await monthlyReceipts.click();
   await expect(page).toHaveURL(/day=2026-10-03.*receipts=2026-10/);
@@ -2542,6 +2573,22 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await dialog.getByRole("button", { name: "Chiudi", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page).toHaveURL(/\/\?day=2026-10-03$/);
+
+  const mobileKpis = await page
+    .locator(".dashboard-kpis .metric")
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return { left: box.left, top: box.top, width: box.width };
+      }),
+    );
+  expect(new Set(mobileKpis.map(({ top }) => Math.round(top))).size).toBe(1);
+  expect(mobileKpis[1].left).toBeGreaterThan(
+    mobileKpis[0].left + mobileKpis[0].width - 1,
+  );
+  expect(mobileKpis[2].left).toBeGreaterThan(
+    mobileKpis[1].left + mobileKpis[1].width - 1,
+  );
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -2977,6 +3024,7 @@ test("dashboard animates on entry and data changes while respecting reduced moti
         })),
     )
     .toEqual({ height: "1px", opacity: "1" });
+  await expect(page.locator(".attention-card")).toHaveClass(/is-active/);
   await expect(page.locator(".attention-card")).toHaveCSS(
     "border-color",
     "rgb(239, 210, 124)",
@@ -3005,10 +3053,7 @@ test("dashboard animates on entry and data changes while respecting reduced moti
   const dashboardDateToggle = page.locator(
     ".dashboard-date-filter .date-picker-toggle",
   );
-  await expect(page.locator(".dashboard-date-filter > span").nth(1)).toHaveCSS(
-    "white-space",
-    "nowrap",
-  );
+  await expect(page.locator(".dashboard-date-filter > span")).toHaveCount(0);
   const toggleBeforeHover = await dashboardDateToggle.boundingBox();
   await dashboardDateToggle.hover();
   const toggleAfterHover = await dashboardDateToggle.boundingBox();
@@ -3089,6 +3134,21 @@ test("dashboard animates on entry and data changes while respecting reduced moti
     page.getByRole("button", { name: "Priorità", exact: true }),
   ).toContainText("In ritardo");
   await expect(page.locator('input[name="month"]')).toHaveValue("");
+});
+
+test("dashboard only emphasizes attention when issues exist", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const attentionCard = page.locator(".attention-card");
+  await expect(attentionCard).toHaveClass(/is-active/);
+
+  await clearDashboardAttention();
+  await page.reload();
+
+  await expect(attentionCard).not.toHaveClass(/is-active/);
+  await expect(attentionCard.getByRole("link")).toHaveCount(0);
+  await expect(attentionCard.locator(".dashboard-empty")).toBeVisible();
 });
 
 test("dashboard hides its final state before client animation starts", async ({

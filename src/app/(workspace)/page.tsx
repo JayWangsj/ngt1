@@ -151,6 +151,7 @@ export default async function Dashboard({
   const outOfStockCount = stockLevels.filter(
     (product) => product.stockQuantity <= 0,
   ).length;
+  const attentionCount = overdueCount + lowStockCount + outOfStockCount;
   const receiptSummary = canViewReceipts
     ? summarizeMonthToDateReceipts(payments, today, 0)
     : null;
@@ -222,12 +223,6 @@ export default async function Dashboard({
       ...options,
       timeZone: "Europe/Rome",
     }).format(new Date(`${day}T12:00:00Z`));
-  const selectedDateLabel = formatDate(today, {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
   const monthRangeLabel = receiptSummary
     ? `${formatDate(paymentPeriods[0].startDay, { day: "numeric", month: "short" })} – ${formatDate(paymentPeriods[0].endDay, { day: "numeric", month: "short", year: "numeric" })}`
     : "";
@@ -246,8 +241,6 @@ export default async function Dashboard({
           <div className="dashboard-receipts-heading">
             <h2 id="dashboard-receipts-title">{it.dashboard.receiptsTitle}</h2>
             <form className="date-strip dashboard-date-filter">
-              <span className="live-dot" />
-              <span>{selectedDateLabel}</span>
               <DatePicker name="day" defaultValue={today} />
             </form>
           </div>
@@ -478,17 +471,18 @@ export default async function Dashboard({
             <strong data-count={count} data-count-type={type}>
               {value}
             </strong>
-            <small>{it.workspace}</small>
           </div>
         ))}
       </div>
 
       <div className="dashboard-lists">
-        <section className="panel padded attention-card">
+        <section
+          className={`panel padded attention-card${attentionCount ? " is-active" : ""}`}
+        >
           <div className="section-heading">
             <h2>{it.priorities}</h2>
           </div>
-          {overdueCount + lowStockCount + outOfStockCount ? (
+          {attentionCount ? (
             <>
               <Link href="/orders?attention=overdue">
                 <Clock3 size={18} />

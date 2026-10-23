@@ -140,7 +140,7 @@ export function DashboardMotion({
   return (
     <div
       ref={root}
-      className="dashboard-animating"
+      className="dashboard dashboard-animating"
       data-testid="dashboard-motion"
       onChange={handleChange}
       onSubmit={handleSubmit}
