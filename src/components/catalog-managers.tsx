@@ -12,7 +12,13 @@ import { cents, decimal } from "@/lib/domain";
 import { useMessages } from "./language";
 import { Button } from "./ui/button";
 import { ToggleSwitch } from "./ui/toggle-switch";
-import { DialogBody, DialogFooter, Field, FormDialog } from "./forms";
+import {
+  DialogBody,
+  DialogFooter,
+  DialogForm,
+  Field,
+  FormDialog,
+} from "./forms";
 import { RecordIcon } from "./ui/record-icon";
 
 export type QuickServiceView = {
@@ -79,47 +85,49 @@ export function QuickServiceEditor({
   }
 
   return (
-    <form
-      className="dialog-form"
-      data-form-dialog-body
+    <DialogForm
       onSubmit={(event) => {
         event.preventDefault();
         save();
       }}
     >
-      <Field label={it.quickService.name}>
-        <input
-          value={draft.name}
-          maxLength={120}
-          required
-          onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-        />
-      </Field>
-      <Field label={it.quickService.defaultPrice}>
-        <input
-          value={priceDraft}
-          inputMode="decimal"
-          required
-          onChange={(event) => setPriceDraft(event.target.value)}
-        />
-      </Field>
-      <Field label={it.quickService.notes}>
-        <textarea
-          value={draft.notes}
-          maxLength={2000}
-          onChange={(event) =>
-            setDraft({ ...draft, notes: event.target.value })
-          }
-        />
-      </Field>
-      {error && <p className="message error">{error}</p>}
-      <div className="dialog-actions">
+      <DialogBody>
+        <Field label={it.quickService.name}>
+          <input
+            value={draft.name}
+            maxLength={120}
+            required
+            onChange={(event) =>
+              setDraft({ ...draft, name: event.target.value })
+            }
+          />
+        </Field>
+        <Field label={it.quickService.defaultPrice}>
+          <input
+            value={priceDraft}
+            inputMode="decimal"
+            required
+            onChange={(event) => setPriceDraft(event.target.value)}
+          />
+        </Field>
+        <Field label={it.quickService.notes}>
+          <textarea
+            value={draft.notes}
+            maxLength={2000}
+            onChange={(event) =>
+              setDraft({ ...draft, notes: event.target.value })
+            }
+          />
+        </Field>
+        {error && <p className="message error">{error}</p>}
+      </DialogBody>
+      <DialogFooter>
         <Button type="button" variant="cancel" onClick={onCancel}>
           {it.cancel}
         </Button>
         <Button disabled={pending || unchanged}>{it.save}</Button>
-      </div>
-    </form>
+      </DialogFooter>
+    </DialogForm>
   );
 }
 

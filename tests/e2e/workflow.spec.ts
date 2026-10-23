@@ -5861,6 +5861,32 @@ test("system update page offers browser fallback and confirms authorization", as
     page.getByRole("button", { name: "Autorizza GitHub", exact: true }),
   ).toHaveCount(0);
 });
+test("quick service editor uses the shared dialog form layout", async ({
+  page,
+}) => {
+  await page.goto("/settings/quick-services");
+  await page.waitForLoadState("networkidle");
+  await page.locator(".catalog-manager .quick-service-service-add").click();
+
+  const dialog = page.getByRole("dialog");
+  const form = dialog.locator(":scope > .dialog-form-layout");
+  const body = form.locator(":scope > .dialog-body");
+  const footer = form.locator(":scope > .dialog-footer");
+  await expect(body).toBeVisible();
+  await expect(footer).toBeVisible();
+  await expect(form.locator("input[required]")).toHaveCount(2);
+  expect(
+    await footer.evaluate((element) => {
+      const dialogBox = element.closest("dialog")!.getBoundingClientRect();
+      const footerBox = element.getBoundingClientRect();
+      return dialogBox.right - footerBox.right;
+    }),
+  ).toBeLessThanOrEqual(32);
+
+  await footer.locator("button[type=button]").click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test("settings catalogs reuse stable inline and dialog interactions", async ({
   page,
 }) => {
@@ -5948,14 +5974,6 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   await addService.click();
   const serviceEditor = page.getByRole("dialog", { name: "Nuovo servizio" });
   await expect(serviceEditor.locator('input[type="checkbox"]')).toHaveCount(0);
-  const serviceActions = serviceEditor.locator(".dialog-actions");
-  expect(
-    await serviceActions.evaluate((actions) => {
-      const dialogBox = actions.closest("dialog")!.getBoundingClientRect();
-      const actionsBox = actions.getBoundingClientRect();
-      return dialogBox.right - actionsBox.right;
-    }),
-  ).toBeLessThanOrEqual(32);
   await serviceEditor
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
