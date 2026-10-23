@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useMessages } from "./language";
 import { useUpdateState } from "./update-state";
+import { Button } from "./ui/button";
 
 export function UpdateStartupCheck() {
   const it = useMessages();
@@ -38,17 +39,18 @@ export function UpdateStartupCheck() {
             : it.updateNoticeBody}
         </span>
       </div>
-      <Link className="button button-primary" href="/settings/system-update">
-        {it.viewUpdate}
-      </Link>
-      <button
+      <Button asChild>
+        <Link href="/settings/system-update">{it.viewUpdate}</Link>
+      </Button>
+      <Button
         type="button"
-        className="button button-outline update-notification-later"
+        variant="outline"
+        className="update-notification-later"
         aria-label={it.close}
         onClick={() => setDismissedVersion(version)}
       >
         {it.later}
-      </button>
+      </Button>
     </aside>
   );
 }

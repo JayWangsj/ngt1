@@ -23,9 +23,9 @@ import { OrderListBody } from "./order-list-controls";
 import { getBusinessDay } from "@/lib/business-date";
 export function BackButton({ href, label }: { href: string; label: string }) {
   return (
-    <Link className="button button-outline back-link" href={href}>
-      ← {label}
-    </Link>
+    <Button asChild variant="outline" className="back-link">
+      <Link href={href}>← {label}</Link>
+    </Button>
   );
 }
 export async function PageHeader({

@@ -556,9 +556,10 @@ export function RetailWorkbench({
           title={
             dialog.view === "detail" ? (
               <span className="retail-dialog-title">
-                <button
+                <Button
                   type="button"
-                  className="button button-outline back-link retail-dialog-back"
+                  variant="outline"
+                  className="back-link retail-dialog-back"
                   onClick={() =>
                     setDialog(
                       dialog.returnTo === "history"
@@ -571,7 +572,7 @@ export function RetailWorkbench({
                   {dialog.returnTo === "history"
                     ? it.retail.salesHistory
                     : it.retail.completed}
-                </button>
+                </Button>
                 <span>
                   {it.retail.detail} · {dialog.sale.code}
                 </span>

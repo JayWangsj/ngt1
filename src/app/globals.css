@@ -1184,24 +1184,10 @@ small {
   padding: 9px 14px;
   border-radius: var(--radius-control);
   border: 1px solid transparent;
-  font-size: var(--type-control);
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
-}
-.button-primary,
-.button-danger {
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out,
-    color 150ms ease-out,
-    box-shadow 150ms ease-out;
-}
-.button-outline,
-.button-cancel,
-.button-secondary,
-.button-tertiary,
-.button-ghost {
   transition:
     background-color 150ms ease-out,
     border-color 150ms ease-out,
@@ -1319,8 +1305,15 @@ small {
   padding: 7px 10px;
 }
 .button-tertiary:hover:not(:disabled),
-.button-tertiary:focus-visible:not(:disabled),
-.button-ghost:hover:not(:disabled),
+.button-tertiary:focus-visible:not(:disabled) {
+  background: transparent;
+  color: var(--action-hover);
+}
+.button-ghost:hover:not(:disabled) {
+  border-color: #806000;
+  background: #fff1b6;
+  color: var(--action-hover);
+}
 .button-ghost:focus-visible:not(:disabled) {
   background: transparent;
   color: var(--action-hover);
@@ -1330,6 +1323,7 @@ small {
   outline-offset: 2px;
 }
 .button-danger {
+  border-color: #d58a87;
   background: var(--danger-surface);
   color: var(--danger);
 }
@@ -10034,10 +10028,6 @@ details.secondary-actions {
 }
 
 /* Shared action affordances across business pages. */
-.button {
-  min-height: 40px;
-  font-size: 13px;
-}
 .icon-button,
 details summary {
   border: 1px solid #b8ae8d;
@@ -10051,10 +10041,6 @@ details summary {
   color: #6d5510;
   border-radius: 10px;
 }
-.button-danger {
-  border-color: #d58a87;
-}
-.button-ghost:hover,
 .icon-button:hover,
 details summary:hover {
   background: #fff1b6;

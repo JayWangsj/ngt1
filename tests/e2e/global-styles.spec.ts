@@ -170,6 +170,8 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
 
   const primaryButton = page.locator(".button-primary").first();
   await expect(primaryButton).toBeVisible();
+  await expect(primaryButton).toHaveCSS("min-height", "40px");
+  await expect(primaryButton).toHaveCSS("font-size", "13px");
   expect(await computedContrast(primaryButton, "color")).toBeGreaterThanOrEqual(
     4.5,
   );

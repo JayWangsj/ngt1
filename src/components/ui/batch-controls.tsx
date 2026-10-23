@@ -66,8 +66,8 @@ export function BatchControls({
         </Button>
       )}
       <Button
-        variant="ghost"
-        className="button-danger batch-control-button batch-control-danger"
+        variant="danger"
+        className="batch-control-button batch-control-danger"
         disabled={!selectedCount || pending || deleteDisabled}
         onClick={onDelete}
       >

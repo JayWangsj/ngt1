@@ -44,6 +44,7 @@ import { ServiceOrderActions } from "@/components/service-order-actions";
 import { ServiceOrderPrint } from "@/components/service-order-print";
 import { it as italianMessages } from "@/messages/it";
 import { priceRuleViews } from "@/lib/price-rule-view";
+import { Button } from "@/components/ui/button";
 
 type TimelineEvent = {
   id: string;
@@ -632,13 +633,15 @@ export default async function Detail({
           />
           {inspectionStageAction}
           {order.status === "PARTS_MISSING" && (
-            <a
-              className={`button button-primary stage-primary-action status-action-trigger status-${order.status.toLowerCase()}`}
-              href={order.afterSalesOpen ? "#warranty" : "#required-parts"}
+            <Button
+              asChild
+              className={`stage-primary-action status-action-trigger status-${order.status.toLowerCase()}`}
             >
-              <span className="status-dropdown-dot" aria-hidden="true" />
-              {it.stageActions.viewMissingParts}
-            </a>
+              <a href={order.afterSalesOpen ? "#warranty" : "#required-parts"}>
+                <span className="status-dropdown-dot" aria-hidden="true" />
+                {it.stageActions.viewMissingParts}
+              </a>
+            </Button>
           )}
           <ServiceOrderActions
             id={id}

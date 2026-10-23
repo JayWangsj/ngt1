@@ -7,6 +7,7 @@ import { money } from "@/lib/domain";
 import { DatePicker } from "./business-select";
 import { DialogBody, FormDialog } from "./forms";
 import { useMessages } from "./language";
+import { Button } from "./ui/button";
 
 type MonthlyReceiptSummary = {
   amount: number;
@@ -56,14 +57,15 @@ export function MonthlyReceiptsDialog({
 
   return (
     <>
-      <button
+      <Button
         type="button"
-        className="button button-outline dashboard-month-entry"
+        variant="outline"
+        className="dashboard-month-entry"
         onClick={() => router.push(receiptUrl(defaultMonth), { scroll: false })}
       >
         <CalendarRange size={16} aria-hidden="true" />
         {it.dashboard.monthlyReceipts}
-      </button>
+      </Button>
       {mounted && open && summary && (
         <FormDialog
           title={it.dashboard.monthlyReceipts}
