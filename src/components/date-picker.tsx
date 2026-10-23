@@ -46,6 +46,7 @@ import {
 } from "@/lib/date-picker";
 import { useBusinessDay, useBusinessDayMode } from "./business-date";
 import { useLanguage, useMessages } from "./language";
+import styles from "./date-picker.module.css";
 
 export type DatePickerProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -844,7 +845,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
     return (
       <div
         ref={root}
-        className={`date-picker ${className}${open ? " is-open" : ""}${disabled ? " is-disabled" : ""}${readOnly ? " is-readonly" : ""}`.trim()}
+        className={`date-picker ${className}${open ? " is-open" : ""}${disabled ? " is-disabled" : ""}${readOnly ? " is-readonly" : ""} ${styles.scope}`.trim()}
         onBlurCapture={(event) => {
           if (suppressBlurCommit.current) return;
           const next = event.relatedTarget;
@@ -941,7 +942,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
             <div
               ref={panel}
               id={panelId}
-              className={`date-picker-popover${pickerType === "datetime-local" ? " is-datetime" : ""}`}
+              className={`date-picker-popover${pickerType === "datetime-local" ? " is-datetime" : ""} ${styles.scope}`}
               role="dialog"
               aria-label={
                 pickerType === "month"

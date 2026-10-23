@@ -49,6 +49,15 @@ test.beforeEach(async () => {
 
 async function loadCompiledAppStyles(page: Page) {
   await page.goto("/orders", { waitUntil: "commit" });
+  const bodyClass = (await page.locator("body").getAttribute("class")) ?? "";
+  const datePickerScopeClass = await page
+    .locator(".date-picker")
+    .first()
+    .evaluate((element) =>
+      element.classList.item(element.classList.length - 1),
+    );
+  if (!datePickerScopeClass)
+    throw new Error("The DatePicker CSS Module scope class was not rendered.");
 
   const nextDist = resolve(process.cwd(), process.env.NEXT_DIST_DIR || ".next");
   const compiledStylesheets = [
@@ -72,7 +81,8 @@ async function loadCompiledAppStyles(page: Page) {
     return (
       css.includes("--action-primary") ||
       css.includes(".button-primary") ||
-      css.includes(".dialog-heading")
+      css.includes(".dialog-heading") ||
+      css.includes(".date-picker-popover")
     );
   });
 
@@ -87,9 +97,18 @@ async function loadCompiledAppStyles(page: Page) {
       readFileSync(stylesheet, "utf8").includes(".dialog-heading"),
     ),
   ).toBe(true);
+  expect(
+    appStylesheets.some((stylesheet) =>
+      readFileSync(stylesheet, "utf8").includes(".date-picker-popover"),
+    ),
+  ).toBe(true);
   await page.setContent("<main></main>");
+  await page.locator("body").evaluate((body, className) => {
+    body.setAttribute("class", className);
+  }, bodyClass);
   for (const stylesheet of appStylesheets)
     await page.addStyleTag({ path: stylesheet });
+  return datePickerScopeClass;
 }
 
 async function computedContrast(
@@ -477,8 +496,8 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
 test("monthly receipt dialog uses a compact responsive overview", async ({
   page,
 }) => {
-  await loadCompiledAppStyles(page);
-  await page.evaluate(() => {
+  const datePickerScopeClass = await loadCompiledAppStyles(page);
+  await page.evaluate((scopeClass) => {
     const dialog = document.createElement("div");
     dialog.className = "form-dialog";
     dialog.innerHTML = `
@@ -499,8 +518,11 @@ test("monthly receipt dialog uses a compact responsive overview", async ({
         </section>
       </div>
     `;
+    dialog
+      .querySelector(".monthly-receipt-picker .date-picker")!
+      .classList.add(scopeClass);
     document.body.append(dialog);
-  });
+  }, datePickerScopeClass);
 
   const dialog = page.locator(".form-dialog");
   const overview = page.locator(".monthly-receipt-overview");
