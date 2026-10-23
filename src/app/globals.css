@@ -9906,6 +9906,9 @@ details.secondary-actions {
     grid-column: 1 / -1;
     grid-row: 4;
   }
+  .customer-table .customer-last-repair .mobile-label {
+    margin-right: 4px;
+  }
   .customer-table .mobile-label {
     display: inline;
   }

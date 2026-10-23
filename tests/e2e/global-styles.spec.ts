@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { seedTestDatabase } from "../../scripts/seed-test";
 
 const elevationSurfaces = [
@@ -89,6 +89,18 @@ async function computedContrast(
     luminance(backgroundColor),
   ].sort((left, right) => right - left);
   return (light + 0.05) / (dark + 0.05);
+}
+
+async function expectDocumentToFitViewport(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
 }
 
 test("shared controls keep readable text, borders, and keyboard focus", async ({
@@ -186,4 +198,80 @@ test("sidebar resize handle uses the defined action color", async ({
       ),
     )
     .toBe("rgb(128, 96, 0)");
+});
+
+test("shared actions keep visible focus, stable hover, and clear disabled feedback", async ({
+  page,
+}) => {
+  await page.goto("/orders", { waitUntil: "commit" });
+
+  const primaryButton = page.locator(".button-primary").first();
+  await expect(primaryButton).toBeVisible();
+
+  await primaryButton.focus();
+  await expect(primaryButton).toHaveCSS("outline-style", "solid");
+  expect(
+    await computedContrast(primaryButton, "outlineColor"),
+  ).toBeGreaterThanOrEqual(3);
+
+  const restingBox = await primaryButton.boundingBox();
+  await primaryButton.hover();
+  const hoverBox = await primaryButton.boundingBox();
+  expect(hoverBox).toEqual(restingBox);
+
+  await page.evaluate(() => {
+    const fixture = document.createElement("button");
+    fixture.id = "global-disabled-button-fixture";
+    fixture.className = "button button-primary";
+    fixture.disabled = true;
+    fixture.textContent = "Disabled";
+    document.body.append(fixture);
+  });
+
+  const disabledButton = page.locator("#global-disabled-button-fixture");
+  await expect(disabledButton).toHaveCSS("cursor", "not-allowed");
+  await expect(disabledButton).toHaveCSS("box-shadow", "none");
+  await expect(disabledButton).toHaveCSS("transform", "none");
+});
+
+test("workspace list pages fit desktop, tablet, and mobile viewports", async ({
+  page,
+}) => {
+  const viewports = [
+    { width: 1280, height: 800 },
+    { width: 900, height: 800 },
+    { width: 390, height: 844 },
+  ];
+  const routes = ["/orders", "/inventory", "/customers"];
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    for (const route of routes) {
+      await page.goto(route, { waitUntil: "commit" });
+      await expect(page.locator(".workspace-list-page")).toBeVisible();
+      await expectDocumentToFitViewport(page);
+    }
+  }
+
+  await page.goto("/customers", { waitUntil: "networkidle" });
+  await expect(
+    page.locator(".customer-last-repair .mobile-label").first(),
+  ).toHaveCSS("margin-right", "4px");
+  await page.locator(".page-header .button-primary").click();
+
+  const dialog = page.locator(".form-dialog");
+  await expect(dialog).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await dialog.boundingBox();
+      return Boolean(
+        box &&
+        box.x >= 0 &&
+        box.y >= 0 &&
+        box.x + box.width <= 390 &&
+        box.y + box.height <= 844,
+      );
+    })
+    .toBe(true);
+  await expectDocumentToFitViewport(page);
 });
