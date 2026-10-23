@@ -345,7 +345,7 @@ export function WorkOrderCheckout({
         {onClose && (
           <Button
             type="button"
-            variant="outline"
+            variant="cancel"
             disabled={pending}
             onClick={onClose}
           >

@@ -94,7 +94,7 @@ export function ServiceOrderActions({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setOpen(false)}
               >
                 {it.cancel}

@@ -970,7 +970,7 @@ export function ProductForm({
       <div className="dialog-actions">
         <Button
           type="button"
-          variant="outline"
+          variant="cancel"
           onClick={onClose}
           disabled={pending}
         >
@@ -1259,7 +1259,7 @@ function PriceOptionPicker({
               <div className="dialog-actions">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="cancel"
                   disabled={disabled}
                   onClick={() => onOpenChange(false)}
                 >
@@ -2292,7 +2292,12 @@ export function ItemsEditor({
                       {discounts && (
                         <Button
                           type="button"
-                          variant="outline"
+                          variant={
+                            item.discountVisible ||
+                            numeric(item.discount ?? "0") > 0
+                              ? "cancel"
+                              : "outline"
+                          }
                           onClick={() =>
                             update(index, {
                               discountVisible: !(
@@ -2471,7 +2476,7 @@ export function ItemsEditor({
               <div className="dialog-actions">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="cancel"
                   onClick={() => setChoosingProjects(false)}
                 >
                   {it.cancel}
@@ -2540,7 +2545,7 @@ export function ItemsEditor({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => {
                   setCreatingProject(false);
                   setEditingPickerProject("");
@@ -3200,7 +3205,7 @@ export function NewOrderForm({
         <div className="quote-adjustments">
           <Button
             type="button"
-            variant="outline"
+            variant={discountEnabled ? "cancel" : "outline"}
             onClick={() => {
               setDiscountEnabled(!discountEnabled);
               setValue("orderDiscount", "0");
@@ -3278,7 +3283,7 @@ export function NewOrderForm({
       )}
       <Message error={error} />
       <div className="form-footer">
-        <Button type="button" variant="outline" onClick={() => router.back()}>
+        <Button type="button" variant="cancel" onClick={() => router.back()}>
           {it.cancel}
         </Button>
         <Button disabled={pending}>{pending ? it.saving : it.create}</Button>
@@ -3721,7 +3726,7 @@ export function EditOrderForm({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setAddingCustomer(false)}
               >
                 {it.cancel}
@@ -4767,7 +4772,7 @@ export function EditQuoteForm({
           <div className="quote-adjustments">
             <Button
               type="button"
-              variant="outline"
+              variant={discounts ? "cancel" : "outline"}
               onClick={() => {
                 setDiscounts(!discounts);
                 setOrderDiscount("0");

@@ -630,7 +630,7 @@ export function NewOrderWizard({
                     <div className="dialog-actions">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="cancel"
                         onClick={() => setChoosingDevice(false)}
                       >
                         {it.cancel}
@@ -909,7 +909,7 @@ export function NewOrderWizard({
             <span>
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => router.push("/orders")}
               >
                 {it.cancel}

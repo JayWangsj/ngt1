@@ -164,7 +164,7 @@ export function RetailSalesHistory({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 disabled={pending}
                 onClick={() => {
                   setError("");

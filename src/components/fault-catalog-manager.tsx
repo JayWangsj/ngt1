@@ -429,7 +429,7 @@ export function FaultCatalogManager({
       {error && <p className="message error">{error}</p>}
       {!embedded && (
         <div className="dialog-actions">
-          <Button type="button" variant="outline" onClick={closeManager}>
+          <Button type="button" variant="cancel" onClick={closeManager}>
             {it.close}
           </Button>
         </div>

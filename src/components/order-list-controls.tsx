@@ -273,7 +273,7 @@ function PaymentControl({
           <div className="order-payment-correction-actions">
             <Button
               type="button"
-              variant="outline"
+              variant="cancel"
               disabled={pending}
               onClick={() => {
                 setValue(decimal(row.paid));

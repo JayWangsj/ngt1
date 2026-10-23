@@ -229,7 +229,7 @@ export function CompatibilityAddEditor({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setProjectPickerOpen(false)}
               >
                 {it.cancel}
@@ -296,7 +296,7 @@ export function CompatibilityAddEditor({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setCreatingProject(false)}
               >
                 {it.cancel}

@@ -315,7 +315,7 @@ export function OrderDetailCard({
                   <div className="dialog-actions order-card-edit-actions">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="cancel"
                       disabled={saving}
                       onClick={closeEdit}
                     >
@@ -350,7 +350,7 @@ export function OrderDetailCard({
           <div className="dialog-actions">
             <Button
               type="button"
-              variant="outline"
+              variant="cancel"
               disabled={saving}
               onClick={() => setLeaveHref("")}
             >

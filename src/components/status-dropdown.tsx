@@ -442,7 +442,7 @@ export function StatusDropdown({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setCancelOpen(false)}
               >
                 {it.cancel}

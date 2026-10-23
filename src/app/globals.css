@@ -10182,19 +10182,6 @@ summary.record-icon::-webkit-details-marker {
 .dialog-close svg {
   display: block;
 }
-.dialog-actions .button-outline {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-}
-.dialog-actions .button-outline:hover:not(:disabled),
-.dialog-actions .button-outline:focus-visible:not(:disabled) {
-  border-color: transparent;
-  background: #fff7d6;
-}
-.dialog-actions .button-outline:active:not(:disabled) {
-  background: #ffe99d;
-}
 .x-icon-button:hover:not(:disabled),
 .x-icon-button:focus-visible,
 .dialog-close:hover:not(:disabled),

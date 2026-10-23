@@ -780,7 +780,7 @@ export function SystemUpdate({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setConfirmationOpen(false)}
               >
                 {it.cancel}

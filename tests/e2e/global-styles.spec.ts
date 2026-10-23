@@ -275,7 +275,7 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
         <div class="price-option-list" style="height: 40px"></div>
         <button class="quick-service-picker-add price-option-add">Add</button>
         <div class="quick-service-picker-footer price-option-picker-footer">
-          <div class="dialog-actions"><button class="button button-cancel">Cancel</button></div>
+          <div class="dialog-actions"><button class="button button-cancel">Cancel</button><button class="button button-outline">Outline action</button></div>
         </div>
       </div>
       <form class="action-form">
@@ -292,7 +292,7 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
     const embeddedActions = document.createElement("div");
     embeddedActions.className = "standalone-actions";
     embeddedActions.innerHTML =
-      '<button class="button button-cancel">Standalone cancel</button><button class="button button-outline">Outline action</button>';
+      '<button class="button button-cancel">Standalone cancel</button>';
     document.body.append(embeddedActions);
   });
 

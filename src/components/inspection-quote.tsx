@@ -203,7 +203,7 @@ export function CompleteInspectionButton({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 disabled={pending}
                 onClick={close}
               >

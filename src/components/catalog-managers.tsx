@@ -114,7 +114,7 @@ export function QuickServiceEditor({
       </Field>
       {error && <p className="message error">{error}</p>}
       <div className="dialog-actions">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="cancel" onClick={onCancel}>
           {it.cancel}
         </Button>
         <Button disabled={pending || unchanged}>{it.save}</Button>
@@ -289,7 +289,7 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 disabled={pending}
                 onClick={() => {
                   setError("");

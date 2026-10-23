@@ -380,7 +380,7 @@ export function NewServiceOrder({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => router.push("/orders")}
               >
                 {it.cancel}
@@ -447,7 +447,7 @@ export function NewServiceOrder({
                     <div className="dialog-actions">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="cancel"
                         onClick={() => setChoosingDevices(false)}
                       >
                         {it.cancel}
@@ -549,7 +549,7 @@ export function NewServiceOrder({
                     <div className="dialog-actions">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="cancel"
                         onClick={() => setChoosingServices(false)}
                       >
                         {it.cancel}

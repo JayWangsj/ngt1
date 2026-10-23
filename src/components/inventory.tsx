@@ -318,7 +318,7 @@ function ProductCompatibilityDialog({
         <div className="dialog-actions">
           <Button
             type="button"
-            variant="outline"
+            variant="cancel"
             onClick={() => (adding ? setAdding(null) : onClose())}
           >
             {it.cancel}
