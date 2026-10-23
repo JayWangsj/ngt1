@@ -69,13 +69,22 @@ async function loadCompiledAppStyles(page: Page) {
     ...new Set([...compiledStylesheets, ...fallbackStylesheets]),
   ].filter((stylesheet) => {
     const css = readFileSync(stylesheet, "utf8");
-    return css.includes("--action-primary") || css.includes(".button-primary");
+    return (
+      css.includes("--action-primary") ||
+      css.includes(".button-primary") ||
+      css.includes(".dialog-heading")
+    );
   });
 
   expect(appStylesheets.length).toBeGreaterThan(0);
   expect(
     appStylesheets.some((stylesheet) =>
       readFileSync(stylesheet, "utf8").includes(".button-primary"),
+    ),
+  ).toBe(true);
+  expect(
+    appStylesheets.some((stylesheet) =>
+      readFileSync(stylesheet, "utf8").includes(".dialog-heading"),
     ),
   ).toBe(true);
   await page.setContent("<main></main>");

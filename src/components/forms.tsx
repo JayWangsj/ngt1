@@ -66,6 +66,7 @@ import {
   siXiaomi,
 } from "simple-icons";
 import { Button } from "./ui/button";
+import dialogStyles from "./ui/dialog.module.css";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import {
@@ -3489,7 +3490,7 @@ function ActionForm({
       onSubmit={handle}
       onChangeCapture={() => requestAnimationFrame(updateUnchanged)}
       onInputCapture={() => requestAnimationFrame(updateUnchanged)}
-      className={`action-form ${className}`}
+      className={`${dialogStyles.actionForm} action-form ${className}`}
       aria-busy={pending}
     >
       {children}
@@ -6216,7 +6217,7 @@ export function FormDialog({
   return createPortal(
     <dialog
       ref={dialog}
-      className="form-dialog"
+      className={`${dialogStyles.formDialog} form-dialog`}
       data-prevent-card-autosave
       aria-labelledby={titleId}
       onKeyDownCapture={(event) => {
@@ -6238,14 +6239,14 @@ export function FormDialog({
         if (!busy()) onClose();
       }}
     >
-      <div className="dialog-heading">
+      <div className={`${dialogStyles.dialogHeading} dialog-heading`}>
         <div>
           <h2 id={titleId}>{title}</h2>
           {subtitle && <p>{subtitle}</p>}
         </div>
         <button
           type="button"
-          className="dialog-close icon-button"
+          className={`${dialogStyles.dialogClose} dialog-close icon-button`}
           aria-label={it.close}
           title={it.close}
           onClick={() => {
@@ -6272,7 +6273,7 @@ export function DialogBody({
   return (
     <div
       {...props}
-      className={`dialog-body${className ? ` ${className}` : ""}`}
+      className={`${dialogStyles.dialogBody} dialog-body${className ? ` ${className}` : ""}`}
       data-form-dialog-body
     />
   );
@@ -6285,7 +6286,7 @@ export function DialogForm({
   return (
     <form
       {...props}
-      className={`dialog-form dialog-form-layout${className ? ` ${className}` : ""}`}
+      className={`${dialogStyles.dialogForm} ${dialogStyles.dialogFormLayout} dialog-form dialog-form-layout${className ? ` ${className}` : ""}`}
     />
   );
 }
@@ -6299,12 +6300,18 @@ export function DialogFooter({
   return (
     <div
       {...props}
-      className={`dialog-footer${className ? ` ${className}` : ""}`}
+      className={`${dialogStyles.dialogFooter} dialog-footer${className ? ` ${className}` : ""}`}
     >
       {summary !== undefined && (
-        <div className="dialog-footer-summary">{summary}</div>
+        <div
+          className={`${dialogStyles.dialogFooterSummary} dialog-footer-summary`}
+        >
+          {summary}
+        </div>
       )}
-      <div className="dialog-actions">{children}</div>
+      <div className={`${dialogStyles.dialogActions} dialog-actions`}>
+        {children}
+      </div>
     </div>
   );
 }

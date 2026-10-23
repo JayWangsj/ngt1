@@ -1,0 +1,273 @@
+.formDialog,
+:global(.form-dialog) {
+  margin: auto;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: visible;
+  border: 1px solid #e4e6e5;
+  border-radius: 12px;
+  padding: var(--dialog-padding);
+  background: white;
+  color: #222;
+  box-shadow: var(--shadow-5);
+}
+
+.formDialog::backdrop,
+:global(.form-dialog)::backdrop {
+  background: rgb(24 29 27 / 42%);
+}
+
+.formDialog[open]:has(> .dialogBody),
+:global(.form-dialog[open]:has(> .dialog-body)) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.formDialog > .dialogHeading,
+:global(.form-dialog) > :global(.dialog-heading) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: var(--dialog-body-gap);
+  padding-bottom: var(--dialog-header-gap);
+  border-bottom: 1px solid var(--line);
+}
+
+.dialogHeading > div,
+:global(.dialog-heading) > div {
+  min-width: 0;
+}
+
+.dialogHeading h2,
+:global(.dialog-heading) h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.dialogHeading p,
+:global(.dialog-heading) p {
+  max-width: 35em;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialogClose,
+:global(.dialog-close) {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  line-height: 0;
+}
+
+.dialogClose:global(.icon-button),
+:global(.dialog-close.icon-button) {
+  margin-left: 0;
+  padding: 0;
+}
+
+.dialogClose svg,
+:global(.dialog-close) svg {
+  display: block;
+}
+
+.dialogClose:hover:not(:disabled),
+.dialogClose:focus-visible,
+:global(.dialog-close):hover:not(:disabled),
+:global(.dialog-close):focus-visible {
+  border-color: transparent;
+  background: #fff7d6;
+}
+
+.dialogClose:hover:not(:disabled),
+:global(.dialog-close):hover:not(:disabled) {
+  background: #fff0ee;
+  color: #a64642;
+  transform: none;
+}
+
+.dialogClose:focus-visible,
+:global(.dialog-close):focus-visible {
+  outline: 2px solid #806000;
+  outline-offset: 3px;
+}
+
+.formDialog > :is(.actionForm, .dialogForm),
+:global(.form-dialog) > :is(:global(.action-form), :global(.dialog-form)),
+.formDialog > [data-form-dialog-body],
+:global(.form-dialog) > [data-form-dialog-body] {
+  min-height: 0;
+  max-height: calc(100dvh - 176px);
+  overflow-y: auto;
+  padding-inline: 4px;
+}
+
+.formDialog > .actionForm,
+:global(.form-dialog) > :global(.action-form) {
+  display: grid;
+  gap: 16px;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.formDialog[open]:has(> .dialogFormLayout),
+:global(.form-dialog[open]:has(> .dialog-form-layout)) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.formDialog > .dialogFormLayout,
+:global(.form-dialog) > :global(.dialog-form-layout) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0;
+  max-height: none;
+  overflow: hidden;
+  padding-inline: 0;
+}
+
+.formDialog > .dialogFormLayout > .dialogBody,
+:global(.form-dialog) > :global(.dialog-form-layout) > :global(.dialog-body) {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline: 4px;
+}
+
+.formDialog > :is(.actionForm, .dialogForm) > label,
+:global(.form-dialog)
+  > :is(:global(.action-form), :global(.dialog-form))
+  > label,
+.formDialog .formGrid > label,
+:global(.form-dialog) .form-grid > label {
+  margin-bottom: 0;
+}
+
+.formDialog .formGrid,
+:global(.form-dialog) .form-grid {
+  gap: 16px;
+}
+
+.formDialog .actionForm .dialogActions,
+:global(.form-dialog) :global(.action-form) :global(.dialog-actions),
+.formDialog > .dialogForm .dialogActions,
+:global(.form-dialog) > :global(.dialog-form) :global(.dialog-actions) {
+  width: 100%;
+  gap: var(--dialog-action-gap);
+  margin-left: 0;
+  padding-top: var(--dialog-footer-gap);
+}
+
+.dialogFooter,
+:global(.dialog-footer) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--dialog-body-gap);
+  margin-top: var(--dialog-body-gap);
+  padding-top: var(--dialog-footer-gap);
+  border-top: 1px solid var(--line);
+}
+
+.dialogFooter:has(.dialogFooterSummary),
+:global(.dialog-footer:has(.dialog-footer-summary)) {
+  justify-content: space-between;
+}
+
+.dialogFooterSummary,
+:global(.dialog-footer-summary) {
+  min-width: 0;
+}
+
+.formDialog .dialogFooter > .dialogActions,
+:global(.form-dialog) > :global(.dialog-footer) > :global(.dialog-actions) {
+  width: auto;
+  margin-left: auto;
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (max-width: 600px) {
+  .formDialog,
+  :global(.form-dialog) {
+    --dialog-padding: 16px;
+    --dialog-header-gap: 12px;
+    --dialog-body-gap: 16px;
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: var(--dialog-padding);
+  }
+
+  .formDialog > .dialogHeading,
+  :global(.form-dialog) > :global(.dialog-heading) {
+    gap: 12px;
+    margin-bottom: var(--dialog-body-gap);
+    padding-bottom: var(--dialog-header-gap);
+  }
+
+  .dialogHeading h2,
+  :global(.dialog-heading) h2 {
+    font-size: 18px;
+  }
+
+  .formDialog > :is(.actionForm, .dialogForm),
+  :global(.form-dialog) > :is(:global(.action-form), :global(.dialog-form)),
+  .formDialog > [data-form-dialog-body],
+  :global(.form-dialog) > [data-form-dialog-body] {
+    max-height: calc(100dvh - 128px);
+  }
+
+  .formDialog .formGrid,
+  :global(.form-dialog) .form-grid,
+  .formDialog .formGrid.three,
+  :global(.form-dialog) .form-grid.three {
+    grid-template-columns: 1fr;
+  }
+
+  .formDialog .actionForm .dialogActions,
+  :global(.form-dialog) :global(.action-form) :global(.dialog-actions),
+  .formDialog > .dialogForm .dialogActions,
+  :global(.form-dialog) > :global(.dialog-form) :global(.dialog-actions) {
+    flex-wrap: wrap;
+  }
+
+  .formDialog .actionForm .dialogActions > .button,
+  :global(.form-dialog)
+    :global(.action-form)
+    :global(.dialog-actions)
+    > .button,
+  .formDialog > .dialogForm .dialogActions > .button,
+  :global(.form-dialog)
+    > :global(.dialog-form)
+    :global(.dialog-actions)
+    > .button {
+    flex: 1 1 120px;
+  }
+
+  .dialogFooter,
+  :global(.dialog-footer) {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .formDialog .dialogFooter > .dialogActions,
+  :global(.form-dialog) > :global(.dialog-footer) > :global(.dialog-actions) {
+    width: 100%;
+    margin-left: 0;
+  }
+}
