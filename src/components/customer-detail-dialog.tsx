@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FormDialog } from "./forms";
+import { DialogBody, FormDialog } from "./forms";
 
 export function CustomerDetailDialog({
   title,
@@ -23,9 +23,7 @@ export function CustomerDetailDialog({
         router.back();
       }}
     >
-      <div className="customer-detail-dialog" data-form-dialog-body>
-        {children}
-      </div>
+      <DialogBody className="customer-detail-dialog">{children}</DialogBody>
     </FormDialog>
   );
 }

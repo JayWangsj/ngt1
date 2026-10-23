@@ -66,7 +66,7 @@ export function RetailSalesHistory({
     });
   }
   return (
-    <div className="retail-history-dialog" data-form-dialog-body>
+    <DialogBody className="retail-history-dialog">
       <DatePicker
         className="retail-period-picker"
         aria-label={it.month}
@@ -181,7 +181,7 @@ export function RetailSalesHistory({
           </DialogFooter>
         </FormDialog>
       )}
-    </div>
+    </DialogBody>
   );
 }
 

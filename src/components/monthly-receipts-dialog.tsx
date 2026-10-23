@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { money } from "@/lib/domain";
 import { DatePicker } from "./business-select";
-import { FormDialog } from "./forms";
+import { DialogBody, FormDialog } from "./forms";
 import { useMessages } from "./language";
 
 type MonthlyReceiptSummary = {
@@ -70,7 +70,7 @@ export function MonthlyReceiptsDialog({
           subtitle={it.dashboard.monthlyReceiptsDescription}
           onClose={close}
         >
-          <div data-form-dialog-body className="monthly-receipt-dialog">
+          <DialogBody className="monthly-receipt-dialog">
             <div className="monthly-receipt-overview">
               <div className="monthly-receipt-picker">
                 <span>{it.month}</span>
@@ -122,7 +122,7 @@ export function MonthlyReceiptsDialog({
                 </div>
               ))}
             </section>
-          </div>
+          </DialogBody>
         </FormDialog>
       )}
     </>

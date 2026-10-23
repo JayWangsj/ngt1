@@ -30,6 +30,7 @@ import {
 import { decimal, inventoryStatus, money } from "@/lib/domain";
 import { useLanguage, useMessages } from "./language";
 import {
+  DialogBody,
   FormDialog,
   ProductForm,
   type CategoryView,
@@ -467,7 +468,7 @@ export function InventoryHistoryCard({
           title={it.inventory.movementHistory}
           onClose={() => setOpen(false)}
         >
-          <div className="inventory-movements-dialog" data-form-dialog-body>
+          <DialogBody className="inventory-movements-dialog">
             <DatePicker
               className="retail-period-picker"
               aria-label={it.month}
@@ -506,7 +507,7 @@ export function InventoryHistoryCard({
             ) : (
               <p className="inventory-empty">{it.inventory.noMovements}</p>
             )}
-          </div>
+          </DialogBody>
         </FormDialog>
       )}
     </>

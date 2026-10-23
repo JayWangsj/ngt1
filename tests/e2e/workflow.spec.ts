@@ -2575,6 +2575,9 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await expect(page).toHaveURL(/day=2026-10-03.*receipts=2026-10/);
   const dialog = page.getByRole("dialog", { name: "Incassi mensili" });
   await expect(dialog).toBeVisible();
+  await expect(
+    dialog.locator(":scope > .dialog-body.monthly-receipt-dialog"),
+  ).toBeVisible();
   await expect(dialog).toHaveCSS("width", "680px");
   await expect(dialog.locator(".monthly-receipt-total")).toContainText(
     "140,00 €",
@@ -3484,6 +3487,19 @@ test("settings can force interface animations when Windows reduces motion", asyn
   await expect(page.getByTestId("dashboard-motion")).not.toHaveClass(
     /dashboard-animating/,
   );
+});
+
+test("inventory movement history uses the shared dialog body", async ({
+  page,
+}) => {
+  await page.goto("/inventory");
+  await page.locator(".inventory-history-card").click();
+  const dialog = page.getByRole("dialog", { name: "Registro magazzino" });
+  await expect(
+    dialog.locator(":scope > .dialog-body.inventory-movements-dialog"),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Chiudi" }).click();
+  await expect(dialog).toHaveCount(0);
 });
 
 test("creates and edits a product directly in the inventory row", async ({
@@ -5060,6 +5076,9 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await page.getByRole("button", { name: "Vendite", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
+  await expect(
+    dialog.locator(":scope > .dialog-body.retail-history-dialog"),
+  ).toBeVisible();
   const dialogBox = await dialog.boundingBox();
   expect(dialogBox?.width).toBeGreaterThan(800);
   expect(dialogBox?.height).toBeGreaterThan(600);
@@ -9604,7 +9623,9 @@ test("closing customer detail preserves list scroll and batch state", async ({
   expect(scrollBefore).toBeGreaterThan(0);
   await page.locator(".customer-name .order-link").last().click();
   const detailDialog = page.getByRole("dialog");
-  await expect(detailDialog.locator(".customer-detail-dialog")).toBeVisible();
+  await expect(
+    detailDialog.locator(":scope > .dialog-body.customer-detail-dialog"),
+  ).toBeVisible();
   await detailDialog.getByRole("button", { name: "Chiudi" }).click();
   await expect(detailDialog).toHaveCount(0);
   await expect(
