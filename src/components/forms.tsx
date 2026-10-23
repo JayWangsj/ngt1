@@ -3684,9 +3684,7 @@ export function EditOrderForm({
           title={it.addCustomer}
           onClose={() => setAddingCustomer(false)}
         >
-          <form
-            className="dialog-form"
-            data-form-dialog-body
+          <DialogForm
             onSubmit={(event) => {
               event.preventDefault();
               if (customerPending) return;
@@ -3708,23 +3706,27 @@ export function EditOrderForm({
                 .finally(() => setCustomerPending(false));
             }}
           >
-            <Field label={`${it.name} *`}>
-              <input
-                required
-                value={customerName}
-                onChange={(event) => setCustomerName(event.target.value)}
-              />
-            </Field>
-            <Field label={`${it.phone} *`}>
-              <input
-                required
-                type="tel"
-                value={customerPhone}
-                onChange={(event) => setCustomerPhone(event.target.value)}
-              />
-            </Field>
-            {customerError && <p className="message error">{customerError}</p>}
-            <div className="dialog-actions">
+            <DialogBody>
+              <Field label={`${it.name} *`}>
+                <input
+                  required
+                  value={customerName}
+                  onChange={(event) => setCustomerName(event.target.value)}
+                />
+              </Field>
+              <Field label={`${it.phone} *`}>
+                <input
+                  required
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(event) => setCustomerPhone(event.target.value)}
+                />
+              </Field>
+              {customerError && (
+                <p className="message error">{customerError}</p>
+              )}
+            </DialogBody>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="cancel"
@@ -3735,8 +3737,8 @@ export function EditOrderForm({
               <Button disabled={customerPending}>
                 {customerPending ? it.saving : it.saveCustomer}
               </Button>
-            </div>
-          </form>
+            </DialogFooter>
+          </DialogForm>
         </FormDialog>
       )}
     </>

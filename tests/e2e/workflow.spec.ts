@@ -6247,6 +6247,38 @@ test("detail edits save on outside click and protect navigation", async ({
   await expect(row).toContainText("29/12/2099");
 });
 
+test("order edit customer dialog keeps its body and actions separated", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  await save(page);
+  const details = page.getByTestId("details-card");
+  await details.hover();
+  await details
+    .getByRole("button", { name: "Modifica dati", exact: true })
+    .click();
+
+  const customer = details.getByRole("combobox", {
+    name: "Cerca cliente",
+    exact: true,
+  });
+  await customer.fill(`cliente-dialog-${Date.now()}`);
+  await details
+    .getByRole("button", { name: "Nuovo cliente", exact: true })
+    .click();
+
+  const dialog = page.getByRole("dialog", {
+    name: "Nuovo cliente",
+    exact: true,
+  });
+  const form = dialog.locator(":scope > .dialog-form-layout");
+  await expect(form.locator(":scope > .dialog-body")).toBeVisible();
+  await expect(form.locator(":scope > .dialog-footer")).toBeVisible();
+  await dialog.getByRole("button", { name: "Annulla", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(customer).toBeVisible();
+});
+
 test("repair detail part option dialog keeps its save button and warranty field", async ({
   page,
 }) => {
