@@ -12,6 +12,7 @@ import {
   cloneElement,
   type ReactElement,
   type FormEvent,
+  type HTMLAttributes,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -1137,7 +1138,7 @@ function PriceOptionPicker({
           title={it.partPriceOptions}
           onClose={() => onOpenChange(false)}
         >
-          <div className="price-option-dialog" aria-label={ariaLabel}>
+          <DialogBody className="price-option-dialog" aria-label={ariaLabel}>
             <div className="price-option-list">
               {options.map((option) => (
                 <button
@@ -1255,32 +1256,30 @@ function PriceOptionPicker({
                 <Plus size={16} /> {it.addPartOption}
               </button>
             )}
-            <div className="quick-service-picker-footer price-option-picker-footer">
-              <div className="dialog-actions">
-                <Button
-                  type="button"
-                  variant="cancel"
-                  disabled={disabled}
-                  onClick={() => onOpenChange(false)}
-                >
-                  {it.cancel}
-                </Button>
-                <Button
-                  type="button"
-                  disabled={disabled || draftOptionId === null}
-                  onClick={() => {
-                    if (draftOptionId === null) return;
-                    if (draftOptionId.startsWith("product:"))
-                      onSelectProduct?.(draftOptionId.slice(8));
-                    else onSelect(draftOptionId);
-                    onOpenChange(false, true);
-                  }}
-                >
-                  {it.quickService.confirmServices}
-                </Button>
-              </div>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter className="price-option-picker-footer">
+            <Button
+              type="button"
+              variant="cancel"
+              disabled={disabled}
+              onClick={() => onOpenChange(false)}
+            >
+              {it.cancel}
+            </Button>
+            <Button
+              type="button"
+              disabled={disabled || draftOptionId === null}
+              onClick={() => {
+                if (draftOptionId === null) return;
+                if (draftOptionId.startsWith("product:"))
+                  onSelectProduct?.(draftOptionId.slice(8));
+                else onSelect(draftOptionId);
+                onOpenChange(false, true);
+              }}
+            >
+              {it.quickService.confirmServices}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
     </>
@@ -2370,7 +2369,7 @@ export function ItemsEditor({
           subtitle={it.repairProjectPickerHelp}
           onClose={() => setChoosingProjects(false)}
         >
-          <div className="quick-service-picker">
+          <DialogBody className="quick-service-picker">
             <div className="quick-service-picker-list">
               {pickerProjects.map((choice) => {
                 const selected = draftProjects.some(
@@ -2466,27 +2465,28 @@ export function ItemsEditor({
             >
               <Plus size={16} /> {it.project}
             </button>
-            <div className="quick-service-picker-footer">
+          </DialogBody>
+          <DialogFooter
+            summary={
               <strong>
                 {it.selectedRepairProjects.replace(
                   "{count}",
                   String(draftProjects.length),
                 )}
               </strong>
-              <div className="dialog-actions">
-                <Button
-                  type="button"
-                  variant="cancel"
-                  onClick={() => setChoosingProjects(false)}
-                >
-                  {it.cancel}
-                </Button>
-                <Button type="button" onClick={confirmProjects}>
-                  {it.quickService.confirmServices}
-                </Button>
-              </div>
-            </div>
-          </div>
+            }
+          >
+            <Button
+              type="button"
+              variant="cancel"
+              onClick={() => setChoosingProjects(false)}
+            >
+              {it.cancel}
+            </Button>
+            <Button type="button" onClick={confirmProjects}>
+              {it.quickService.confirmServices}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
       {creatingProject && (
@@ -6261,6 +6261,39 @@ export function FormDialog({
     document.body,
   );
 }
+
+export function DialogBody({
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      {...props}
+      className={`dialog-body${className ? ` ${className}` : ""}`}
+      data-form-dialog-body
+    />
+  );
+}
+
+export function DialogFooter({
+  className,
+  summary,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { summary?: ReactNode }) {
+  return (
+    <div
+      {...props}
+      className={`dialog-footer${className ? ` ${className}` : ""}`}
+    >
+      {summary !== undefined && (
+        <div className="dialog-footer-summary">{summary}</div>
+      )}
+      <div className="dialog-actions">{children}</div>
+    </div>
+  );
+}
+
 export function NewCustomerDialog() {
   const it = useMessages();
   const [open, setOpen] = useState(false);

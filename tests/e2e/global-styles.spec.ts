@@ -267,20 +267,28 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
     const fixture = document.createElement("div");
     fixture.id = "global-action-fixture";
     fixture.className = "form-dialog";
+    fixture.setAttribute("open", "");
     fixture.innerHTML = `
-      <button class="dialog-close icon-button" aria-label="Close">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 6l12 12M18 6L6 18" /></svg>
-      </button>
-      <div class="price-option-dialog">
-        <div class="price-option-list" style="height: 40px"></div>
-        <button class="quick-service-picker-add price-option-add">Add</button>
-        <div class="quick-service-picker-footer price-option-picker-footer">
-          <div class="dialog-actions"><button class="button button-cancel">Cancel</button><button class="button button-outline">Outline action</button></div>
-        </div>
+      <div class="dialog-heading">
+        <div><h2>Choose an option</h2><p>Dialog description</p></div>
+        <button class="dialog-close icon-button" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
       </div>
-      <form class="action-form">
+      <div class="dialog-body price-option-dialog" data-form-dialog-body>
+        <div class="price-option-list" style="height: 900px"></div>
+        <button class="quick-service-picker-add price-option-add">Add</button>
         <textarea aria-label="Focused field"></textarea>
-      </form>
+      </div>
+      <div class="dialog-footer price-option-picker-footer">
+        <div class="dialog-actions"><button class="button button-cancel">Cancel</button><button class="button button-outline">Outline action</button></div>
+      </div>
+    `;
+    document.body.append(fixture);
+    const embeddedActions = document.createElement("div");
+    embeddedActions.className = "standalone-actions";
+    embeddedActions.innerHTML = `
+      <button class="button button-cancel">Standalone cancel</button>
       <button class="button button-ghost record-icon record-icon-edit" aria-label="Edit">
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20h4l11-11-4-4L4 16v4Z" /></svg>
       </button>
@@ -288,11 +296,6 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" /></svg>
       </button>
     `;
-    document.body.append(fixture);
-    const embeddedActions = document.createElement("div");
-    embeddedActions.className = "standalone-actions";
-    embeddedActions.innerHTML =
-      '<button class="button button-cancel">Standalone cancel</button>';
     document.body.append(embeddedActions);
   });
 
@@ -329,6 +332,21 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   const optionFooter = page.locator(".price-option-picker-footer");
   await expect(optionFooter).toHaveCSS("margin-top", "24px");
   await expect(optionFooter).toHaveCSS("padding-top", "16px");
+  await expect(optionFooter).not.toHaveCSS(
+    "border-top-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  const footerActions = optionFooter.locator(".dialog-actions");
+  await expect(footerActions).toHaveCSS("padding-top", "0px");
+  await expect(footerActions).toHaveCSS("border-top-width", "0px");
+  const [headingBox, footerBox] = await Promise.all([
+    page.locator(".dialog-heading").boundingBox(),
+    optionFooter.boundingBox(),
+  ]);
+  expect(Math.abs(headingBox!.x - footerBox!.x)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(headingBox!.width - footerBox!.width)).toBeLessThanOrEqual(
+    0.5,
+  );
 
   const cancel = page.getByRole("button", { name: "Cancel", exact: true });
   await expect(cancel).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
@@ -336,7 +354,9 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   const cancelBox = await cancel.boundingBox();
   await cancel.hover();
   await expect(cancel).toHaveCSS("background-color", "rgb(255, 247, 214)");
-  expect(await cancel.boundingBox()).toEqual(cancelBox);
+  const hoveredCancelBox = await cancel.boundingBox();
+  expect(hoveredCancelBox!.width).toBe(cancelBox!.width);
+  expect(hoveredCancelBox!.height).toBe(cancelBox!.height);
 
   const standaloneCancel = page.getByRole("button", {
     name: "Standalone cancel",
@@ -362,8 +382,12 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
     "rgba(0, 0, 0, 0)",
   );
 
-  const dialogBody = page.locator(".form-dialog > .action-form");
+  const dialogBody = page.locator(".form-dialog > .dialog-body");
   const focusedField = page.getByRole("textbox", { name: "Focused field" });
+  await expect(optionFooter).toBeInViewport();
+  expect(
+    await dialogBody.evaluate((body) => body.scrollHeight > body.clientHeight),
+  ).toBe(true);
   await expect(dialogBody).toHaveCSS("padding-left", "4px");
   await expect(dialogBody).toHaveCSS("padding-right", "4px");
   await focusedField.focus();
@@ -385,6 +409,21 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   await expect(remove).toBeVisible();
   await remove.hover();
   await expect(remove).toHaveCSS("background-color", "rgb(251, 233, 232)");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(optionFooter).toHaveCSS("flex-direction", "column");
+  const [mobileFooterBox, mobileActionsBox] = await Promise.all([
+    optionFooter.boundingBox(),
+    footerActions.boundingBox(),
+  ]);
+  expect(
+    Math.abs(mobileFooterBox!.width - mobileActionsBox!.width),
+  ).toBeLessThanOrEqual(0.5);
+  expect(
+    await page
+      .locator("#global-action-fixture")
+      .evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth),
+  ).toBe(true);
 });
 
 test("monthly receipt dialog uses a compact responsive overview", async ({

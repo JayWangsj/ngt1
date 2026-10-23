@@ -26,6 +26,8 @@ import { prefersReducedMotion } from "@/lib/motion-preference";
 import { DatePicker, SimpleSelect } from "./business-select";
 import {
   DeviceForm,
+  DialogBody,
+  DialogFooter,
   Field,
   FormDialog,
   ItemsEditor,
@@ -594,7 +596,7 @@ export function NewOrderWizard({
                 title={it.chooseDevice}
                 onClose={() => setChoosingDevice(false)}
               >
-                <div className="quick-service-picker">
+                <DialogBody className="quick-service-picker">
                   <div className="quick-service-picker-list">
                     {customer.devices.map((device) => (
                       <CustomerDeviceCard
@@ -626,32 +628,30 @@ export function NewOrderWizard({
                   >
                     <Plus size={16} /> {it.device}
                   </button>
-                  <div className="quick-service-picker-footer">
-                    <div className="dialog-actions">
-                      <Button
-                        type="button"
-                        variant="cancel"
-                        onClick={() => setChoosingDevice(false)}
-                      >
-                        {it.cancel}
-                      </Button>
-                      <Button
-                        type="button"
-                        disabled={!draftDeviceId}
-                        onClick={() => {
-                          const device = customer.devices.find(
-                            (entry) => entry.id === draftDeviceId,
-                          );
-                          if (!device) return;
-                          selectCustomerDevice(device);
-                          setChoosingDevice(false);
-                        }}
-                      >
-                        {it.quickService.confirmDevices}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                </DialogBody>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="cancel"
+                    onClick={() => setChoosingDevice(false)}
+                  >
+                    {it.cancel}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!draftDeviceId}
+                    onClick={() => {
+                      const device = customer.devices.find(
+                        (entry) => entry.id === draftDeviceId,
+                      );
+                      if (!device) return;
+                      selectCustomerDevice(device);
+                      setChoosingDevice(false);
+                    }}
+                  >
+                    {it.quickService.confirmDevices}
+                  </Button>
+                </DialogFooter>
               </FormDialog>
             )}
             {creatingDevice && customer && (

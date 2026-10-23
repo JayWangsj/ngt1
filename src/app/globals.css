@@ -30,6 +30,11 @@
   --shadow-4: 0 16px 38px hsl(0 0% 0% / 16%);
   --shadow-5: 0 24px 70px hsl(0 0% 0% / 18%);
   --space-control-gap: 8px;
+  --dialog-padding: 24px;
+  --dialog-header-gap: 16px;
+  --dialog-body-gap: 24px;
+  --dialog-footer-gap: 16px;
+  --dialog-action-gap: 8px;
   --type-label: 12px;
   --type-control: 14px;
   --radius-control: 8px;
@@ -4830,18 +4835,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .quick-service-picker-price {
   text-align: right;
 }
-.quick-service-picker-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-.quick-service-picker-footer .dialog-actions {
-  padding: 0;
-  border: 0;
-}
 .quick-service-schedule {
   border-bottom: 0;
 }
@@ -7708,7 +7701,7 @@ details.secondary-actions {
   overflow: visible;
   border: 1px solid #e4e6e5;
   border-radius: 12px;
-  padding: 24px;
+  padding: var(--dialog-padding);
   background: white;
   color: #222;
   box-shadow: var(--shadow-5);
@@ -7716,13 +7709,18 @@ details.secondary-actions {
 .form-dialog::backdrop {
   background: rgb(24 29 27 / 42%);
 }
+.form-dialog[open]:has(> .dialog-body) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
 .form-dialog > .dialog-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
+  margin-bottom: var(--dialog-body-gap);
+  padding-bottom: var(--dialog-header-gap);
   border-bottom: 1px solid var(--line);
 }
 .dialog-heading > div {
@@ -7752,6 +7750,7 @@ details.secondary-actions {
 }
 .form-dialog > :is(.action-form, .dialog-form),
 .form-dialog > [data-form-dialog-body] {
+  min-height: 0;
   max-height: calc(100dvh - 176px);
   overflow-y: auto;
   padding-inline: 4px;
@@ -7772,9 +7771,30 @@ details.secondary-actions {
 }
 .form-dialog .dialog-actions {
   width: 100%;
-  gap: 8px;
+  gap: var(--dialog-action-gap);
   margin-left: 0;
-  padding-top: 16px;
+  padding-top: var(--dialog-footer-gap);
+}
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--dialog-body-gap);
+  margin-top: var(--dialog-body-gap);
+  padding-top: var(--dialog-footer-gap);
+  border-top: 1px solid var(--line);
+}
+.dialog-footer:has(.dialog-footer-summary) {
+  justify-content: space-between;
+}
+.dialog-footer-summary {
+  min-width: 0;
+}
+.form-dialog .dialog-footer > .dialog-actions {
+  width: auto;
+  margin-left: auto;
+  padding-top: 0;
+  border-top: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   html:not([data-motion="always"]) .wizard-progressive-reveal,
@@ -7926,14 +7946,17 @@ details.secondary-actions {
 }
 @media (max-width: 600px) {
   .form-dialog {
+    --dialog-padding: 16px;
+    --dialog-header-gap: 12px;
+    --dialog-body-gap: 16px;
     width: calc(100vw - 16px);
     max-height: calc(100dvh - 16px);
-    padding: 16px;
+    padding: var(--dialog-padding);
   }
   .form-dialog > .dialog-heading {
     gap: 12px;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
+    margin-bottom: var(--dialog-body-gap);
+    padding-bottom: var(--dialog-header-gap);
   }
   .dialog-heading h2 {
     font-size: 18px;
@@ -7966,9 +7989,14 @@ details.secondary-actions {
     border-left: 0;
     text-align: left;
   }
-  .quick-service-picker-footer {
-    align-items: flex-start;
+  .dialog-footer {
+    align-items: stretch;
     flex-direction: column;
+    gap: 12px;
+  }
+  .form-dialog .dialog-footer > .dialog-actions {
+    width: 100%;
+    margin-left: 0;
   }
   .price-tree-level {
     margin-left: 8px;
@@ -9502,11 +9530,6 @@ details.secondary-actions {
   justify-self: end;
   flex: 0 0 auto;
   white-space: nowrap;
-}
-.price-option-picker-footer {
-  justify-content: flex-end;
-  margin-top: 24px;
-  padding-top: 16px;
 }
 .detail-primary-actions .status-dropdown-trigger,
 .detail-primary-actions .status-action-trigger {

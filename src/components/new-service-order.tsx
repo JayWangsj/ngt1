@@ -9,7 +9,13 @@ import {
 } from "@/app/actions";
 import { cents, decimal, money } from "@/lib/domain";
 import { useMessages } from "./language";
-import { DeviceForm, Field, FormDialog } from "./forms";
+import {
+  DeviceForm,
+  DialogBody,
+  DialogFooter,
+  Field,
+  FormDialog,
+} from "./forms";
 import { DatePicker } from "./business-select";
 import { Button } from "./ui/button";
 import {
@@ -405,7 +411,7 @@ export function NewServiceOrder({
                 subtitle={it.quickService.devicePickerHelp}
                 onClose={() => setChoosingDevices(false)}
               >
-                <div className="quick-service-picker">
+                <DialogBody className="quick-service-picker">
                   <div className="quick-service-picker-list">
                     {customer.devices.map((device) => (
                       <CustomerDeviceCard
@@ -437,33 +443,34 @@ export function NewServiceOrder({
                   >
                     <Plus size={16} /> {it.device}
                   </button>
-                  <div className="quick-service-picker-footer">
+                </DialogBody>
+                <DialogFooter
+                  summary={
                     <strong>
                       {it.quickService.selectedDevices.replace(
                         "{count}",
                         String(draftDeviceIds.length),
                       )}
                     </strong>
-                    <div className="dialog-actions">
-                      <Button
-                        type="button"
-                        variant="cancel"
-                        onClick={() => setChoosingDevices(false)}
-                      >
-                        {it.cancel}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          setDeviceIds(draftDeviceIds);
-                          setChoosingDevices(false);
-                        }}
-                      >
-                        {it.quickService.confirmDevices}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                  }
+                >
+                  <Button
+                    type="button"
+                    variant="cancel"
+                    onClick={() => setChoosingDevices(false)}
+                  >
+                    {it.cancel}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setDeviceIds(draftDeviceIds);
+                      setChoosingDevices(false);
+                    }}
+                  >
+                    {it.quickService.confirmDevices}
+                  </Button>
+                </DialogFooter>
               </FormDialog>
             )}
             {choosingServices && (
@@ -472,7 +479,7 @@ export function NewServiceOrder({
                 subtitle={it.quickService.servicePickerHelp}
                 onClose={() => setChoosingServices(false)}
               >
-                <div className="quick-service-picker">
+                <DialogBody className="quick-service-picker">
                   <div className="quick-service-picker-list">
                     {availableServices.map((service) => (
                       <article
@@ -539,27 +546,28 @@ export function NewServiceOrder({
                   >
                     <Plus size={16} /> {it.quickService.serviceItems}
                   </button>
-                  <div className="quick-service-picker-footer">
+                </DialogBody>
+                <DialogFooter
+                  summary={
                     <strong>
                       {it.quickService.selectedServices.replace(
                         "{count}",
                         String(draftServiceIds.length),
                       )}
                     </strong>
-                    <div className="dialog-actions">
-                      <Button
-                        type="button"
-                        variant="cancel"
-                        onClick={() => setChoosingServices(false)}
-                      >
-                        {it.cancel}
-                      </Button>
-                      <Button type="button" onClick={confirmServices}>
-                        {it.quickService.confirmServices}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                  }
+                >
+                  <Button
+                    type="button"
+                    variant="cancel"
+                    onClick={() => setChoosingServices(false)}
+                  >
+                    {it.cancel}
+                  </Button>
+                  <Button type="button" onClick={confirmServices}>
+                    {it.quickService.confirmServices}
+                  </Button>
+                </DialogFooter>
               </FormDialog>
             )}
             {creatingDevice && customer && (
