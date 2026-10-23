@@ -1,0 +1,128 @@
+:where(.scope) :global(input[type="number"]::-webkit-inner-spin-button),
+:where(.scope) :global(input[type="number"]::-webkit-outer-spin-button) {
+  appearance: none;
+  margin: 0;
+}
+
+:where(.scope) :global(input[type="number"]) {
+  appearance: textfield;
+}
+
+:where(.scope) :global(input[type="checkbox"]) {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  border: 1px solid var(--border-control);
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+:where(.scope) :global(input[type="checkbox"]::before) {
+  width: 9px;
+  height: 5px;
+  border-bottom: 3px solid #26302c;
+  border-left: 3px solid #26302c;
+  content: "";
+  transform: rotate(-45deg) scale(0);
+  transform-origin: center;
+}
+
+:where(.scope) :global(input[type="checkbox"]:checked) {
+  border-color: #f2c717;
+  background: #fbd72e;
+}
+
+:where(.scope) :global(input[type="checkbox"]:checked::before) {
+  transform: rotate(-45deg) scale(1);
+}
+
+:where(.scope) :global(input[type="checkbox"]:indeterminate) {
+  border-color: #f2c717;
+  background: #fbd72e;
+}
+
+:where(.scope) :global(input[type="checkbox"]:indeterminate::before) {
+  width: 9px;
+  height: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: #26302c;
+  transform: scale(1);
+}
+
+:where(.scope) :global(input[type="checkbox"]:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+:where(.scope) :global(input[type="checkbox"]:disabled) {
+  border-color: #d5dad7;
+  background: #eef0ef;
+  cursor: not-allowed;
+}
+
+:where(.scope) :global(input[type="date"]:not(:disabled)),
+:where(.scope) :global(input[type="month"]:not(:disabled)) {
+  cursor: pointer;
+}
+
+:where(.scope) :global(input),
+:where(.scope) :global(select),
+:where(.scope) :global(textarea) {
+  font: inherit;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  min-height: 41px;
+  padding: 10px 12px;
+  color: var(--ink);
+  width: 100%;
+  font-size: var(--type-control);
+}
+
+:where(.scope) :global(input[type="checkbox"]) {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  flex: 0 0 16px;
+  border-radius: 4px;
+  padding: 0;
+}
+
+:where(.scope) :global(input:hover),
+:where(.scope) :global(select:hover),
+:where(.scope) :global(textarea:hover) {
+  border-color: var(--action);
+}
+
+:where(.scope) :global(input:focus),
+:where(.scope) :global(select:focus),
+:where(.scope) :global(textarea:focus) {
+  border-color: var(--border-focus);
+  outline: 0;
+  box-shadow: 0 0 0 3px hsl(45 100% 25% / 16%);
+}
+
+:where(.scope) :global(input:focus-visible),
+:where(.scope) :global(select:focus-visible),
+:where(.scope) :global(textarea:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+:where(.scope) :global(input::placeholder),
+:where(.scope) :global(textarea::placeholder) {
+  color: var(--text-tertiary);
+}
+
+:where(.scope) :global(input[readonly]) {
+  background: #f5f7f5;
+  color: var(--text-secondary);
+}
+
+:where(.scope) :global(textarea) {
+  resize: vertical;
+  min-height: 75px;
+}

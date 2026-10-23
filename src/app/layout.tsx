@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import formControlStyles from "@/components/ui/form-controls.module.css";
 import { getLocale } from "@/lib/i18n-server";
 import { LanguageProvider } from "@/components/language";
 import { ComfortableScrollManager } from "@/components/comfortable-scroll-manager";
@@ -57,7 +58,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: motionPreferenceScript }} />
         <script dangerouslySetInnerHTML={{ __html: sidebarPreferenceScript }} />
       </head>
-      <body>
+      <body className={formControlStyles.scope}>
         <LanguageProvider initial={locale}>
           <ComfortableScrollManager />
           {children}

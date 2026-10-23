@@ -171,6 +171,30 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
     3,
   );
 
+  await page.evaluate(() => {
+    const controls = document.createElement("div");
+    controls.id = "global-form-controls";
+    controls.innerHTML = `
+      <select aria-label="Control select"><option>Option</option></select>
+      <textarea aria-label="Control textarea"></textarea>
+      <input type="checkbox" aria-label="Control checkbox" checked />
+    `;
+    document.body.append(controls);
+  });
+
+  const select = page.getByRole("combobox", { name: "Control select" });
+  await expect(select).toHaveCSS("min-height", "41px");
+  await expect(select).toHaveCSS("font-size", "14px");
+
+  const textarea = page.getByRole("textbox", { name: "Control textarea" });
+  await expect(textarea).toHaveCSS("min-height", "75px");
+  await expect(textarea).toHaveCSS("resize", "vertical");
+
+  const checkbox = page.getByRole("checkbox", { name: "Control checkbox" });
+  await expect(checkbox).toHaveCSS("width", "16px");
+  await expect(checkbox).toHaveCSS("height", "16px");
+  await expect(checkbox).toHaveCSS("background-color", "rgb(251, 215, 46)");
+
   // The seeded test database has no orders, so create a DOM fixture for the
   // shared table rules while keeping the application data untouched.
   await page.evaluate(() => {
