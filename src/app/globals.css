@@ -3410,10 +3410,15 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .dashboard > .page-header {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .dashboard > .page-header .eyebrow {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+.dashboard > .page-header h1 {
+  margin-bottom: 4px;
+  font-size: 30px;
+  line-height: 1.15;
 }
 .dashboard-date-filter {
   display: flex;
@@ -3431,16 +3436,16 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   margin: 0;
 }
 .dashboard-receipts {
-  margin: 18px 0 16px;
+  margin: 12px 0 14px;
   border-radius: 12px;
-  padding: 22px 24px;
+  padding: 14px 20px;
 }
 .dashboard-receipts-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 .dashboard-receipts-heading h2 {
   margin: 0;
@@ -3452,15 +3457,15 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   display: grid;
   grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
   align-items: stretch;
-  gap: 20px;
+  gap: 16px;
 }
 .dashboard-day-receipts {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   border-right: 1px solid var(--line);
-  padding-right: 24px;
+  padding-right: 20px;
 }
 .dashboard-day-receipts > span,
 .dashboard-month-total > span {
@@ -3470,7 +3475,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .dashboard-day-receipts > strong {
   color: var(--ink);
-  font-size: 32px;
+  font-size: 30px;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
@@ -3478,7 +3483,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   display: grid;
   grid-template-columns: minmax(150px, 1fr) auto;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 .dashboard-month-total {
   display: flex;
@@ -3491,7 +3496,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .dashboard-month-total > strong {
   color: var(--teal-dark);
-  font-size: 26px;
+  font-size: 24px;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
 }
@@ -3822,10 +3827,24 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .dashboard-kpis .metric {
   position: relative;
   overflow: hidden;
+  padding: 16px;
   transition:
     border-color var(--motion-base) var(--ease-ui),
     background var(--motion-base) var(--ease-ui),
     box-shadow var(--motion-base) var(--ease-ui);
+}
+.dashboard-kpis .metric-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+.dashboard-kpis .metric-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.dashboard-kpis .metric > strong {
+  margin: 10px 0 0;
+  font-size: 28px;
 }
 .dashboard-kpis .metric:hover {
   border-color: #dcd2ae;
@@ -4005,6 +4024,9 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   .dashboard-receipts-heading {
     align-items: center;
     gap: 12px;
+  }
+  .dashboard > .page-header h1 {
+    font-size: 27px;
   }
   .dashboard-receipt-summary {
     grid-template-columns: 1fr;

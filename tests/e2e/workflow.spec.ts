@@ -2539,6 +2539,8 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   expect(receiptBox!.y + receiptBox!.height).toBeLessThanOrEqual(chartBox!.y);
   expect(chartBox!.y + chartBox!.height).toBeLessThanOrEqual(kpiBox!.y);
   expect(kpiBox!.y + kpiBox!.height).toBeLessThanOrEqual(listBox!.y);
+  expect(receiptBox!.height).toBeLessThanOrEqual(155);
+  expect(kpiBox!.height).toBeLessThanOrEqual(112);
   await expect(charts.locator(".revenue-bars")).toHaveCSS("height", "220px");
 
   await monthlyReceipts.click();
