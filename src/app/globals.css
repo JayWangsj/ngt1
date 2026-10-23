@@ -9453,6 +9453,9 @@ details.secondary-actions {
 .price-option-clear {
   width: 100%;
 }
+.price-option-dialog > .price-option-add {
+  margin-top: 12px;
+}
 .selection-summary.selected-part-summary.price-option-picker-summary {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
@@ -10107,11 +10110,16 @@ summary.record-icon::-webkit-details-marker {
   border-color: transparent;
   background: #fff7d6;
 }
-.record-icon-delete:hover,
-.record-icon-delete:focus-visible {
-  color: #a64642;
+.record-icon.record-icon-edit:hover:not(:disabled),
+.record-icon.record-icon-edit:focus-visible:not(:disabled) {
+  color: #6d5510;
+  background: #ffedaa;
+}
+.record-icon.record-icon-delete:hover:not(:disabled),
+.record-icon.record-icon-delete:focus-visible:not(:disabled) {
+  color: #913737;
   border-color: transparent;
-  background: #fff0ee;
+  background: #fbe9e8;
 }
 .x-icon-button,
 .dialog-close,
@@ -10120,6 +10128,31 @@ summary.record-icon::-webkit-details-marker {
   border-color: transparent;
   background: transparent;
   border-radius: 7px;
+}
+.dialog-close {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  place-items: center;
+  line-height: 0;
+}
+.dialog-close svg {
+  display: block;
+}
+.form-dialog .dialog-actions .button-outline {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.form-dialog .dialog-actions .button-outline:hover:not(:disabled),
+.form-dialog .dialog-actions .button-outline:focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: #fff7d6;
+}
+.form-dialog .dialog-actions .button-outline:active:not(:disabled) {
+  background: #ffe99d;
 }
 .x-icon-button:hover:not(:disabled),
 .x-icon-button:focus-visible,

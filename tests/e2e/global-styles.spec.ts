@@ -1,6 +1,8 @@
 import { expect, test } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
 import { seedTestDatabase } from "../../scripts/seed-test";
+import { existsSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 
 const elevationSurfaces = [
   { id: "dialog", className: "form-dialog", token: "--shadow-5" },
@@ -232,6 +234,96 @@ test("shared actions keep visible focus, stable hover, and clear disabled feedba
   await expect(disabledButton).toHaveCSS("cursor", "not-allowed");
   await expect(disabledButton).toHaveCSS("box-shadow", "none");
   await expect(disabledButton).toHaveCSS("transform", "none");
+});
+
+test("dialog and record actions keep clear spacing and hover feedback", async ({
+  page,
+}) => {
+  const nextDist = resolve(process.cwd(), process.env.NEXT_DIST_DIR || ".next");
+  const chunkDirectories = [
+    resolve(nextDist, "dev", "static", "chunks"),
+    resolve(nextDist, "static", "chunks"),
+  ];
+  const globalStylesheet = chunkDirectories
+    .filter(existsSync)
+    .flatMap((directory) =>
+      readdirSync(directory)
+        .filter((file) => file.includes("globals") && file.endsWith(".css"))
+        .map((file) => resolve(directory, file)),
+    )[0];
+  expect(globalStylesheet).toBeTruthy();
+  await page.setContent("<main></main>");
+  await page.addStyleTag({ path: globalStylesheet });
+  await page.evaluate(() => {
+    const fixture = document.createElement("div");
+    fixture.id = "global-action-fixture";
+    fixture.className = "form-dialog";
+    fixture.innerHTML = `
+      <button class="dialog-close icon-button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+      <div class="price-option-dialog">
+        <div class="price-option-list" style="height: 40px"></div>
+        <button class="quick-service-picker-add price-option-add">Add</button>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-outline">Cancel</button>
+      </div>
+      <button class="button button-ghost record-icon record-icon-edit" aria-label="Edit">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20h4l11-11-4-4L4 16v4Z" /></svg>
+      </button>
+      <button class="button button-ghost record-icon record-icon-delete" aria-label="Delete">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" /></svg>
+      </button>
+    `;
+    document.body.append(fixture);
+  });
+
+  const close = page.getByRole("button", { name: "Close" });
+  await expect(close).toHaveCSS("display", "grid");
+  await expect(close).toHaveCSS("width", "40px");
+  await expect(close).toHaveCSS("height", "40px");
+  await expect(close).toHaveCSS("padding", "0px");
+  await expect(close).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+  expect(
+    await close.evaluate((button) => {
+      const buttonBox = button.getBoundingClientRect();
+      const iconBox = button.querySelector("svg")!.getBoundingClientRect();
+      return Math.max(
+        Math.abs(
+          buttonBox.left +
+            buttonBox.width / 2 -
+            (iconBox.left + iconBox.width / 2),
+        ),
+        Math.abs(
+          buttonBox.top +
+            buttonBox.height / 2 -
+            (iconBox.top + iconBox.height / 2),
+        ),
+      );
+    }),
+  ).toBeLessThanOrEqual(0.5);
+  await close.hover();
+  await expect(close).toHaveCSS("background-color", "rgb(255, 240, 238)");
+
+  const addPartOption = page.locator(".price-option-add");
+  await expect(addPartOption).toHaveCSS("margin-top", "12px");
+
+  const cancel = page.getByRole("button", { name: "Cancel" });
+  await expect(cancel).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+  await expect(cancel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await cancel.hover();
+  await expect(cancel).toHaveCSS("background-color", "rgb(255, 247, 214)");
+
+  const edit = page.getByRole("button", { name: "Edit" });
+  await expect(edit).toBeVisible();
+  await edit.hover();
+  await expect(edit).toHaveCSS("background-color", "rgb(255, 237, 170)");
+
+  const remove = page.getByRole("button", { name: "Delete" });
+  await expect(remove).toBeVisible();
+  await remove.hover();
+  await expect(remove).toHaveCSS("background-color", "rgb(251, 233, 232)");
 });
 
 test("workspace list pages fit desktop, tablet, and mobile viewports", async ({
