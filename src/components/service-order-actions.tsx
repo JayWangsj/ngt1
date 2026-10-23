@@ -5,7 +5,13 @@ import { MoreVertical, Printer, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { deleteWorkOrderAction } from "@/app/actions";
 import { useMessages } from "./language";
-import { FormDialog, Field } from "./forms";
+import {
+  DialogBody,
+  DialogFooter,
+  DialogForm,
+  Field,
+  FormDialog,
+} from "./forms";
 import { Button } from "./ui/button";
 
 export function ServiceOrderActions({
@@ -67,9 +73,7 @@ export function ServiceOrderActions({
           subtitle={blockedReason || it.deleteServiceOrderWarning}
           onClose={() => setOpen(false)}
         >
-          <form
-            className="dialog-form"
-            data-form-dialog-body
+          <DialogForm
             onSubmit={(event) => {
               event.preventDefault();
               startTransition(async () => {
@@ -80,18 +84,20 @@ export function ServiceOrderActions({
               });
             }}
           >
-            {!blockedReason && (
-              <Field label={it.serviceOrderNumber}>
-                <input
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                  placeholder={code}
-                  autoComplete="off"
-                />
-              </Field>
-            )}
-            {error && <p className="message error">{error}</p>}
-            <div className="dialog-actions">
+            <DialogBody>
+              {!blockedReason && (
+                <Field label={it.serviceOrderNumber}>
+                  <input
+                    value={value}
+                    onChange={(event) => setValue(event.target.value)}
+                    placeholder={code}
+                    autoComplete="off"
+                  />
+                </Field>
+              )}
+              {error && <p className="message error">{error}</p>}
+            </DialogBody>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="cancel"
@@ -104,8 +110,8 @@ export function ServiceOrderActions({
                   {it.confirmPermanentDelete}
                 </Button>
               )}
-            </div>
-          </form>
+            </DialogFooter>
+          </DialogForm>
         </FormDialog>
       )}
     </>

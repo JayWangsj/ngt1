@@ -4798,6 +4798,31 @@ test("repair list cancellation uses the shared confirmation and locks the row", 
   await expect(row).toContainText("0,00 €");
 });
 
+test("service order deletion uses the shared dialog form layout", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  await save(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const actions = page.locator(".secondary-actions");
+  const trigger = actions.locator("summary");
+  await trigger.click();
+  await actions.locator(".danger-text").click();
+
+  const dialog = page.getByRole("dialog");
+  const form = dialog.locator(":scope > .dialog-form-layout");
+  const body = form.locator(":scope > .dialog-body");
+  const footer = form.locator(":scope > .dialog-footer");
+  await expect(body).toHaveCount(1);
+  await expect(footer).toBeInViewport();
+  await expect(footer).toHaveCSS("flex-direction", "column");
+
+  await footer.locator(".button-cancel").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeVisible();
+});
+
 test("repair detail cancellation persists after a reload", async ({ page }) => {
   await fillOrder(page);
   await save(page);
