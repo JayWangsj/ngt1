@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useLanguage, useMessages } from "./language";
 import { Button } from "./ui/button";
-import { FormDialog } from "./forms";
+import { DialogBody, DialogFooter, DialogForm, FormDialog } from "./forms";
 import { useUpdateState } from "./update-state";
 import {
   classifyUpdateTask,
@@ -765,19 +765,19 @@ export function SystemUpdate({
           title={it.updateConfirmTitle}
           onClose={() => setConfirmationOpen(false)}
         >
-          <form
-            className="dialog-form confirm-update-dialog"
-            data-form-dialog-body
+          <DialogForm
             onSubmit={(event) => {
               event.preventDefault();
               void confirmUpdate();
             }}
           >
-            <div className="confirm-update-icon" aria-hidden="true">
-              <Download size={22} />
-            </div>
-            <p>{it.updateConfirm.replace("{version}", info.latestVersion)}</p>
-            <div className="dialog-actions">
+            <DialogBody className="confirm-update-dialog">
+              <div className="confirm-update-icon" aria-hidden="true">
+                <Download size={22} />
+              </div>
+              <p>{it.updateConfirm.replace("{version}", info.latestVersion)}</p>
+            </DialogBody>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="cancel"
@@ -789,8 +789,8 @@ export function SystemUpdate({
                 <Download size={17} />
                 {it.updateNow}
               </Button>
-            </div>
-          </form>
+            </DialogFooter>
+          </DialogForm>
         </FormDialog>
       )}
     </div>

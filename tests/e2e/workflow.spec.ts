@@ -5785,6 +5785,21 @@ test("system update page checks a private release and shows real progress", asyn
   const confirmation = page.getByRole("dialog");
   await expect(confirmation).toContainText("Conferma aggiornamento");
   await expect(confirmation).toContainText("1.11.58");
+  const confirmationForm = confirmation.locator(":scope > .dialog-form-layout");
+  await expect(
+    confirmationForm.locator(":scope > .dialog-body.confirm-update-dialog"),
+  ).toBeVisible();
+  await expect(
+    confirmationForm.locator(":scope > .dialog-footer"),
+  ).toBeVisible();
+  await confirmation
+    .getByRole("button", { name: "Annulla", exact: true })
+    .click();
+  await expect(confirmation).toHaveCount(0);
+  expect(updateStarted).toBe(false);
+  await releaseCard
+    .getByRole("button", { name: "Aggiorna ora", exact: true })
+    .click();
   await confirmation
     .getByRole("button", { name: "Aggiorna ora", exact: true })
     .click();
