@@ -319,7 +319,7 @@ export default async function Detail({
 
   if (order.type === "QUICK_SERVICE")
     return (
-      <>
+      <div className="order-detail-page">
         <BackButton href={backHref} label={it.nav.orders} />
         <PageHeader
           title={orderCode(order.code)}
@@ -436,7 +436,7 @@ export default async function Detail({
           </div>
         </div>
         {printView}
-      </>
+      </div>
     );
 
   const events: TimelineEvent[] = [];
@@ -612,7 +612,7 @@ export default async function Detail({
   const latestEvent = events.at(-1);
 
   return (
-    <>
+    <div className="order-detail-page">
       <BackButton href={backHref} label={it.nav.orders} />
       <PageHeader
         title={orderCode(order.code)}
@@ -1189,6 +1189,6 @@ export default async function Detail({
         </div>
       </div>
       {printView}
-    </>
+    </div>
   );
 }

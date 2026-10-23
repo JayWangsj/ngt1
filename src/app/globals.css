@@ -2303,6 +2303,26 @@ textarea {
   color: var(--muted);
   font-size: 11px;
 }
+.order-detail-page > .page-header {
+  margin-bottom: 0;
+}
+.order-detail-page > .page-header .eyebrow {
+  margin-bottom: 4px;
+}
+.order-detail-page > .page-header h1 {
+  margin-bottom: 4px;
+  font-size: 30px;
+}
+.order-detail-page .detail-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px 24px;
+  margin: 16px 0 24px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
 .detail-status-control .inline-order-control {
   display: flex;
   flex-wrap: wrap;
@@ -2314,6 +2334,10 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+.order-detail-page .detail-primary-actions {
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .stage-primary-action {
   min-height: 36px;
@@ -2548,6 +2572,10 @@ textarea {
   grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
   gap: 24px;
 }
+.order-detail-page .detail-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  align-items: start;
+}
 .order-lock-notice {
   margin: -6px 0 20px;
   padding: 9px 12px;
@@ -2572,10 +2600,19 @@ textarea {
     box-shadow var(--motion-base) var(--ease-ui),
     background var(--motion-base) var(--ease-ui);
 }
+.order-detail-page .order-detail-card {
+  --detail-card-padding: 20px;
+}
 .order-detail-card.is-editable:hover:not(.is-editing) {
   transform: translateY(-1px) scale(1.003);
   border-color: #e7c95a;
   box-shadow: 0 7px 18px #8060000c;
+}
+.order-detail-page .order-detail-card.is-editable:hover:not(.is-editing) {
+  transform: none;
+  border-color: #dfd6b5;
+  background: #fffefb;
+  box-shadow: none;
 }
 .order-detail-card.is-editing {
   transform: translateY(0) scale(1.002);
@@ -2618,11 +2655,17 @@ textarea {
   text-align: left;
   transition: color 150ms ease-out;
 }
+.order-detail-page .order-card-toggle {
+  font-size: 16px;
+}
 .order-card-summary {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+.order-detail-page .order-card-summary {
+  font-size: 12px;
 }
 .order-card-toggle h2 {
   margin: 0;
@@ -2701,6 +2744,9 @@ textarea {
   overflow: visible;
   visibility: visible;
 }
+.order-detail-page .order-card-collapse.is-expanded .order-card-body {
+  padding-top: 16px;
+}
 .order-customer-link {
   display: inline-flex;
   align-items: center;
@@ -2735,8 +2781,15 @@ textarea {
   flex-direction: column;
   gap: 22px;
 }
+.order-detail-page .stack {
+  gap: 16px;
+}
 .padded {
   padding: 24px;
+}
+.order-detail-page .detail-grid .panel > h2 {
+  margin-bottom: 16px;
+  font-size: 16px;
 }
 .padded .section-heading {
   padding: 0;
@@ -2753,11 +2806,20 @@ textarea {
   padding: 10px 0;
   font-size: 12px;
 }
+.order-detail-page .detail-list > div {
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+}
 .detail-list > div:last-child {
   border: 0;
 }
 .detail-list dt {
   color: var(--muted);
+}
+.order-detail-page .detail-list dt {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 .detail-list dd {
   margin: 0;
@@ -2797,6 +2859,10 @@ textarea {
   background: var(--teal);
   color: #d7eee6;
 }
+.order-detail-page .balance-card {
+  border-color: transparent;
+  box-shadow: var(--shadow-1);
+}
 .balance-card > strong {
   display: block;
   font-size: 38px;
@@ -2804,12 +2870,26 @@ textarea {
   color: white;
   margin: 10px 0 18px;
 }
+.order-detail-page .balance-card > strong {
+  margin: 8px 0 16px;
+  font-size: 36px;
+}
 .balance-card > div {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
   border-top: 1px solid #ffffff30;
   padding-top: 16px;
+}
+.order-detail-page .balance-card > div {
+  display: grid;
+  justify-content: stretch;
+  gap: 8px;
+}
+.order-detail-page .balance-card > div > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
 }
 .payment-row {
   padding: 12px 0;
@@ -3104,6 +3184,16 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   .detail-grid {
     grid-template-columns: minmax(0, 1.5fr) minmax(265px, 1fr);
   }
+  .order-detail-page .detail-grid {
+    grid-template-columns: minmax(0, 1.45fr) minmax(280px, 1fr);
+    gap: 16px;
+  }
+  .order-detail-page .detail-status {
+    grid-template-columns: 1fr 1fr;
+  }
+  .order-detail-page .detail-primary-actions {
+    grid-column: 1 / -1;
+  }
   .form-grid.three {
     grid-template-columns: 1fr 1fr;
   }
@@ -3211,6 +3301,9 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     grid-template-columns: repeat(2, 1fr);
   }
   .detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-detail-page .detail-grid {
     grid-template-columns: 1fr;
   }
   .detail-grid > .stack:last-child {
@@ -3332,6 +3425,15 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     flex-wrap: wrap;
     gap: 10px;
   }
+  .order-detail-page > .page-header h1 {
+    font-size: 24px;
+  }
+  .order-detail-page .detail-status {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 12px 0 16px;
+    padding: 12px;
+  }
   .detail-primary-actions {
     flex-wrap: wrap;
   }
@@ -3344,12 +3446,26 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   .padded {
     padding: 20px;
   }
+  .order-detail-page .padded {
+    padding: 16px;
+  }
   .order-detail-card {
     --detail-card-padding: 20px;
+  }
+  .order-detail-page .order-detail-card {
+    --detail-card-padding: 16px;
   }
   .detail-list > div {
     grid-template-columns: 120px 1fr;
     gap: 10px;
+  }
+  .order-detail-page .detail-list > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 12px 0;
+  }
+  .order-detail-page .balance-card > strong {
+    font-size: 30px;
   }
   .detail-grid > .stack:last-child {
     display: flex;
@@ -4190,6 +4306,11 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     max-width: none;
   }
   .main-content:has(> .service-order-print) > :not(.service-order-print) {
+    display: none !important;
+  }
+  .main-content:has(.order-detail-page > .service-order-print)
+    > .order-detail-page
+    > :not(.service-order-print) {
     display: none !important;
   }
   .service-order-print {
