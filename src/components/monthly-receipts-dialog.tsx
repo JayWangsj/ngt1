@@ -71,24 +71,26 @@ export function MonthlyReceiptsDialog({
           onClose={close}
         >
           <div data-form-dialog-body className="monthly-receipt-dialog">
-            <div className="monthly-receipt-picker">
-              <span>{it.month}</span>
-              <DatePicker
-                type="month"
-                value={month}
-                max={maxMonth}
-                aria-label={it.month}
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  if (value)
-                    router.replace(receiptUrl(value), { scroll: false });
-                }}
-              />
-            </div>
-            <div className="monthly-receipt-total">
-              <span>{it.dashboard.selectedMonthTotal}</span>
-              <strong>{money(summary.amount)}</strong>
-              <small>{rangeLabel}</small>
+            <div className="monthly-receipt-overview">
+              <div className="monthly-receipt-picker">
+                <span>{it.month}</span>
+                <DatePicker
+                  type="month"
+                  value={month}
+                  max={maxMonth}
+                  aria-label={it.month}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    if (value)
+                      router.replace(receiptUrl(value), { scroll: false });
+                  }}
+                />
+              </div>
+              <div className="monthly-receipt-total">
+                <span>{it.dashboard.selectedMonthTotal}</span>
+                <strong>{money(summary.amount)}</strong>
+                <small>{rangeLabel}</small>
+              </div>
             </div>
             <section
               className="monthly-receipt-comparisons"

@@ -47,6 +47,23 @@ test.beforeEach(async () => {
   await seedTestDatabase();
 });
 
+async function loadCompiledGlobalStyles(page: Page) {
+  const nextDist = resolve(process.cwd(), process.env.NEXT_DIST_DIR || ".next");
+  const globalStylesheet = [
+    resolve(nextDist, "dev", "static", "chunks"),
+    resolve(nextDist, "static", "chunks"),
+  ]
+    .filter(existsSync)
+    .flatMap((directory) =>
+      readdirSync(directory)
+        .filter((file) => file.includes("globals") && file.endsWith(".css"))
+        .map((file) => resolve(directory, file)),
+    )[0];
+  expect(globalStylesheet).toBeTruthy();
+  await page.setContent("<main></main>");
+  await page.addStyleTag({ path: globalStylesheet });
+}
+
 async function computedContrast(
   locator: Locator,
   foreground: "color" | "borderTopColor" | "outlineColor",
@@ -239,21 +256,7 @@ test("shared actions keep visible focus, stable hover, and clear disabled feedba
 test("dialog and record actions keep clear spacing and hover feedback", async ({
   page,
 }) => {
-  const nextDist = resolve(process.cwd(), process.env.NEXT_DIST_DIR || ".next");
-  const chunkDirectories = [
-    resolve(nextDist, "dev", "static", "chunks"),
-    resolve(nextDist, "static", "chunks"),
-  ];
-  const globalStylesheet = chunkDirectories
-    .filter(existsSync)
-    .flatMap((directory) =>
-      readdirSync(directory)
-        .filter((file) => file.includes("globals") && file.endsWith(".css"))
-        .map((file) => resolve(directory, file)),
-    )[0];
-  expect(globalStylesheet).toBeTruthy();
-  await page.setContent("<main></main>");
-  await page.addStyleTag({ path: globalStylesheet });
+  await loadCompiledGlobalStyles(page);
   await page.evaluate(() => {
     const fixture = document.createElement("div");
     fixture.id = "global-action-fixture";
@@ -324,6 +327,70 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   await expect(remove).toBeVisible();
   await remove.hover();
   await expect(remove).toHaveCSS("background-color", "rgb(251, 233, 232)");
+});
+
+test("monthly receipt dialog uses a compact responsive overview", async ({
+  page,
+}) => {
+  await loadCompiledGlobalStyles(page);
+  await page.evaluate(() => {
+    const dialog = document.createElement("div");
+    dialog.className = "form-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-heading"><div><h2>Monthly receipts</h2><p>Description</p></div></div>
+      <div data-form-dialog-body class="monthly-receipt-dialog">
+        <div class="monthly-receipt-overview">
+          <div class="monthly-receipt-picker">
+            <span>Month</span>
+            <div class="date-picker"><input type="month" value="2026-10" /></div>
+          </div>
+          <div class="monthly-receipt-total">
+            <span>Total</span><strong>119,00 €</strong><small>1–23 October</small>
+          </div>
+        </div>
+        <section class="monthly-receipt-comparisons">
+          <h3>Previous years</h3>
+          <div class="monthly-receipt-comparison"><span>2025</span><strong>100,00 €</strong><small>+19%</small></div>
+        </section>
+      </div>
+    `;
+    document.body.append(dialog);
+  });
+
+  const dialog = page.locator(".form-dialog");
+  const overview = page.locator(".monthly-receipt-overview");
+  const picker = page.locator(".monthly-receipt-picker");
+  const control = picker.locator(".date-picker");
+  const total = page.locator(".monthly-receipt-total");
+  const amount = page.locator(".monthly-receipt-comparison > strong");
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(dialog).toHaveCSS("width", "680px");
+  const [desktopPicker, desktopControl, desktopTotal] = await Promise.all([
+    picker.boundingBox(),
+    control.boundingBox(),
+    total.boundingBox(),
+  ]);
+  expect(desktopControl!.width).toBeLessThanOrEqual(256);
+  expect(desktopPicker!.y).toBeCloseTo(desktopTotal!.y, 0);
+  await expect(amount).toHaveCSS("text-align", "right");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const [mobileOverview, mobilePicker, mobileTotal] = await Promise.all([
+    overview.boundingBox(),
+    picker.boundingBox(),
+    total.boundingBox(),
+  ]);
+  expect(mobilePicker!.x).toBeCloseTo(mobileTotal!.x, 0);
+  expect(mobileTotal!.y).toBeGreaterThanOrEqual(
+    mobilePicker!.y + mobilePicker!.height,
+  );
+  expect(mobileOverview!.width).toBeLessThanOrEqual(342);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 });
 
 test("workspace list pages fit desktop, tablet, and mobile viewports", async ({

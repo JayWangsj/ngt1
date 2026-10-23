@@ -238,17 +238,7 @@ export default async function Dashboard({
 
   return (
     <DashboardMotion fingerprint={fingerprint} locale={locale}>
-      <PageHeader
-        title={it.today}
-        description={it.dashboardDescription}
-        actionNode={
-          canViewReceipts && receiptSummary ? (
-            <form className="date-strip dashboard-date-filter">
-              <DatePicker name="day" defaultValue={today} />
-            </form>
-          ) : undefined
-        }
-      />
+      <PageHeader title={it.today} description={it.dashboardDescription} />
       <div
         className={`metrics dashboard-kpis${
           canViewReceipts && receiptSummary ? " has-receipts" : ""
@@ -266,13 +256,18 @@ export default async function Dashboard({
             </div>
             <div className="dashboard-receipt-summary">
               <div className="dashboard-day-receipts">
-                <span>{it.receivedOnDay}</span>
-                <strong
-                  data-count={receiptSummary.selectedDay}
-                  data-count-type="money"
-                >
-                  {money(receiptSummary.selectedDay)}
-                </strong>
+                <div className="dashboard-day-total">
+                  <span>{it.receivedOnDay}</span>
+                  <strong
+                    data-count={receiptSummary.selectedDay}
+                    data-count-type="money"
+                  >
+                    {money(receiptSummary.selectedDay)}
+                  </strong>
+                </div>
+                <form className="date-strip dashboard-date-filter">
+                  <DatePicker name="day" defaultValue={today} />
+                </form>
               </div>
               <div className="dashboard-month-receipts">
                 <div className="dashboard-month-total">

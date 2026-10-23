@@ -3624,7 +3624,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   margin: 0 0 16px;
 }
 .dashboard-kpis.has-receipts {
-  grid-template-columns: minmax(280px, 1.55fr) repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(320px, 1.8fr) repeat(3, minmax(0, 1fr));
 }
 .dashboard {
   width: min(100%, 1440px);
@@ -3645,22 +3645,20 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .dashboard-date-filter {
   display: flex;
   align-items: center;
+  margin: 0;
 }
 .dashboard-date-filter .date-picker {
   flex: 0 0 auto;
-  width: auto;
+  width: min(192px, 100%);
 }
 .dashboard-date-filter input {
-  width: auto;
+  width: 100%;
   cursor: pointer;
-}
-.dashboard > .page-header .dashboard-date-filter {
-  margin: 0;
 }
 .dashboard-receipts {
   margin: 0;
   border-radius: var(--radius);
-  padding: 11px 14px;
+  padding: 16px;
 }
 .dashboard-receipts-heading {
   margin-bottom: 4px;
@@ -3677,17 +3675,22 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .dashboard-day-receipts {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.dashboard-day-total {
+  display: grid;
+  min-width: 0;
   gap: 4px;
 }
-.dashboard-day-receipts > span,
+.dashboard-day-total > span,
 .dashboard-month-total > span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
-.dashboard-day-receipts > strong {
+.dashboard-day-total > strong {
   color: var(--ink);
   font-size: 22px;
   font-variant-numeric: tabular-nums;
@@ -3723,23 +3726,28 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   flex: 0 0 auto;
 }
 .form-dialog:has(.monthly-receipt-dialog) {
-  width: min(560px, calc(100vw - 32px));
+  width: min(680px, calc(100vw - 32px));
 }
 .monthly-receipt-dialog {
   display: grid;
-  gap: 20px;
+  gap: 24px;
+}
+.monthly-receipt-overview {
+  display: grid;
+  grid-template-columns: 256px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
 }
 .monthly-receipt-picker {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
 .monthly-receipt-picker .date-picker {
-  width: min(250px, 100%);
+  width: 100%;
 }
 .monthly-receipt-picker input {
   width: 100%;
@@ -3748,7 +3756,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   display: grid;
   gap: 4px;
   border-radius: 12px;
-  padding: 20px;
+  padding: 16px;
   background: #fff9e8;
 }
 .monthly-receipt-total > span,
@@ -3765,23 +3773,24 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   line-height: 1.2;
 }
 .monthly-receipt-comparisons h3 {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
 }
 .monthly-receipt-comparison {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: 64px minmax(0, 1fr) 48px;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
 .monthly-receipt-comparison > strong {
   color: var(--ink);
   font-size: 14px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .monthly-receipt-comparison > small {
   min-width: 44px;
@@ -4256,6 +4265,14 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   .dashboard-receipts {
     padding: 14px;
   }
+  .dashboard-day-receipts {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .dashboard-date-filter .date-picker {
+    width: 100%;
+  }
   .dashboard-month-receipts {
     align-items: flex-start;
     flex-direction: column;
@@ -4266,19 +4283,14 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   .dashboard > .page-header h1 {
     font-size: 27px;
   }
-  .dashboard > .page-header .dashboard-date-filter {
-    align-self: flex-start;
-  }
   .revenue-source-content {
     grid-template-columns: 1fr;
     justify-items: center;
   }
 }
 @media (max-width: 480px) {
-  .monthly-receipt-picker {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
+  .monthly-receipt-overview {
+    grid-template-columns: 1fr;
   }
   .monthly-receipt-picker .date-picker {
     width: 100%;

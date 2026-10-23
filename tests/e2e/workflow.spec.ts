@@ -2484,12 +2484,10 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   page,
 }) => {
   await seedDashboardReceipts();
-  await page.goto("/?day=2026-10-03");
+  await page.goto("/?day=2026-10-03", { waitUntil: "commit" });
   const receipts = page.locator(".dashboard-receipts");
   await expect(receipts).toBeVisible();
-  await expect(
-    page.locator(".dashboard > .page-header .dashboard-date-filter"),
-  ).toBeVisible();
+  await expect(receipts.locator(".dashboard-date-filter")).toBeVisible();
   await expect(receipts.locator(".dashboard-date-filter > span")).toHaveCount(
     0,
   );
@@ -2499,18 +2497,17 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
     name: "Incassi mensili",
     exact: true,
   });
-  await expect(monthlyReceipts).toHaveCSS(
+  await expect(monthlyReceipts).not.toHaveCSS(
     "border-top-color",
     "rgba(0, 0, 0, 0)",
   );
-  await expect(monthlyReceipts).toHaveCSS(
-    "background-color",
-    "rgba(0, 0, 0, 0)",
+  const monthlyReceiptsBackground = await monthlyReceipts.evaluate(
+    (button) => getComputedStyle(button).backgroundColor,
   );
   await monthlyReceipts.hover();
   await expect(monthlyReceipts).not.toHaveCSS(
     "background-color",
-    "rgba(0, 0, 0, 0)",
+    monthlyReceiptsBackground,
   );
   const charts = page.locator(".dashboard-charts");
   await expect(
@@ -2577,6 +2574,7 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await expect(page).toHaveURL(/day=2026-10-03.*receipts=2026-10/);
   const dialog = page.getByRole("dialog", { name: "Incassi mensili" });
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS("width", "680px");
   await expect(dialog.locator(".monthly-receipt-total")).toContainText(
     "140,00 €",
   );
@@ -2589,9 +2587,16 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await page.setViewportSize({ width: 1280, height: 900 });
   const monthControl = dialog.locator(".monthly-receipt-picker .date-picker");
   const monthPickerLayout = dialog.locator(".monthly-receipt-picker");
+  const monthOverview = dialog.locator(".monthly-receipt-overview");
+  const monthTotal = dialog.locator(".monthly-receipt-total");
   const monthPicker = dialog.locator(".date-picker-popover");
   const desktopLayoutBox = await monthPickerLayout.boundingBox();
   const desktopControlBox = await monthControl.boundingBox();
+  const desktopTotalBox = await monthTotal.boundingBox();
+  expect(desktopControlBox!.width).toBeLessThanOrEqual(256);
+  expect(
+    Math.abs(desktopLayoutBox!.y - desktopTotalBox!.y),
+  ).toBeLessThanOrEqual(1);
   await page.mouse.click(
     desktopLayoutBox!.x + 4,
     desktopControlBox!.y + desktopControlBox!.height / 2,
@@ -2623,16 +2628,27 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   ).toContainText("+100%");
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const [mobileLayoutBox, mobileLabelBox, mobileControlBox] = await Promise.all(
-    [
-      monthPickerLayout.boundingBox(),
-      monthPickerLayout.locator("> span").boundingBox(),
-      monthControl.boundingBox(),
-    ],
-  );
+  const [
+    mobileOverviewBox,
+    mobileLayoutBox,
+    mobileLabelBox,
+    mobileControlBox,
+    mobileTotalBox,
+  ] = await Promise.all([
+    monthOverview.boundingBox(),
+    monthPickerLayout.boundingBox(),
+    monthPickerLayout.locator("> span").boundingBox(),
+    monthControl.boundingBox(),
+    monthTotal.boundingBox(),
+  ]);
   expect(mobileLabelBox!.y + mobileLabelBox!.height).toBeLessThanOrEqual(
     mobileControlBox!.y,
   );
+  expect(mobileLayoutBox!.x).toBeCloseTo(mobileTotalBox!.x, 0);
+  expect(mobileTotalBox!.y).toBeGreaterThanOrEqual(
+    mobileLayoutBox!.y + mobileLayoutBox!.height,
+  );
+  expect(mobileOverviewBox!.width).toBeLessThanOrEqual(342);
   await page.mouse.click(
     mobileLayoutBox!.x + 4,
     (mobileLabelBox!.y + mobileControlBox!.y) / 2,
