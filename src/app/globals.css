@@ -9431,6 +9431,16 @@ details.secondary-actions {
 .price-option-enabled-switch input:checked ~ span:last-child {
   color: #806000;
 }
+.price-option-flags {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 16px;
+}
+.price-option-flags .checkbox {
+  width: fit-content;
+  margin: 0;
+}
 .price-option-default-action {
   display: inline-flex;
   min-height: 28px;

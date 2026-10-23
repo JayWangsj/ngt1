@@ -6960,6 +6960,26 @@ test("price editor and mobile yellow layout support both languages", async ({
     exact: true,
   });
   await expect(newPriceOption).toBeVisible();
+  const optionFlags = newPriceOption.locator(".price-option-flags");
+  const enabledFlag = newPriceOption.getByRole("checkbox", {
+    name: "Attiva",
+    exact: true,
+  });
+  const defaultFlag = newPriceOption.getByRole("checkbox", {
+    name: "Opzione consigliata predefinita",
+    exact: true,
+  });
+  const [optionFlagsBox, enabledLabelBox] = await Promise.all([
+    optionFlags.boundingBox(),
+    enabledFlag.locator("..").boundingBox(),
+  ]);
+  expect(enabledLabelBox!.width).toBeLessThan(optionFlagsBox!.width);
+  await page.mouse.click(
+    optionFlagsBox!.x + optionFlagsBox!.width - 4,
+    enabledLabelBox!.y + enabledLabelBox!.height / 2,
+  );
+  await expect(enabledFlag).toBeChecked();
+  await expect(defaultFlag).not.toBeChecked();
   await chooseBusinessOption(
     page,
     "Ricambio richiesto",

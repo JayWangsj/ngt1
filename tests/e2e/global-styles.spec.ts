@@ -428,6 +428,46 @@ test("monthly receipt dialog uses a compact responsive overview", async ({
   ).toBe(true);
 });
 
+test("price option flags only toggle from their compact labels", async ({
+  page,
+}) => {
+  await page.setContent("<main></main>");
+  await page.addStyleTag({
+    path: resolve(process.cwd(), "src/app/globals.css"),
+  });
+  await page.evaluate(() => {
+    const flags = document.createElement("div");
+    flags.className = "form-row price-option-flags";
+    flags.innerHTML = `
+      <label class="checkbox"><input type="checkbox" checked />Enabled</label>
+      <label class="checkbox"><input type="checkbox" />Default option</label>
+    `;
+    document.body.append(flags);
+  });
+
+  const flags = page.locator(".price-option-flags");
+  const enabled = page.getByRole("checkbox", { name: "Enabled" });
+  const defaultOption = page.getByRole("checkbox", {
+    name: "Default option",
+  });
+  const enabledLabel = enabled.locator("..");
+  const [flagsBox, labelBox] = await Promise.all([
+    flags.boundingBox(),
+    enabledLabel.boundingBox(),
+  ]);
+  expect(labelBox!.width).toBeLessThan(flagsBox!.width);
+
+  await page.mouse.click(
+    flagsBox!.x + flagsBox!.width - 4,
+    labelBox!.y + labelBox!.height / 2,
+  );
+  await expect(enabled).toBeChecked();
+  await expect(defaultOption).not.toBeChecked();
+
+  await enabledLabel.click();
+  await expect(enabled).not.toBeChecked();
+});
+
 test("workspace list pages fit desktop, tablet, and mobile viewports", async ({
   page,
 }) => {

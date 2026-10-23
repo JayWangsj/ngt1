@@ -5694,7 +5694,7 @@ function PriceRuleOptionForm({
             onChange={(event) => setNotes(event.target.value)}
           />
         </Field>
-        <div className="form-row">
+        <div className="form-row price-option-flags">
           <label className="checkbox">
             <input
               type="checkbox"
