@@ -2,6 +2,41 @@ import { expect, test } from "./fixtures";
 import type { Locator } from "@playwright/test";
 import { seedTestDatabase } from "../../scripts/seed-test";
 
+const elevationSurfaces = [
+  { id: "dialog", className: "form-dialog", token: "--shadow-5" },
+  {
+    id: "status-menu",
+    className: "status-dropdown-menu",
+    token: "--shadow-3",
+  },
+  {
+    id: "action-menu",
+    className: "secondary-actions-menu",
+    token: "--shadow-3",
+  },
+  {
+    id: "business-select",
+    className: "business-select-panel",
+    token: "--shadow-3",
+  },
+  {
+    id: "date-picker",
+    className: "date-picker-popover",
+    token: "--shadow-4",
+  },
+  {
+    id: "inventory-filter",
+    className: "inventory-device-popover",
+    token: "--shadow-4",
+  },
+  { id: "chart-tooltip", className: "revenue-tooltip", token: "--shadow-3" },
+  {
+    id: "update-notification",
+    className: "update-notification",
+    token: "--shadow-2",
+  },
+] as const;
+
 test.beforeEach(async () => {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl || !new URL(databaseUrl).pathname.endsWith("_test"))
@@ -101,6 +136,35 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
   expect(await computedContrast(primaryButton, "color")).toBeGreaterThanOrEqual(
     4.5,
   );
+
+  await page.evaluate((surfaces) => {
+    const fixture = document.createElement("div");
+    fixture.id = "global-shadow-fixtures";
+    fixture.style.cssText =
+      "position: absolute; left: -10000px; top: 0; visibility: hidden";
+    for (const surface of surfaces) {
+      const element = document.createElement("div");
+      element.id = `global-shadow-${surface.id}`;
+      element.className = surface.className;
+      fixture.append(element);
+    }
+    document.body.append(fixture);
+  }, elevationSurfaces);
+
+  for (const surface of elevationSurfaces) {
+    const usesToken = await page
+      .locator(`#global-shadow-${surface.id}`)
+      .evaluate((element, token) => {
+        const probe = document.createElement("div");
+        probe.style.boxShadow = `var(${token})`;
+        element.parentElement?.append(probe);
+        const expected = getComputedStyle(probe).boxShadow;
+        const actual = getComputedStyle(element).boxShadow;
+        probe.remove();
+        return actual !== "none" && actual === expected;
+      }, surface.token);
+    expect(usesToken, `${surface.className} uses ${surface.token}`).toBe(true);
+  }
 });
 
 test("sidebar resize handle uses the defined action color", async ({

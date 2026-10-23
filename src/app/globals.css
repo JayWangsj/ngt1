@@ -18,9 +18,9 @@
   --danger-surface: hsl(4 80% 95%);
   --shadow-1: 0 1px 3px hsl(0 0% 0% / 12%);
   --shadow-2: 0 4px 6px hsl(0 0% 0% / 14%);
-  --shadow-3: 0 5px 15px hsl(0 0% 0% / 16%);
-  --shadow-4: 0 10px 24px hsl(0 0% 0% / 18%);
-  --shadow-5: 0 15px 35px hsl(0 0% 0% / 20%);
+  --shadow-3: 0 10px 28px hsl(0 0% 0% / 12%);
+  --shadow-4: 0 16px 38px hsl(0 0% 0% / 16%);
+  --shadow-5: 0 24px 70px hsl(0 0% 0% / 18%);
   --space-control-gap: 8px;
   --type-label: 12px;
   --type-control: 14px;
@@ -2390,7 +2390,7 @@ textarea {
   border: 1px solid #e1e5e4;
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 10px 28px rgb(30 45 40 / 12%);
+  box-shadow: var(--shadow-3);
   animation: status-menu-in 170ms var(--ease-ui);
 }
 @keyframes status-menu-in {
@@ -3728,7 +3728,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   border: 1px solid #e4deca;
   border-radius: 10px;
   background: #fffefa;
-  box-shadow: 0 12px 34px #4d43252e;
+  box-shadow: var(--shadow-3);
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, 5px);
@@ -5056,7 +5056,7 @@ details.secondary-actions {
   border: 1px solid #dce4e0;
   border-radius: 9px;
   background: var(--surface);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-3);
 }
 .secondary-actions-menu > button {
   display: flex;
@@ -7263,7 +7263,7 @@ details.secondary-actions {
   border: 1px solid rgb(191 128 20 / 35%);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-2);
   font-size: 12px;
 }
 .update-notification-copy {
@@ -7491,7 +7491,7 @@ details.secondary-actions {
   padding: 24px;
   background: white;
   color: #222;
-  box-shadow: 0 24px 70px rgb(25 32 29 / 18%);
+  box-shadow: var(--shadow-5);
 }
 .form-dialog::backdrop {
   background: rgb(24 29 27 / 42%);
@@ -8065,7 +8065,7 @@ details.secondary-actions {
   border: 1px solid #e0e4e2;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 16px 38px rgb(35 39 47 / 16%);
+  box-shadow: var(--shadow-4);
 }
 .date-picker-header {
   display: grid;
@@ -8475,7 +8475,7 @@ details.secondary-actions {
   border: 1px solid #e0e4e2;
   border-radius: 9px;
   background: #fff;
-  box-shadow: 0 10px 26px rgb(30 40 36 / 10%);
+  box-shadow: var(--shadow-3);
   transform-origin: top center;
 }
 .business-select-panel.is-entering {
@@ -10371,7 +10371,7 @@ summary.record-icon::-webkit-details-marker {
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--surface);
-  box-shadow: 0 16px 38px rgb(35 39 47 / 16%);
+  box-shadow: var(--shadow-4);
 }
 .inventory-device-popover::before {
   content: "";
