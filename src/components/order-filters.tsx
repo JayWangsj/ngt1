@@ -55,7 +55,7 @@ export function OrderFilters({
   );
 
   return (
-    <div className="filters">
+    <div className="filters order-filters">
       <label className="grow">
         <span className="sr-only">{it.search}</span>
         <input

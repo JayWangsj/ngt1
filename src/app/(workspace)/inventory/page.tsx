@@ -154,7 +154,7 @@ export default async function InventoryPage({
     },
   ];
   return (
-    <>
+    <div className="workspace-list-page inventory-page">
       <PageHeader
         title={it.inventory.title}
         description={it.inventory.description}
@@ -198,6 +198,6 @@ export default async function InventoryPage({
         projectCatalog={projectCatalog}
         initialStatus={initialStatus}
       />
-    </>
+    </div>
   );
 }

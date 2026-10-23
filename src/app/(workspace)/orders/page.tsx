@@ -229,7 +229,7 @@ export default async function Orders({
     return `/orders?${params.toString()}`;
   }
   return (
-    <>
+    <div className="workspace-list-page orders-page">
       <PageHeader
         title={it.nav.orders}
         description={it.ordersDescription}
@@ -313,6 +313,6 @@ export default async function Orders({
           </div>
         </nav>
       )}
-    </>
+    </div>
   );
 }

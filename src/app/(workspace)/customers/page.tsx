@@ -29,7 +29,7 @@ export default async function Customers() {
     orderBy: { name: "asc" },
   });
   return (
-    <>
+    <div className="workspace-list-page customers-page">
       <PageHeader
         title={it.nav.customers}
         description={it.customersDescription}
@@ -45,6 +45,6 @@ export default async function Customers() {
               ?.createdAt.toISOString() ?? null,
         }))}
       />
-    </>
+    </div>
   );
 }
