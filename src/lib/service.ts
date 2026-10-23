@@ -3021,6 +3021,7 @@ export async function updateReworkPart(
 
 export async function refundOrder(actorInput: Actor, id: string, raw: unknown) {
   const data = refundInput.parse(raw);
+  const refundAmount = cents(data.amount);
   return transact(async (tx) => {
     const actor = await currentActor(tx, actorInput);
     const existing = await tx.payment.findUnique({
@@ -3043,6 +3044,10 @@ export async function refundOrder(actorInput: Actor, id: string, raw: unknown) {
     );
     if (received <= 0)
       throw new BusinessError("Non ci sono incassi da rimborsare.");
+    if (refundAmount <= 0 || refundAmount > received)
+      throw new BusinessError(
+        "L'importo del rimborso deve essere maggiore di zero e non superare l'incassato.",
+      );
     const allocations = new Map<string, number>();
     for (const allocation of order.payments.flatMap(
       (payment) => payment.allocations,
@@ -3051,22 +3056,43 @@ export async function refundOrder(actorInput: Actor, id: string, raw: unknown) {
         allocation.source,
         (allocations.get(allocation.source) ?? 0) + cents(allocation.amount),
       );
+    const sourceAllocations = [...allocations.entries()].filter(
+      ([, amount]) => amount > 0,
+    );
+    const allocatedTotal = sourceAllocations.reduce(
+      (sum, [, amount]) => sum + amount,
+      0,
+    );
+    let allocatedRefund = 0;
+    const refundAllocations = sourceAllocations.length
+      ? sourceAllocations.map(([source, sourceAmount], index) => {
+          const amount =
+            index === sourceAllocations.length - 1
+              ? refundAmount - allocatedRefund
+              : Math.floor((refundAmount * sourceAmount) / allocatedTotal);
+          allocatedRefund += amount;
+          return { source, amount };
+        })
+      : [
+          {
+            source: order.type === "QUICK_SERVICE" ? "QUICK_SERVICE" : "REPAIR",
+            amount: refundAmount,
+          },
+        ];
     const payment = await tx.payment.create({
       data: {
         requestId: data.requestId,
         orderId: id,
-        amount: decimal(-received),
+        amount: decimal(-refundAmount),
         method: data.method,
         kind: "REFUND",
         actorId: actor.id,
         actorName: actor.name,
         allocations: {
-          create: [...allocations.entries()]
-            .filter(([, amount]) => amount > 0)
-            .map(([source, amount]) => ({
-              source: source as "REPAIR" | "RETAIL" | "QUICK_SERVICE",
-              amount: decimal(-amount),
-            })),
+          create: refundAllocations.map(({ source, amount }) => ({
+            source: source as "REPAIR" | "RETAIL" | "QUICK_SERVICE",
+            amount: decimal(-amount),
+          })),
         },
       },
     });
@@ -3086,7 +3112,7 @@ export async function refundOrder(actorInput: Actor, id: string, raw: unknown) {
     });
     await audit(tx, actor, id, "REFUND_ISSUED", {
       paymentId: payment.id,
-      amount: decimal(received),
+      amount: decimal(refundAmount),
       method: data.method,
       originalMethods: [...new Set(order.payments.map((item) => item.method))],
       reason: data.reason,

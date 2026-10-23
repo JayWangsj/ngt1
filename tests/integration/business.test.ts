@@ -1479,11 +1479,13 @@ describe("PostgreSQL workflow", () => {
     await refundOrder(staff, created.id, {
       requestId,
       method: "CASH",
+      amount: "100",
       reason: "Cliente non soddisfatto",
     });
     await refundOrder(staff, created.id, {
       requestId,
       method: "CASH",
+      amount: "100",
       reason: "Cliente non soddisfatto",
     });
     const order = await db.workOrder.findUniqueOrThrow({
@@ -1519,6 +1521,53 @@ describe("PostgreSQL workflow", () => {
     expect(
       await db.auditLog.count({
         where: { entityId: created.id, action: "REFUND_ISSUED" },
+      }),
+    ).toBe(1);
+  });
+  it("allows one partial refund and rejects a second refund request", async () => {
+    const created = await createOrder(staff, input({ deposit: "100" }));
+    await changeStatus(staff, created.id, { status: "REPAIRING" });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+
+    await refundOrder(staff, created.id, {
+      requestId: randomUUID(),
+      amount: "35.50",
+      method: "CARD",
+      reason: "Rimborso parziale",
+    });
+
+    const order = await db.workOrder.findUniqueOrThrow({
+      where: { id: created.id },
+      include: orderInclude,
+    });
+    expect(order.status).toBe("REFUNDED");
+    expect(order.payments.map((payment) => payment.amount.toString())).toEqual([
+      "100",
+      "-35.5",
+    ]);
+    expect(
+      order.payments
+        .at(-1)
+        ?.allocations.reduce(
+          (sum, allocation) => sum + Number(allocation.amount),
+          0,
+        ),
+    ).toBe(-35.5);
+    await expect(
+      refundOrder(staff, created.id, {
+        requestId: randomUUID(),
+        amount: "1",
+        method: "CASH",
+        reason: "Secondo rimborso",
+      }),
+    ).rejects.toThrow("consegnata");
+    expect(
+      await db.payment.count({
+        where: { orderId: created.id, kind: "REFUND" },
       }),
     ).toBe(1);
   });

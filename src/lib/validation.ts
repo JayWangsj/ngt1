@@ -368,6 +368,7 @@ export const afterSalesInput = z.object({
 });
 export const refundInput = z.object({
   requestId: z.string().uuid(),
+  amount: amountInput,
   method: z.enum(["CASH", "CARD", "OTHER"]),
   reason: z.string().trim().min(1).max(2000),
 });

@@ -4625,6 +4625,7 @@ export function RefundForm({ id, received }: { id: string; received: number }) {
       action={(data) =>
         refundAction(id, {
           requestId,
+          amount: str(data, "amount"),
           method,
           reason: str(data, "reason"),
         })
@@ -4635,7 +4636,16 @@ export function RefundForm({ id, received }: { id: string; received: number }) {
         <input readOnly value={money(received)} />
       </Field>
       <Field label={it.afterSales.refundAmount}>
-        <input readOnly value={money(received)} />
+        <input
+          name="amount"
+          type="number"
+          min="0.01"
+          max={decimal(received)}
+          step="0.01"
+          defaultValue={decimal(received)}
+          inputMode="decimal"
+          required
+        />
       </Field>
       <Field label={it.afterSales.refundMethod}>
         <SimpleSelect
