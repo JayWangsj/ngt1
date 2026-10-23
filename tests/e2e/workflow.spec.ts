@@ -8345,6 +8345,28 @@ test("quick service editor saves only changed content", async ({ page }) => {
   await expect(save).toBeDisabled();
   await dialog.getByRole("button", { name: "Annulla", exact: true }).click();
 });
+test("quick service delete confirmation uses the shared dialog layout", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings/quick-services");
+  const row = page.locator(".catalog-manager-row").first();
+  await row.hover();
+  await row.getByRole("button", { name: /Elimina servizio/ }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Elimina servizio" });
+  const body = dialog.locator(":scope > .dialog-body.confirm-delete-dialog");
+  const footer = dialog.locator(":scope > .dialog-footer");
+  await expect(body).toBeVisible();
+  await expect(footer).toBeInViewport();
+  await expect(footer).toHaveCSS("flex-direction", "column");
+  await expect(
+    footer.getByRole("button", { name: "Annulla", exact: true }),
+  ).toBeEnabled();
+  await footer.getByRole("button", { name: "Annulla", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(row).toBeVisible();
+});
 test("customer dialog keeps filters and inputs on errors and allows deleted numbers again", async ({
   page,
 }) => {

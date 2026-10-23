@@ -7,7 +7,7 @@ import { DatePicker } from "./business-select";
 import { useMessages } from "./language";
 import { money } from "@/lib/domain";
 import { RecordIcon } from "./ui/record-icon";
-import { FormDialog } from "./forms";
+import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { Button } from "./ui/button";
 
 export type SaleHistoryRow = {
@@ -147,11 +147,7 @@ export function RetailSalesHistory({
             }
           }}
         >
-          <div
-            className="confirm-delete-dialog"
-            data-form-dialog-body
-            aria-busy={pending}
-          >
+          <DialogBody className="confirm-delete-dialog" aria-busy={pending}>
             <div className="confirm-delete-icon" aria-hidden="true">
               <Trash2 size={22} />
             </div>
@@ -161,28 +157,28 @@ export function RetailSalesHistory({
                 {error}
               </p>
             )}
-            <div className="dialog-actions">
-              <Button
-                type="button"
-                variant="cancel"
-                disabled={pending}
-                onClick={() => {
-                  setError("");
-                  setSaleToDelete(null);
-                }}
-              >
-                {it.cancel}
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                disabled={pending}
-                onClick={remove}
-              >
-                {it.retail.deleteSale}
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="cancel"
+              disabled={pending}
+              onClick={() => {
+                setError("");
+                setSaleToDelete(null);
+              }}
+            >
+              {it.cancel}
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={pending}
+              onClick={remove}
+            >
+              {it.retail.deleteSale}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
     </div>

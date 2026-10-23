@@ -3,7 +3,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Plus, Smartphone, Trash2 } from "lucide-react";
-import { CustomerForm, DeviceForm, FormDialog } from "./forms";
+import {
+  CustomerForm,
+  DeviceForm,
+  DialogBody,
+  DialogFooter,
+  FormDialog,
+} from "./forms";
 import { RecordIcon } from "./ui/record-icon";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
@@ -88,7 +94,7 @@ export function DeleteRecordDialog({
       }
       onClose={onClose}
     >
-      <div className="confirm-delete-dialog" data-form-dialog-body>
+      <DialogBody className="confirm-delete-dialog">
         <div className="confirm-delete-icon" aria-hidden="true">
           <Trash2 size={22} />
         </div>
@@ -103,15 +109,15 @@ export function DeleteRecordDialog({
             {translateError(error, locale)}
           </p>
         )}
-        <div className="dialog-actions">
-          <Button variant="cancel" disabled={pending} onClick={onClose}>
-            {it.cancel}
-          </Button>
-          <Button variant="danger" disabled={pending} onClick={remove}>
-            {kind === "customer" ? it.deleteCustomer : it.deleteDevice}
-          </Button>
-        </div>
-      </div>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="cancel" disabled={pending} onClick={onClose}>
+          {it.cancel}
+        </Button>
+        <Button variant="danger" disabled={pending} onClick={remove}>
+          {kind === "customer" ? it.deleteCustomer : it.deleteDevice}
+        </Button>
+      </DialogFooter>
     </FormDialog>
   );
 }

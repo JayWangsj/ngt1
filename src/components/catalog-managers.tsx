@@ -12,7 +12,7 @@ import { cents, decimal } from "@/lib/domain";
 import { useMessages } from "./language";
 import { Button } from "./ui/button";
 import { ToggleSwitch } from "./ui/toggle-switch";
-import { Field, FormDialog } from "./forms";
+import { DialogBody, DialogFooter, Field, FormDialog } from "./forms";
 import { RecordIcon } from "./ui/record-icon";
 
 export type QuickServiceView = {
@@ -272,11 +272,7 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
             }
           }}
         >
-          <div
-            className="confirm-delete-dialog"
-            data-form-dialog-body
-            aria-busy={pending}
-          >
+          <DialogBody className="confirm-delete-dialog" aria-busy={pending}>
             <div className="confirm-delete-icon" aria-hidden="true">
               <Trash2 size={22} />
             </div>
@@ -286,28 +282,28 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
                 {error}
               </p>
             )}
-            <div className="dialog-actions">
-              <Button
-                type="button"
-                variant="cancel"
-                disabled={pending}
-                onClick={() => {
-                  setError("");
-                  setDeleting(null);
-                }}
-              >
-                {it.cancel}
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                disabled={pending}
-                onClick={remove}
-              >
-                {it.quickService.delete}
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="cancel"
+              disabled={pending}
+              onClick={() => {
+                setError("");
+                setDeleting(null);
+              }}
+            >
+              {it.cancel}
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={pending}
+              onClick={remove}
+            >
+              {it.quickService.delete}
+            </Button>
+          </DialogFooter>
         </FormDialog>
       )}
     </>
