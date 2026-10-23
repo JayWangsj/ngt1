@@ -4823,6 +4823,35 @@ test("service order deletion uses the shared dialog form layout", async ({
   await expect(trigger).toBeVisible();
 });
 
+test("service order cancellation uses the shared dialog form layout", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  await save(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const status = page.locator(".detail-status .status-dropdown-trigger");
+  const initialStatus = (await status.innerText()).trim();
+  await status.click();
+  await page.getByRole("option", { name: "Annullato", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Annulla scheda" });
+  const form = dialog.locator(":scope > .dialog-form-layout");
+  const body = form.locator(":scope > .dialog-body");
+  const footer = form.locator(":scope > .dialog-footer");
+  await expect(body).toBeVisible();
+  await expect(footer).toBeInViewport();
+  await expect(footer).toHaveCSS("flex-direction", "column");
+  await body
+    .getByLabel("Motivo dell'annullamento (facoltativo)")
+    .fill("Bozza non salvata");
+
+  await footer.locator(".button-cancel").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(status).toBeVisible();
+  expect((await status.innerText()).trim()).toBe(initialStatus);
+});
+
 test("repair detail cancellation persists after a reload", async ({ page }) => {
   await fillOrder(page);
   await save(page);

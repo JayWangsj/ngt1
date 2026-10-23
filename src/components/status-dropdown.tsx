@@ -19,7 +19,13 @@ import {
   type StatusMutationSnapshot,
 } from "@/lib/domain";
 import { useMessages } from "./language";
-import { Field, FormDialog } from "./forms";
+import {
+  DialogBody,
+  DialogFooter,
+  DialogForm,
+  Field,
+  FormDialog,
+} from "./forms";
 import { WorkOrderCheckoutDialog } from "./work-order-products";
 import { Button } from "./ui/button";
 import { decimal, creatablePaymentMethods } from "@/lib/domain";
@@ -351,9 +357,7 @@ export function StatusDropdown({
           onClose={() => setCancelOpen(false)}
           restoreFocusComfortably={false}
         >
-          <form
-            className="dialog-form"
-            data-form-dialog-body
+          <DialogForm
             onSubmit={(event) => {
               event.preventDefault();
               void (async () => {
@@ -389,57 +393,59 @@ export function StatusDropdown({
               })();
             }}
           >
-            <Field label={it.cancelReasonOptional}>
-              <textarea
-                value={cancelReason}
-                onChange={(event) => setCancelReason(event.target.value)}
-                maxLength={2000}
-              />
-            </Field>
-            {currentOrder.status === "DIAGNOSING" &&
-              currentOrder.balance > 0 && (
-                <div className="cancel-diagnostic-payment">
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={collectDiagnostic}
-                      onChange={(event) =>
-                        setCollectDiagnostic(event.target.checked)
-                      }
-                    />
-                    {it.collectDiagnosticOnCancel}
-                  </label>
-                  {collectDiagnostic && (
-                    <div className="form-grid">
-                      <Field label={it.diagnosticBalance}>
-                        <input
-                          inputMode="decimal"
-                          value={cancelAmount}
-                          onChange={(event) =>
-                            setCancelAmount(event.target.value)
-                          }
-                        />
-                      </Field>
-                      <Field label={it.paymentMethod}>
-                        <SimpleSelect
-                          value={cancelMethod}
-                          onChange={(value) =>
-                            setCancelMethod(value as typeof cancelMethod)
-                          }
-                          placeholder={it.selectOption}
-                          ariaLabel={it.paymentMethod}
-                          options={creatablePaymentMethods.map((method) => ({
-                            value: method,
-                            label: it.methods[method],
-                          }))}
-                        />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              )}
-            {error && <p className="message error">{error}</p>}
-            <div className="dialog-actions">
+            <DialogBody>
+              <Field label={it.cancelReasonOptional}>
+                <textarea
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  maxLength={2000}
+                />
+              </Field>
+              {currentOrder.status === "DIAGNOSING" &&
+                currentOrder.balance > 0 && (
+                  <div className="cancel-diagnostic-payment">
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={collectDiagnostic}
+                        onChange={(event) =>
+                          setCollectDiagnostic(event.target.checked)
+                        }
+                      />
+                      {it.collectDiagnosticOnCancel}
+                    </label>
+                    {collectDiagnostic && (
+                      <div className="form-grid">
+                        <Field label={it.diagnosticBalance}>
+                          <input
+                            inputMode="decimal"
+                            value={cancelAmount}
+                            onChange={(event) =>
+                              setCancelAmount(event.target.value)
+                            }
+                          />
+                        </Field>
+                        <Field label={it.paymentMethod}>
+                          <SimpleSelect
+                            value={cancelMethod}
+                            onChange={(value) =>
+                              setCancelMethod(value as typeof cancelMethod)
+                            }
+                            placeholder={it.selectOption}
+                            ariaLabel={it.paymentMethod}
+                            options={creatablePaymentMethods.map((method) => ({
+                              value: method,
+                              label: it.methods[method],
+                            }))}
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+                )}
+              {error && <p className="message error">{error}</p>}
+            </DialogBody>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="cancel"
@@ -450,8 +456,8 @@ export function StatusDropdown({
               <Button variant="danger" disabled={pending}>
                 {it.confirmCancelOrder}
               </Button>
-            </div>
-          </form>
+            </DialogFooter>
+          </DialogForm>
         </FormDialog>
       )}
     </div>
