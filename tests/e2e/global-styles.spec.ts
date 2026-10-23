@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
 import { seedTestDatabase } from "../../scripts/seed-test";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const elevationSurfaces = [
@@ -47,27 +47,40 @@ test.beforeEach(async () => {
   await seedTestDatabase();
 });
 
-async function loadCompiledGlobalStyles(page: Page) {
+async function loadCompiledAppStyles(page: Page) {
+  await page.goto("/orders", { waitUntil: "commit" });
+
   const nextDist = resolve(process.cwd(), process.env.NEXT_DIST_DIR || ".next");
-  const chunkStylesheet = [
+  const compiledStylesheets = [
     resolve(nextDist, "dev", "static", "chunks"),
     resolve(nextDist, "static", "chunks"),
   ]
     .filter(existsSync)
     .flatMap((directory) =>
       readdirSync(directory)
-        .filter((file) => file.includes("globals") && file.endsWith(".css"))
+        .filter((file) => file.endsWith(".css"))
         .map((file) => resolve(directory, file)),
-    )[0];
-  const globalStylesheet =
-    chunkStylesheet ||
-    [
-      resolve(nextDist, "dev", "static", "css", "app", "layout.css"),
-      resolve(nextDist, "static", "css", "app", "layout.css"),
-    ].find(existsSync);
-  expect(globalStylesheet).toBeTruthy();
+    );
+  const fallbackStylesheets = [
+    resolve(nextDist, "dev", "static", "css", "app", "layout.css"),
+    resolve(nextDist, "static", "css", "app", "layout.css"),
+  ].filter(existsSync);
+  const appStylesheets = [
+    ...new Set([...compiledStylesheets, ...fallbackStylesheets]),
+  ].filter((stylesheet) => {
+    const css = readFileSync(stylesheet, "utf8");
+    return css.includes("--action-primary") || css.includes(".button-primary");
+  });
+
+  expect(appStylesheets.length).toBeGreaterThan(0);
+  expect(
+    appStylesheets.some((stylesheet) =>
+      readFileSync(stylesheet, "utf8").includes(".button-primary"),
+    ),
+  ).toBe(true);
   await page.setContent("<main></main>");
-  await page.addStyleTag({ path: globalStylesheet });
+  for (const stylesheet of appStylesheets)
+    await page.addStyleTag({ path: stylesheet });
 }
 
 async function computedContrast(
@@ -264,7 +277,7 @@ test("shared actions keep visible focus, stable hover, and clear disabled feedba
 test("dialog and record actions keep clear spacing and hover feedback", async ({
   page,
 }) => {
-  await loadCompiledGlobalStyles(page);
+  await loadCompiledAppStyles(page);
   await page.evaluate(() => {
     const fixture = document.createElement("div");
     fixture.id = "global-action-fixture";
@@ -431,7 +444,7 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
 test("monthly receipt dialog uses a compact responsive overview", async ({
   page,
 }) => {
-  await loadCompiledGlobalStyles(page);
+  await loadCompiledAppStyles(page);
   await page.evaluate(() => {
     const dialog = document.createElement("div");
     dialog.className = "form-dialog";

@@ -1,0 +1,135 @@
+.button,
+:global(.button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-control-gap);
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+.button:focus-visible,
+:global(.button):focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.primary,
+:global(.button-primary) {
+  background: var(--action-primary);
+  color: var(--action-primary-text);
+  box-shadow: var(--shadow-1);
+}
+
+.primary:hover,
+:global(.button-primary):hover {
+  background: var(--action-primary-hover);
+}
+
+.primary:active,
+:global(.button-primary):active {
+  background: var(--action-primary-active);
+}
+
+.outline,
+:global(.button-outline) {
+  border-color: var(--border-control);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+
+.cancel,
+:global(.button-cancel) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+.cancel:hover:not(:disabled),
+.cancel:focus-visible:not(:disabled),
+:global(.button-cancel):hover:not(:disabled),
+:global(.button-cancel):focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: var(--action-cancel-hover);
+  color: var(--text-primary);
+}
+
+.cancel:active:not(:disabled),
+:global(.button-cancel):active:not(:disabled) {
+  background: var(--action-cancel-active);
+}
+
+.secondary,
+:global(.button-secondary) {
+  border-color: transparent;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
+
+.outline:hover:not(:disabled),
+.outline:focus-visible:not(:disabled),
+.secondary:hover:not(:disabled),
+.secondary:focus-visible:not(:disabled),
+:global(.button-outline):hover:not(:disabled),
+:global(.button-outline):focus-visible:not(:disabled),
+:global(.button-secondary):hover:not(:disabled),
+:global(.button-secondary):focus-visible:not(:disabled) {
+  background: var(--action-secondary-hover);
+  color: var(--text-primary);
+}
+
+.outline:active:not(:disabled),
+.secondary:active:not(:disabled),
+:global(.button-outline):active:not(:disabled),
+:global(.button-secondary):active:not(:disabled) {
+  background: #fff1b6;
+}
+
+.tertiary,
+.ghost,
+:global(.button-tertiary),
+:global(.button-ghost) {
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.tertiary:hover:not(:disabled),
+.tertiary:focus-visible:not(:disabled),
+:global(.button-tertiary):hover:not(:disabled),
+:global(.button-tertiary):focus-visible:not(:disabled) {
+  background: transparent;
+  color: var(--action-hover);
+}
+
+.ghost:hover:not(:disabled),
+:global(.button-ghost):hover:not(:disabled) {
+  border-color: #806000;
+  background: #fff1b6;
+  color: var(--action-hover);
+}
+
+.ghost:focus-visible:not(:disabled),
+:global(.button-ghost):focus-visible:not(:disabled) {
+  background: transparent;
+  color: var(--action-hover);
+}
+
+.danger,
+:global(.button-danger) {
+  border-color: #d58a87;
+  background: var(--danger-surface);
+  color: var(--danger);
+}

@@ -3,16 +3,18 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-const variants = cva("button", {
+import styles from "./button.module.css";
+
+const variants = cva(clsx(styles.button, "button"), {
   variants: {
     variant: {
-      default: "button-primary",
-      outline: "button-outline",
-      cancel: "button-cancel",
-      secondary: "button-secondary",
-      tertiary: "button-tertiary",
-      ghost: "button-ghost",
-      danger: "button-danger",
+      default: clsx(styles.primary, "button-primary"),
+      outline: clsx(styles.outline, "button-outline"),
+      cancel: clsx(styles.cancel, "button-cancel"),
+      secondary: clsx(styles.secondary, "button-secondary"),
+      tertiary: clsx(styles.tertiary, "button-tertiary"),
+      ghost: clsx(styles.ghost, "button-ghost"),
+      danger: clsx(styles.danger, "button-danger"),
     },
   },
   defaultVariants: { variant: "default" },
