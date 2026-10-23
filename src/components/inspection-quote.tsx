@@ -6,6 +6,9 @@ import { completeInspectionAction } from "@/app/actions";
 import { settlement } from "@/lib/domain";
 import { useBusinessDay } from "./business-date";
 import {
+  DialogBody,
+  DialogFooter,
+  DialogForm,
   Field,
   FormDialog,
   ItemsEditor,
@@ -92,9 +95,8 @@ export function CompleteInspectionButton({
       </Button>
       {open && (
         <FormDialog title={it.completeInspection} onClose={close}>
-          <form
-            className="dialog-form inspection-complete-form"
-            data-form-dialog-body
+          <DialogForm
+            className="inspection-complete-form"
             aria-busy={pending}
             onSubmit={async (event) => {
               event.preventDefault();
@@ -120,87 +122,89 @@ export function CompleteInspectionButton({
               }
             }}
           >
-            <FaultSelector
-              category={device.category}
-              items={faults}
-              selected={selectedFaults}
-              disabled={pending}
-              onChange={setSelectedFaults}
-              onItemsChange={setFaults}
-            />
-            {selectedFaults.length > 0 && (
-              <div className="inspection-progressive-reveal">
-                <Field label={`${it.faultNotes} (${it.optional})`}>
-                  <textarea
-                    rows={3}
-                    maxLength={2000}
-                    value={faultNote}
-                    onChange={(event) => setFaultNote(event.target.value)}
-                  />
-                </Field>
-                <div className="compact-date-field">
-                  <Field label={it.dueDate}>
-                    <DatePicker
-                      min={today}
-                      quickDays={[0, 1, 2, 3, 7]}
-                      value={dueDate}
-                      onChange={(event) => setDueDate(event.target.value)}
+            <DialogBody>
+              <FaultSelector
+                category={device.category}
+                items={faults}
+                selected={selectedFaults}
+                disabled={pending}
+                onChange={setSelectedFaults}
+                onItemsChange={setFaults}
+              />
+              {selectedFaults.length > 0 && (
+                <div className="inspection-progressive-reveal">
+                  <Field label={`${it.faultNotes} (${it.optional})`}>
+                    <textarea
+                      rows={3}
+                      maxLength={2000}
+                      value={faultNote}
+                      onChange={(event) => setFaultNote(event.target.value)}
                     />
                   </Field>
-                </div>
-              </div>
-            )}
-            {selectedFaults.length > 0 && dueDate && (
-              <div className="inspection-progressive-reveal inspection-quote-stage">
-                <h3>{it.quoteSection}</h3>
-                <ItemsEditor
-                  items={items}
-                  onChange={setItems}
-                  rules={rules}
-                  device={device}
-                  discounts
-                  products={products}
-                  productCategories={productCategories}
-                  progressive
-                  projectPicker
-                />
-                {quoteValid && (
-                  <div className="inspection-progressive-reveal">
-                    <Field label={it.orderDiscount}>
-                      <input
-                        inputMode="decimal"
-                        value={discount}
-                        onChange={(event) => setDiscount(event.target.value)}
-                        aria-invalid={!priceValid}
+                  <div className="compact-date-field">
+                    <Field label={it.dueDate}>
+                      <DatePicker
+                        min={today}
+                        quickDays={[0, 1, 2, 3, 7]}
+                        value={dueDate}
+                        onChange={(event) => setDueDate(event.target.value)}
                       />
-                      {!priceValid && discount && (
-                        <small className="field-error">
-                          {it.invalidAmount}
-                        </small>
-                      )}
                     </Field>
-                    <label className="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={includeVat}
-                        onChange={(event) =>
-                          setIncludeVat(event.target.checked)
-                        }
-                      />
-                      {it.includeVat}
-                    </label>
-                    <QuoteSummary
-                      items={items}
-                      orderDiscount={discount}
-                      includeVat={includeVat}
-                      inspectionFee={inspectionFee}
-                    />
                   </div>
-                )}
-              </div>
-            )}
-            {error && <p className="message error">{error}</p>}
-            <div className="dialog-actions">
+                </div>
+              )}
+              {selectedFaults.length > 0 && dueDate && (
+                <div className="inspection-progressive-reveal inspection-quote-stage">
+                  <h3>{it.quoteSection}</h3>
+                  <ItemsEditor
+                    items={items}
+                    onChange={setItems}
+                    rules={rules}
+                    device={device}
+                    discounts
+                    products={products}
+                    productCategories={productCategories}
+                    progressive
+                    projectPicker
+                  />
+                  {quoteValid && (
+                    <div className="inspection-progressive-reveal">
+                      <Field label={it.orderDiscount}>
+                        <input
+                          inputMode="decimal"
+                          value={discount}
+                          onChange={(event) => setDiscount(event.target.value)}
+                          aria-invalid={!priceValid}
+                        />
+                        {!priceValid && discount && (
+                          <small className="field-error">
+                            {it.invalidAmount}
+                          </small>
+                        )}
+                      </Field>
+                      <label className="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={includeVat}
+                          onChange={(event) =>
+                            setIncludeVat(event.target.checked)
+                          }
+                        />
+                        {it.includeVat}
+                      </label>
+                      <QuoteSummary
+                        items={items}
+                        orderDiscount={discount}
+                        includeVat={includeVat}
+                        inspectionFee={inspectionFee}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {error && <p className="message error">{error}</p>}
+            </DialogBody>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="cancel"
@@ -212,8 +216,8 @@ export function CompleteInspectionButton({
               <Button disabled={pending || !ready}>
                 {pending ? it.saving : it.save}
               </Button>
-            </div>
-          </form>
+            </DialogFooter>
+          </DialogForm>
         </FormDialog>
       )}
     </>

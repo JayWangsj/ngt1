@@ -5014,6 +5014,10 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
   const dialog = page.getByRole("dialog", {
     name: "Completa diagnosi e crea preventivo",
   });
+  const inspectionForm = dialog.locator(":scope > .dialog-form-layout");
+  const inspectionFooter = inspectionForm.locator(":scope > .dialog-footer");
+  await expect(inspectionForm.locator(":scope > .dialog-body")).toBeVisible();
+  await expect(inspectionFooter).toBeInViewport();
   await expect(dialog.locator(".quote-item")).toHaveCount(0);
   const saveInspection = dialog.getByRole("button", {
     name: "Salva",
@@ -5075,6 +5079,7 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
     ),
   ).toBeLessThanOrEqual(1);
   await expect(saveInspection).toBeEnabled();
+  await expect(inspectionFooter).toBeInViewport();
   await saveInspection.dblclick();
   await expect(dialog).toHaveCount(0);
   await expect(status).toContainText("In riparazione");
