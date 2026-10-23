@@ -6099,6 +6099,45 @@ test("detail edits save on outside click and protect navigation", async ({
   await expect(row).toContainText("29/12/2099");
 });
 
+test("repair detail part option dialog keeps its save button and warranty field", async ({
+  page,
+}) => {
+  await fillOrder(page, { manual: true });
+  await chooseRequiredPart(page, "Batteria Test");
+  await save(page);
+
+  const details = page.getByTestId("details-card");
+  await expect(details).toBeVisible();
+  await details.hover();
+  await details
+    .getByRole("button", { name: "Modifica dati", exact: true })
+    .click();
+  await details
+    .locator(".detail-repair-summary .selected-part-summary .summary-action")
+    .click();
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await optionPicker.locator(".price-option-add").click();
+  const newPartOption = page.getByRole("dialog", {
+    name: "Nuova opzione ricambio",
+    exact: true,
+  });
+  await expect(newPartOption).toBeVisible();
+  await expect(
+    newPartOption.getByRole("button", { name: "Salva", exact: true }),
+  ).toBeVisible();
+  await expect(
+    newPartOption.getByText("Tempo previsto (minuti)", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    newPartOption.getByText("Giorni di garanzia", { exact: true }),
+  ).toBeVisible();
+  await newPartOption.locator(".dialog-close").click();
+  await optionPicker.locator(".dialog-close").click();
+});
+
 test("repair detail cards lock history and keep post-sale finance auditable", async ({
   page,
 }) => {

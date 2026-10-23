@@ -5545,7 +5545,7 @@ function PriceRuleOptionForm({
   const [suggested, setSuggested] = useState(option?.suggested ?? "");
   const [cost, setCost] = useState(option?.cost ?? "");
   const [quantity, setQuantity] = useState(option?.quantity ?? 1);
-  const [minutes, setMinutes] = useState(option?.minutes ?? rule.minutes);
+  const minutes = option?.minutes ?? rule.minutes;
   const [warrantyDays, setWarrantyDays] = useState(option?.warrantyDays ?? 0);
   const [enabled, setEnabled] = useState(option?.enabled ?? true);
   const [isDefault, setIsDefault] = useState(option?.isDefault ?? false);
@@ -5568,7 +5568,6 @@ function PriceRuleOptionForm({
           suggested,
           cost,
           quantity,
-          minutes,
           warrantyDays,
           enabled,
           isDefault,
@@ -5642,14 +5641,6 @@ function PriceRuleOptionForm({
               min={1}
               value={quantity}
               onValueChange={(value) => setQuantity(Number(value))}
-            />
-          </Field>
-          <Field label={it.durationMinutes}>
-            <input
-              type="number"
-              min={0}
-              value={minutes}
-              onChange={(event) => setMinutes(Number(event.target.value))}
             />
           </Field>
           <Field label={it.warrantyDays}>
@@ -6221,9 +6212,11 @@ export function FormDialog({
           <X size={18} aria-hidden="true" />
         </button>
       </div>
-      <FormCloseContext.Provider value={onClose}>
-        {children}
-      </FormCloseContext.Provider>
+      <FormSaveContext.Provider value={null}>
+        <FormCloseContext.Provider value={onClose}>
+          {children}
+        </FormCloseContext.Provider>
+      </FormSaveContext.Provider>
     </dialog>,
     document.body,
   );
