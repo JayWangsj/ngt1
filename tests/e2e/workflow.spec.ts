@@ -1236,6 +1236,12 @@ test("uses part-specific prices without overwriting a manual quote", async ({
   const lcdOption = optionPicker
     .locator(".price-option-choice")
     .filter({ hasText: "Display LCD standard" });
+  await expect(lcdOption).toHaveCSS("border-radius", "12px");
+  await expect(lcdOption).toHaveCSS("padding", "14px");
+  await expect(lcdOption).toHaveCSS(
+    "transition-property",
+    "background-color, box-shadow, transform",
+  );
   await page.mouse.move(0, 0);
   await expect(lcdOption).toHaveCSS("background-color", "rgb(255, 250, 240)");
   await oledOption.hover();
@@ -7172,6 +7178,7 @@ test("price editor and mobile yellow layout support both languages", async ({
   expect(enabledThumb.transition).toBe("0.28s");
   await batterySwitch.click();
   await expect(batteryOption).toHaveClass(/is-disabled/);
+  await expect(batteryOption).toHaveCSS("opacity", "0.58");
   const enableBatterySwitch = batteryOption.getByRole("switch", {
     name: "Batteria Test: Attiva",
   });
@@ -7181,6 +7188,7 @@ test("price editor and mobile yellow layout support both languages", async ({
   expect(disabledThumb.transform).not.toBe(enabledThumb.transform);
   await enableBatterySwitch.click();
   await expect(batteryOption).not.toHaveClass(/is-disabled/);
+  await expect(batteryOption).toHaveCSS("opacity", "1");
 
   await form
     .getByRole("button", { name: "Opzione ricambio", exact: true })
@@ -8036,9 +8044,18 @@ test("new repair products add compatible devices in a modal", async ({
     projectPicker.locator(":scope > .dialog-body.compatibility-project-picker"),
   ).toBeVisible();
   await expect(projectPicker.locator(":scope > .dialog-footer")).toBeVisible();
-  await projectPicker
-    .getByRole("button", { name: "sostituzione display", exact: true })
-    .click();
+  const projectChoice = projectPicker.getByRole("button", {
+    name: "sostituzione display",
+    exact: true,
+  });
+  await expect(projectChoice).toHaveCSS("display", "flex");
+  await expect(projectChoice).toHaveCSS("border-radius", "12px");
+  await projectChoice.click();
+  await page.mouse.move(0, 0);
+  await expect(projectChoice).toHaveCSS(
+    "background-color",
+    "rgb(255, 250, 240)",
+  );
   const newProject = `progetto compatibilita ${Date.now()}`;
   await projectPicker.getByRole("button", { name: "Nuovo intervento" }).click();
   let newProjectDialog = page.getByRole("dialog", {

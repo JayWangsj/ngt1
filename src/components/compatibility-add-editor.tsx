@@ -10,6 +10,7 @@ import { useLanguage, useMessages } from "./language";
 import { EditableSelect } from "./editable-select";
 import { SimpleSelect } from "./business-select";
 import { DialogBody, DialogFooter, FormDialog } from "./forms";
+import priceOptionCardStyles from "./price-option-card.module.css";
 import { Button } from "./ui/button";
 import type {
   DeviceCatalogDeletionView,
@@ -195,7 +196,7 @@ export function CompatibilityAddEditor({
                   <button
                     type="button"
                     key={project}
-                    className={`price-option-card price-option-choice business-list-row${pickerProjects.includes(project) ? " is-selected" : ""}`}
+                    className={`${priceOptionCardStyles.card} price-option-card ${priceOptionCardStyles.choice} price-option-choice business-list-row${pickerProjects.includes(project) ? ` is-selected ${priceOptionCardStyles.selected}` : ""}`}
                     onClick={() => {
                       setPickerProjects((current) =>
                         current.includes(project)

@@ -19,6 +19,7 @@ import {
 import { createPortal } from "react-dom";
 import { RecordIcon } from "./ui/record-icon";
 import { EditableSelect } from "./editable-select";
+import priceOptionCardStyles from "./price-option-card.module.css";
 import {
   deviceProjects,
   uniqueOptions,
@@ -1145,7 +1146,7 @@ function PriceOptionPicker({
               {options.map((option) => (
                 <button
                   type="button"
-                  className={`price-option-card price-option-choice business-list-row${option.id === draftOptionId ? " is-selected" : ""}`}
+                  className={`${priceOptionCardStyles.card} price-option-card ${priceOptionCardStyles.choice} price-option-choice business-list-row${option.id === draftOptionId ? ` is-selected ${priceOptionCardStyles.selected}` : ""}`}
                   key={option.id}
                   disabled={disabled}
                   onClick={() => setDraftOptionId(option.id)}
@@ -1203,7 +1204,7 @@ function PriceOptionPicker({
                   return (
                     <button
                       type="button"
-                      className={`price-option-card price-option-choice price-option-inventory business-list-row${draftOptionId === `product:${entry.id}` ? " is-selected" : ""}`}
+                      className={`${priceOptionCardStyles.card} price-option-card ${priceOptionCardStyles.choice} price-option-choice price-option-inventory business-list-row${draftOptionId === `product:${entry.id}` ? ` is-selected ${priceOptionCardStyles.selected}` : ""}`}
                       key={entry.id}
                       disabled={disabled}
                       onClick={() => setDraftOptionId(`product:${entry.id}`)}
@@ -1233,7 +1234,7 @@ function PriceOptionPicker({
                 })}
               <button
                 type="button"
-                className={`price-option-card price-option-choice price-option-none business-list-row${draftOptionId === "" ? " is-selected" : ""}`}
+                className={`${priceOptionCardStyles.card} price-option-card ${priceOptionCardStyles.choice} price-option-choice price-option-none business-list-row${draftOptionId === "" ? ` is-selected ${priceOptionCardStyles.selected}` : ""}`}
                 disabled={disabled}
                 onClick={() => setDraftOptionId("")}
               >
@@ -5074,7 +5075,7 @@ export function RuleForm({
           <div className="price-option-list">
             {optionRule.options.map((option) => (
               <article
-                className={`price-option-card${option.enabled ? "" : " is-disabled"}`}
+                className={`${priceOptionCardStyles.card} price-option-card${option.enabled ? "" : ` is-disabled ${priceOptionCardStyles.disabled}`}`}
                 key={option.id}
               >
                 <div className="price-option-card-heading">

@@ -8383,37 +8383,9 @@ details.secondary-actions {
   display: grid;
   gap: 10px;
 }
-.price-option-card {
-  display: grid;
-  gap: 12px;
-  width: 100%;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--ink);
-  text-align: left;
-}
 .price-option-none {
   grid-template-columns: 46px minmax(0, 1fr);
   align-items: center;
-}
-.price-option-card.is-disabled {
-  opacity: 0.58;
-}
-.price-option-choice {
-  cursor: pointer;
-  font: inherit;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
-}
-.price-option-choice.is-selected {
-  border-color: #e8bb15;
-  background: #fffaf0;
-}
-.price-option-choice.is-selected {
-  box-shadow: 0 0 0 1px rgb(232 187 21 / 12%);
 }
 .price-option-card-heading {
   display: flex;

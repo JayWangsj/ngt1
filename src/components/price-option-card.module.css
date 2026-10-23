@@ -1,0 +1,26 @@
+.card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.disabled {
+  opacity: 0.58;
+}
+
+.choice {
+  cursor: pointer;
+  font: inherit;
+}
+
+.selected {
+  border-color: #e8bb15;
+  background: #fffaf0;
+  box-shadow: 0 0 0 1px rgb(232 187 21 / 12%);
+}
