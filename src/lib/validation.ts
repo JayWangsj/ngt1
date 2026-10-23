@@ -168,6 +168,7 @@ export const productInput = z.object({
   name: short,
   category: short,
   usage: z.enum(["RETAIL", "REPAIR"]),
+  unlimitedStock: z.boolean().default(false),
   costPrice: amountInput,
   salePrice: amountInput,
   initialStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
@@ -185,11 +186,19 @@ export const productInput = z.object({
     )
     .max(100)
     .default([]),
+}).superRefine((data, ctx) => {
+  if (data.unlimitedStock && data.usage !== "RETAIL")
+    ctx.addIssue({
+      code: "custom",
+      path: ["unlimitedStock"],
+      message: "La disponibilità illimitata è consentita solo per i prodotti retail.",
+    });
 });
 export const productUpdateInput = z.object({
   name: short,
   category: short,
   usage: z.enum(["RETAIL", "REPAIR"]),
+  unlimitedStock: z.boolean().optional(),
   costPrice: amountInput,
   salePrice: amountInput,
   stockQuantity: z.coerce.number().int().min(0).max(1_000_000),
@@ -206,6 +215,13 @@ export const productUpdateInput = z.object({
     )
     .max(100)
     .optional(),
+}).superRefine((data, ctx) => {
+  if (data.unlimitedStock && data.usage !== "RETAIL")
+    ctx.addIssue({
+      code: "custom",
+      path: ["unlimitedStock"],
+      message: "La disponibilità illimitata è consentita solo per i prodotti retail.",
+    });
 });
 export const paidTotalInput = z.object({
   requestId: z.string().uuid(),

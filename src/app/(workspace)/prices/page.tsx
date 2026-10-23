@@ -39,7 +39,8 @@ export default async function Prices() {
       where: {
         kind: "REPAIR_PART",
         consumedAt: null,
-        order: { status: { notIn: ["COMPLETED", "REFUNDED", "CANCELLED"] } },
+        stockTracked: true,
+        order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
       },
       _sum: { quantity: true },
     }),

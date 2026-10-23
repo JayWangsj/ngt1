@@ -62,6 +62,7 @@ export type ProductView = {
   costPrice: number;
   salePrice: number;
   stockQuantity: number;
+  unlimitedStock: boolean;
   reservedQuantity: number;
   minStock: number;
   favorite: boolean;
@@ -857,10 +858,9 @@ export function InventoryWorkspace({
     () =>
       products.filter((product) => {
         const normalized = query.trim().toLocaleLowerCase();
-        const productStatus = inventoryStatus(
-          product.stockQuantity,
-          product.minStock,
-        );
+        const productStatus = product.unlimitedStock
+          ? "IN_STOCK"
+          : inventoryStatus(product.stockQuantity, product.minStock);
         const compatibilityText = product.compatibilities
           .flatMap((compatibility) => [
             compatibility.brand,
@@ -1130,10 +1130,9 @@ export function InventoryWorkspace({
               {filtered.map((source) => {
                 const product = drafts[source.id] ?? source;
                 const selected = selectedId === product.id;
-                const productStatus = inventoryStatus(
-                  product.stockQuantity,
-                  product.minStock,
-                );
+                const productStatus = product.unlimitedStock
+                  ? "IN_STOCK"
+                  : inventoryStatus(product.stockQuantity, product.minStock);
                 return (
                   <tr
                     key={product.id}
@@ -1250,11 +1249,15 @@ export function InventoryWorkspace({
                       {selected ? (
                         <SimpleSelect
                           value={product.usage}
-                          onChange={(value) =>
+                          onChange={(value) => {
+                            const usage = value as ProductView["usage"];
                             updateDraft(product, {
-                              usage: value as ProductView["usage"],
-                            })
-                          }
+                              usage,
+                              ...(usage === "REPAIR"
+                                ? { unlimitedStock: false }
+                                : {}),
+                            });
+                          }}
                           placeholder={it.selectOption}
                           ariaLabel={it.inventory.usage}
                           options={[
@@ -1332,7 +1335,25 @@ export function InventoryWorkspace({
                       )}
                     </td>
                     <td className="inventory-stepper-cell">
-                      {selected ? (
+                      {selected && product.usage === "RETAIL" && (
+                        <button
+                          type="button"
+                          className="motion-switch"
+                          role="switch"
+                          aria-checked={product.unlimitedStock}
+                          aria-label={it.inventory.unlimitedStock}
+                          onClick={() =>
+                            updateDraft(product, {
+                              unlimitedStock: !product.unlimitedStock,
+                            })
+                          }
+                        >
+                          <span aria-hidden="true" />
+                        </button>
+                      )}
+                      {product.unlimitedStock ? (
+                        "∞"
+                      ) : selected ? (
                         <StockEditor
                           value={product.stockQuantity}
                           label={it.inventory.currentStock}
@@ -1345,16 +1366,20 @@ export function InventoryWorkspace({
                       )}
                     </td>
                     <td className="inventory-quantity-cell">
-                      {product.reservedQuantity}
+                      {product.unlimitedStock ? "—" : product.reservedQuantity}
                     </td>
                     <td className="inventory-quantity-cell">
-                      {Math.max(
-                        0,
-                        product.stockQuantity - product.reservedQuantity,
-                      )}
+                      {product.unlimitedStock
+                        ? "∞"
+                        : Math.max(
+                            0,
+                            product.stockQuantity - product.reservedQuantity,
+                          )}
                     </td>
                     <td className="inventory-stepper-cell">
-                      {selected ? (
+                      {product.unlimitedStock ? (
+                        "—"
+                      ) : selected ? (
                         <StockEditor
                           value={product.minStock}
                           label={it.inventory.minimumStock}

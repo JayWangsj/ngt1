@@ -75,7 +75,8 @@ export default async function InventoryPage({
       where: {
         kind: "REPAIR_PART",
         consumedAt: null,
-        order: { status: { notIn: ["COMPLETED", "REFUNDED", "CANCELLED"] } },
+        stockTracked: true,
+        order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
       },
       _sum: { quantity: true },
     }),
@@ -98,6 +99,7 @@ export default async function InventoryPage({
     costPrice: cents(product.costPrice),
     salePrice: cents(product.salePrice),
     stockQuantity: product.stockQuantity,
+    unlimitedStock: product.unlimitedStock,
     reservedQuantity: reservedByProduct.get(product.id) ?? 0,
     minStock: product.minStock,
     favorite: product.favorite,
@@ -114,17 +116,18 @@ export default async function InventoryPage({
     ],
   }));
   const enabled = productViews.filter((product) => product.enabled);
+  const tracked = enabled.filter((product) => !product.unlimitedStock);
   const metrics = [
     { label: it.inventory.productCount, value: enabled.length, icon: Boxes },
     {
       label: it.inventory.stockTotal,
-      value: enabled.reduce((sum, product) => sum + product.stockQuantity, 0),
+      value: tracked.reduce((sum, product) => sum + product.stockQuantity, 0),
       icon: PackageCheck,
     },
     {
       label: it.inventory.stockCost,
       value: money(
-        enabled.reduce(
+        tracked.reduce(
           (sum, product) => sum + product.costPrice * product.stockQuantity,
           0,
         ),
@@ -133,7 +136,7 @@ export default async function InventoryPage({
     },
     {
       label: it.inventory.lowStock,
-      value: enabled.filter(
+      value: tracked.filter(
         (product) =>
           inventoryStatus(product.stockQuantity, product.minStock) ===
           "LOW_STOCK",
@@ -142,7 +145,7 @@ export default async function InventoryPage({
     },
     {
       label: it.inventory.outOfStock,
-      value: enabled.filter(
+      value: tracked.filter(
         (product) =>
           inventoryStatus(product.stockQuantity, product.minStock) ===
           "OUT_OF_STOCK",

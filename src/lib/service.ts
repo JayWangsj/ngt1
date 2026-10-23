@@ -222,7 +222,9 @@ const reservationStatuses = [
   "REPAIRING",
   "PARTS_MISSING",
   "REWORKING",
+  "READY",
 ] as const;
+const occupiedStockStatuses = ["REPAIRING", "READY", "REWORKING"] as const;
 
 async function newLinesNeedParts(
   tx: Tx,
@@ -234,6 +236,7 @@ async function newLinesNeedParts(
     where: {
       productId: { in: lines.map((line) => line.product.id) },
       consumedAt: null,
+      stockTracked: true,
       ...(excludeOrderId ? { orderId: { not: excludeOrderId } } : {}),
       order: { status: { in: [...reservationStatuses] } },
     },
@@ -264,11 +267,16 @@ async function orderNeedsParts(tx: Tx, orderId: string) {
   const lines = await tx.workOrderProduct.findMany({
     where: {
       productId: { in: target.map((line) => line.productId) },
+      kind: "REPAIR_PART",
       consumedAt: null,
       order: { status: { in: [...reservationStatuses] } },
     },
     include: { product: true },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    orderBy: [
+      { order: { createdAt: "asc" } },
+      { createdAt: "asc" },
+      { id: "asc" },
+    ],
   });
   const allocated = new Map<string, number>();
   for (const line of lines) {
@@ -1236,6 +1244,11 @@ export async function replaceQuote(
       items,
       preservedInactiveProductIds,
     );
+    const readyPartsAlreadyConsumed =
+      order.status === "READY" &&
+      order.products.some(
+        (line) => line.kind === "REPAIR_PART" && line.consumedAt,
+      );
     if (order.status === "READY") {
       const previousRequirements = new Map<string, number>();
       for (const item of order.items)
@@ -1249,22 +1262,15 @@ export async function replaceQuote(
         requiredParts.map(({ product, quantity }) => [product.id, quantity]),
       );
       if (
-        previousRequirements.size !== nextRequirements.size ||
-        [...previousRequirements].some(
-          ([productId, quantity]) =>
-            nextRequirements.get(productId) !== quantity,
-        )
+        readyPartsAlreadyConsumed &&
+        (previousRequirements.size !== nextRequirements.size ||
+          [...previousRequirements].some(
+            ([productId, quantity]) =>
+              nextRequirements.get(productId) !== quantity,
+          ))
       )
         throw new BusinessError(
-          "Per modificare i ricambi richiesti, riaprire prima la riparazione.",
-        );
-      if (
-        order.products.some(
-          (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
-        )
-      )
-        throw new BusinessError(
-          "Verifica i ricambi non contabilizzati prima di modificare il preventivo.",
+          "I ricambi di questa scheda sono già stati scaricati dal magazzino.",
         );
     }
     if (
@@ -1344,9 +1350,12 @@ export async function replaceQuote(
       }
       requiredPartContexts.set(product.id, contextKey);
     }
-    const nextStatus = (await newLinesNeedParts(tx, requiredParts, id))
-      ? "PARTS_MISSING"
-      : "REPAIRING";
+    const nextStatus =
+      order.status === "READY"
+        ? "READY"
+        : (await newLinesNeedParts(tx, requiredParts, id))
+          ? "PARTS_MISSING"
+          : "REPAIRING";
     await tx.workOrder.update({
       where: { id },
       data: {
@@ -1357,7 +1366,7 @@ export async function replaceQuote(
         confirmationNote: "",
         ...(order.status === "READY" ? {} : { status: nextStatus }),
         products:
-          order.status !== "READY" &&
+          (order.status !== "READY" || !readyPartsAlreadyConsumed) &&
           requiredParts.some(
             ({ product }) => !preservedInactiveProductIds.has(product.id),
           )
@@ -1380,6 +1389,12 @@ export async function replaceQuote(
             : undefined,
       },
     });
+    if (
+      order.status === "READY" &&
+      !readyPartsAlreadyConsumed &&
+      (await orderNeedsParts(tx, id))
+    )
+      throw new BusinessError("I ricambi selezionati non sono disponibili.");
     if (order.status !== "READY" && order.status !== nextStatus)
       await tx.statusHistory.create({
         data: {
@@ -1622,16 +1637,6 @@ export async function changeStatus(
       assertTransition(order.status, data.status, order.afterSalesOpen);
     }
 
-    if (
-      data.status === "COMPLETED" &&
-      order.products.some(
-        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
-      )
-    )
-      throw new BusinessError(
-        "Ricambi non registrati: completa prima il controllo di magazzino.",
-      );
-
     if (data.cancelPayment) {
       if (order.status !== "DIAGNOSING" || data.status !== "CANCELLED")
         throw new BusinessError(
@@ -1684,10 +1689,10 @@ export async function changeStatus(
         throw new BusinessError("Indica chi ritira il dispositivo.");
       assertDelivery(balance(order.items, order.payments, order));
     }
-    if (data.status === "READY")
+    if (data.status === "COMPLETED") {
       await consumeWorkOrderProducts(tx, actor, id, "REPAIR_PART");
-    if (data.status === "COMPLETED")
       await consumeWorkOrderProducts(tx, actor, id, "RETAIL_ADDON");
+    }
     await tx.workOrder.update({
       where: { id },
       data: {
@@ -2127,14 +2132,15 @@ async function consumeWorkOrderProducts(
   });
   const consumedAt = new Date();
   for (const line of lines) {
-    await applyInventoryMovement(tx, actor, {
-      requestId: `work-order-product:${line.id}`,
-      productId: line.productId,
-      quantity: -line.quantity,
-      type: kind === "REPAIR_PART" ? "REPAIR_USE" : "RETAIL_SALE",
-      referenceType: "WORK_ORDER",
-      referenceId: orderId,
-    });
+    if (line.stockTracked)
+      await applyInventoryMovement(tx, actor, {
+        requestId: `work-order-product:${line.id}`,
+        productId: line.productId,
+        quantity: -line.quantity,
+        type: kind === "REPAIR_PART" ? "REPAIR_USE" : "RETAIL_SALE",
+        referenceType: "WORK_ORDER",
+        referenceId: orderId,
+      });
     await tx.workOrderProduct.update({
       where: { id: line.id },
       data: { consumedAt },
@@ -2202,6 +2208,8 @@ export async function createProduct(actorInput: Actor, raw: unknown) {
         usage: data.usage,
         costPrice: decimal(cents(data.costPrice)),
         salePrice: decimal(cents(data.salePrice)),
+        unlimitedStock: data.unlimitedStock,
+        stockQuantity: data.unlimitedStock ? 0 : undefined,
         minStock: data.minStock,
         favorite: data.favorite,
         enabled: data.enabled,
@@ -2215,7 +2223,7 @@ export async function createProduct(actorInput: Actor, raw: unknown) {
       },
       update: { deletedAt: null },
     });
-    if (data.initialStock > 0)
+    if (!data.unlimitedStock && data.initialStock > 0)
       await applyInventoryMovement(tx, actor, {
         requestId: data.requestId,
         productId: product.id,
@@ -2232,7 +2240,8 @@ export async function createProduct(actorInput: Actor, raw: unknown) {
     );
     await audit(tx, actor, product.id, "PRODUCT_CREATED", {
       requestId: data.requestId,
-      initialStock: data.initialStock,
+      initialStock: data.unlimitedStock ? 0 : data.initialStock,
+      unlimitedStock: data.unlimitedStock,
     });
     return product;
   });
@@ -2342,6 +2351,13 @@ export async function adjustInventory(
   const data = inventoryAdjustmentInput.parse(raw);
   return transact(async (tx) => {
     const actor = await currentActor(tx, actorInput);
+    const product = await tx.product.findUniqueOrThrow({
+      where: { id: productId },
+    });
+    if (product.unlimitedStock)
+      throw new BusinessError(
+        "Non è possibile rettificare un prodotto a disponibilità illimitata.",
+      );
     const movement = await applyInventoryMovement(tx, actor, {
       ...data,
       productId,
@@ -2369,6 +2385,9 @@ export async function updateProduct(
     const current = await tx.product.findUniqueOrThrow({
       where: { id: productId },
     });
+    const unlimitedStock =
+      data.unlimitedStock ??
+      (data.usage === "RETAIL" ? current.unlimitedStock : false);
     const usageChanged = current.usage !== data.usage;
     const affectedRuleIds = new Set<string>();
     if (usageChanged || data.compatibilities) {
@@ -2385,7 +2404,9 @@ export async function updateProduct(
       for (const { ruleId } of options) affectedRuleIds.add(ruleId);
       for (const { id } of rules) affectedRuleIds.add(id);
     }
-    const stockChange = data.stockQuantity - current.stockQuantity;
+    const stockChange = unlimitedStock
+      ? 0
+      : data.stockQuantity - current.stockQuantity;
     await tx.product.update({
       where: { id: productId },
       data: {
@@ -2394,6 +2415,7 @@ export async function updateProduct(
         usage: data.usage,
         costPrice: decimal(cents(data.costPrice)),
         salePrice: decimal(cents(data.salePrice)),
+        unlimitedStock,
         minStock: data.minStock,
         favorite: data.favorite,
       },
@@ -2427,11 +2449,15 @@ export async function updateProduct(
         costPrice: current.costPrice.toString(),
         salePrice: current.salePrice.toString(),
         stockQuantity: current.stockQuantity,
+        unlimitedStock: current.unlimitedStock,
       },
       after: {
         costPrice: decimal(cents(data.costPrice)),
         salePrice: decimal(cents(data.salePrice)),
-        stockQuantity: data.stockQuantity,
+        stockQuantity: unlimitedStock
+          ? current.stockQuantity
+          : data.stockQuantity,
+        unlimitedStock,
       },
       fields: [
         "name",
@@ -2439,6 +2465,7 @@ export async function updateProduct(
         "usage",
         "costPrice",
         "salePrice",
+        "unlimitedStock",
         "minStock",
         "favorite",
       ],
@@ -2482,8 +2509,6 @@ export async function addWorkOrderProduct(
     });
     if (originalOrderLocked(order))
       throw new BusinessError("La scheda è chiusa.");
-    if (data.kind === "REPAIR_PART" && order.status === "READY")
-      throw new BusinessError("I ricambi sono già stati contabilizzati.");
     const product = await tx.product.findFirst({
       where: {
         id: data.productId,
@@ -2504,25 +2529,27 @@ export async function addWorkOrderProduct(
     });
     if (existing?.consumedAt)
       throw new BusinessError("Il movimento di magazzino è già registrato.");
-    const reserved = await tx.workOrderProduct.aggregate({
-      where: {
-        productId: product.id,
-        consumedAt: null,
-        ...(existing ? { id: { not: existing.id } } : {}),
-        order: {
-          status: { notIn: ["COMPLETED", "REFUNDED", "CANCELLED"] },
+    const stockTracked = data.kind === "REPAIR_PART" || !product.unlimitedStock;
+    if (stockTracked) {
+      const reserved = await tx.workOrderProduct.aggregate({
+        where: {
+          productId: product.id,
+          stockTracked: true,
+          consumedAt: null,
+          ...(existing ? { id: { not: existing.id } } : {}),
+          order: { status: { in: [...occupiedStockStatuses] } },
         },
-      },
-      _sum: { quantity: true },
-    });
-    const available = Math.max(
-      0,
-      product.stockQuantity - (reserved._sum.quantity ?? 0),
-    );
-    if (data.quantity > available)
-      throw new BusinessError(
-        "Scorte insufficienti o prodotto non disponibile.",
+        _sum: { quantity: true },
+      });
+      const available = Math.max(
+        0,
+        product.stockQuantity - (reserved._sum.quantity ?? 0),
       );
+      if (data.quantity > available)
+        throw new BusinessError(
+          "Scorte insufficienti o prodotto non disponibile.",
+        );
+    }
     const line = await tx.workOrderProduct.upsert({
       where: {
         orderId_productId_kind_contextKey: {
@@ -2539,12 +2566,14 @@ export async function addWorkOrderProduct(
         category: product.category,
         kind: data.kind,
         contextKey: "ORIGINAL",
+        stockTracked,
         unitPrice:
           data.kind === "RETAIL_ADDON" ? product.salePrice : decimal(0),
         quantity: data.quantity,
       },
       update: {
         quantity: data.quantity,
+        stockTracked,
         productName: product.name,
         category: product.category,
         unitPrice:
@@ -2559,6 +2588,12 @@ export async function addWorkOrderProduct(
     });
     if (data.kind === "REPAIR_PART")
       await refreshPartStatuses(tx, actor, product.id);
+    if (
+      data.kind === "REPAIR_PART" &&
+      order.status === "READY" &&
+      (await orderNeedsParts(tx, orderId))
+    )
+      throw new BusinessError("Ricambi insufficienti.");
     return line;
   });
 }
@@ -2648,14 +2683,6 @@ export async function checkoutWorkOrder(
     });
     if (order.status !== "READY")
       throw new BusinessError("La riparazione non è pronta per la consegna.");
-    if (
-      order.products.some(
-        (line) => line.kind === "REPAIR_PART" && !line.consumedAt,
-      )
-    )
-      throw new BusinessError(
-        "Ricambi non registrati: completa prima il controllo di magazzino.",
-      );
     const remaining = balance(order.items, order.payments, order);
     if (amount !== remaining)
       throw new BusinessError(
@@ -2720,6 +2747,7 @@ export async function checkoutWorkOrder(
     const deliveredAt = data.pickedUpAt
       ? new Date(data.pickedUpAt)
       : new Date();
+    await consumeWorkOrderProducts(tx, actor, orderId, "REPAIR_PART");
     await consumeWorkOrderProducts(tx, actor, orderId, "RETAIL_ADDON");
     await tx.workOrder.update({
       where: { id: orderId },
@@ -3166,8 +3194,9 @@ export async function createRetailSale(actorInput: Actor, raw: unknown) {
     const reservations = await tx.workOrderProduct.findMany({
       where: {
         productId: { in: products.map((product) => product.id) },
+        stockTracked: true,
         consumedAt: null,
-        order: { status: { notIn: ["COMPLETED", "REFUNDED", "CANCELLED"] } },
+        order: { status: { in: [...occupiedStockStatuses] } },
       },
       select: { productId: true, quantity: true },
     });
@@ -3181,11 +3210,12 @@ export async function createRetailSale(actorInput: Actor, raw: unknown) {
     if (
       lines.some(
         ({ product, quantity }) =>
+          !product.unlimitedStock &&
           quantity >
-          Math.max(
-            0,
-            product.stockQuantity - (reservedByProduct.get(product.id) ?? 0),
-          ),
+            Math.max(
+              0,
+              product.stockQuantity - (reservedByProduct.get(product.id) ?? 0),
+            ),
       )
     )
       throw new BusinessError(
@@ -3248,6 +3278,7 @@ export async function createRetailSale(actorInput: Actor, raw: unknown) {
             category: line.product.category,
             unitPrice: decimal(line.unitPrice),
             quantity: line.quantity,
+            stockTracked: !line.product.unlimitedStock,
             subtotal: decimal(line.subtotal),
           })),
         },
@@ -3290,14 +3321,15 @@ export async function createRetailSale(actorInput: Actor, raw: unknown) {
       },
     });
     for (const line of lines)
-      await applyInventoryMovement(tx, actor, {
-        requestId: `${data.requestId}:${line.product.id}`,
-        productId: line.product.id,
-        quantity: -line.quantity,
-        type: "RETAIL_SALE",
-        referenceType: "RETAIL_SALE",
-        referenceId: sale.id,
-      });
+      if (!line.product.unlimitedStock)
+        await applyInventoryMovement(tx, actor, {
+          requestId: `${data.requestId}:${line.product.id}`,
+          productId: line.product.id,
+          quantity: -line.quantity,
+          type: "RETAIL_SALE",
+          referenceType: "RETAIL_SALE",
+          referenceId: sale.id,
+        });
     await audit(tx, actor, sale.id, "RETAIL_SALE_COMPLETED", {
       paymentId: payment.id,
       total: decimal(totalAmount),
@@ -3326,7 +3358,7 @@ export async function deleteRetailSale(actorInput: Actor, id: string) {
       where: { referenceType: "RETAIL_SALE", referenceId: id },
     });
     const soldByProduct = new Map<string, number>();
-    for (const item of sale.items)
+    for (const item of sale.items.filter((item) => item.stockTracked))
       soldByProduct.set(
         item.productId,
         (soldByProduct.get(item.productId) ?? 0) + item.quantity,

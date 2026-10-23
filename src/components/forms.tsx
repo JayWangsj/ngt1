@@ -704,6 +704,7 @@ export function ProductForm({
   const [usage, setUsage] = useState<"RETAIL" | "REPAIR">(
     quickRepair ? "REPAIR" : (initialUsage ?? "RETAIL"),
   );
+  const [unlimitedStock, setUnlimitedStock] = useState(false);
   const [compatibilities, setCompatibilities] = useState<
     ProductCompatibilityDraft[]
   >(() => (initialCompatibility ? [initialCompatibility] : []));
@@ -771,6 +772,7 @@ export function ProductForm({
         name,
         category,
         usage: mode === "retail" ? "RETAIL" : usage,
+        unlimitedStock,
         costPrice,
         salePrice: mode === "inventory" && usage === "REPAIR" ? "0" : salePrice,
         initialStock: String(initialStock),
@@ -791,7 +793,7 @@ export function ProductForm({
           id: result.id,
           name,
           category,
-          stock: initialStock,
+          stock: unlimitedStock ? 0 : initialStock,
           costPrice,
         });
       onClose();
@@ -859,7 +861,11 @@ export function ProductForm({
             <SimpleSelect
               name="usage"
               value={usage}
-              onChange={(value) => setUsage(value as typeof usage)}
+              onChange={(value) => {
+                const next = value as typeof usage;
+                setUsage(next);
+                if (next === "REPAIR") setUnlimitedStock(false);
+              }}
               placeholder={it.selectOption}
               ariaLabel={it.inventory.usage}
               options={[
@@ -893,24 +899,43 @@ export function ProductForm({
             />
           </Field>
         )}
-        <Field label={it.inventory.initialStock}>
-          <QuantityStepper
-            name="initialStock"
-            ariaLabel={it.inventory.initialStock}
-            min={0}
-            defaultValue={0}
-            required
-          />
-        </Field>
-        <Field label={it.inventory.minimumStock}>
-          <QuantityStepper
-            name="minStock"
-            ariaLabel={it.inventory.minimumStock}
-            min={0}
-            defaultValue={0}
-            required
-          />
-        </Field>
+        {!quickRepair && (mode === "retail" || usage === "RETAIL") && (
+          <Field label={it.inventory.unlimitedStock}>
+            <button
+              type="button"
+              className="motion-switch"
+              role="switch"
+              aria-checked={unlimitedStock}
+              aria-label={it.inventory.unlimitedStock}
+              onClick={() => setUnlimitedStock((current) => !current)}
+            >
+              <span aria-hidden="true" />
+            </button>
+            <p className="muted">{it.inventory.unlimitedStockHelp}</p>
+          </Field>
+        )}
+        {!unlimitedStock && (
+          <>
+            <Field label={it.inventory.initialStock}>
+              <QuantityStepper
+                name="initialStock"
+                ariaLabel={it.inventory.initialStock}
+                min={0}
+                defaultValue={0}
+                required
+              />
+            </Field>
+            <Field label={it.inventory.minimumStock}>
+              <QuantityStepper
+                name="minStock"
+                ariaLabel={it.inventory.minimumStock}
+                min={0}
+                defaultValue={0}
+                required
+              />
+            </Field>
+          </>
+        )}
       </div>
       {quickRepair && (
         <p className="product-quick-repair-context">

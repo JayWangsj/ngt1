@@ -154,10 +154,9 @@ export default async function Detail({
     db.workOrderProduct.groupBy({
       by: ["productId"],
       where: {
+        stockTracked: true,
         consumedAt: null,
-        order: {
-          status: { notIn: ["COMPLETED", "REFUNDED", "CANCELLED"] },
-        },
+        order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
       },
       _sum: { quantity: true },
     }),

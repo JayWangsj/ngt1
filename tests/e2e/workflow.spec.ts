@@ -3827,6 +3827,44 @@ test("creates and edits a product directly in the inventory row", async ({
   await expect(batchControls).not.toContainText("selezionati");
 });
 
+test("creates and sells a retail product with unlimited stock", async ({
+  page,
+}) => {
+  const productName = `Accessorio illimitato E2E ${Date.now()}`;
+  await page.goto("/inventory");
+  await page.getByRole("button", { name: "Nuovo prodotto" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Prodotto", { exact: true }).fill(productName);
+  await chooseBusinessOption(page, "Categoria", "Accessori", dialog);
+  await dialog.getByLabel("Costo", { exact: true }).fill("2");
+  await dialog.getByLabel("Prezzo", { exact: true }).fill("5");
+  await dialog
+    .getByRole("switch", { name: "Scorta illimitata", exact: true })
+    .click();
+  await expect(
+    dialog.getByLabel("Scorta iniziale", { exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog.getByLabel("Scorta minima", { exact: true })).toHaveCount(
+    0,
+  );
+  await dialog.getByRole("button", { name: "Salva prodotto" }).click();
+
+  const row = page.getByRole("row", { name: new RegExp(productName) });
+  await expect(row).toContainText("∞");
+  await page.goto("/retail");
+  const card = page
+    .locator(".retail-product-card:not(.retail-service-card)")
+    .filter({ hasText: productName });
+  await expect(card).toBeVisible();
+  await expect(card).toBeEnabled();
+  await card.click();
+  await page.getByRole("button", { name: /Conferma incasso.*5,00/ }).click();
+  const saleDialog = page.getByRole("dialog");
+  await expect(saleDialog.getByRole("status")).toContainText(
+    "Vendita completata",
+  );
+});
+
 test("filters inventory by compatible device and exposes compatibility", async ({
   page,
 }) => {

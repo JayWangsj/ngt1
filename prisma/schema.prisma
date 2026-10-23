@@ -390,6 +390,7 @@ model Product {
   costPrice         Decimal                @db.Decimal(12, 2)
   salePrice         Decimal                @db.Decimal(12, 2)
   stockQuantity     Int                    @default(0)
+  unlimitedStock    Boolean                @default(false)
   minStock          Int                    @default(0)
   favorite          Boolean                @default(false)
   enabled           Boolean                @default(true)
@@ -499,16 +500,17 @@ model RetailServiceItem {
 }
 
 model RetailSaleItem {
-  id          String     @id @default(cuid())
-  saleId      String
-  sale        RetailSale @relation(fields: [saleId], references: [id])
-  productId   String
-  product     Product    @relation(fields: [productId], references: [id])
-  productName String
-  category    String
-  unitPrice   Decimal    @db.Decimal(12, 2)
-  quantity    Int
-  subtotal    Decimal    @db.Decimal(12, 2)
+  id           String     @id @default(cuid())
+  saleId       String
+  sale         RetailSale @relation(fields: [saleId], references: [id])
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  productName  String
+  category     String
+  unitPrice    Decimal    @db.Decimal(12, 2)
+  quantity     Int
+  stockTracked Boolean    @default(true)
+  subtotal     Decimal    @db.Decimal(12, 2)
 
   @@index([saleId])
   @@index([productId])
@@ -526,20 +528,21 @@ model PaymentAllocation {
 }
 
 model WorkOrderProduct {
-  id          String               @id @default(cuid())
-  orderId     String
-  order       WorkOrder            @relation(fields: [orderId], references: [id])
-  productId   String
-  product     Product              @relation(fields: [productId], references: [id])
-  productName String
-  category    String
-  kind        WorkOrderProductKind
-  contextKey  String               @default("ORIGINAL")
-  unitPrice   Decimal              @db.Decimal(12, 2)
-  discount    Decimal              @default(0) @db.Decimal(12, 2)
-  quantity    Int
-  consumedAt  DateTime?            @db.Timestamptz(3)
-  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+  id           String               @id @default(cuid())
+  orderId      String
+  order        WorkOrder            @relation(fields: [orderId], references: [id])
+  productId    String
+  product      Product              @relation(fields: [productId], references: [id])
+  productName  String
+  category     String
+  kind         WorkOrderProductKind
+  contextKey   String               @default("ORIGINAL")
+  unitPrice    Decimal              @db.Decimal(12, 2)
+  discount     Decimal              @default(0) @db.Decimal(12, 2)
+  quantity     Int
+  stockTracked Boolean              @default(true)
+  consumedAt   DateTime?            @db.Timestamptz(3)
+  createdAt    DateTime             @default(now()) @db.Timestamptz(3)
 
   @@unique([orderId, productId, kind, contextKey])
   @@index([orderId])

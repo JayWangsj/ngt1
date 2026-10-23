@@ -2907,7 +2907,7 @@ describe("unified product inventory", () => {
 });
 
 describe("work order products and combined checkout", () => {
-  it("reserves repair stock in order and releases it after cancellation", async () => {
+  it("keeps missing parts queued without occupying stock and deducts at delivery", async () => {
     const part = await createProduct(owner, {
       requestId: randomUUID(),
       name: "Batteria prenotata test",
@@ -2964,10 +2964,25 @@ describe("work order products and combined checkout", () => {
     ).toBe(1);
     expect(
       await db.workOrderProduct.aggregate({
-        where: { productId: part.id, consumedAt: null },
+        where: {
+          productId: part.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+          order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
+        },
         _sum: { quantity: true },
       }),
-    ).toMatchObject({ _sum: { quantity: 2 } });
+    ).toMatchObject({ _sum: { quantity: 1 } });
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId: second.id,
+          productId: part.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+        },
+      }),
+    ).toBe(1);
 
     await changeStatus(staff, first.id, {
       status: "CANCELLED",
@@ -2982,12 +2997,26 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
         .stockQuantity,
-    ).toBe(0);
+    ).toBe(1);
     expect(
       await db.workOrderProduct.count({
-        where: { orderId: second.id, consumedAt: { not: null } },
+        where: {
+          orderId: second.id,
+          kind: "REPAIR_PART",
+          consumedAt: { not: null },
+        },
       }),
-    ).toBe(1);
+    ).toBe(0);
+    await checkoutWorkOrder(staff, second.id, {
+      requestId: randomUUID(),
+      amount: "60",
+      method: "CASH",
+      pickedUpBy: "Cliente",
+    });
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
+        .stockQuantity,
+    ).toBe(0);
   });
 
   it("releases a repair reservation when the quote removes the part", async () => {
@@ -3091,7 +3120,7 @@ describe("work order products and combined checkout", () => {
     ).toBe(1);
   });
 
-  it("recreates a repair reservation after the previous part was consumed", async () => {
+  it("keeps a repair reservation when its quote is edited", async () => {
     const part = await createProduct(owner, {
       requestId: randomUUID(),
       name: "Ricambio riaperto test",
@@ -3140,13 +3169,11 @@ describe("work order products and combined checkout", () => {
       where: { orderId: order.id, productId: part.id, kind: "REPAIR_PART" },
       orderBy: { createdAt: "asc" },
     });
-    expect(lines).toHaveLength(2);
-    expect(lines.filter((line) => line.consumedAt)).toHaveLength(1);
-    expect(lines.filter((line) => !line.consumedAt)).toHaveLength(1);
-    expect(new Set(lines.map((line) => line.contextKey)).size).toBe(2);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].consumedAt).toBeNull();
   });
 
-  it("does not add new repair-part reservations to a READY order", async () => {
+  it("allows required parts to change on a READY order without reopening it", async () => {
     const firstPart = await createProduct(owner, {
       requestId: randomUUID(),
       name: "Ricambio iniziale",
@@ -3186,25 +3213,33 @@ describe("work order products and combined checkout", () => {
     );
     await changeStatus(staff, order.id, { status: "READY" });
 
-    await expect(
-      replaceQuote(staff, order.id, {
-        items: [
-          {
-            project: "READY ricambio",
-            final: "45",
-            requiredProductId: replacementPart.id,
-            requiredQuantity: 1,
-          },
-        ],
-        orderDiscount: "0",
-        includeVat: false,
+    await replaceQuote(staff, order.id, {
+      items: [
+        {
+          project: "READY ricambio",
+          final: "45",
+          requiredProductId: replacementPart.id,
+          requiredQuantity: 1,
+        },
+      ],
+      orderDiscount: "0",
+      includeVat: false,
+    });
+    expect(
+      await db.workOrderProduct.findMany({
+        where: {
+          orderId: order.id,
+          productId: replacementPart.id,
+          consumedAt: null,
+        },
       }),
-    ).rejects.toThrow("riaprire");
+    ).toHaveLength(1);
     expect(
       await db.workOrderProduct.count({
         where: {
           orderId: order.id,
-          productId: replacementPart.id,
+          productId: firstPart.id,
+          kind: "REPAIR_PART",
           consumedAt: null,
         },
       }),
@@ -3215,7 +3250,7 @@ describe("work order products and combined checkout", () => {
     ).toBe("READY");
   });
 
-  it("blocks delivery while a repair part remains unconsumed", async () => {
+  it("deducts repair stock on delivery when the part is still unconsumed", async () => {
     const part = await createProduct(owner, {
       requestId: randomUUID(),
       name: "Ricambio da verificare",
@@ -3226,7 +3261,7 @@ describe("work order products and combined checkout", () => {
       initialStock: 2,
       minStock: 0,
     });
-    const order = await createOrder(staff, input({ deposit: "0" }));
+    const order = await createOrder(staff, input({ deposit: "100" }));
     await changeStatus(staff, order.id, { status: "READY" });
     await db.workOrderProduct.create({
       data: {
@@ -3240,20 +3275,25 @@ describe("work order products and combined checkout", () => {
       },
     });
 
-    await expect(
-      checkoutWorkOrder(staff, order.id, {
-        requestId: randomUUID(),
-        amount: "0",
-        method: "CASH",
-        pickedUpBy: "Test Cliente",
+    await checkoutWorkOrder(staff, order.id, {
+      requestId: randomUUID(),
+      amount: "0",
+      method: "CASH",
+      pickedUpBy: "Test Cliente",
+    });
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
+        .stockQuantity,
+    ).toBe(1);
+    expect(
+      await db.workOrderProduct.count({
+        where: {
+          orderId: order.id,
+          kind: "REPAIR_PART",
+          consumedAt: { not: null },
+        },
       }),
-    ).rejects.toThrow("non registrati");
-    await expect(
-      changeStatus(staff, order.id, {
-        status: "COMPLETED",
-        pickedUpBy: "Test Cliente",
-      }),
-    ).rejects.toThrow("non registrati");
+    ).toBe(1);
   });
 
   it("keeps partial payments separate from delivery checkout", async () => {
@@ -3306,7 +3346,7 @@ describe("work order products and combined checkout", () => {
     expect(completed.pickedUpAt?.toISOString()).toBe(deliveredAt);
   });
 
-  it("deducts repair parts at READY once and allocates combined payment", async () => {
+  it("deducts repair parts at delivery once and allocates combined payment", async () => {
     const part = await createProduct(staff, {
       requestId: randomUUID(),
       name: "Display OLED test",
@@ -3343,7 +3383,7 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
         .stockQuantity,
-    ).toBe(2);
+    ).toBe(3);
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: addon.id } }))
         .stockQuantity,
@@ -3354,7 +3394,7 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
         .stockQuantity,
-    ).toBe(2);
+    ).toBe(3);
 
     await checkoutWorkOrder(staff, order.id, {
       requestId: randomUUID(),
@@ -3367,6 +3407,10 @@ describe("work order products and combined checkout", () => {
       include: { payments: { include: { allocations: true } } },
     });
     expect(completed.status).toBe("COMPLETED");
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
+        .stockQuantity,
+    ).toBe(2);
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: addon.id } }))
         .stockQuantity,
@@ -3673,6 +3717,73 @@ describe("retail checkout", () => {
         where: { entityId: sale.id, action: "RETAIL_SALE_COMPLETED" },
       }),
     ).toBe(1);
+  });
+
+  it("does not track stock for an unlimited retail product", async () => {
+    const product = await createProduct(staff, {
+      requestId: randomUUID(),
+      name: "Accessori senza limite",
+      category: "Accessori",
+      usage: "RETAIL",
+      costPrice: "2",
+      salePrice: "5",
+      initialStock: 3,
+      minStock: 1,
+    });
+    const movementCount = await db.inventoryMovement.count({
+      where: { productId: product.id },
+    });
+    await updateProduct(staff, product.id, {
+      name: product.name,
+      category: product.category,
+      usage: "RETAIL",
+      costPrice: "2",
+      salePrice: "5",
+      stockQuantity: 3,
+      minStock: 1,
+      favorite: false,
+      unlimitedStock: true,
+    });
+
+    const sale = await createRetailSale(staff, {
+      requestId: randomUUID(),
+      items: [{ productId: product.id, quantity: 25 }],
+      discount: "0",
+      method: "CASH",
+    });
+    expect(sale.items[0]).toMatchObject({ quantity: 25, stockTracked: false });
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: product.id } }))
+        .stockQuantity,
+    ).toBe(3);
+    expect(
+      await db.inventoryMovement.count({ where: { productId: product.id } }),
+    ).toBe(movementCount);
+
+    await deleteRetailSale(staff, sale.id);
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: product.id } }))
+        .stockQuantity,
+    ).toBe(3);
+    await updateProduct(staff, product.id, {
+      name: product.name,
+      category: product.category,
+      usage: "RETAIL",
+      costPrice: "2",
+      salePrice: "5",
+      stockQuantity: 3,
+      minStock: 1,
+      favorite: false,
+      unlimitedStock: false,
+    });
+    await expect(
+      createRetailSale(staff, {
+        requestId: randomUUID(),
+        items: [{ productId: product.id, quantity: 4 }],
+        discount: "0",
+        method: "CASH",
+      }),
+    ).rejects.toThrow("insufficienti");
   });
 
   it("classifies quick services separately without changing inventory", async () => {

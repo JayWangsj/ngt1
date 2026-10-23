@@ -86,7 +86,11 @@ export default async function Dashboard({
     }),
     db.product.findMany({
       where: { enabled: true },
-      select: { stockQuantity: true, minStock: true },
+      select: {
+        stockQuantity: true,
+        minStock: true,
+        unlimitedStock: true,
+      },
     }),
     canViewReceipts
       ? db.payment.findMany({
@@ -146,10 +150,12 @@ export default async function Dashboard({
   );
   const lowStockCount = stockLevels.filter(
     (product) =>
-      product.stockQuantity > 0 && product.stockQuantity <= product.minStock,
+      !product.unlimitedStock &&
+      product.stockQuantity > 0 &&
+      product.stockQuantity <= product.minStock,
   ).length;
   const outOfStockCount = stockLevels.filter(
-    (product) => product.stockQuantity <= 0,
+    (product) => !product.unlimitedStock && product.stockQuantity <= 0,
   ).length;
   const attentionCount = overdueCount + lowStockCount + outOfStockCount;
   const receiptSummary = canViewReceipts

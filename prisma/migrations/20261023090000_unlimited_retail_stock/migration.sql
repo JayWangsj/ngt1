@@ -1,0 +1,8 @@
+ALTER TABLE "Product"
+ADD COLUMN "unlimitedStock" BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE "WorkOrderProduct"
+ADD COLUMN "stockTracked" BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE "RetailSaleItem"
+ADD COLUMN "stockTracked" BOOLEAN NOT NULL DEFAULT true;

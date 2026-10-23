@@ -40,6 +40,7 @@ type RetailProduct = {
   category: string;
   salePrice: number;
   stockQuantity: number;
+  unlimitedStock: boolean;
   favorite: boolean;
 };
 type RetailQuickService = {
@@ -185,7 +186,11 @@ export function RetailWorkbench({
     setCart((current) => {
       const next = { ...current };
       if (quantity <= 0) delete next[product.id];
-      else next[product.id] = Math.min(quantity, product.stockQuantity);
+      else
+        next[product.id] = Math.min(
+          quantity,
+          product.unlimitedStock ? 999 : product.stockQuantity,
+        );
       return next;
     });
   }
@@ -297,7 +302,8 @@ export function RetailWorkbench({
           </div>
           <div className="retail-product-grid">
             {filtered.map((product) => {
-              const unavailable = product.stockQuantity <= 0;
+              const unavailable =
+                !product.unlimitedStock && product.stockQuantity <= 0;
               const { Icon, kind } = productCategoryIcon(
                 product.category,
                 product.name,
@@ -330,7 +336,9 @@ export function RetailWorkbench({
                   <span className={unavailable ? "danger-text" : "muted"}>
                     {unavailable
                       ? it.retail.outOfStock
-                      : `${it.inventory.currentStock} ${product.stockQuantity}`}
+                      : product.unlimitedStock
+                        ? it.inventory.unlimitedStock
+                        : `${it.inventory.currentStock} ${product.stockQuantity}`}
                   </span>
                 </button>
               );
@@ -410,7 +418,7 @@ export function RetailWorkbench({
                       buttonLabel={item.name}
                       defaultValue={item.quantity}
                       min={0}
-                      max={item.stockQuantity}
+                      max={item.unlimitedStock ? 999 : item.stockQuantity}
                       onCommit={(quantity) => setQuantity(item, quantity)}
                     />
                     <b>{money(item.salePrice * item.quantity)}</b>

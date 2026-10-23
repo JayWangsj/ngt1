@@ -218,6 +218,8 @@ export const zh: typeof it = {
     low: "库存不足",
     out: "缺货",
     initialStock: "初始库存",
+    unlimitedStock: "无限库存",
+    unlimitedStockHelp: "开启后不记录商品库存数量。",
     repairPartName: "配件名称",
     repairPartCost: "成本价（€）",
     repairPartFavorite: "设为常用配件",

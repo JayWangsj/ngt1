@@ -60,6 +60,7 @@ export default async function RetailPage({
         category: product.category,
         salePrice: cents(product.salePrice),
         stockQuantity: product.stockQuantity,
+        unlimitedStock: product.unlimitedStock,
         favorite: product.favorite,
       }))}
       quickServices={quickServices.map((service) => ({

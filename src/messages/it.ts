@@ -305,6 +305,9 @@ export const it = {
     low: "Scorta bassa",
     out: "Esaurito",
     initialStock: "Scorta iniziale",
+    unlimitedStock: "Scorta illimitata",
+    unlimitedStockHelp:
+      "Attivando questa opzione, la quantità non viene tracciata.",
     repairPartName: "Nome ricambio",
     repairPartCost: "Costo (€)",
     repairPartFavorite: "Imposta come ricambio frequente",
