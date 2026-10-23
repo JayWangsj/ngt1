@@ -10,7 +10,7 @@ import {
 } from "@/app/actions";
 import { categories, type Category } from "@/lib/catalog";
 import { useLanguage, useMessages } from "./language";
-import { FormDialog } from "./forms";
+import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { SimpleSelect } from "./business-select";
 import { Button } from "./ui/button";
 import { ToggleSwitch } from "./ui/toggle-switch";
@@ -297,11 +297,8 @@ export function FaultCatalogManager({
     router.refresh();
   }
 
-  const manager = (
-    <div
-      className={`fault-manager ${embedded ? "settings-inline-manager" : ""}`.trim()}
-      data-form-dialog-body={embedded ? undefined : true}
-    >
+  const managerContent = (
+    <>
       {embedded && (
         <SimpleSelect
           value={category}
@@ -427,14 +424,14 @@ export function FaultCatalogManager({
       </div>
       <p className="fault-drag-hint">{it.faultDragHint}</p>
       {error && <p className="message error">{error}</p>}
-      {!embedded && (
-        <div className="dialog-actions">
-          <Button type="button" variant="cancel" onClick={closeManager}>
-            {it.close}
-          </Button>
-        </div>
-      )}
+    </>
+  );
+  const manager = embedded ? (
+    <div className="fault-manager settings-inline-manager">
+      {managerContent}
     </div>
+  ) : (
+    <DialogBody className="fault-manager">{managerContent}</DialogBody>
   );
 
   return (
@@ -462,6 +459,11 @@ export function FaultCatalogManager({
               onClose={closeManager}
             >
               {manager}
+              <DialogFooter>
+                <Button type="button" variant="cancel" onClick={closeManager}>
+                  {it.close}
+                </Button>
+              </DialogFooter>
             </FormDialog>
           )}
     </>

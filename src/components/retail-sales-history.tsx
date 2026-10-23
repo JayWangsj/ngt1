@@ -188,7 +188,7 @@ export function RetailSalesHistory({
 export function RetailSaleDetail({ sale }: { sale: SaleHistoryRow }) {
   const it = useMessages();
   return (
-    <div className="retail-sale-dialog" data-form-dialog-body>
+    <DialogBody className="retail-sale-dialog">
       <div className="table-scroll">
         <table>
           <thead>
@@ -247,6 +247,6 @@ export function RetailSaleDetail({ sale }: { sale: SaleHistoryRow }) {
           <dd>{sale.date}</dd>
         </div>
       </dl>
-    </div>
+    </DialogBody>
   );
 }

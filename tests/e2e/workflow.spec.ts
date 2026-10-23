@@ -5101,6 +5101,14 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await period.fill(currentMonth);
   const historyRow = dialog.locator("tbody tr").first();
   await expect(historyRow).toBeVisible();
+  await historyRow.locator(".sale-number-button").click();
+  await expect(
+    dialog.locator(":scope > .dialog-body.retail-sale-dialog"),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: /Storico vendite/ }).click();
+  await expect(
+    dialog.locator(":scope > .dialog-body.retail-history-dialog"),
+  ).toBeVisible();
   await historyRow.hover();
   await historyRow.getByRole("button", { name: /Elimina vendita V-/ }).click();
   const deleteDialog = page.getByRole("dialog", {
@@ -8726,6 +8734,10 @@ test("hides managed faults without changing historical records", async ({
     .getByRole("button", { name: "Gestisci problemi", exact: true })
     .click();
   const dialog = page.getByRole("dialog", { name: "Gestisci problemi" });
+  await expect(
+    dialog.locator(":scope > .dialog-body.fault-manager"),
+  ).toBeVisible();
+  await expect(dialog.locator(":scope > .dialog-footer")).toBeVisible();
   await expect(dialog).toContainText(
     "Problemi frequenti per nuove schede · Telefono",
   );
