@@ -1,13 +1,40 @@
 @import "tailwindcss";
 :root {
-  --bg: #fff;
-  --surface: #fff;
-  --ink: #29271e;
-  --muted: #706b58;
-  --line: #eae4ce;
-  --teal: #806000;
-  --teal-dark: #654900;
-  --soft: #fff1b6;
+  --surface-page: hsl(0 0% 100%);
+  --surface-raised: hsl(0 0% 100%);
+  --surface-subtle: hsl(48 25% 98%);
+  --surface-hover: hsl(180 9% 97%);
+  --text-primary: hsl(48 15% 14%);
+  --text-secondary: hsl(47 13% 39%);
+  --text-tertiary: var(--text-secondary);
+  --text-disabled: hsl(150 5% 62%);
+  --border-subtle: hsl(48 40% 86%);
+  --border-control: hsl(48 9% 48%);
+  --border-focus: hsl(45 100% 25%);
+  --action: hsl(45 100% 25%);
+  --action-hover: hsl(43 100% 20%);
+  --action-primary-text: hsl(48 100% 9%);
+  --danger: hsl(5 80% 37%);
+  --danger-surface: hsl(4 80% 95%);
+  --shadow-1: 0 1px 3px hsl(0 0% 0% / 12%);
+  --shadow-2: 0 4px 6px hsl(0 0% 0% / 14%);
+  --shadow-3: 0 5px 15px hsl(0 0% 0% / 16%);
+  --shadow-4: 0 10px 24px hsl(0 0% 0% / 18%);
+  --shadow-5: 0 15px 35px hsl(0 0% 0% / 20%);
+  --space-control-gap: 8px;
+  --type-label: 12px;
+  --type-control: 14px;
+  --radius-control: 8px;
+
+  /* Legacy roles stay mapped while page-specific rules migrate gradually. */
+  --bg: var(--surface-page);
+  --surface: var(--surface-raised);
+  --ink: var(--text-primary);
+  --muted: var(--text-secondary);
+  --line: var(--border-subtle);
+  --teal: var(--action);
+  --teal-dark: var(--action-hover);
+  --soft: hsl(48 100% 86%);
   --orange: #be743c;
   --action-primary: #f4c62d;
   --action-primary-hover: #e4b619;
@@ -27,8 +54,8 @@ html {
 }
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--ink);
+  background: var(--surface-page);
+  color: var(--text-primary);
   font-family: Arial, "Helvetica Neue", sans-serif;
   font-size: 14px;
   line-height: 1.5;
@@ -55,7 +82,7 @@ input[type="checkbox"] {
   appearance: none;
   display: inline-grid;
   place-content: center;
-  border: 1px solid #9aa29f;
+  border: 1px solid var(--border-control);
   border-radius: 3px;
   background: #fff;
   cursor: pointer;
@@ -89,7 +116,7 @@ input[type="checkbox"]:indeterminate::before {
   transform: scale(1);
 }
 input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgb(210 174 33 / 45%);
+  outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
 input[type="checkbox"]:disabled {
@@ -824,7 +851,7 @@ small {
   border: 0;
 }
 :focus-visible {
-  outline: 3px solid #a77b00;
+  outline: 3px solid var(--border-focus);
   outline-offset: 3px;
 }
 .app-shell {
@@ -896,7 +923,7 @@ small {
 }
 .sidebar-resizer:hover::after,
 .sidebar-resizer:focus-visible::after {
-  background: var(--accent);
+  background: var(--action);
 }
 .print-brand-header {
   display: none;
@@ -1124,12 +1151,12 @@ small {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-control-gap);
   min-height: 40px;
   padding: 9px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
-  font-size: 13px;
+  font-size: var(--type-control);
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
@@ -1211,8 +1238,8 @@ small {
 }
 .button-primary {
   background: var(--action-primary);
-  color: #302600;
-  box-shadow: 0 3px 8px #bd93001a;
+  color: var(--action-primary-text);
+  box-shadow: var(--shadow-1);
 }
 .button-primary:hover {
   background: var(--action-primary-hover);
@@ -1221,22 +1248,21 @@ small {
   background: var(--action-primary-active);
 }
 .button-outline {
-  background: transparent;
-  border-color: transparent;
-  color: #536561;
+  background: var(--surface-raised);
+  border-color: var(--border-control);
+  color: var(--text-secondary);
 }
 .button-secondary {
-  background: transparent;
+  background: var(--surface-subtle);
   border-color: transparent;
-  color: #536561;
+  color: var(--text-secondary);
 }
 .button-outline:hover:not(:disabled),
 .button-outline:focus-visible:not(:disabled),
 .button-secondary:hover:not(:disabled),
 .button-secondary:focus-visible:not(:disabled) {
   background: var(--action-secondary-hover);
-  border-color: transparent;
-  color: var(--ink);
+  color: var(--text-primary);
 }
 .button-outline:active:not(:disabled),
 .button-secondary:active:not(:disabled) {
@@ -1245,7 +1271,7 @@ small {
 .button-tertiary,
 .button-ghost {
   background: transparent;
-  color: var(--muted);
+  color: var(--text-secondary);
   padding: 7px 10px;
 }
 .button-tertiary:hover:not(:disabled),
@@ -1253,15 +1279,15 @@ small {
 .button-ghost:hover:not(:disabled),
 .button-ghost:focus-visible:not(:disabled) {
   background: transparent;
-  color: var(--teal-dark);
+  color: var(--action-hover);
 }
 .button:focus-visible {
-  outline: 2px solid var(--teal);
+  outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
 .button-danger {
-  background: #fbe9e8;
-  color: #ab4444;
+  background: var(--danger-surface);
+  color: var(--danger);
 }
 .metrics {
   display: grid;
@@ -1314,8 +1340,8 @@ small {
   line-height: 1.2;
 }
 .metric > small {
-  color: #939d9b;
-  font-size: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
 }
 .panel {
   background: white;
@@ -1419,11 +1445,11 @@ table {
   white-space: nowrap;
 }
 th {
-  font-weight: 500;
-  color: #89928f;
+  font-weight: 600;
+  color: var(--text-tertiary);
   text-align: left;
-  font-size: 10px;
-  background: #fbfcfc;
+  font-size: 12px;
+  background: var(--surface-subtle);
   letter-spacing: 0.2px;
 }
 td {
@@ -1442,9 +1468,9 @@ td strong {
 }
 td small {
   display: block;
-  color: #939c99;
+  color: var(--text-tertiary);
   margin-top: 3px;
-  font-size: 10px;
+  font-size: 12px;
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1455,7 +1481,7 @@ td small {
 .order-link {
   font-weight: 600;
   color: var(--teal);
-  font-size: 11px;
+  font-size: 12px;
 }
 .numeric {
   text-align: right;
@@ -1786,7 +1812,7 @@ td small {
 .order-quick-views a.is-active {
   background: #ffed9f;
   box-shadow: inset 0 -3px #e4ae00;
-  color: var(--ink);
+  color: var(--text-primary);
   font-weight: 700;
 }
 .order-quick-views a:active {
@@ -1871,23 +1897,23 @@ td small {
 label {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  font-size: 12px;
+  gap: var(--space-control-gap);
+  font-size: var(--type-label);
   font-weight: 500;
-  color: #53645e;
+  color: var(--text-secondary);
   margin-bottom: 17px;
 }
 input,
 select,
 textarea {
-  background: white;
-  border: 1px solid #dce4e0;
-  border-radius: 7px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
   min-height: 41px;
   padding: 10px 12px;
   color: var(--ink);
   width: 100%;
-  font-size: 13px;
+  font-size: var(--type-control);
 }
 input[type="checkbox"] {
   width: 16px;
@@ -1895,27 +1921,34 @@ input[type="checkbox"] {
   height: 16px;
   min-height: 16px;
   flex: 0 0 16px;
+  border-radius: 4px;
   padding: 0;
 }
 input:hover,
 select:hover,
 textarea:hover {
-  border-color: #c9b96f;
+  border-color: var(--action);
 }
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: #c99c00;
+  border-color: var(--border-focus);
   outline: 0;
-  box-shadow: 0 0 0 3px #f4c62d24;
+  box-shadow: 0 0 0 3px hsl(45 100% 25% / 16%);
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 input::placeholder,
 textarea::placeholder {
-  color: #a4afaa;
+  color: var(--text-tertiary);
 }
 input[readonly] {
   background: #f5f7f5;
-  color: var(--muted);
+  color: var(--text-secondary);
 }
 textarea {
   resize: vertical;
@@ -2973,7 +3006,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-2);
   color: var(--ink);
   white-space: nowrap;
   font-size: 12px;
@@ -5023,7 +5056,7 @@ details.secondary-actions {
   border: 1px solid #dce4e0;
   border-radius: 9px;
   background: var(--surface);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-2);
 }
 .secondary-actions-menu > button {
   display: flex;
@@ -6868,8 +6901,8 @@ details.secondary-actions {
   transition: transform 180ms ease;
 }
 .motion-switch[aria-checked="true"] {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--action);
+  background: var(--action);
 }
 .motion-switch[aria-checked="true"] > span {
   transform: translateX(20px);
@@ -6909,7 +6942,7 @@ details.secondary-actions {
   place-items: center;
   border-radius: 9px;
   background: var(--soft);
-  color: var(--accent);
+  color: var(--action);
 }
 .settings-entry:hover .settings-entry-icon svg,
 .settings-entry:focus-visible .settings-entry-icon svg {
@@ -7076,7 +7109,7 @@ details.secondary-actions {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--action);
 }
 .update-progress-track.indeterminate::before {
   content: "";
@@ -7230,7 +7263,7 @@ details.secondary-actions {
   border: 1px solid rgb(191 128 20 / 35%);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-1);
   font-size: 12px;
 }
 .update-notification-copy {
@@ -7415,7 +7448,7 @@ details.secondary-actions {
 }
 .test-motion-control input[type="range"] {
   width: 100%;
-  accent-color: var(--accent);
+  accent-color: var(--action);
 }
 .danger-zone {
   color: #8f3f36;
@@ -7628,7 +7661,7 @@ details.secondary-actions {
   width: 18px;
   height: 18px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--action);
   cursor: pointer;
 }
 .price-toggle:focus-visible {
@@ -7890,10 +7923,10 @@ details.secondary-actions {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 11px;
-  border: 1px solid #d9dddb;
-  border-radius: 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
   background: #fff;
-  color: var(--text);
+  color: var(--text-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -7903,16 +7936,18 @@ details.secondary-actions {
     background 180ms var(--ease-ui);
 }
 .business-select-trigger .is-placeholder {
-  color: #919996;
+  color: var(--text-tertiary);
 }
 .business-select-trigger:hover:not(:disabled) {
-  border-color: #b7bfbc;
+  border-color: var(--action);
 }
-.business-select.is-open .business-select-trigger,
+.business-select.is-open .business-select-trigger {
+  border-color: var(--action);
+  box-shadow: 0 0 0 3px hsl(45 100% 25% / 16%);
+}
 .business-select-trigger:focus-visible {
-  border-color: #d2ae21;
-  box-shadow: 0 0 0 3px rgb(235 196 39 / 12%);
-  outline: none;
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 .business-select-trigger svg {
   flex: 0 0 auto;
