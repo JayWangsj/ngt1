@@ -2586,6 +2586,33 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   ).toContainText("+75%");
 
   const monthInput = dialog.locator('input[type="month"]');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const monthControl = dialog.locator(".monthly-receipt-picker .date-picker");
+  const monthPickerLayout = dialog.locator(".monthly-receipt-picker");
+  const monthPicker = dialog.locator(".date-picker-popover");
+  const desktopLayoutBox = await monthPickerLayout.boundingBox();
+  const desktopControlBox = await monthControl.boundingBox();
+  await page.mouse.click(
+    desktopLayoutBox!.x + 4,
+    desktopControlBox!.y + desktopControlBox!.height / 2,
+  );
+  await expect(monthPicker).toHaveCount(0);
+  const monthLabelBox = await monthPickerLayout.locator("> span").boundingBox();
+  const alignedControlBox = await monthControl.boundingBox();
+  expect(
+    Math.abs(
+      monthLabelBox!.y +
+        monthLabelBox!.height / 2 -
+        (alignedControlBox!.y + alignedControlBox!.height / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
+  await monthInput.click();
+  await expect(monthPicker).toBeVisible();
+  await page.screenshot({
+    path: "test-results/monthly-receipts-month-picker.png",
+  });
+  await monthInput.click();
+  await expect(monthPicker).toHaveCount(0);
   await monthInput.fill("2025-09");
   await expect(page).toHaveURL(/day=2026-10-03.*receipts=2025-09/);
   await expect(dialog.locator(".monthly-receipt-total")).toContainText(
@@ -2596,6 +2623,31 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   ).toContainText("+100%");
 
   await page.setViewportSize({ width: 390, height: 844 });
+  const [mobileLayoutBox, mobileLabelBox, mobileControlBox] = await Promise.all(
+    [
+      monthPickerLayout.boundingBox(),
+      monthPickerLayout.locator("> span").boundingBox(),
+      monthControl.boundingBox(),
+    ],
+  );
+  expect(mobileLabelBox!.y + mobileLabelBox!.height).toBeLessThanOrEqual(
+    mobileControlBox!.y,
+  );
+  await page.mouse.click(
+    mobileLayoutBox!.x + 4,
+    (mobileLabelBox!.y + mobileControlBox!.y) / 2,
+  );
+  await expect(monthPicker).toHaveCount(0);
+  await monthInput.click();
+  await expect(monthPicker).toBeVisible();
+  const mobilePickerBox = await monthPicker.boundingBox();
+  expect(mobilePickerBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mobilePickerBox!.x + mobilePickerBox!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: "test-results/monthly-receipts-month-picker-mobile.png",
+  });
+  await monthInput.click();
+  await expect(monthPicker).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,

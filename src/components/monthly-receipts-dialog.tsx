@@ -71,7 +71,7 @@ export function MonthlyReceiptsDialog({
           onClose={close}
         >
           <div data-form-dialog-body className="monthly-receipt-dialog">
-            <label className="monthly-receipt-picker">
+            <div className="monthly-receipt-picker">
               <span>{it.month}</span>
               <DatePicker
                 type="month"
@@ -84,7 +84,7 @@ export function MonthlyReceiptsDialog({
                     router.replace(receiptUrl(value), { scroll: false });
                 }}
               />
-            </label>
+            </div>
             <div className="monthly-receipt-total">
               <span>{it.dashboard.selectedMonthTotal}</span>
               <strong>{money(summary.amount)}</strong>
