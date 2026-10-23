@@ -7736,7 +7736,7 @@ details.secondary-actions {
 .form-dialog > [data-form-dialog-body] {
   max-height: calc(100dvh - 176px);
   overflow-y: auto;
-  padding-right: 4px;
+  padding-inline: 4px;
 }
 .form-dialog > :is(.action-form, .dialog-form) {
   display: grid;
@@ -9478,6 +9478,8 @@ details.secondary-actions {
 }
 .price-option-picker-footer {
   justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 16px;
 }
 .detail-primary-actions .status-dropdown-trigger,
 .detail-primary-actions .status-action-trigger {
@@ -10153,17 +10155,17 @@ summary.record-icon::-webkit-details-marker {
 .dialog-close svg {
   display: block;
 }
-.form-dialog .dialog-actions .button-outline {
+.dialog-actions .button-outline {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
 }
-.form-dialog .dialog-actions .button-outline:hover:not(:disabled),
-.form-dialog .dialog-actions .button-outline:focus-visible:not(:disabled) {
+.dialog-actions .button-outline:hover:not(:disabled),
+.dialog-actions .button-outline:focus-visible:not(:disabled) {
   border-color: transparent;
   background: #fff7d6;
 }
-.form-dialog .dialog-actions .button-outline:active:not(:disabled) {
+.dialog-actions .button-outline:active:not(:disabled) {
   background: #ffe99d;
 }
 .x-icon-button:hover:not(:disabled),

@@ -268,9 +268,12 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
       <div class="price-option-dialog">
         <div class="price-option-list" style="height: 40px"></div>
         <button class="quick-service-picker-add price-option-add">Add</button>
+        <div class="quick-service-picker-footer price-option-picker-footer">
+          <div class="dialog-actions"><button class="button button-outline">Cancel</button></div>
+        </div>
       </div>
-      <div class="dialog-actions">
-        <button class="button button-outline">Cancel</button>
+      <div data-form-dialog-body>
+        <input aria-label="Focused field" />
       </div>
       <button class="button button-ghost record-icon record-icon-edit" aria-label="Edit">
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20h4l11-11-4-4L4 16v4Z" /></svg>
@@ -280,6 +283,11 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
       </button>
     `;
     document.body.append(fixture);
+    const embeddedActions = document.createElement("div");
+    embeddedActions.className = "dialog-actions";
+    embeddedActions.innerHTML =
+      '<button class="button button-outline">Embedded cancel</button>';
+    document.body.append(embeddedActions);
   });
 
   const close = page.getByRole("button", { name: "Close" });
@@ -312,11 +320,38 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   const addPartOption = page.locator(".price-option-add");
   await expect(addPartOption).toHaveCSS("margin-top", "12px");
 
-  const cancel = page.getByRole("button", { name: "Cancel" });
+  const optionFooter = page.locator(".price-option-picker-footer");
+  await expect(optionFooter).toHaveCSS("margin-top", "24px");
+  await expect(optionFooter).toHaveCSS("padding-top", "16px");
+
+  const cancel = page.getByRole("button", { name: "Cancel", exact: true });
   await expect(cancel).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await expect(cancel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await cancel.hover();
   await expect(cancel).toHaveCSS("background-color", "rgb(255, 247, 214)");
+
+  const embeddedCancel = page.getByRole("button", {
+    name: "Embedded cancel",
+  });
+  await expect(embeddedCancel).toHaveCSS(
+    "border-top-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await embeddedCancel.hover();
+  await expect(embeddedCancel).toHaveCSS(
+    "background-color",
+    "rgb(255, 247, 214)",
+  );
+
+  const dialogBody = page.locator("[data-form-dialog-body]");
+  const focusedField = page.getByRole("textbox", { name: "Focused field" });
+  await expect(dialogBody).toHaveCSS("padding-left", "4px");
+  await focusedField.focus();
+  const [bodyBox, fieldBox] = await Promise.all([
+    dialogBody.boundingBox(),
+    focusedField.boundingBox(),
+  ]);
+  expect(fieldBox!.x - bodyBox!.x).toBeGreaterThanOrEqual(4);
 
   const edit = page.getByRole("button", { name: "Edit" });
   await expect(edit).toBeVisible();
