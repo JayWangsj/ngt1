@@ -7,7 +7,13 @@ import { customerAction, lookupCustomerAction } from "@/app/actions";
 import { translateError } from "@/lib/i18n";
 import { focusComfortably } from "@/lib/comfortable-scroll";
 import { SearchableCombobox } from "./business-select";
-import { Field, FormDialog } from "./forms";
+import {
+  DialogBody,
+  DialogFooter,
+  DialogForm,
+  Field,
+  FormDialog,
+} from "./forms";
 import { useLanguage, useMessages } from "./language";
 import { Button } from "./ui/button";
 
@@ -167,59 +173,59 @@ export function CustomerPicker({
       {invalid && <p className="field-error">{it.selectCustomerError}</p>}
       {creating && (
         <FormDialog title={it.addCustomer} onClose={() => setCreating(false)}>
-          <form
-            className="dialog-form"
-            data-form-dialog-body
+          <DialogForm
             onSubmit={(event) => {
               event.preventDefault();
               void save();
             }}
           >
-            <Field label={`${it.name} *`}>
-              <input
-                ref={nameInput}
-                required
-                maxLength={120}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </Field>
-            <Field label={`${it.phone} *`}>
-              <input
-                ref={phoneInput}
-                required
-                type="tel"
-                maxLength={30}
-                value={phone}
-                onChange={(event) => {
-                  setPhone(event.target.value);
-                  setDuplicate(null);
-                }}
-              />
-            </Field>
-            {duplicate && (
-              <div className="message warning duplicate-customer">
-                <strong>{it.customerFound}</strong>
-                <span>{duplicate.name}</span>
-                <small>{duplicate.phone}</small>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    onChange(duplicate);
-                    setChoosing(false);
-                    setQuery("");
-                    setCreating(false);
+            <DialogBody>
+              <Field label={`${it.name} *`}>
+                <input
+                  ref={nameInput}
+                  required
+                  maxLength={120}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </Field>
+              <Field label={`${it.phone} *`}>
+                <input
+                  ref={phoneInput}
+                  required
+                  type="tel"
+                  maxLength={30}
+                  value={phone}
+                  onChange={(event) => {
+                    setPhone(event.target.value);
+                    setDuplicate(null);
                   }}
-                >
-                  {it.useExistingCustomer}
-                </Button>
-              </div>
-            )}
-            {error && (
-              <p className="message error">{translateError(error, locale)}</p>
-            )}
-            <div className="dialog-actions">
+                />
+              </Field>
+              {duplicate && (
+                <div className="message warning duplicate-customer">
+                  <strong>{it.customerFound}</strong>
+                  <span>{duplicate.name}</span>
+                  <small>{duplicate.phone}</small>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      onChange(duplicate);
+                      setChoosing(false);
+                      setQuery("");
+                      setCreating(false);
+                    }}
+                  >
+                    {it.useExistingCustomer}
+                  </Button>
+                </div>
+              )}
+              {error && (
+                <p className="message error">{translateError(error, locale)}</p>
+              )}
+            </DialogBody>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="cancel"
@@ -231,8 +237,8 @@ export function CustomerPicker({
               <Button disabled={pending}>
                 {pending ? it.saving : it.saveCustomer}
               </Button>
-            </div>
-          </form>
+            </DialogFooter>
+          </DialogForm>
         </FormDialog>
       )}
     </>

@@ -12,6 +12,7 @@ import {
   cloneElement,
   type ReactElement,
   type FormEvent,
+  type FormHTMLAttributes,
   type HTMLAttributes,
   type ReactNode,
 } from "react";
@@ -6271,6 +6272,18 @@ export function DialogBody({
       {...props}
       className={`dialog-body${className ? ` ${className}` : ""}`}
       data-form-dialog-body
+    />
+  );
+}
+
+export function DialogForm({
+  className,
+  ...props
+}: FormHTMLAttributes<HTMLFormElement>) {
+  return (
+    <form
+      {...props}
+      className={`dialog-form dialog-form-layout${className ? ` ${className}` : ""}`}
     />
   );
 }

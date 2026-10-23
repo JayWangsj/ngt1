@@ -7762,6 +7762,26 @@ details.secondary-actions {
   padding-top: 0;
   padding-bottom: 0;
 }
+.form-dialog[open]:has(> .dialog-form-layout) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+.form-dialog > .dialog-form-layout {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0;
+  max-height: none;
+  overflow: hidden;
+  padding-inline: 0;
+}
+.form-dialog > .dialog-form-layout > .dialog-body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline: 4px;
+}
 .form-dialog > :is(.action-form, .dialog-form) > label,
 .form-dialog .form-grid > label {
   margin-bottom: 0;

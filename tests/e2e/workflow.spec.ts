@@ -7187,7 +7187,8 @@ test("price editor and mobile yellow layout support both languages", async ({
 test("creates a customer and selects it without another search", async ({
   page,
 }) => {
-  const phone = "336" + Date.now().toString().slice(-7);
+  const phone = "336" + Date.now().toString().slice(-10);
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/orders/new");
   await page.waitForLoadState("networkidle");
   await page
@@ -7197,11 +7198,15 @@ test("creates a customer and selects it without another search", async ({
     .getByRole("button", { name: "Nuovo cliente", exact: true })
     .click();
   const dialog = page.getByRole("dialog", { name: "Nuovo cliente" });
+  const form = dialog.locator(":scope > .dialog-form-layout");
+  const footer = form.locator(":scope > .dialog-footer");
+  await expect(form.locator(":scope > .dialog-body")).toBeVisible();
+  await expect(footer).toBeInViewport();
+  await expect(footer).toHaveCSS("flex-direction", "column");
   await dialog.getByLabel(/Nome e cognome/).fill("Tre telefoni");
-  await dialog.getByLabel(/Telefono/).fill(phone);
-  await dialog
-    .getByRole("button", { name: "Salva cliente", exact: true })
-    .click();
+  const phoneInput = dialog.getByLabel(/Telefono/);
+  await phoneInput.fill(phone);
+  await phoneInput.press("Enter");
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(".selected-customer-summary")).toContainText(
     "Tre telefoni",
