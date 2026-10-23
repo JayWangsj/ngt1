@@ -49,7 +49,7 @@ test.beforeEach(async () => {
 
 async function loadCompiledGlobalStyles(page: Page) {
   const nextDist = resolve(process.cwd(), process.env.NEXT_DIST_DIR || ".next");
-  const globalStylesheet = [
+  const chunkStylesheet = [
     resolve(nextDist, "dev", "static", "chunks"),
     resolve(nextDist, "static", "chunks"),
   ]
@@ -59,6 +59,12 @@ async function loadCompiledGlobalStyles(page: Page) {
         .filter((file) => file.includes("globals") && file.endsWith(".css"))
         .map((file) => resolve(directory, file)),
     )[0];
+  const globalStylesheet =
+    chunkStylesheet ||
+    [
+      resolve(nextDist, "dev", "static", "css", "app", "layout.css"),
+      resolve(nextDist, "static", "css", "app", "layout.css"),
+    ].find(existsSync);
   expect(globalStylesheet).toBeTruthy();
   await page.setContent("<main></main>");
   await page.addStyleTag({ path: globalStylesheet });
@@ -269,7 +275,7 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
         <div class="price-option-list" style="height: 40px"></div>
         <button class="quick-service-picker-add price-option-add">Add</button>
         <div class="quick-service-picker-footer price-option-picker-footer">
-          <div class="dialog-actions"><button class="button button-outline">Cancel</button></div>
+          <div class="dialog-actions"><button class="button button-cancel">Cancel</button></div>
         </div>
       </div>
       <form class="action-form">
@@ -284,9 +290,9 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
     `;
     document.body.append(fixture);
     const embeddedActions = document.createElement("div");
-    embeddedActions.className = "dialog-actions";
+    embeddedActions.className = "standalone-actions";
     embeddedActions.innerHTML =
-      '<button class="button button-outline">Embedded cancel</button>';
+      '<button class="button button-cancel">Standalone cancel</button><button class="button button-outline">Outline action</button>';
     document.body.append(embeddedActions);
   });
 
@@ -327,20 +333,33 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   const cancel = page.getByRole("button", { name: "Cancel", exact: true });
   await expect(cancel).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await expect(cancel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const cancelBox = await cancel.boundingBox();
   await cancel.hover();
   await expect(cancel).toHaveCSS("background-color", "rgb(255, 247, 214)");
+  expect(await cancel.boundingBox()).toEqual(cancelBox);
 
-  const embeddedCancel = page.getByRole("button", {
-    name: "Embedded cancel",
+  const standaloneCancel = page.getByRole("button", {
+    name: "Standalone cancel",
   });
-  await expect(embeddedCancel).toHaveCSS(
+  await expect(standaloneCancel).toHaveCSS(
     "border-top-color",
     "rgba(0, 0, 0, 0)",
   );
-  await embeddedCancel.hover();
-  await expect(embeddedCancel).toHaveCSS(
+  await standaloneCancel.focus();
+  await expect(standaloneCancel).toHaveCSS("outline-style", "solid");
+  expect(
+    await computedContrast(standaloneCancel, "outlineColor"),
+  ).toBeGreaterThanOrEqual(3);
+  await standaloneCancel.hover();
+  await expect(standaloneCancel).toHaveCSS(
     "background-color",
     "rgb(255, 247, 214)",
+  );
+
+  const outlineAction = page.getByRole("button", { name: "Outline action" });
+  await expect(outlineAction).not.toHaveCSS(
+    "border-top-color",
+    "rgba(0, 0, 0, 0)",
   );
 
   const dialogBody = page.locator(".form-dialog > .action-form");

@@ -8,6 +8,7 @@ const variants = cva("button", {
     variant: {
       default: "button-primary",
       outline: "button-outline",
+      cancel: "button-cancel",
       secondary: "button-secondary",
       tertiary: "button-tertiary",
       ghost: "button-ghost",
@@ -20,6 +21,7 @@ export function Button({
   className,
   variant,
   asChild = false,
+  type,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof variants> & { asChild?: boolean }) {
@@ -27,6 +29,11 @@ export function Button({
   return (
     <Component
       className={twMerge(clsx(variants({ variant }), className))}
+      type={
+        asChild
+          ? undefined
+          : (type ?? (variant === "cancel" ? "button" : undefined))
+      }
       {...props}
     />
   );

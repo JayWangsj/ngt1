@@ -104,7 +104,7 @@ export function DeleteRecordDialog({
           </p>
         )}
         <div className="dialog-actions">
-          <Button variant="outline" disabled={pending} onClick={onClose}>
+          <Button variant="cancel" disabled={pending} onClick={onClose}>
             {it.cancel}
           </Button>
           <Button variant="danger" disabled={pending} onClick={remove}>

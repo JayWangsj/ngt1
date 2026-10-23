@@ -624,7 +624,7 @@ export function ProductCompatibilityFields({
             <div className="dialog-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="cancel"
                 onClick={() => setDialogOpen(false)}
               >
                 {it.cancel}
@@ -3492,7 +3492,7 @@ function ActionForm({
         <div className="dialog-actions">
           <Button
             type="button"
-            variant="outline"
+            variant="cancel"
             disabled={pending}
             onClick={closeDialog}
           >
