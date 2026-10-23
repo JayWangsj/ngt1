@@ -272,9 +272,9 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
           <div class="dialog-actions"><button class="button button-outline">Cancel</button></div>
         </div>
       </div>
-      <div data-form-dialog-body>
-        <input aria-label="Focused field" />
-      </div>
+      <form class="action-form">
+        <textarea aria-label="Focused field"></textarea>
+      </form>
       <button class="button button-ghost record-icon record-icon-edit" aria-label="Edit">
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20h4l11-11-4-4L4 16v4Z" /></svg>
       </button>
@@ -343,15 +343,19 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
     "rgb(255, 247, 214)",
   );
 
-  const dialogBody = page.locator("[data-form-dialog-body]");
+  const dialogBody = page.locator(".form-dialog > .action-form");
   const focusedField = page.getByRole("textbox", { name: "Focused field" });
   await expect(dialogBody).toHaveCSS("padding-left", "4px");
+  await expect(dialogBody).toHaveCSS("padding-right", "4px");
   await focusedField.focus();
   const [bodyBox, fieldBox] = await Promise.all([
     dialogBody.boundingBox(),
     focusedField.boundingBox(),
   ]);
   expect(fieldBox!.x - bodyBox!.x).toBeGreaterThanOrEqual(4);
+  expect(
+    bodyBox!.x + bodyBox!.width - fieldBox!.x - fieldBox!.width,
+  ).toBeGreaterThanOrEqual(4);
 
   const edit = page.getByRole("button", { name: "Edit" });
   await expect(edit).toBeVisible();

@@ -7744,7 +7744,6 @@ details.secondary-actions {
   margin-top: 0;
   padding-top: 0;
   padding-bottom: 0;
-  padding-left: 0;
 }
 .form-dialog > :is(.action-form, .dialog-form) > label,
 .form-dialog .form-grid > label {
