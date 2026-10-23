@@ -14,6 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessages } from "./language";
+import styles from "./business-select-panel.module.css";
 import {
   ensureComfortableInteractionSpace,
   focusComfortably,
@@ -543,7 +544,7 @@ export function SelectDropdown({
         createPortal(
           <div
             ref={panel}
-            className={`business-select-panel ${open ? "is-entering" : "is-leaving"}`}
+            className={`business-select-panel ${open ? "is-entering" : "is-leaving"} ${styles.scope}`}
             data-prevent-card-autosave
             style={{
               top: position.top,

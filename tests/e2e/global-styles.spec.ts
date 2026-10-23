@@ -18,7 +18,7 @@ const elevationSurfaces = [
   },
   {
     id: "business-select",
-    className: "business-select-panel",
+    className: "business-select-panel is-entering",
     token: "--shadow-3",
   },
   {
@@ -190,6 +190,31 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
     3,
   );
 
+  const datePickerScopeClass = await page
+    .locator(".date-picker")
+    .first()
+    .evaluate((element) =>
+      element.classList.item(element.classList.length - 1),
+    );
+  if (!datePickerScopeClass)
+    throw new Error("The DatePicker CSS Module scope was not rendered.");
+
+  const selectTrigger = page.locator(".business-select-trigger").first();
+  await selectTrigger.click();
+  const selectPanel = page.locator(
+    ".business-select-panel.is-entering:visible",
+  );
+  await expect(selectPanel).toHaveCount(1);
+  await expect(selectPanel).toHaveCSS("position", "fixed");
+  await expect(selectPanel).toHaveCSS("border-radius", "9px");
+  const businessSelectScopeClass = await selectPanel.evaluate((element) =>
+    element.classList.item(element.classList.length - 1),
+  );
+  if (!businessSelectScopeClass)
+    throw new Error("The business-select CSS Module scope was not rendered.");
+  await selectTrigger.click();
+  await expect(selectPanel).toHaveCount(0);
+
   await page.evaluate(() => {
     const controls = document.createElement("div");
     controls.id = "global-form-controls";
@@ -241,19 +266,30 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
     4.5,
   );
 
-  await page.evaluate((surfaces) => {
-    const fixture = document.createElement("div");
-    fixture.id = "global-shadow-fixtures";
-    fixture.style.cssText =
-      "position: absolute; left: -10000px; top: 0; visibility: hidden";
-    for (const surface of surfaces) {
-      const element = document.createElement("div");
-      element.id = `global-shadow-${surface.id}`;
-      element.className = surface.className;
-      fixture.append(element);
-    }
-    document.body.append(fixture);
-  }, elevationSurfaces);
+  await page.evaluate(
+    ({ surfaces, businessSelectScopeClass, datePickerScopeClass }) => {
+      const fixture = document.createElement("div");
+      fixture.id = "global-shadow-fixtures";
+      fixture.style.cssText =
+        "position: absolute; left: -10000px; top: 0; visibility: hidden";
+      for (const surface of surfaces) {
+        const element = document.createElement("div");
+        element.id = `global-shadow-${surface.id}`;
+        element.className = surface.className;
+        if (surface.id === "business-select")
+          element.classList.add(businessSelectScopeClass);
+        if (surface.id === "date-picker")
+          element.classList.add(datePickerScopeClass);
+        fixture.append(element);
+      }
+      document.body.append(fixture);
+    },
+    {
+      surfaces: elevationSurfaces,
+      businessSelectScopeClass,
+      datePickerScopeClass,
+    },
+  );
 
   for (const surface of elevationSurfaces) {
     const usesToken = await page
@@ -269,6 +305,36 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
       }, surface.token);
     expect(usesToken, `${surface.className} uses ${surface.token}`).toBe(true);
   }
+
+  await page.evaluate((scopeClass) => {
+    const panel = document.createElement("div");
+    panel.id = "business-select-hover-fixture";
+    panel.className = `business-select-panel ${scopeClass}`;
+    panel.style.cssText =
+      "position: fixed; top: 24px; left: 24px; width: 240px; z-index: 2000";
+    panel.innerHTML = `
+      <div class="business-select-options">
+        <div class="business-select-option">
+          <span>Option</span><button class="option-delete" type="button">Delete</button>
+        </div>
+      </div>
+    `;
+    document.body.append(panel);
+  }, businessSelectScopeClass);
+  const deleteOption = page.locator(
+    "#business-select-hover-fixture .business-select-option",
+  );
+  const deleteButton = deleteOption.locator(".option-delete");
+  await expect(deleteButton).toHaveCSS("opacity", "0");
+  await deleteOption.hover();
+  await expect(deleteButton).toHaveCSS("opacity", "1");
+  await expect(deleteButton).toHaveCSS("pointer-events", "auto");
+
+  const panelFixture = page.locator("#global-shadow-business-select");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panelFixture).toHaveCSS("max-width", "374px");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(panelFixture).toHaveCSS("animation-name", "none");
 });
 
 test("sidebar resize handle uses the defined action color", async ({
