@@ -3408,9 +3408,19 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 
 .dashboard-kpis {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+.dashboard-kpis.has-receipts {
+  grid-template-columns: minmax(280px, 1.55fr) repeat(3, minmax(0, 1fr));
+}
+.dashboard {
+  width: min(100%, 1440px);
+  margin-inline: auto;
 }
 .dashboard > .page-header {
-  margin-bottom: 4px;
+  align-items: flex-end;
+  margin-bottom: 16px;
 }
 .dashboard > .page-header .eyebrow {
   margin-bottom: 4px;
@@ -3432,40 +3442,32 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   width: auto;
   cursor: pointer;
 }
-.dashboard-date-filter {
+.dashboard > .page-header .dashboard-date-filter {
   margin: 0;
 }
 .dashboard-receipts {
-  margin: 12px 0 14px;
-  border-radius: 12px;
-  padding: 14px 20px;
+  margin: 0;
+  border-radius: var(--radius);
+  padding: 11px 14px;
 }
 .dashboard-receipts-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 .dashboard-receipts-heading h2 {
   margin: 0;
-  color: var(--ink);
-  font-size: 17px;
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 600;
 }
 .dashboard-receipt-summary {
   display: grid;
-  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
-  align-items: stretch;
-  gap: 16px;
+  gap: 8px;
 }
 .dashboard-day-receipts {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
-  border-right: 1px solid var(--line);
-  padding-right: 20px;
+  gap: 4px;
 }
 .dashboard-day-receipts > span,
 .dashboard-month-total > span {
@@ -3475,33 +3477,38 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .dashboard-day-receipts > strong {
   color: var(--ink);
-  font-size: 30px;
+  font-size: 22px;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 .dashboard-month-receipts {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
+  gap: 8px;
 }
 .dashboard-month-total {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  min-width: 0;
+  gap: 2px;
 }
 .dashboard-month-total > small {
+  overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dashboard-month-total > strong {
   color: var(--teal-dark);
-  font-size: 24px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 .dashboard-month-entry {
   align-self: center;
+  flex: 0 0 auto;
 }
 .form-dialog:has(.monthly-receipt-dialog) {
   width: min(560px, calc(100vw - 32px));
@@ -3577,14 +3584,28 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .dashboard-charts {
   --dashboard-repair: #f5bd27;
   --dashboard-retail: #5b9cf6;
+  display: block;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+}
+.dashboard-charts > .section-heading {
+  padding: 0;
+}
+.dashboard-chart-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.8fr);
   gap: 16px;
-  margin-bottom: 20px;
+  margin-top: 12px;
 }
 .revenue-chart-card,
 .revenue-source-card {
   min-width: 0;
+}
+.revenue-source-card > h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
 }
 .chart-legend {
   display: flex;
@@ -3819,10 +3840,10 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   text-align: right;
 }
 .dashboard-chart-empty {
-  min-height: 220px;
+  min-height: 136px;
 }
 .dashboard-compact-empty {
-  min-height: 220px;
+  min-height: 100px;
 }
 .dashboard-kpis .metric {
   position: relative;
@@ -3885,14 +3906,15 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .dashboard-kpis .metric:nth-child(3) {
   --dashboard-card-index: 2;
 }
-.dashboard-animating .dashboard-receipts,
-.dashboard-animating .dashboard-charts > section,
+.dashboard-kpis .metric:nth-child(4) {
+  --dashboard-card-index: 3;
+}
+.dashboard-animating .dashboard-charts,
 .dashboard-animating .dashboard-lists > section {
   opacity: 0;
   transform: translateY(6px);
 }
-.dashboard-animating.dashboard-running .dashboard-receipts,
-.dashboard-animating.dashboard-running .dashboard-charts > section,
+.dashboard-animating.dashboard-running .dashboard-charts,
 .dashboard-animating.dashboard-running .dashboard-lists > section {
   opacity: 1;
   transform: translateY(0);
@@ -3902,7 +3924,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .dashboard-lists {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.18fr);
   gap: 16px;
 }
 .attention-card {
@@ -3956,6 +3978,11 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+@media (max-width: 1024px) {
+  .dashboard-kpis.has-receipts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .dashboard-list-row > strong {
   margin-left: auto;
   text-align: right;
@@ -3973,27 +4000,18 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   text-align: center;
 }
 @media (max-width: 800px) {
-  .dashboard-charts,
+  .dashboard-chart-grid,
   .dashboard-lists {
     grid-template-columns: 1fr;
   }
   .dashboard-kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: white;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
   .dashboard-kpis .metric {
     min-width: 0;
-    border: 0;
-    border-radius: 0;
-    padding: 14px 12px;
+    padding: 14px;
     box-shadow: none;
-  }
-  .dashboard-kpis .metric + .metric {
-    border-left: 1px solid var(--line);
   }
   .dashboard-kpis .metric:hover {
     border-color: var(--line);
@@ -4021,30 +4039,21 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     margin: 10px 0 0;
     font-size: 26px;
   }
-  .dashboard-receipts-heading {
-    align-items: center;
-    gap: 12px;
+  .dashboard-receipts {
+    padding: 14px;
+  }
+  .dashboard-month-receipts {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .dashboard-month-entry {
+    align-self: flex-start;
   }
   .dashboard > .page-header h1 {
     font-size: 27px;
   }
-  .dashboard-receipt-summary {
-    grid-template-columns: 1fr;
-  }
-  .dashboard-month-receipts {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-  }
-  .dashboard-day-receipts {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 0 0 14px;
-  }
-  .dashboard-month-entry {
-    justify-self: end;
-  }
-  .dashboard-date-filter {
-    width: auto;
+  .dashboard > .page-header .dashboard-date-filter {
+    align-self: flex-start;
   }
   .revenue-source-content {
     grid-template-columns: 1fr;
@@ -4064,10 +4073,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 @media (prefers-reduced-motion: reduce) {
   html:not([data-motion="always"]) .dashboard-animating .dashboard-kpis .metric,
   html:not([data-motion="always"]) .dashboard-animating .dashboard-receipts,
-  html:not([data-motion="always"])
-    .dashboard-animating
-    .dashboard-charts
-    > section,
+  html:not([data-motion="always"]) .dashboard-animating .dashboard-charts,
   html:not([data-motion="always"])
     .dashboard-animating
     .dashboard-lists
@@ -4079,7 +4085,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   html:not([data-motion="always"]) .dashboard-receipts,
   html:not([data-motion="always"]) .revenue-bar,
   html:not([data-motion="always"]) .donut-segment,
-  html:not([data-motion="always"]) .dashboard-charts > section,
+  html:not([data-motion="always"]) .dashboard-charts,
   html:not([data-motion="always"]) .dashboard-lists > section,
   html:not([data-motion="always"]) .dashboard-action-link,
   html:not([data-motion="always"])

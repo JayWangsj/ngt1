@@ -2487,6 +2487,9 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await page.goto("/?day=2026-10-03");
   const receipts = page.locator(".dashboard-receipts");
   await expect(receipts).toBeVisible();
+  await expect(
+    page.locator(".dashboard > .page-header .dashboard-date-filter"),
+  ).toBeVisible();
   await expect(receipts.locator(".dashboard-date-filter > span")).toHaveCount(
     0,
   );
@@ -2521,7 +2524,7 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   await expect(charts.locator(".revenue-source-card")).toContainText(
     "100,00 €",
   );
-  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(4);
   await expect(page.locator(".dashboard-kpis .metric > small")).toHaveCount(0);
   await expect(page.locator(".dashboard-workflow")).toHaveCount(0);
   await expect(page.locator(".dashboard-lists > section")).toHaveCount(2);
@@ -2530,18 +2533,45 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   ).toHaveCount(0);
 
   await page.setViewportSize({ width: 1280, height: 844 });
-  const [receiptBox, chartBox, kpiBox, listBox] = await Promise.all([
+  const [
+    headerBox,
+    receiptBox,
+    chartBox,
+    kpiBox,
+    listBox,
+    prioritiesBox,
+    recentOrdersBox,
+  ] = await Promise.all([
+    page.locator(".dashboard > .page-header").boundingBox(),
     receipts.boundingBox(),
     charts.boundingBox(),
     page.locator(".dashboard-kpis").boundingBox(),
     page.locator(".dashboard-lists").boundingBox(),
+    page.locator(".attention-card").boundingBox(),
+    page.locator(".dashboard-list-card").boundingBox(),
   ]);
-  expect(receiptBox!.y + receiptBox!.height).toBeLessThanOrEqual(chartBox!.y);
-  expect(chartBox!.y + chartBox!.height).toBeLessThanOrEqual(kpiBox!.y);
+  expect(headerBox!.y + headerBox!.height).toBeLessThanOrEqual(kpiBox!.y);
   expect(kpiBox!.y + kpiBox!.height).toBeLessThanOrEqual(listBox!.y);
-  expect(receiptBox!.height).toBeLessThanOrEqual(155);
-  expect(kpiBox!.height).toBeLessThanOrEqual(112);
+  expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(chartBox!.y);
+  expect(recentOrdersBox!.width).toBeGreaterThan(prioritiesBox!.width);
+  expect(receiptBox!.height).toBeLessThanOrEqual(180);
+  expect(kpiBox!.height).toBeLessThanOrEqual(180);
+  expect(chartBox!.height).toBeGreaterThanOrEqual(260);
+  expect(
+    (await page.locator(".dashboard").boundingBox())!.width,
+  ).toBeLessThanOrEqual(1440);
   await expect(charts.locator(".revenue-bars")).toHaveCSS("height", "220px");
+  await expect(page.locator(".dashboard")).not.toHaveClass(
+    /dashboard-animating/,
+  );
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.addStyleTag({
+    content: "nextjs-portal { display: none !important; }",
+  });
+  await page.screenshot({
+    path: "test-results/dashboard-redesign-desktop.png",
+    fullPage: false,
+  });
 
   await monthlyReceipts.click();
   await expect(page).toHaveURL(/day=2026-10-03.*receipts=2026-10/);
@@ -2584,13 +2614,21 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
         return { left: box.left, top: box.top, width: box.width };
       }),
     );
-  expect(new Set(mobileKpis.map(({ top }) => Math.round(top))).size).toBe(1);
+  const [mobileReceiptBox, mobileMonthlyEntryBox] = await Promise.all([
+    receipts.boundingBox(),
+    receipts.locator(".dashboard-month-entry").boundingBox(),
+  ]);
+  expect(
+    mobileMonthlyEntryBox!.x + mobileMonthlyEntryBox!.width,
+  ).toBeLessThanOrEqual(mobileReceiptBox!.x + mobileReceiptBox!.width);
+  expect(new Set(mobileKpis.map(({ top }) => Math.round(top))).size).toBe(2);
+  expect(Math.round(mobileKpis[0].top)).toBe(Math.round(mobileKpis[1].top));
   expect(mobileKpis[1].left).toBeGreaterThan(
     mobileKpis[0].left + mobileKpis[0].width - 1,
   );
-  expect(mobileKpis[2].left).toBeGreaterThan(
-    mobileKpis[1].left + mobileKpis[1].width - 1,
-  );
+  expect(mobileKpis[2].top).toBeGreaterThan(mobileKpis[0].top);
+  expect(mobileKpis[2].left).toBeCloseTo(mobileKpis[0].left, 0);
+  expect(mobileKpis[3].left).toBeCloseTo(mobileKpis[1].left, 0);
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -2601,6 +2639,15 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
       `dashboard overflows at ${width}px`,
     ).toBe(true);
   }
+  await expect(page.locator(".dashboard")).not.toHaveClass(
+    /dashboard-animating/,
+  );
+  await page.addStyleTag({
+    content: "nextjs-portal { display: none !important; }",
+  });
+  await page.locator(".dashboard").screenshot({
+    path: "test-results/dashboard-redesign-mobile.png",
+  });
 
   await page.evaluate(() => {
     const controls = document.createElement("div");
@@ -2653,6 +2700,11 @@ test("staff cannot open receipt data from the dashboard or reports route", async
     });
     await page.reload();
     await expect(page.locator(".dashboard-receipts")).toHaveCount(0);
+    await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+    await expect(page.locator(".dashboard-charts")).toHaveCount(0);
+    await expect(
+      page.locator(".dashboard > .page-header .dashboard-date-filter"),
+    ).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Incassi mensili", exact: true }),
     ).toHaveCount(0);
@@ -2967,7 +3019,7 @@ test("dashboard animates on entry and data changes while respecting reduced moti
   await expect(dashboard).not.toHaveClass(/dashboard-animating/, {
     timeout: 2000,
   });
-  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(3);
+  await expect(page.locator(".dashboard-kpis .metric")).toHaveCount(4);
   await expect(page.locator(".dashboard-receipts")).toBeVisible();
   await expect(page.locator(".revenue-bar")).toHaveCount(21);
   await expect(page.locator(".donut-segment")).toHaveCount(3);
@@ -3151,6 +3203,9 @@ test("dashboard only emphasizes attention when issues exist", async ({
   await expect(attentionCard).not.toHaveClass(/is-active/);
   await expect(attentionCard.getByRole("link")).toHaveCount(0);
   await expect(attentionCard.locator(".dashboard-empty")).toBeVisible();
+  const emptyCharts = page.locator(".dashboard-charts");
+  await expect(emptyCharts.locator(".dashboard-chart-empty")).toBeVisible();
+  expect((await emptyCharts.boundingBox())!.height).toBeLessThanOrEqual(220);
 });
 
 test("dashboard hides its final state before client animation starts", async ({

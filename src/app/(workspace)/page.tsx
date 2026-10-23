@@ -232,234 +232,65 @@ export default async function Dashboard({
 
   return (
     <DashboardMotion fingerprint={fingerprint} locale={locale}>
-      <PageHeader title={it.today} description={it.dashboardDescription} />
-      {canViewReceipts && receiptSummary && (
-        <section
-          aria-labelledby="dashboard-receipts-title"
-          className="panel padded dashboard-receipts"
-        >
-          <div className="dashboard-receipts-heading">
-            <h2 id="dashboard-receipts-title">{it.dashboard.receiptsTitle}</h2>
+      <PageHeader
+        title={it.today}
+        description={it.dashboardDescription}
+        actionNode={
+          canViewReceipts && receiptSummary ? (
             <form className="date-strip dashboard-date-filter">
               <DatePicker name="day" defaultValue={today} />
             </form>
-          </div>
-          <div className="dashboard-receipt-summary">
-            <div className="dashboard-day-receipts">
-              <span>{it.receivedOnDay}</span>
-              <strong
-                data-count={receiptSummary.selectedDay}
-                data-count-type="money"
-              >
-                {money(receiptSummary.selectedDay)}
-              </strong>
+          ) : undefined
+        }
+      />
+      <div
+        className={`metrics dashboard-kpis${
+          canViewReceipts && receiptSummary ? " has-receipts" : ""
+        }`}
+      >
+        {canViewReceipts && receiptSummary && (
+          <section
+            aria-labelledby="dashboard-receipts-title"
+            className="metric dashboard-receipts"
+          >
+            <div className="dashboard-receipts-heading">
+              <h2 id="dashboard-receipts-title">
+                {it.dashboard.receiptsTitle}
+              </h2>
             </div>
-            <div className="dashboard-month-receipts">
-              <div className="dashboard-month-total">
-                <span>{it.dashboard.monthToDate}</span>
-                <small>{monthRangeLabel}</small>
+            <div className="dashboard-receipt-summary">
+              <div className="dashboard-day-receipts">
+                <span>{it.receivedOnDay}</span>
                 <strong
-                  data-count={receiptSummary.monthToDate}
+                  data-count={receiptSummary.selectedDay}
                   data-count-type="money"
                 >
-                  {money(receiptSummary.monthToDate)}
+                  {money(receiptSummary.selectedDay)}
                 </strong>
               </div>
-              <MonthlyReceiptsDialog
-                open={receiptDialogOpen}
-                defaultMonth={defaultReceiptMonth}
-                month={receiptMonth}
-                maxMonth={businessToday.slice(0, 7)}
-                rangeLabel={receiptDialogRangeLabel}
-                summary={receiptDialogSummary}
-              />
-            </div>
-          </div>
-        </section>
-      )}
-      {canViewReceipts && todayRevenue && (
-        <div className="dashboard-charts">
-          <section className="panel padded revenue-chart-card">
-            <div className="section-heading">
-              <h2>{it.dashboard.revenue7}</h2>
-              <div className="chart-legend">
-                <span>
-                  <i className="repair" />
-                  {it.dashboard.repairRevenue}
-                </span>
-                <span>
-                  <i className="retail" />
-                  {it.dashboard.retailRevenue}
-                </span>
-                <span>
-                  <i className="quick-service" />
-                  {it.dashboard.quickServiceRevenue}
-                </span>
+              <div className="dashboard-month-receipts">
+                <div className="dashboard-month-total">
+                  <span>{it.dashboard.monthToDate}</span>
+                  <small>{monthRangeLabel}</small>
+                  <strong
+                    data-count={receiptSummary.monthToDate}
+                    data-count-type="money"
+                  >
+                    {money(receiptSummary.monthToDate)}
+                  </strong>
+                </div>
+                <MonthlyReceiptsDialog
+                  open={receiptDialogOpen}
+                  defaultMonth={defaultReceiptMonth}
+                  month={receiptMonth}
+                  maxMonth={businessToday.slice(0, 7)}
+                  rangeLabel={receiptDialogRangeLabel}
+                  summary={receiptDialogSummary}
+                />
               </div>
             </div>
-            {hasRevenueSeries ? (
-              <div className="revenue-bars">
-                {series.map((day) => {
-                  const dateLabel = formatDate(day.day, {
-                    month: "2-digit",
-                    day: "2-digit",
-                  });
-                  return (
-                    <div
-                      aria-label={`${dateLabel}: ${it.dashboard.totalRevenue} ${money(day.total)}`}
-                      className="revenue-day"
-                      key={day.day}
-                      tabIndex={0}
-                    >
-                      <div className="revenue-bar-track">
-                        <div
-                          className="revenue-bar repair"
-                          data-bar={`${(day.repair / chartMax) * 100}%`}
-                          style={{
-                            height: `${(day.repair / chartMax) * 100}%`,
-                          }}
-                        />
-                        <div
-                          className="revenue-bar retail"
-                          data-bar={`${(day.retail / chartMax) * 100}%`}
-                          style={{
-                            height: `${(day.retail / chartMax) * 100}%`,
-                          }}
-                        />
-                        <div
-                          className="revenue-bar quick-service"
-                          data-bar={`${(day.quickService / chartMax) * 100}%`}
-                          style={{
-                            height: `${(day.quickService / chartMax) * 100}%`,
-                          }}
-                        />
-                      </div>
-                      <small>{dateLabel}</small>
-                      <div className="revenue-tooltip" role="tooltip">
-                        <strong>{dateLabel}</strong>
-                        <span>
-                          {it.dashboard.repairRevenue}
-                          <b>{money(day.repair)}</b>
-                        </span>
-                        <span>
-                          {it.dashboard.quickServiceRevenue}
-                          <b>{money(day.quickService)}</b>
-                        </span>
-                        <span>
-                          {it.dashboard.retailRevenue}
-                          <b>{money(day.retail)}</b>
-                        </span>
-                        <span className="total">
-                          {it.dashboard.totalRevenue}
-                          <b>{money(day.total)}</b>
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="dashboard-empty dashboard-chart-empty">
-                <ChartNoAxesColumnIncreasing size={22} />
-                <span>{it.dashboard.noRevenue}</span>
-              </div>
-            )}
           </section>
-          <section className="panel padded revenue-source-card">
-            <h2>{it.dashboard.receiptComposition}</h2>
-            {todayRevenue.total ? (
-              <div className="revenue-source-content">
-                <div className="revenue-donut">
-                  <svg aria-hidden="true" viewBox="0 0 42 42">
-                    <circle className="donut-track" cx="21" cy="21" r="15.9" />
-                    <circle
-                      className="donut-segment repair"
-                      cx="21"
-                      cy="21"
-                      data-donut-segment={repairShare}
-                      pathLength="100"
-                      r="15.9"
-                      style={{
-                        strokeDasharray: `${repairShare} ${100 - repairShare}`,
-                      }}
-                    />
-                    <circle
-                      className="donut-segment retail"
-                      cx="21"
-                      cy="21"
-                      data-donut-segment={retailShare}
-                      data-donut-offset={-repairShare}
-                      pathLength="100"
-                      r="15.9"
-                      style={{
-                        strokeDasharray: `${retailShare} ${100 - retailShare}`,
-                        strokeDashoffset: -repairShare,
-                      }}
-                    />
-                    <circle
-                      className="donut-segment quick-service"
-                      cx="21"
-                      cy="21"
-                      data-donut-segment={quickServiceShare}
-                      data-donut-offset={-(repairShare + retailShare)}
-                      pathLength="100"
-                      r="15.9"
-                      style={{
-                        strokeDasharray: `${quickServiceShare} ${100 - quickServiceShare}`,
-                        strokeDashoffset: -(repairShare + retailShare),
-                      }}
-                    />
-                  </svg>
-                  <span>
-                    <strong
-                      data-count={todayRevenue.total}
-                      data-count-type="money"
-                    >
-                      {money(todayRevenue.total)}
-                    </strong>
-                    <small>{it.receipts}</small>
-                  </span>
-                </div>
-                <div className="revenue-source-legend">
-                  {[
-                    [
-                      "repair",
-                      it.dashboard.repairRevenue,
-                      todayRevenue.repair,
-                      repairShare,
-                    ],
-                    [
-                      "retail",
-                      it.dashboard.retailRevenue,
-                      todayRevenue.retail,
-                      retailShare,
-                    ],
-                    [
-                      "quick-service",
-                      it.dashboard.quickServiceRevenue,
-                      todayRevenue.quickService,
-                      quickServiceShare,
-                    ],
-                  ].map(([source, label, amount, share]) => (
-                    <p key={String(source)}>
-                      <i className={String(source)} />
-                      <span>{label}</span>
-                      <strong>{money(Number(amount))}</strong>
-                      <small>{share}%</small>
-                    </p>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="dashboard-empty dashboard-compact-empty">
-                <Inbox size={20} />
-                <span>{it.dashboard.noReceipts}</span>
-              </div>
-            )}
-          </section>
-        </div>
-      )}
-      <div className="metrics dashboard-kpis">
+        )}
         {metrics.map(({ label, value, count, type, icon: Icon, color }) => (
           <div className="metric" key={label}>
             <div className="metric-top">
@@ -539,6 +370,195 @@ export default async function Dashboard({
           )}
         </section>
       </div>
+      {canViewReceipts && todayRevenue && (
+        <section className="panel padded dashboard-charts">
+          <div className="section-heading">
+            <h2>{it.dashboard.revenue7}</h2>
+            <div className="chart-legend">
+              <span>
+                <i className="repair" />
+                {it.dashboard.repairRevenue}
+              </span>
+              <span>
+                <i className="retail" />
+                {it.dashboard.retailRevenue}
+              </span>
+              <span>
+                <i className="quick-service" />
+                {it.dashboard.quickServiceRevenue}
+              </span>
+            </div>
+          </div>
+          <div className="dashboard-chart-grid">
+            <section className="revenue-chart-card">
+              {hasRevenueSeries ? (
+                <div className="revenue-bars">
+                  {series.map((day) => {
+                    const dateLabel = formatDate(day.day, {
+                      month: "2-digit",
+                      day: "2-digit",
+                    });
+                    return (
+                      <div
+                        aria-label={`${dateLabel}: ${it.dashboard.totalRevenue} ${money(day.total)}`}
+                        className="revenue-day"
+                        key={day.day}
+                        tabIndex={0}
+                      >
+                        <div className="revenue-bar-track">
+                          <div
+                            className="revenue-bar repair"
+                            data-bar={`${(day.repair / chartMax) * 100}%`}
+                            style={{
+                              height: `${(day.repair / chartMax) * 100}%`,
+                            }}
+                          />
+                          <div
+                            className="revenue-bar retail"
+                            data-bar={`${(day.retail / chartMax) * 100}%`}
+                            style={{
+                              height: `${(day.retail / chartMax) * 100}%`,
+                            }}
+                          />
+                          <div
+                            className="revenue-bar quick-service"
+                            data-bar={`${(day.quickService / chartMax) * 100}%`}
+                            style={{
+                              height: `${(day.quickService / chartMax) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <small>{dateLabel}</small>
+                        <div className="revenue-tooltip" role="tooltip">
+                          <strong>{dateLabel}</strong>
+                          <span>
+                            {it.dashboard.repairRevenue}
+                            <b>{money(day.repair)}</b>
+                          </span>
+                          <span>
+                            {it.dashboard.quickServiceRevenue}
+                            <b>{money(day.quickService)}</b>
+                          </span>
+                          <span>
+                            {it.dashboard.retailRevenue}
+                            <b>{money(day.retail)}</b>
+                          </span>
+                          <span className="total">
+                            {it.dashboard.totalRevenue}
+                            <b>{money(day.total)}</b>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="dashboard-empty dashboard-chart-empty">
+                  <ChartNoAxesColumnIncreasing size={22} />
+                  <span>{it.dashboard.noRevenue}</span>
+                </div>
+              )}
+            </section>
+            <section className="revenue-source-card">
+              <h2>{it.dashboard.receiptComposition}</h2>
+              {todayRevenue.total ? (
+                <div className="revenue-source-content">
+                  <div className="revenue-donut">
+                    <svg aria-hidden="true" viewBox="0 0 42 42">
+                      <circle
+                        className="donut-track"
+                        cx="21"
+                        cy="21"
+                        r="15.9"
+                      />
+                      <circle
+                        className="donut-segment repair"
+                        cx="21"
+                        cy="21"
+                        data-donut-segment={repairShare}
+                        pathLength="100"
+                        r="15.9"
+                        style={{
+                          strokeDasharray: `${repairShare} ${100 - repairShare}`,
+                        }}
+                      />
+                      <circle
+                        className="donut-segment retail"
+                        cx="21"
+                        cy="21"
+                        data-donut-segment={retailShare}
+                        data-donut-offset={-repairShare}
+                        pathLength="100"
+                        r="15.9"
+                        style={{
+                          strokeDasharray: `${retailShare} ${100 - retailShare}`,
+                          strokeDashoffset: -repairShare,
+                        }}
+                      />
+                      <circle
+                        className="donut-segment quick-service"
+                        cx="21"
+                        cy="21"
+                        data-donut-segment={quickServiceShare}
+                        data-donut-offset={-(repairShare + retailShare)}
+                        pathLength="100"
+                        r="15.9"
+                        style={{
+                          strokeDasharray: `${quickServiceShare} ${100 - quickServiceShare}`,
+                          strokeDashoffset: -(repairShare + retailShare),
+                        }}
+                      />
+                    </svg>
+                    <span>
+                      <strong
+                        data-count={todayRevenue.total}
+                        data-count-type="money"
+                      >
+                        {money(todayRevenue.total)}
+                      </strong>
+                      <small>{it.receipts}</small>
+                    </span>
+                  </div>
+                  <div className="revenue-source-legend">
+                    {[
+                      [
+                        "repair",
+                        it.dashboard.repairRevenue,
+                        todayRevenue.repair,
+                        repairShare,
+                      ],
+                      [
+                        "retail",
+                        it.dashboard.retailRevenue,
+                        todayRevenue.retail,
+                        retailShare,
+                      ],
+                      [
+                        "quick-service",
+                        it.dashboard.quickServiceRevenue,
+                        todayRevenue.quickService,
+                        quickServiceShare,
+                      ],
+                    ].map(([source, label, amount, share]) => (
+                      <p key={String(source)}>
+                        <i className={String(source)} />
+                        <span>{label}</span>
+                        <strong>{money(Number(amount))}</strong>
+                        <small>{share}%</small>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="dashboard-empty dashboard-compact-empty">
+                  <Inbox size={20} />
+                  <span>{it.dashboard.noReceipts}</span>
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
+      )}
     </DashboardMotion>
   );
 }
