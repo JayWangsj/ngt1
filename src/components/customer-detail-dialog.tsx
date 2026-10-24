@@ -18,6 +18,7 @@ export function CustomerDetailDialog({
   return (
     <FormDialog
       title={title}
+      size="extraWide"
       onClose={() => {
         setClosing(true);
         router.back();

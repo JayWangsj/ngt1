@@ -9091,7 +9091,6 @@ summary.record-icon::-webkit-details-marker {
   overflow: hidden;
 }
 .form-dialog:has(.customer-detail-dialog) {
-  width: min(1000px, calc(100vw - 32px));
   overflow: visible;
 }
 .form-dialog:has(.customer-detail-dialog) > .customer-detail-dialog {

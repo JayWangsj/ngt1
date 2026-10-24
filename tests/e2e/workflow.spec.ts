@@ -10114,6 +10114,7 @@ test("shared action affordances, price search and delivery date limit", async ({
   await page.locator(".customer-table .order-link").first().click();
   const customerDetail = page.getByRole("dialog");
   await expect(customerDetail).toHaveClass(/form-dialog/);
+  await expect(customerDetail).toHaveCSS("width", "1000px");
   const dialogBox = await customerDetail.boundingBox();
   expect(dialogBox?.width).toBeGreaterThanOrEqual(900);
   expect(dialogBox?.width).toBeLessThanOrEqual(1100);

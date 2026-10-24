@@ -6200,7 +6200,7 @@ export function FormDialog({
   subtitle?: string;
   onClose: () => void;
   restoreFocusComfortably?: boolean;
-  size?: "wide" | "large" | "medium" | "narrow" | "compact";
+  size?: "wide" | "extraWide" | "large" | "medium" | "narrow" | "compact";
   children: ReactNode;
 }) {
   const it = useMessages();
