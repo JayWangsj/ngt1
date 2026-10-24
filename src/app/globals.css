@@ -7351,11 +7351,6 @@ details.secondary-actions {
   justify-content: flex-end;
   flex-wrap: nowrap;
 }
-.price-option-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
 .price-option-count {
   padding-inline: 6px;
   text-align: right;
@@ -7429,19 +7424,6 @@ details.secondary-actions {
   display: grid;
   gap: 10px;
 }
-.price-option-actions {
-  margin-left: 0;
-  align-items: center;
-}
-.price-option-enabled-switch {
-  justify-self: auto;
-  gap: 5px;
-  color: #68736f;
-  font-size: 11px;
-}
-.price-option-enabled-switch input:checked ~ span:last-child {
-  color: #806000;
-}
 .price-option-flags {
   display: flex;
   align-items: flex-start;
@@ -7451,36 +7433,6 @@ details.secondary-actions {
 .price-option-flags .checkbox {
   width: fit-content;
   margin: 0;
-}
-.price-option-default-action {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: #806000;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.price-option-default-action:hover:not(:disabled),
-.price-option-default-action:focus-visible {
-  border-color: transparent;
-  background: #fff7d6;
-}
-.price-option-default-action:disabled:not(.is-default) {
-  cursor: default;
-  opacity: 0.58;
-}
-.price-option-default-action.is-default {
-  color: #806000;
-  opacity: 1;
-  cursor: default;
 }
 .price-option-add,
 .price-option-clear {

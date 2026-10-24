@@ -7627,6 +7627,13 @@ test("price editor and mobile yellow layout support both languages", async ({
   await expect(
     lcdOption.locator(".price-option-card-title-row .price-option-actions"),
   ).toBeVisible();
+  const optionActions = lcdOption.locator(".price-option-actions");
+  await expect(optionActions).toHaveCSS("display", "flex");
+  await expect(optionActions).toHaveCSS("gap", "7px");
+  await expect(lcdOption.locator(".price-option-enabled-switch")).toHaveCSS(
+    "gap",
+    "5px",
+  );
   await expect(setLcdDefault.locator("svg")).toBeVisible();
   await setLcdDefault.click();
   await expect(lcdOption).toContainText("Opzione consigliata predefinita");
