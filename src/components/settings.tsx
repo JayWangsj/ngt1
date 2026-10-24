@@ -45,6 +45,7 @@ import {
 import settingsCardStyles from "./settings-card.module.css";
 import settingsEntryStyles from "./settings-entry.module.css";
 import businessDateStyles from "./business-date-settings.module.css";
+import settingsActionStyles from "./settings-action.module.css";
 
 function SettingsEntry({
   href,
@@ -213,7 +214,7 @@ export function MotionSettings() {
         <Sparkles size={19} aria-hidden="true" />
         <h2>{it.interfaceMotion}</h2>
       </div>
-      <div className="settings-action">
+      <div className={`settings-action ${settingsActionStyles.action}`}>
         <div>
           <strong>{it.alwaysPlayMotion}</strong>
           <p>{it.motionPreferenceHelp}</p>
@@ -232,7 +233,7 @@ export function MotionSettings() {
           </button>
         </div>
       </div>
-      <div className="settings-action">
+      <div className={`settings-action ${settingsActionStyles.action}`}>
         <div>
           <strong>{it.followRepairRowMotion}</strong>
           <p>{it.followRepairRowMotionHelp}</p>
@@ -503,7 +504,7 @@ export function DataSettings() {
       className={`panel padded settings-card ${settingsCardStyles.card}`}
     >
       <h2>{it.dataManagement}</h2>
-      <div className="settings-action">
+      <div className={`settings-action ${settingsActionStyles.action}`}>
         <div>
           <strong>{it.exportData}</strong>
           <p>{it.exportHelp}</p>
@@ -518,7 +519,7 @@ export function DataSettings() {
           {it.exportData}
         </Button>
       </div>
-      <div className="settings-action">
+      <div className={`settings-action ${settingsActionStyles.action}`}>
         <div>
           <strong>{it.importData}</strong>
           <p>{it.importHelp}</p>
@@ -543,7 +544,9 @@ export function DataSettings() {
           }}
         />
       </div>
-      <div className="settings-action danger-zone">
+      <div
+        className={`settings-action danger-zone ${settingsActionStyles.action}`}
+      >
         <div>
           <strong>{it.clearData}</strong>
           <p>{it.clearDataHelp}</p>

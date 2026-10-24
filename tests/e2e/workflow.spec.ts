@@ -3007,6 +3007,42 @@ test("settings cards use one scoped layout", async ({ page }) => {
   );
 });
 
+test("settings action rows keep shared layout and responsive behavior", async ({
+  page,
+}) => {
+  await page.goto("/settings/system-update");
+  const updateAction = page.locator(".update-preferences .settings-action");
+  await expect(updateAction).toHaveCSS("display", "flex");
+  await expect(updateAction).toHaveCSS("gap", "24px");
+  await expect(updateAction).toHaveCSS("padding-bottom", "0px");
+
+  await page.goto("/settings/data");
+  const actions = page.locator(".settings-action");
+  await expect(actions).toHaveCount(3);
+  const row = actions.first();
+  await expect(row).toHaveCSS("gap", "24px");
+  await expect(row).toHaveCSS("padding-top", "18px");
+  await expect(row.locator("p")).toHaveCSS("margin-top", "5px");
+
+  const clearRow = actions.nth(2);
+  const clearButton = clearRow.locator(".button-danger");
+  await expect(clearButton).toHaveCSS("opacity", "0");
+  await expect(clearButton).toHaveCSS("pointer-events", "none");
+  await clearRow.hover();
+  await expect(clearButton).toHaveCSS("opacity", "1");
+  await expect(clearButton).toHaveCSS("pointer-events", "auto");
+  await clearButton.focus();
+  await expect(clearButton).toHaveCSS("opacity", "1");
+  await expect(clearButton).toHaveCSS("pointer-events", "auto");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(row).toHaveCSS("flex-direction", "column");
+  await expect(row).toHaveCSS("align-items", "stretch");
+  expect(
+    await row.evaluate((element) => element.scrollWidth > element.clientWidth),
+  ).toBe(false);
+});
+
 test("settings opens system update as a separate page", async ({ page }) => {
   await page.goto("/settings");
   const entries = page.locator(".settings-entry");

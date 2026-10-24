@@ -1,0 +1,44 @@
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+
+.action p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.action :global(.button) {
+  flex: 0 0 auto;
+}
+
+.updatePreference {
+  padding-bottom: 0;
+}
+
+@media (max-width: 700px) {
+  .action {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+@media (hover: hover) {
+  .action :global(.button-danger) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  .action:hover :global(.button-danger),
+  .action:focus-within :global(.button-danger) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

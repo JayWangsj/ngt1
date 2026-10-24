@@ -6735,22 +6735,6 @@ details.secondary-actions {
   width: 100%;
   min-width: 0;
 }
-.settings-action {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 18px 0;
-  border-top: 1px solid var(--line);
-}
-.settings-action p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.settings-action .button {
-  flex: 0 0 auto;
-}
 .motion-setting-control {
   display: flex;
   flex: 0 0 auto;
@@ -7088,9 +7072,6 @@ details.secondary-actions {
   background: #eef9f1;
   color: #24804f;
 }
-.update-preferences .settings-action {
-  padding-bottom: 0;
-}
 .update-notification {
   position: static;
   display: flex;
@@ -7293,11 +7274,6 @@ details.secondary-actions {
   color: #8f3f36;
 }
 @media (max-width: 700px) {
-  .settings-action {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 12px;
-  }
   .motion-setting-control {
     justify-content: space-between;
   }
@@ -8700,8 +8676,7 @@ details.secondary-actions {
   .phone-row .record-icon-delete,
   .order-product-line .icon-button,
   .retail-cart-row .retail-remove,
-  .panel.padded > details > summary.record-icon,
-  .settings-action .button-danger {
+  .panel.padded > details > summary.record-icon {
     opacity: 0;
     pointer-events: none;
     transition: opacity 160ms ease;
@@ -8715,9 +8690,7 @@ details.secondary-actions {
   .retail-cart-row:hover .retail-remove,
   .retail-cart-row:focus-within .retail-remove,
   .panel.padded:hover > details > summary.record-icon,
-  .panel.padded:focus-within > details > summary.record-icon,
-  .settings-action:hover .button-danger,
-  .settings-action:focus-within .button-danger {
+  .panel.padded:focus-within > details > summary.record-icon {
     opacity: 1;
     pointer-events: auto;
   }
