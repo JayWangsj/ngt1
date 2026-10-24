@@ -3119,6 +3119,18 @@ test("settings inline managers fill their content at desktop and mobile widths",
 
 test("settings opens system update as a separate page", async ({ page }) => {
   await page.goto("/settings");
+  const settingsGrid = page.locator(".settings-grid");
+  await expect(settingsGrid).toHaveCSS("display", "grid");
+  await expect(settingsGrid).toHaveCSS("gap", "22px");
+  const desktopViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await settingsGrid.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(false);
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
+
   const entries = page.locator(".settings-entry");
   await expect(entries).toHaveCount(9);
   await expect

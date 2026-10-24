@@ -6707,10 +6707,6 @@ details.secondary-actions {
 .price-group-heading span {
   color: var(--muted);
 }
-.settings-grid {
-  display: grid;
-  gap: 22px;
-}
 .system-update-page {
   display: grid;
   gap: 20px;

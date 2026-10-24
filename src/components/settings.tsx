@@ -108,7 +108,9 @@ export function SettingsOverview({
           ? it.updateFailed
           : `${it.currentVersion}: ${update.currentVersion || currentVersion}`;
   return (
-    <div className="settings-grid settings-overview">
+    <div
+      className={`settings-grid settings-overview ${settingsEntryStyles.grid}`}
+    >
       <SettingsEntry
         href="/settings/language"
         icon={<Languages size={20} />}
