@@ -10,6 +10,33 @@
   text-align: left;
 }
 
+.card :global(.price-option-card-heading) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card :global(.price-option-card-heading > div:first-child) {
+  display: grid;
+  gap: 3px;
+}
+
+.card :global(.price-option-card-title-row) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.card :global(small) {
+  color: var(--muted);
+}
+
+.card :global(.price-option-card-status) {
+  color: #806000 !important;
+}
+
 .disabled {
   opacity: 0.58;
 }

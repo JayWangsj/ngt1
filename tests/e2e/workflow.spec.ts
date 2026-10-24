@@ -7599,6 +7599,13 @@ test("price editor and mobile yellow layout support both languages", async ({
   const lcdOption = form
     .locator(".price-option-card")
     .filter({ hasText: "Display LCD Test" });
+  const cardHeading = lcdOption.locator(".price-option-card-heading");
+  await expect(cardHeading).toHaveCSS("display", "flex");
+  await expect(cardHeading).toHaveCSS("align-items", "flex-start");
+  await expect(lcdOption.locator(".price-option-card-title-row")).toHaveCSS(
+    "flex-wrap",
+    "wrap",
+  );
   const setLcdDefault = lcdOption.getByRole("button", {
     name: "Imposta predefinita",
   });
@@ -8561,6 +8568,9 @@ test("legacy repair rules use the shared part option dialog", async ({
     exact: true,
   });
   await expect(picker).toBeVisible();
+  const defaultStatus = picker.locator(".price-option-card-status").first();
+  await expect(defaultStatus).toBeVisible();
+  await expect(defaultStatus).toHaveCSS("color", "rgb(128, 96, 0)");
   await expect(
     picker.locator(".price-option-choice").filter({
       hasText: "Batteria Test",

@@ -7433,25 +7433,6 @@ details.secondary-actions {
   grid-template-columns: 46px minmax(0, 1fr);
   align-items: center;
 }
-.price-option-card-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-.price-option-card-heading > div:first-child {
-  display: grid;
-  gap: 3px;
-}
-.price-option-card-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.price-option-card small {
-  color: var(--muted);
-}
 .price-option-data {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -7468,9 +7449,6 @@ details.secondary-actions {
 .price-option-data strong {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-}
-.price-option-card-status {
-  color: #806000 !important;
 }
 .price-option-actions {
   margin-left: 0;
