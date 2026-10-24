@@ -5076,88 +5076,6 @@ details.secondary-actions {
   flex-direction: column;
   gap: 22px;
 }
-.order-step-heading {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  gap: 12px;
-  align-items: center;
-  padding: 18px 20px;
-  text-align: left;
-  cursor: pointer;
-}
-.order-step-title {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-.order-step-title strong {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 1rem;
-}
-.order-step-title strong svg {
-  color: #42825a;
-}
-.order-step-title small {
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.order-step-state {
-  font-size: 0.76rem;
-  color: var(--muted);
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: #f1f1ed;
-}
-.order-step-card.is-in-progress .order-step-state {
-  color: #806000;
-  background: #fff4c7;
-}
-.order-step-card.is-completed .order-step-state {
-  color: #397650;
-  background: #e9f5ec;
-}
-.order-step-chevron {
-  transition: transform var(--motion-base) var(--ease-ui);
-}
-.order-step-card.is-selected .order-step-chevron {
-  transform: rotate(180deg);
-}
-.order-step-collapse {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transform: translateY(-2px);
-  transition:
-    grid-template-rows var(--motion-slow) var(--ease-ui),
-    opacity var(--motion-base) var(--ease-ui),
-    transform var(--motion-base) var(--ease-ui);
-}
-.order-step-collapse.is-expanded {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transform: translateY(0);
-}
-.order-step-body {
-  border-top: 1px solid var(--line);
-  padding: 20px;
-  display: grid;
-  gap: 16px;
-  min-height: 0;
-  overflow: hidden;
-  visibility: hidden;
-}
-.order-step-collapse.is-expanded .order-step-body {
-  overflow: visible;
-  visibility: visible;
-}
 .wizard-progressive-reveal,
 .quote-progressive-reveal,
 .inspection-progressive-reveal {
@@ -5629,16 +5547,6 @@ details.secondary-actions {
   }
 }
 @media (max-width: 600px) {
-  .order-step-heading {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    padding: 15px;
-  }
-  .order-step-state {
-    display: none;
-  }
-  .order-step-body {
-    padding: 15px;
-  }
   .sticky-order-actions {
     position: static;
     align-items: stretch;
@@ -5656,9 +5564,7 @@ details.secondary-actions {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  html:not([data-motion="always"]) .new-order-back,
-  html:not([data-motion="always"]) .order-step-collapse,
-  html:not([data-motion="always"]) .order-step-chevron {
+  html:not([data-motion="always"]) .new-order-back {
     transition: none;
   }
   html:not([data-motion="always"]) .new-order-back:hover {

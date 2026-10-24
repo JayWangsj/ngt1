@@ -629,6 +629,14 @@ test("new repair uses a single selected accordion step", async ({ page }) => {
   await expect(cards.nth(1)).toHaveCSS("border-color", "rgb(231, 201, 90)");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(cards.nth(0)).toHaveCSS("transition-property", "none");
+  await expect(cards.nth(0).locator(".order-step-collapse")).toHaveCSS(
+    "transition-property",
+    "none",
+  );
+  await expect(cards.nth(0).locator(".order-step-chevron")).toHaveCSS(
+    "transition-property",
+    "none",
+  );
   await cards.nth(1).hover();
   await expect(cards.nth(1)).toHaveCSS("transform", "none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -681,6 +689,16 @@ test("new repair uses a single selected accordion step", async ({ page }) => {
       await cards.nth(3).elementHandle(),
     );
   expect(actionGap).toBeGreaterThanOrEqual(20);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(cards.nth(0).locator(".order-step-heading")).toHaveCSS(
+    "padding",
+    "15px",
+  );
+  await expect(cards.nth(0).locator(".order-step-state")).toHaveCSS(
+    "display",
+    "none",
+  );
 });
 
 test("inputs and expanding controls scroll only when interaction space is tight", async ({

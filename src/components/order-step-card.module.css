@@ -22,6 +22,104 @@
   background: #fffefb;
 }
 
+:where(.card) :global(.order-step-heading) {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+:where(.card) :global(.order-step-title) {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+:where(.card) :global(.order-step-title strong) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 1rem;
+}
+:where(.card) :global(.order-step-title strong svg) {
+  color: #42825a;
+}
+:where(.card) :global(.order-step-title small) {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:where(.card) :global(.order-step-state) {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f1f1ed;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+:where(.card):global(.is-in-progress) :global(.order-step-state) {
+  background: #fff4c7;
+  color: #806000;
+}
+:where(.card):global(.is-completed) :global(.order-step-state) {
+  background: #e9f5ec;
+  color: #397650;
+}
+:where(.card) :global(.order-step-chevron) {
+  transition: transform var(--motion-base) var(--ease-ui);
+}
+:where(.card):global(.is-selected) :global(.order-step-chevron) {
+  transform: rotate(180deg);
+}
+:where(.card) :global(.order-step-collapse) {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    grid-template-rows var(--motion-slow) var(--ease-ui),
+    opacity var(--motion-base) var(--ease-ui),
+    transform var(--motion-base) var(--ease-ui);
+}
+:where(.card) :global(.order-step-collapse.is-expanded) {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+:where(.card) :global(.order-step-body) {
+  display: grid;
+  min-height: 0;
+  gap: 16px;
+  overflow: hidden;
+  padding: 20px;
+  border-top: 1px solid var(--line);
+  visibility: hidden;
+}
+:where(.card)
+  :global(.order-step-collapse.is-expanded)
+  :global(.order-step-body) {
+  overflow: visible;
+  visibility: visible;
+}
+
+@media (max-width: 600px) {
+  :where(.card) :global(.order-step-heading) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 15px;
+  }
+  :where(.card) :global(.order-step-state) {
+    display: none;
+  }
+  :where(.card) :global(.order-step-body) {
+    padding: 15px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :global(html:not([data-motion="always"])) .card {
     transition: none;
@@ -29,5 +127,14 @@
 
   :global(html:not([data-motion="always"])) .card:hover {
     transform: none;
+  }
+
+  :global(html:not([data-motion="always"]))
+    :where(.card)
+    :global(.order-step-collapse),
+  :global(html:not([data-motion="always"]))
+    :where(.card)
+    :global(.order-step-chevron) {
+    transition: none;
   }
 }
