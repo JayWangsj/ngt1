@@ -616,6 +616,7 @@ export function ProductCompatibilityFields({
       {dialogOpen && (
         <FormDialog
           title={it.inventory.addCompatibleDevice}
+          size="wide"
           subtitle={it.inventory.compatibilityEditorHelp}
           onClose={() => setDialogOpen(false)}
         >
@@ -5967,6 +5968,7 @@ export function PriceList({
       {(creating || editing) && (
         <FormDialog
           title={editing ? it.editQuote : it.newRule}
+          size="wide"
           onClose={() => {
             setCreating(null);
             setEditing(null);
@@ -6190,12 +6192,14 @@ export function FormDialog({
   subtitle,
   onClose,
   restoreFocusComfortably = true,
+  size,
   children,
 }: {
   title: ReactNode;
   subtitle?: string;
   onClose: () => void;
   restoreFocusComfortably?: boolean;
+  size?: "wide";
   children: ReactNode;
 }) {
   const it = useMessages();
@@ -6220,7 +6224,7 @@ export function FormDialog({
   return createPortal(
     <dialog
       ref={dialog}
-      className={`${dialogStyles.formDialog} form-dialog`}
+      className={`${dialogStyles.formDialog}${size === "wide" ? ` ${dialogStyles.wide}` : ""} form-dialog`}
       data-prevent-card-autosave
       aria-labelledby={titleId}
       onKeyDownCapture={(event) => {

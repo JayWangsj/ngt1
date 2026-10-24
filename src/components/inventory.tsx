@@ -211,6 +211,7 @@ function ProductCompatibilityDialog({
           ? it.inventory.compatibilityEditorHelp
           : it.inventory.compatibilityListHelp
       }
+      size="wide"
       onClose={() => (adding ? setAdding(null) : onClose())}
     >
       <DialogBody data-product-compatibility-dialog>

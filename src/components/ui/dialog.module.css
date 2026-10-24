@@ -12,6 +12,10 @@
   box-shadow: var(--shadow-5);
 }
 
+.formDialog.wide {
+  width: min(920px, calc(100vw - 32px));
+}
+
 .formDialog::backdrop,
 :global(.form-dialog)::backdrop {
   background: rgb(24 29 27 / 42%);
@@ -210,6 +214,10 @@
     width: calc(100vw - 16px);
     max-height: calc(100dvh - 16px);
     padding: var(--dialog-padding);
+  }
+
+  .formDialog.wide {
+    width: min(920px, calc(100vw - 32px));
   }
 
   .formDialog > .dialogHeading,

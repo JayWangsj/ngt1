@@ -7356,12 +7356,6 @@ details.secondary-actions {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.form-dialog:has(.product-compatibility-dialog) {
-  width: min(920px, calc(100vw - 32px));
-}
-.form-dialog:has(.price-rule-editor) {
-  width: min(920px, calc(100vw - 32px));
-}
 .price-rule-editor {
   display: grid;
   gap: 16px;

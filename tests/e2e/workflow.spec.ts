@@ -7465,6 +7465,16 @@ test("price editor and mobile yellow layout support both languages", async ({
     .first()
     .click();
   const form = page.getByRole("dialog");
+  await expect(form).toHaveCSS("width", "920px");
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileDialogBox = await form.boundingBox();
+  expect(mobileDialogBox).not.toBeNull();
+  expect(mobileDialogBox!.x).toBeGreaterThanOrEqual(16);
+  expect(mobileDialogBox!.x + mobileDialogBox!.width).toBeLessThanOrEqual(
+    page.viewportSize()!.width - 16,
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(form).toHaveCSS("width", "920px");
   const testProject = `pulizia ${Date.now()}`;
   await chooseBusinessOption(page, "Marca", "Apple", form);
   await chooseBusinessOption(page, "Modello", "iPhone 13", form);
@@ -8239,6 +8249,7 @@ test("removing the last compatible repair project removes its device row", async
   const dialog = page.getByRole("dialog", {
     name: "Modifica dispositivi compatibili",
   });
+  await expect(dialog).toHaveCSS("width", "920px");
   const deviceRow = dialog.locator(".compatibility-device-row").first();
   const deviceModel = await deviceRow
     .locator(".compatibility-device-summary strong")
@@ -8298,6 +8309,7 @@ test("inventory repair products retain their compatibility editor", async ({
   const editorDialog = page.getByRole("dialog", {
     name: "Aggiungi dispositivo compatibile",
   });
+  await expect(editorDialog).toHaveCSS("width", "920px");
   await expect(
     editorDialog.locator(
       ":scope > .dialog-body[data-product-compatibility-dialog]",
@@ -8426,6 +8438,7 @@ test("new repair products add compatible devices in a modal", async ({
     name: "Aggiungi dispositivo compatibile",
     exact: true,
   });
+  await expect(compatibilityDialog).toHaveCSS("width", "920px");
   await expect(
     compatibilityDialog.locator(
       ":scope > .dialog-body[data-product-compatibility-dialog]",
