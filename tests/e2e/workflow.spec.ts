@@ -2989,8 +2989,28 @@ test("settings cards use one scoped layout", async ({ page }) => {
   await expect(cardTitle).toHaveCSS("gap", "9px");
   await expect(cardTitle.locator("h2")).toHaveCSS("margin", "0px");
   const languageSwitch = languageCard.locator(".language-switch");
+  await expect(languageSwitch).toHaveCSS("display", "flex");
+  await expect(languageSwitch).toHaveCSS("gap", "5px");
   await expect(languageSwitch).toHaveCSS("position", "static");
   await expect(languageSwitch).toHaveCSS("margin", "0px");
+  await expect(languageSwitch.locator('button[aria-pressed="true"]')).toHaveCSS(
+    "background-color",
+    "rgb(244, 198, 45)",
+  );
+  await expect(
+    languageSwitch.locator('button[aria-pressed="false"]'),
+  ).toHaveCSS("border-radius", "8px");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    languageSwitch.locator('button[aria-pressed="false"]'),
+  ).toHaveCSS("padding", "7px 9px");
+  expect(
+    await languageCard.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(false);
+  await page.setViewportSize({ width: 1280, height: 844 });
 
   await page.goto("/settings");
   const settingsEntry = page.locator(".settings-entry").first();

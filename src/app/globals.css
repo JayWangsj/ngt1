@@ -6408,24 +6408,6 @@ details.secondary-actions {
 .quote-item {
   background: #fffef8;
 }
-.language-switch {
-  display: flex;
-  gap: 5px;
-  margin-top: 25px;
-  flex-wrap: wrap;
-}
-.language-switch button {
-  border: 1px solid var(--line);
-  background: white;
-  border-radius: 7px;
-  padding: 8px 12px;
-  color: var(--ink);
-  font-size: 12px;
-}
-.language-switch button[aria-pressed="true"] {
-  background: #f4c62d;
-  border-color: #d1a70b;
-}
 .nav-label {
   margin-top: 28px;
 }
@@ -6591,12 +6573,6 @@ details.secondary-actions {
   padding-top: 14px;
 }
 @media (max-width: 900px) {
-  .language-switch {
-    position: absolute;
-    right: 20px;
-    top: 15px;
-    margin: 0;
-  }
   .sidebar .brand {
     padding-right: 135px;
     width: 301px;
@@ -6605,9 +6581,6 @@ details.secondary-actions {
 @media (max-width: 600px) {
   .fault-options {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .language-switch button {
-    padding: 7px 9px;
   }
   .quote-summary {
     padding: 14px;
@@ -8664,8 +8637,7 @@ details summary {
   width: 100%;
 }
 
-.fault-row button,
-.language-switch button:not([aria-pressed="true"]) {
+.fault-row button {
   border: 1px solid #b8ae8d;
   border-radius: 8px;
   background: #fffdf5;

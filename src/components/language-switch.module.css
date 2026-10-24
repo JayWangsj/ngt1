@@ -1,0 +1,42 @@
+.switch {
+  display: flex;
+  gap: 5px;
+  margin-top: 25px;
+  flex-wrap: wrap;
+}
+
+.switch button {
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 7px;
+  padding: 8px 12px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.switch button[aria-pressed="true"] {
+  background: #f4c62d;
+  border-color: #d1a70b;
+}
+
+.switch button:not([aria-pressed="true"]) {
+  border: 1px solid #b8ae8d;
+  border-radius: 8px;
+  background: #fffdf5;
+  color: #574200;
+}
+
+@media (max-width: 900px) {
+  .switch {
+    position: absolute;
+    right: 20px;
+    top: 15px;
+    margin: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .switch button {
+    padding: 7px 9px;
+  }
+}
