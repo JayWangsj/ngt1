@@ -254,6 +254,7 @@ export function CompatibilityAddEditor({
       {creatingProject && (
         <FormDialog
           title={it.newRepairProject}
+          size="narrow"
           onClose={() => {
             setCreatingProject(false);
             setProjectError("");

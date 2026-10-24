@@ -8495,6 +8495,7 @@ test("new repair products add compatible devices in a modal", async ({
   let newProjectDialog = page.getByRole("dialog", {
     name: "Nuovo intervento",
   });
+  await expect(newProjectDialog).toHaveCSS("width", "520px");
   await expect(
     newProjectDialog.locator(
       ":scope > .dialog-body.compatibility-new-project-dialog",
@@ -8508,6 +8509,7 @@ test("new repair products add compatible devices in a modal", async ({
   await expect(projectPicker).toBeVisible();
   await projectPicker.getByRole("button", { name: "Nuovo intervento" }).click();
   newProjectDialog = page.getByRole("dialog", { name: "Nuovo intervento" });
+  await expect(newProjectDialog).toHaveCSS("width", "520px");
   await newProjectDialog
     .getByLabel("Intervento", { exact: true })
     .fill(newProject);

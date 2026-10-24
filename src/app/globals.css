@@ -4861,9 +4861,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .compatibility-new-project .message {
   grid-column: 1 / -1;
 }
-.form-dialog:has(.compatibility-new-project-dialog) {
-  width: min(520px, calc(100vw - 32px));
-}
 @media (max-width: 760px) {
   .compatibility-device-fields {
     grid-template-columns: 1fr;
