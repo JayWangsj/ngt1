@@ -615,6 +615,23 @@ test("new repair uses a single selected accordion step", async ({ page }) => {
   const cards = page.locator(".order-step-card");
   await expect(cards).toHaveCount(4);
   await expect(cards.nth(0)).toHaveClass(/is-selected/);
+  await expect(cards.nth(0)).toHaveCSS("border-color", "rgb(234, 216, 137)");
+  await expect(cards.nth(0)).toHaveCSS(
+    "background-color",
+    "rgb(255, 254, 251)",
+  );
+  expect(
+    await cards
+      .nth(0)
+      .evaluate((element) => getComputedStyle(element).transitionDuration),
+  ).toContain("0.18s");
+  await cards.nth(1).hover();
+  await expect(cards.nth(1)).toHaveCSS("border-color", "rgb(231, 201, 90)");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(cards.nth(0)).toHaveCSS("transition-property", "none");
+  await cards.nth(1).hover();
+  await expect(cards.nth(1)).toHaveCSS("transform", "none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(cards.nth(0).locator(".order-step-state")).toContainText(
     "In corso",
   );

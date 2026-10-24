@@ -24,6 +24,7 @@ import { useBusinessDay } from "./business-date";
 import { translateError } from "@/lib/i18n";
 import { prefersReducedMotion } from "@/lib/motion-preference";
 import { DatePicker, SimpleSelect } from "./business-select";
+import orderStepCardStyles from "./order-step-card.module.css";
 import {
   DeviceForm,
   DialogBody,
@@ -164,7 +165,7 @@ function StepCard({
         : it.stepEmpty;
   return (
     <section
-      className={`panel order-step-card is-${state} ${selected ? "is-selected" : ""}`}
+      className={`panel ${orderStepCardStyles.card} order-step-card is-${state} ${selected ? `is-selected ${orderStepCardStyles.selected}` : ""}`}
     >
       <button
         ref={heading}

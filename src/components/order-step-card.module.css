@@ -1,0 +1,33 @@
+.card {
+  overflow: visible;
+  transform: translateY(0) scale(1);
+  transition:
+    transform var(--motion-base) var(--ease-ui),
+    box-shadow var(--motion-base) var(--ease-ui),
+    border-color var(--motion-base) var(--ease-ui),
+    background var(--motion-base) var(--ease-ui);
+}
+
+.card:hover:not(.selected) {
+  transform: translateY(-1px) scale(1.003);
+  border-color: #e7c95a;
+  box-shadow: 0 7px 18px #8060000c;
+  background: #fffefb;
+}
+
+.selected {
+  transform: translateY(0) scale(1.002);
+  border-color: #ead889;
+  box-shadow: inset 2px 0 #f4c62d;
+  background: #fffefb;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global(html:not([data-motion="always"])) .card {
+    transition: none;
+  }
+
+  :global(html:not([data-motion="always"])) .card:hover {
+    transform: none;
+  }
+}

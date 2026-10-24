@@ -5191,27 +5191,6 @@ details.secondary-actions {
   flex-direction: column;
   gap: 22px;
 }
-.order-step-card {
-  overflow: visible;
-  transform: translateY(0) scale(1);
-  transition:
-    transform var(--motion-base) var(--ease-ui),
-    box-shadow var(--motion-base) var(--ease-ui),
-    border-color var(--motion-base) var(--ease-ui),
-    background var(--motion-base) var(--ease-ui);
-}
-.order-step-card:hover:not(.is-selected) {
-  transform: translateY(-1px) scale(1.003);
-  border-color: #e7c95a;
-  box-shadow: 0 7px 18px #8060000c;
-  background: #fffefb;
-}
-.order-step-card.is-selected {
-  transform: translateY(0) scale(1.002);
-  border-color: #ead889;
-  box-shadow: inset 2px 0 #f4c62d;
-  background: #fffefb;
-}
 .order-step-heading {
   width: 100%;
   border: 0;
@@ -5988,13 +5967,11 @@ details.secondary-actions {
 }
 @media (prefers-reduced-motion: reduce) {
   html:not([data-motion="always"]) .new-order-back,
-  html:not([data-motion="always"]) .order-step-card,
   html:not([data-motion="always"]) .order-step-collapse,
   html:not([data-motion="always"]) .order-step-chevron {
     transition: none;
   }
-  html:not([data-motion="always"]) .new-order-back:hover,
-  html:not([data-motion="always"]) .order-step-card:hover {
+  html:not([data-motion="always"]) .new-order-back:hover {
     transform: none;
   }
 }
