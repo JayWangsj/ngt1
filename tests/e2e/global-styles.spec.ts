@@ -349,6 +349,41 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
   await expect(panelFixture).toHaveCSS("animation-name", "none");
 });
 
+test("searchable business select keeps its scoped control styles", async ({
+  page,
+}) => {
+  await page.goto("/orders/new", { waitUntil: "domcontentloaded" });
+
+  const customerSearch = page.getByRole("combobox", {
+    name: "Cerca cliente",
+    exact: true,
+  });
+  await expect(customerSearch).toBeVisible();
+  const searchBox = customerSearch.locator("xpath=..");
+  const searchableSelectRoot = customerSearch.locator(
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' business-select ')]",
+  );
+  await expect(searchBox).toHaveCSS("display", "flex");
+  await expect(searchBox).toHaveCSS("min-height", "38px");
+  await expect(searchBox).toHaveCSS("border-radius", "8px");
+  await expect(searchBox.locator("xpath=..")).toHaveCSS("display", "grid");
+  await customerSearch.focus();
+  await expect(searchBox).not.toHaveCSS("box-shadow", "none");
+
+  await customerSearch
+    .locator("xpath=../..")
+    .locator(".business-combobox-chevron")
+    .click();
+  const panel = page.locator(".business-select-panel.is-entering:visible");
+  await expect(panel).toHaveCount(1);
+  const scopeClass = await panel.evaluate((element) =>
+    element.classList.item(element.classList.length - 1),
+  );
+  if (!scopeClass)
+    throw new Error("The searchable business-select scope was not rendered.");
+  await expect(searchableSelectRoot).toHaveClass(new RegExp(scopeClass));
+});
+
 test("sidebar resize handle uses the defined action color", async ({
   page,
 }) => {

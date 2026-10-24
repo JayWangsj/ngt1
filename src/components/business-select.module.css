@@ -1,3 +1,68 @@
+:where(.scope):global(.business-select) {
+  position: relative;
+  width: 100%;
+  container-type: inline-size;
+}
+:where(.scope) :global(.business-combobox-control) {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: stretch;
+  gap: 8px;
+}
+:where(.scope) :global(.business-combobox-control.has-create) {
+  grid-template-columns: minmax(0, 1fr) 36px auto;
+}
+:where(.scope) :global(.business-combobox-input) {
+  display: flex;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #d8dddb;
+  border-radius: 8px;
+  background: #fff;
+  color: #7e8884;
+  transition:
+    border-color 180ms var(--ease-ui),
+    box-shadow 180ms var(--ease-ui),
+    background 180ms var(--ease-ui);
+}
+:where(.scope) :global(.business-combobox-input:hover) {
+  border-color: #b7bfbc;
+}
+:where(.scope) :global(.business-combobox-input:focus-within),
+:where(.scope):global(.business-select.is-open)
+  :global(.business-combobox-input) {
+  border-color: #d2ae21;
+  box-shadow: 0 0 0 3px rgb(235 196 39 / 12%);
+}
+:where(.scope) :global(.business-combobox-input > svg) {
+  flex: 0 0 auto;
+}
+:where(.scope) :global(.business-combobox-input input) {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #37413d;
+  font: inherit;
+}
+:where(.scope) :global(.business-combobox-input input:focus) {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+:where(.scope) :global(.business-combobox-input:has(input:disabled)) {
+  background: #f4f5f5;
+  color: #9ca3a0;
+}
+
 :where(.scope) :global(.business-select-trigger) {
   display: flex;
   width: 100%;

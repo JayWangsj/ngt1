@@ -6995,21 +6995,6 @@ details.secondary-actions {
   border-top: 1px solid #e5e5e5;
 }
 
-.business-select {
-  position: relative;
-  width: 100%;
-  container-type: inline-size;
-}
-.business-combobox-control {
-  display: grid;
-  width: 100%;
-  grid-template-columns: minmax(0, 1fr) 36px;
-  align-items: stretch;
-  gap: 8px;
-}
-.business-combobox-control.has-create {
-  grid-template-columns: minmax(0, 1fr) 36px auto;
-}
 .business-combobox-control.has-middle {
   grid-template-columns: minmax(220px, 1fr) 36px minmax(118px, 145px) auto;
 }
@@ -7031,54 +7016,6 @@ details.secondary-actions {
   .repair-project-combobox .business-combobox-control.has-middle {
     grid-template-columns: minmax(180px, 1fr) 36px 145px auto;
   }
-}
-.business-combobox-input {
-  display: flex;
-  min-width: 0;
-  min-height: 38px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  border: 1px solid #d8dddb;
-  border-radius: 8px;
-  background: #fff;
-  color: #7e8884;
-  transition:
-    border-color 180ms var(--ease-ui),
-    box-shadow 180ms var(--ease-ui),
-    background 180ms var(--ease-ui);
-}
-.business-combobox-input:hover {
-  border-color: #b7bfbc;
-}
-.business-combobox-input:focus-within,
-.business-select.is-open .business-combobox-input {
-  border-color: #d2ae21;
-  box-shadow: 0 0 0 3px rgb(235 196 39 / 12%);
-}
-.business-combobox-input > svg {
-  flex: 0 0 auto;
-}
-.business-combobox-input input {
-  width: 100%;
-  min-width: 0;
-  min-height: 36px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  color: #37413d;
-  font: inherit;
-}
-.business-combobox-input input:focus {
-  border: 0;
-  box-shadow: none;
-  outline: none;
-}
-.business-combobox-input:has(input:disabled) {
-  background: #f4f5f5;
-  color: #9ca3a0;
 }
 .business-combobox-clear,
 .business-combobox-chevron,
