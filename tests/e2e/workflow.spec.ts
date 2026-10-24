@@ -3005,6 +3005,37 @@ test("settings cards use one scoped layout", async ({ page }) => {
     "display",
     "flex",
   );
+  await expect(testToolsCard).toHaveCSS(
+    "border-top-color",
+    "rgba(31, 119, 103, 0.28)",
+  );
+  expect(
+    await testToolsCard.evaluate(
+      (element) => getComputedStyle(element).backgroundImage,
+    ),
+  ).toContain("linear-gradient");
+  const testDataGenerator = testToolsCard.locator(".test-data-generator");
+  await expect(testDataGenerator).toHaveCSS("gap", "12px");
+  await expect(testDataGenerator.locator("p")).toHaveCSS("margin", "0px");
+  await expect(testToolsCard.locator(".test-tools-badge")).toHaveCSS(
+    "font-size",
+    "10px",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await testToolsCard
+      .locator(".test-motion-grid")
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+            .length,
+      ),
+  ).toBe(1);
+  expect(
+    await testToolsCard.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(false);
 });
 
 test("settings detail pages use a scoped shell layout", async ({ page }) => {

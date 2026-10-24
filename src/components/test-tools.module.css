@@ -1,0 +1,114 @@
+.scope:global(.test-tools-settings) {
+  border-color: rgb(31 119 103 / 28%);
+  background: linear-gradient(180deg, #fbfffd, #fff 180px);
+}
+
+.scope:global(.test-tools-settings) > p,
+.scope :global(.test-data-generator) p,
+.scope :global(.test-motion-heading) p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.scope :global(.test-tools-badge) {
+  margin-left: auto;
+  border: 1px solid rgb(31 119 103 / 22%);
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: var(--teal);
+  background: rgb(31 119 103 / 8%);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.scope :global(.test-data-generator) {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 170px auto auto;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.scope :global(.test-data-generator) > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.scope :global(.test-motion-heading) {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.scope :global(.test-motion-heading) > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.scope :global(.test-motion-total) {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.scope :global(.test-motion-total) span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.scope :global(.test-motion-total) strong {
+  color: var(--teal);
+  font-variant-numeric: tabular-nums;
+}
+
+.scope :global(.test-motion-grid) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.scope :global(.test-motion-control) {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px;
+  background: #fff;
+}
+
+.scope :global(.test-motion-control) > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #4d5a56;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.scope :global(.test-motion-control) output {
+  color: var(--teal);
+  font-variant-numeric: tabular-nums;
+}
+
+.scope :global(.test-motion-control) input[type="range"] {
+  width: 100%;
+  accent-color: var(--action);
+}
+
+@media (max-width: 700px) {
+  .scope :global(.test-data-generator),
+  .scope :global(.test-motion-heading),
+  .scope :global(.test-motion-grid) {
+    grid-template-columns: 1fr;
+  }
+
+  .scope :global(.test-motion-total) {
+    text-align: left;
+  }
+}

@@ -15,6 +15,7 @@ import { useMessages } from "./language";
 import { SimpleSelect } from "./business-select";
 import { Button } from "./ui/button";
 import settingsCardStyles from "./settings-card.module.css";
+import testToolsStyles from "./test-tools.module.css";
 
 type MotionKey = keyof OrderMotionSettings;
 
@@ -87,7 +88,7 @@ export function TestTools() {
 
   return (
     <section
-      className={`panel padded settings-card ${settingsCardStyles.card} test-tools-settings`}
+      className={`panel padded settings-card ${settingsCardStyles.card} test-tools-settings ${testToolsStyles.scope}`}
     >
       <div className={`settings-card-title ${settingsCardStyles.title}`}>
         <Database size={19} aria-hidden="true" />
