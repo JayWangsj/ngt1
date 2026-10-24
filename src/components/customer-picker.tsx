@@ -16,6 +16,7 @@ import {
 } from "./forms";
 import { useLanguage, useMessages } from "./language";
 import { Button } from "./ui/button";
+import selectionSummaryStyles from "./selection-summary.module.css";
 
 export type CustomerOption = {
   id: string;
@@ -152,7 +153,7 @@ export function CustomerPicker({
         </Field>
       ) : (
         <div
-          className="selection-summary selected-customer-summary is-actionable"
+          className={`selection-summary selected-customer-summary is-actionable ${selectionSummaryStyles.scope}`}
           onClick={(event) => {
             if (!(event.target as HTMLElement).closest("button")) clear();
           }}

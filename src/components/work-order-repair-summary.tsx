@@ -17,6 +17,7 @@ import {
   useOrderDetailEdit,
   type OrderDetailEditTarget,
 } from "./order-detail-ui";
+import selectionSummaryStyles from "./selection-summary.module.css";
 
 type Product = {
   id: string;
@@ -222,7 +223,7 @@ export function WorkOrderRepairSummary({
               editor(index, "project")
             ) : (
               <div
-                className={`selection-summary selected-project-summary${locked ? "" : " is-actionable"}`}
+                className={`selection-summary selected-project-summary${locked ? "" : " is-actionable"} ${selectionSummaryStyles.scope}`}
                 onClick={() => change(index, "project")}
               >
                 <span className="selection-summary-icon is-project">
@@ -272,7 +273,7 @@ export function WorkOrderRepairSummary({
               editor(index, "part")
             ) : (
               <div
-                className={`selection-summary selected-part-summary${item.suggested ? " has-quote" : ""}${locked ? "" : " is-actionable"}`}
+                className={`selection-summary selected-part-summary${item.suggested ? " has-quote" : ""}${locked ? "" : " is-actionable"} ${selectionSummaryStyles.scope}`}
                 onClick={() => change(index, "part")}
               >
                 <span className="selection-summary-icon is-part">

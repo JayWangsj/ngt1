@@ -26,6 +26,7 @@ import { prefersReducedMotion } from "@/lib/motion-preference";
 import { DatePicker, SimpleSelect } from "./business-select";
 import orderStepCardStyles from "./order-step-card.module.css";
 import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
+import selectionSummaryStyles from "./selection-summary.module.css";
 import {
   DeviceForm,
   DialogBody,
@@ -97,7 +98,7 @@ function RepairDeviceSummary({
   const it = useMessages();
   return (
     <div
-      className="selection-summary repair-device-summary is-actionable"
+      className={`selection-summary repair-device-summary is-actionable ${selectionSummaryStyles.scope}`}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("button")) return;
         onChange();

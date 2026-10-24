@@ -18,6 +18,7 @@ import {
 } from "./forms";
 import { DatePicker } from "./business-select";
 import { Button } from "./ui/button";
+import selectionSummaryStyles from "./selection-summary.module.css";
 import {
   CustomerPicker,
   type CustomerDetail,
@@ -275,7 +276,7 @@ export function NewServiceOrder({
               <div className="quick-service-service-cards">
                 {selectedServiceItems.map((service) => (
                   <article
-                    className="selection-summary selected-project-summary"
+                    className={`selection-summary selected-project-summary ${selectionSummaryStyles.scope}`}
                     key={service.id}
                   >
                     <span className="selection-summary-icon is-project">

@@ -69,6 +69,7 @@ import {
 } from "simple-icons";
 import { Button } from "./ui/button";
 import dialogStyles from "./ui/dialog.module.css";
+import selectionSummaryStyles from "./selection-summary.module.css";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import {
@@ -1058,7 +1059,7 @@ function PriceOptionPicker({
     <>
       {product || noneSelected ? (
         <div
-          className={`selection-summary selected-part-summary price-option-picker-summary${disabled ? "" : " is-actionable"}`}
+          className={`selection-summary selected-part-summary price-option-picker-summary${disabled ? "" : " is-actionable"} ${selectionSummaryStyles.scope}`}
           onClick={(event) => {
             if (disabled || (event.target as HTMLElement).closest("button"))
               return;
@@ -1700,7 +1701,7 @@ export function ItemsEditor({
             itemSelected &&
             !editingProject ? (
               <div
-                className={`selection-summary selected-project-summary${!editingPrices[index] ? " is-actionable" : ""}`}
+                className={`selection-summary selected-project-summary${!editingPrices[index] ? " is-actionable" : ""} ${selectionSummaryStyles.scope}`}
                 onClick={(event) => {
                   if (
                     editingPrices[index] ||
@@ -2034,7 +2035,7 @@ export function ItemsEditor({
                       />
                     ) : selectedProduct && !editingPart ? (
                       <div
-                        className="selection-summary selected-part-summary is-actionable"
+                        className={`selection-summary selected-part-summary is-actionable ${selectionSummaryStyles.scope}`}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("button"))
                             return;
@@ -2103,7 +2104,7 @@ export function ItemsEditor({
                       item.requiredProductRemoved &&
                       !editingPart ? (
                       <div
-                        className="selection-summary selected-part-summary is-actionable"
+                        className={`selection-summary selected-part-summary is-actionable ${selectionSummaryStyles.scope}`}
                         onClick={() =>
                           setEditingParts((current) => ({
                             ...current,
@@ -2146,7 +2147,7 @@ export function ItemsEditor({
                       </button>
                     ) : showEmptyPartSummary && !editingPart ? (
                       <div
-                        className="selection-summary selected-part-summary is-actionable"
+                        className={`selection-summary selected-part-summary is-actionable ${selectionSummaryStyles.scope}`}
                         onClick={() =>
                           setEditingParts((current) => ({
                             ...current,
@@ -3958,7 +3959,7 @@ function ReworkPartSummary({
   const available = product?.available ?? product?.stock ?? 0;
   return (
     <div
-      className={`selection-summary selected-part-summary rework-part-summary${disabled ? "" : " is-actionable"}`}
+      className={`selection-summary selected-part-summary rework-part-summary${disabled ? "" : " is-actionable"} ${selectionSummaryStyles.scope}`}
       onClick={(event) => {
         if (disabled || (event.target as HTMLElement).closest("button")) return;
         onChange();

@@ -975,6 +975,12 @@ test("repair project picker selects multiple items and removes a summary on hove
   const catalogSummary = summaries.filter({
     hasText: "sostituzione display",
   });
+  await expect(catalogSummary).toHaveCSS("display", "grid");
+  const projectSummaryColumnCount = await catalogSummary.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(projectSummaryColumnCount).toBe(4);
   const removeCatalog = catalogSummary.getByRole("button", {
     name: "Rimuovi sostituzione display",
     exact: true,
@@ -1406,6 +1412,12 @@ test("creates a repair part and quote option directly from a new order", async (
   await choosePriceOption(page, productName, optionPicker);
   await expect(optionSummary).toContainText(productName);
   await expect(optionSummary).toContainText("127,00 €");
+  await expect(optionSummary).toHaveCSS("display", "grid");
+  const partSummaryColumnCount = await optionSummary.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(partSummaryColumnCount).toBe(4);
   await expect(
     page.getByRole("button", {
       name: "Modifica dati Preventivo attuale",
@@ -7697,17 +7709,23 @@ test("creates a customer and selects it without another search", async ({
   await phoneInput.fill(phone);
   await phoneInput.press("Enter");
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".selected-customer-summary")).toContainText(
-    "Tre telefoni",
+  const customerSummary = page.locator(".selected-customer-summary");
+  await expect(customerSummary).toContainText("Tre telefoni");
+  await expect(customerSummary).toContainText("+39" + phone);
+  await expect(customerSummary).toHaveCSS("display", "grid");
+  const customerSummaryColumnCount = await customerSummary.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
   );
-  await expect(page.locator(".selected-customer-summary")).toContainText(
-    "+39" + phone,
+  expect(customerSummaryColumnCount).toBe(3);
+  const customerSummaryBox = await customerSummary.boundingBox();
+  expect(customerSummaryBox!.x + customerSummaryBox!.width).toBeLessThanOrEqual(
+    391,
   );
   await expect(
     page.locator(".order-step-card").nth(1).locator(".order-step-heading"),
   ).toHaveAttribute("aria-expanded", "true");
   await openStep(page, 0);
-  const customerSummary = page.locator(".selected-customer-summary");
   await customerSummary.hover();
   await expect(customerSummary.locator(".summary-action svg")).toHaveCSS(
     "transform",
