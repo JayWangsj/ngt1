@@ -6711,10 +6711,6 @@ details.secondary-actions {
   display: grid;
   gap: 22px;
 }
-.settings-inline-manager {
-  width: 100%;
-  min-width: 0;
-}
 .motion-switch {
   position: relative;
   width: 46px;

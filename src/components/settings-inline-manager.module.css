@@ -1,0 +1,4 @@
+.manager:global(.settings-inline-manager) {
+  width: 100%;
+  min-width: 0;
+}

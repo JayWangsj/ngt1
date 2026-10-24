@@ -20,6 +20,7 @@ import {
   FormDialog,
 } from "./forms";
 import { RecordIcon } from "./ui/record-icon";
+import settingsInlineManagerStyles from "./settings-inline-manager.module.css";
 
 export type QuickServiceView = {
   id: string;
@@ -188,7 +189,9 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
 
   return (
     <>
-      <div className="catalog-manager settings-inline-manager">
+      <div
+        className={`catalog-manager settings-inline-manager ${settingsInlineManagerStyles.manager}`}
+      >
         {drafts.length ? (
           <div className="catalog-manager-list">
             {drafts.map((item) => (
@@ -402,7 +405,9 @@ export function DeviceModelManager({ items }: { items: SavedModelView[] }) {
   }
 
   return (
-    <div className="model-manager settings-inline-manager">
+    <div
+      className={`model-manager settings-inline-manager ${settingsInlineManagerStyles.manager}`}
+    >
       {groups.map((group) => (
         <section key={group.key}>
           <button

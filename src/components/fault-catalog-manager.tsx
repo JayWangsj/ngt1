@@ -15,6 +15,7 @@ import { SimpleSelect } from "./business-select";
 import { Button } from "./ui/button";
 import { ToggleSwitch } from "./ui/toggle-switch";
 import { focusComfortably } from "@/lib/comfortable-scroll";
+import settingsInlineManagerStyles from "./settings-inline-manager.module.css";
 
 export type FaultCatalogItem = {
   id: string;
@@ -427,7 +428,9 @@ export function FaultCatalogManager({
     </>
   );
   const manager = embedded ? (
-    <div className="fault-manager settings-inline-manager">
+    <div
+      className={`fault-manager settings-inline-manager ${settingsInlineManagerStyles.manager}`}
+    >
       {managerContent}
     </div>
   ) : (

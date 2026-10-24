@@ -3077,6 +3077,42 @@ test("settings action rows keep shared layout and responsive behavior", async ({
   ).toBe(false);
 });
 
+test("settings inline managers fill their content at desktop and mobile widths", async ({
+  page,
+}) => {
+  const managerRoutes = [
+    ["/settings/quick-services", ".catalog-manager.settings-inline-manager"],
+    ["/settings/device-models", ".model-manager.settings-inline-manager"],
+    ["/settings/fault-catalog", ".fault-manager.settings-inline-manager"],
+  ];
+
+  for (const [route, selector] of managerRoutes) {
+    await page.goto(route);
+    const manager = page.locator(selector);
+    await expect(manager).toHaveCount(1);
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const geometry = await manager.evaluate((element) => {
+        const parent = element.parentElement!;
+        const parentStyle = getComputedStyle(parent);
+        return {
+          minWidth: getComputedStyle(element).minWidth,
+          width: element.getBoundingClientRect().width,
+          parentContentWidth:
+            parent.clientWidth -
+            parseFloat(parentStyle.paddingLeft) -
+            parseFloat(parentStyle.paddingRight),
+        };
+      });
+      expect(geometry.minWidth).toBe("0px");
+      expect(
+        Math.abs(geometry.width - geometry.parentContentWidth),
+      ).toBeLessThanOrEqual(1);
+    }
+  }
+});
+
 test("settings opens system update as a separate page", async ({ page }) => {
   await page.goto("/settings");
   const entries = page.locator(".settings-entry");
