@@ -2979,6 +2979,34 @@ test("desktop sidebar resizes, collapses and restores its saved width", async ({
     .toBe(true);
 });
 
+test("settings cards use one scoped layout", async ({ page }) => {
+  await page.goto("/settings/language");
+  const languageCard = page.locator(".settings-card");
+  await expect(languageCard).toHaveCSS("display", "grid");
+  await expect(languageCard).toHaveCSS("gap", "18px");
+  const cardTitle = languageCard.locator(".settings-card-title");
+  await expect(cardTitle).toHaveCSS("display", "flex");
+  await expect(cardTitle).toHaveCSS("gap", "9px");
+  await expect(cardTitle.locator("h2")).toHaveCSS("margin", "0px");
+  const languageSwitch = languageCard.locator(".language-switch");
+  await expect(languageSwitch).toHaveCSS("position", "static");
+  await expect(languageSwitch).toHaveCSS("margin", "0px");
+
+  await page.goto("/settings");
+  const settingsEntry = page.locator(".settings-entry").first();
+  await expect(settingsEntry).toHaveCSS("display", "grid");
+  await expect(settingsEntry).toHaveCSS("gap", "18px");
+
+  await page.goto("/settings/test-tools");
+  const testToolsCard = page.locator(".test-tools-settings");
+  await expect(testToolsCard).toHaveCSS("display", "grid");
+  await expect(testToolsCard).toHaveCSS("gap", "18px");
+  await expect(testToolsCard.locator(".settings-card-title")).toHaveCSS(
+    "display",
+    "flex",
+  );
+});
+
 test("settings opens system update as a separate page", async ({ page }) => {
   await page.goto("/settings");
   const entries = page.locator(".settings-entry");
@@ -3032,6 +3060,13 @@ test("settings opens system update as a separate page", async ({ page }) => {
     .toBe("matrix(1, 0, 0, 1, 0, 0)");
   await entry.click();
   await expect(page).toHaveURL(/\/settings\/system-update$/);
+  const updatePreferences = page.locator(".update-preferences");
+  await expect(updatePreferences).toHaveCSS("display", "grid");
+  await expect(updatePreferences).toHaveCSS("gap", "18px");
+  await expect(updatePreferences.locator(".settings-card-title")).toHaveCSS(
+    "display",
+    "flex",
+  );
   const settingsHeader = page.locator(".settings-detail-page > .page-header");
   await expect
     .poll(() =>

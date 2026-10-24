@@ -1,0 +1,19 @@
+.card {
+  display: grid;
+  gap: 18px;
+}
+
+.card h2 {
+  margin: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.card :global(.language-switch) {
+  position: static;
+  margin: 0;
+}

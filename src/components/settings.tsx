@@ -42,6 +42,7 @@ import {
   type QuickServiceView,
   type SavedModelView,
 } from "./catalog-managers";
+import settingsCardStyles from "./settings-card.module.css";
 
 function SettingsEntry({
   href,
@@ -59,7 +60,7 @@ function SettingsEntry({
   return (
     <Link
       href={href}
-      className={`panel padded settings-card settings-entry dashboard-action-link ${className}`.trim()}
+      className={`panel padded settings-card ${settingsCardStyles.card} settings-entry dashboard-action-link ${className}`.trim()}
     >
       <span className="settings-entry-icon" aria-hidden="true">
         {icon}
@@ -164,8 +165,10 @@ export function SettingsOverview({
 export function LanguageSettings() {
   const it = useMessages();
   return (
-    <section className="panel padded settings-card">
-      <div className="settings-card-title">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card}`}
+    >
+      <div className={`settings-card-title ${settingsCardStyles.title}`}>
         <Languages size={19} aria-hidden="true" />
         <h2>{it.language}</h2>
       </div>
@@ -198,8 +201,10 @@ export function MotionSettings() {
   }
 
   return (
-    <section className="panel padded settings-card motion-settings">
-      <div className="settings-card-title">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card} motion-settings`}
+    >
+      <div className={`settings-card-title ${settingsCardStyles.title}`}>
         <Sparkles size={19} aria-hidden="true" />
         <h2>{it.interfaceMotion}</h2>
       </div>
@@ -289,8 +294,10 @@ export function BusinessDateSettings({
   }
 
   return (
-    <section className="panel padded settings-card business-date-settings">
-      <div className="settings-card-title">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card} business-date-settings`}
+    >
+      <div className={`settings-card-title ${settingsCardStyles.title}`}>
         <CalendarDays size={19} aria-hidden="true" />
         <h2>{it.businessDate}</h2>
       </div>
@@ -351,7 +358,9 @@ export function BusinessDateSettings({
 
 export function QuickServiceSettings({ items }: { items: QuickServiceView[] }) {
   return (
-    <section className="panel padded settings-card">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card}`}
+    >
       <QuickServiceManager items={items} />
     </section>
   );
@@ -359,7 +368,9 @@ export function QuickServiceSettings({ items }: { items: QuickServiceView[] }) {
 
 export function DeviceModelSettings({ items }: { items: SavedModelView[] }) {
   return (
-    <section className="panel padded settings-card">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card}`}
+    >
       <DeviceModelManager items={items} />
     </section>
   );
@@ -367,7 +378,9 @@ export function DeviceModelSettings({ items }: { items: SavedModelView[] }) {
 
 export function FaultCatalogSettings({ items }: { items: FaultCatalogItem[] }) {
   return (
-    <section className="panel padded settings-card">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card}`}
+    >
       <FaultCatalogManager items={items} embedded />
     </section>
   );
@@ -481,7 +494,9 @@ export function DataSettings() {
   }
 
   return (
-    <section className="panel padded settings-card">
+    <section
+      className={`panel padded settings-card ${settingsCardStyles.card}`}
+    >
       <h2>{it.dataManagement}</h2>
       <div className="settings-action">
         <div>

@@ -27,6 +27,7 @@ import {
   readAutoUpdateCheck,
   writeAutoUpdateCheck,
 } from "@/lib/update-preference";
+import settingsCardStyles from "./settings-card.module.css";
 
 type GitHubAuth = {
   status: "opening" | "waiting";
@@ -738,8 +739,10 @@ export function SystemUpdate({
         </section>
       )}
 
-      <section className="panel padded settings-card update-preferences">
-        <div className="settings-card-title">
+      <section
+        className={`panel padded settings-card ${settingsCardStyles.card} update-preferences`}
+      >
+        <div className={`settings-card-title ${settingsCardStyles.title}`}>
           <h2>{it.updateSettings}</h2>
         </div>
         <div className="settings-action">

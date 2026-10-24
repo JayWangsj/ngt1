@@ -6731,21 +6731,9 @@ details.secondary-actions {
 .settings-detail-page .system-update-page > .panel {
   padding: 20px;
 }
-.settings-card {
-  display: grid;
-  gap: 18px;
-}
 .settings-inline-manager {
   width: 100%;
   min-width: 0;
-}
-.settings-card h2 {
-  margin: 0;
-}
-.settings-card-title {
-  display: flex;
-  align-items: center;
-  gap: 9px;
 }
 .business-date-settings > p {
   margin: -8px 0 0;
@@ -7402,11 +7390,6 @@ details.secondary-actions {
   .test-motion-total {
     text-align: left;
   }
-}
-
-.settings-card .language-switch {
-  position: static;
-  margin: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
