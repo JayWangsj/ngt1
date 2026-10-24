@@ -44,6 +44,7 @@ import {
 } from "./catalog-managers";
 import settingsCardStyles from "./settings-card.module.css";
 import settingsEntryStyles from "./settings-entry.module.css";
+import businessDateStyles from "./business-date-settings.module.css";
 
 function SettingsEntry({
   href,
@@ -299,14 +300,14 @@ export function BusinessDateSettings({
 
   return (
     <section
-      className={`panel padded settings-card ${settingsCardStyles.card} business-date-settings`}
+      className={`panel padded settings-card ${settingsCardStyles.card} business-date-settings ${businessDateStyles.card}`}
     >
       <div className={`settings-card-title ${settingsCardStyles.title}`}>
         <CalendarDays size={19} aria-hidden="true" />
         <h2>{it.businessDate}</h2>
       </div>
       <p>{it.businessDateHelp}</p>
-      <div className="settings-date-form">
+      <div className={`settings-date-form ${businessDateStyles.form}`}>
         <Field label={it.dateMode}>
           <SimpleSelect
             value={dateMode}
@@ -329,13 +330,13 @@ export function BusinessDateSettings({
             />
           </Field>
         )}
-        <div className="business-date-current">
+        <div className={`business-date-current ${businessDateStyles.current}`}>
           <span>{it.currentBusinessDate}</span>
           <strong>{today.split("-").reverse().join("/")}</strong>
         </div>
         <Button
           type="button"
-          className="settings-date-save"
+          className={`settings-date-save ${businessDateStyles.save}`}
           disabled={
             clockPending ||
             !clockChanged ||

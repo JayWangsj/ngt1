@@ -6735,36 +6735,6 @@ details.secondary-actions {
   width: 100%;
   min-width: 0;
 }
-.business-date-settings > p {
-  margin: -8px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-.settings-date-form {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) auto auto;
-  align-items: end;
-  gap: 14px;
-}
-.business-date-current {
-  display: grid;
-  gap: 4px;
-  min-width: 140px;
-  padding-bottom: 2px;
-}
-.business-date-current span {
-  color: var(--muted);
-  font-size: 11px;
-}
-.business-date-current strong {
-  font-size: 15px;
-}
-.settings-date-save,
-.settings-date-save:hover,
-.settings-date-save:active {
-  transform: none;
-  min-width: 128px;
-}
 .settings-action {
   display: flex;
   align-items: center;
@@ -7327,10 +7297,6 @@ details.secondary-actions {
     align-items: stretch;
     flex-direction: column;
     gap: 12px;
-  }
-  .settings-date-form {
-    grid-template-columns: 1fr;
-    align-items: stretch;
   }
   .motion-setting-control {
     justify-content: space-between;

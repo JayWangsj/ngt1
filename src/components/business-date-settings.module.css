@@ -1,0 +1,42 @@
+.card > p {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) auto auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.current {
+  display: grid;
+  gap: 4px;
+  min-width: 140px;
+  padding-bottom: 2px;
+}
+
+.current span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.current strong {
+  font-size: 15px;
+}
+
+.card .save,
+.card .save:hover,
+.card .save:active {
+  transform: none;
+  min-width: 128px;
+}
+
+@media (max-width: 700px) {
+  .form {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}

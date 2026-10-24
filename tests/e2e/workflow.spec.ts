@@ -5677,6 +5677,32 @@ test("language switching from settings persists across business pages", async ({
     }),
   ).toBeVisible();
 });
+
+test("business date settings form fits a narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings/business-date");
+  const dateSettings = page.locator(".business-date-settings");
+  await chooseBusinessOption(
+    page,
+    "Modalità data",
+    "Imposta manualmente",
+    dateSettings,
+  );
+  await dateSettings
+    .getByLabel("Imposta manualmente", { exact: true })
+    .fill("2031-04-12");
+
+  const dateForm = dateSettings.locator(".settings-date-form");
+  await expect(dateForm).toHaveCSS("display", "grid");
+  await expect(dateForm).toHaveCSS("gap", "14px");
+  const mobileLayout = await dateForm.evaluate((element) => ({
+    columns: getComputedStyle(element).gridTemplateColumns,
+    overflows: element.scrollWidth > element.clientWidth,
+  }));
+  expect(mobileLayout.columns.split(" ")).toHaveLength(1);
+  expect(mobileLayout.overflows).toBe(false);
+});
+
 test("settings applies a manual business date and can return to system time", async ({
   page,
 }) => {
@@ -5701,6 +5727,23 @@ test("settings applies a manual business date and can return to system time", as
     name: "Salva",
     exact: true,
   });
+  const dateForm = dateSettings.locator(".settings-date-form");
+  await expect(dateForm).toHaveCSS("display", "grid");
+  await expect(dateForm).toHaveCSS("gap", "14px");
+  expect(
+    await dateForm.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").length,
+    ),
+  ).toBe(4);
+  await expect(dateSettings.locator(".business-date-current")).toHaveCSS(
+    "gap",
+    "4px",
+  );
+  await expect(saveClock).toHaveCSS("min-width", "128px");
+  await saveClock.hover();
+  await expect(saveClock).toHaveCSS("transform", "none");
+  await page.mouse.move(0, 0);
   await expect(saveClock).toBeEnabled();
   const boxesBefore = await Promise.all([
     modeSelect.boundingBox(),
