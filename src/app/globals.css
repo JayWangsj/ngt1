@@ -7017,8 +7017,7 @@ details.secondary-actions {
     grid-template-columns: minmax(180px, 1fr) 36px 145px auto;
   }
 }
-.business-combobox-clear,
-.business-select-create {
+.business-combobox-clear {
   display: inline-flex;
   min-height: 38px;
   align-items: center;
@@ -7072,27 +7071,8 @@ details.secondary-actions {
   border: 0;
   color: #7e8884;
 }
-.business-select-create {
-  max-width: 100px;
-  gap: 5px;
-  padding: 0 11px;
-  white-space: nowrap;
-  transition:
-    transform 180ms var(--ease-ui),
-    border-color 180ms var(--ease-ui),
-    background 180ms var(--ease-ui);
-}
 .editable-field .business-select-create {
   max-width: none;
-}
-.business-select-create span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.business-select-create:hover:not(:disabled) {
-  border-color: #c99e10;
-  background: #fff9e9;
-  box-shadow: 0 4px 10px rgb(116 91 11 / 10%);
 }
 .repair-project-combobox .business-select-create:hover:not(:disabled),
 .repair-part-combobox .business-select-create:hover:not(:disabled) {
@@ -7100,22 +7080,12 @@ details.secondary-actions {
   background: #ffe578;
   box-shadow: 0 5px 12px rgb(116 91 11 / 14%);
 }
-.business-select-create:active:not(:disabled) {
-  background: #ffe99d;
-}
 .business-combobox-clear:hover {
   background: #fff9e9;
 }
-.business-combobox-clear:focus-visible,
-.business-select-create:focus-visible {
+.business-combobox-clear:focus-visible {
   outline: 2px solid rgb(210 174 33 / 45%);
   outline-offset: 2px;
-}
-.business-select-create:disabled {
-  background: #f4f5f5;
-  color: #9ca3a0;
-  border-color: #e1e5e3;
-  cursor: not-allowed;
 }
 .option-delete {
   width: 28px;
@@ -7146,21 +7116,6 @@ details.secondary-actions {
 .inventory-category-field:focus-within .icon-button {
   opacity: 1;
 }
-@container (max-width: 340px) {
-  .business-select-create {
-    width: 38px;
-    padding: 0;
-  }
-  .business-select-create span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-}
-
 .warranty-progress-panel {
   --warranty-color: #65736d;
   --warranty-tint: #f4f6f5;
@@ -7372,18 +7327,6 @@ details.secondary-actions {
   .after-sales-grid {
     grid-template-columns: 1fr;
   }
-  .business-select-create {
-    width: 38px;
-    padding: 0;
-  }
-  .business-select-create span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
   .business-combobox-control.has-middle {
     grid-template-columns: minmax(0, 1fr) 36px;
   }
@@ -7404,10 +7347,6 @@ details.secondary-actions {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  html:not([data-motion="always"]) .business-select-create {
-    animation: none;
-    transition: none;
-  }
   html:not([data-motion="always"]) .warranty-progress-track span {
     transition: none;
   }

@@ -352,6 +352,7 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
 test("searchable business select keeps its scoped control styles", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/orders/new", { waitUntil: "domcontentloaded" });
 
   const customerSearch = page.getByRole("combobox", {
@@ -363,6 +364,12 @@ test("searchable business select keeps its scoped control styles", async ({
   const searchableSelectRoot = customerSearch.locator(
     "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' business-select ')]",
   );
+  await customerSearch.fill("NGT-CSS-CREATE-NO-MATCH-7391");
+  await expect(customerSearch).toHaveValue("NGT-CSS-CREATE-NO-MATCH-7391");
+  const createAction = searchableSelectRoot.locator(".business-select-create");
+  await expect(createAction).toBeVisible();
+  await expect(createAction).toHaveCSS("width", "38px");
+  await expect(createAction.locator("span")).toHaveCSS("position", "absolute");
   await expect(searchBox).toHaveCSS("display", "flex");
   await expect(searchBox).toHaveCSS("min-height", "38px");
   await expect(searchBox).toHaveCSS("border-radius", "8px");
@@ -378,7 +385,6 @@ test("searchable business select keeps its scoped control styles", async ({
   await expect(chevron).toHaveCSS("min-height", "38px");
   await chevron.focus();
   await expect(chevron).toHaveCSS("outline-style", "solid");
-  await chevron.click();
   const panel = page.locator(".business-select-panel.is-entering:visible");
   await expect(panel).toHaveCount(1);
   await expect(chevron.locator("svg")).toHaveCSS(
