@@ -7018,7 +7018,6 @@ details.secondary-actions {
   }
 }
 .business-combobox-clear,
-.business-combobox-chevron,
 .business-select-create {
   display: inline-flex;
   min-height: 38px;
@@ -7104,28 +7103,14 @@ details.secondary-actions {
 .business-select-create:active:not(:disabled) {
   background: #ffe99d;
 }
-.business-combobox-chevron {
-  width: 36px;
-  padding: 0;
-  color: #7e8884;
-}
-.business-combobox-chevron svg {
-  transition: transform 180ms var(--ease-ui);
-}
-.business-select.is-open .business-combobox-chevron svg {
-  transform: rotate(180deg);
-}
-.business-combobox-clear:hover,
-.business-combobox-chevron:hover:not(:disabled) {
+.business-combobox-clear:hover {
   background: #fff9e9;
 }
 .business-combobox-clear:focus-visible,
-.business-combobox-chevron:focus-visible,
 .business-select-create:focus-visible {
   outline: 2px solid rgb(210 174 33 / 45%);
   outline-offset: 2px;
 }
-.business-combobox-chevron:disabled,
 .business-select-create:disabled {
   background: #f4f5f5;
   color: #9ca3a0;
@@ -7419,8 +7404,7 @@ details.secondary-actions {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  html:not([data-motion="always"]) .business-select-create,
-  html:not([data-motion="always"]) .business-combobox-chevron svg {
+  html:not([data-motion="always"]) .business-select-create {
     animation: none;
     transition: none;
   }

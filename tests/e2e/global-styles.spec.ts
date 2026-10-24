@@ -370,18 +370,29 @@ test("searchable business select keeps its scoped control styles", async ({
   await customerSearch.focus();
   await expect(searchBox).not.toHaveCSS("box-shadow", "none");
 
-  await customerSearch
+  const chevron = customerSearch
     .locator("xpath=../..")
-    .locator(".business-combobox-chevron")
-    .click();
+    .locator(".business-combobox-chevron");
+  await expect(chevron).toHaveCSS("display", "flex");
+  await expect(chevron).toHaveCSS("width", "36px");
+  await expect(chevron).toHaveCSS("min-height", "38px");
+  await chevron.focus();
+  await expect(chevron).toHaveCSS("outline-style", "solid");
+  await chevron.click();
   const panel = page.locator(".business-select-panel.is-entering:visible");
   await expect(panel).toHaveCount(1);
+  await expect(chevron.locator("svg")).toHaveCSS(
+    "transform",
+    "matrix(-1, 0, 0, -1, 0, 0)",
+  );
   const scopeClass = await panel.evaluate((element) =>
     element.classList.item(element.classList.length - 1),
   );
   if (!scopeClass)
     throw new Error("The searchable business-select scope was not rendered.");
   await expect(searchableSelectRoot).toHaveClass(new RegExp(scopeClass));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(chevron.locator("svg")).toHaveCSS("transition-property", "none");
 });
 
 test("sidebar resize handle uses the defined action color", async ({
