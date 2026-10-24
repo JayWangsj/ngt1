@@ -2373,6 +2373,7 @@ export function ItemsEditor({
         <FormDialog
           title={it.selectRepairProjects}
           subtitle={it.repairProjectPickerHelp}
+          size="large"
           onClose={() => setChoosingProjects(false)}
         >
           <DialogBody className="quick-service-picker">
@@ -6199,7 +6200,7 @@ export function FormDialog({
   subtitle?: string;
   onClose: () => void;
   restoreFocusComfortably?: boolean;
-  size?: "wide" | "medium" | "narrow" | "compact";
+  size?: "wide" | "large" | "medium" | "narrow" | "compact";
   children: ReactNode;
 }) {
   const it = useMessages();

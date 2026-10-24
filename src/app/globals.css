@@ -4417,9 +4417,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   display: grid;
   gap: 14px;
 }
-.form-dialog:has(.quick-service-picker) {
-  width: min(900px, calc(100vw - 32px));
-}
 .quick-service-picker-list {
   display: grid;
   gap: 9px;

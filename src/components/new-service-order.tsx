@@ -413,6 +413,7 @@ export function NewServiceOrder({
               <FormDialog
                 title={it.quickService.selectDevices}
                 subtitle={it.quickService.devicePickerHelp}
+                size="large"
                 onClose={() => setChoosingDevices(false)}
               >
                 <DialogBody className="quick-service-picker">
@@ -481,6 +482,7 @@ export function NewServiceOrder({
               <FormDialog
                 title={it.quickService.selectServices}
                 subtitle={it.quickService.servicePickerHelp}
+                size="large"
                 onClose={() => setChoosingServices(false)}
               >
                 <DialogBody className="quick-service-picker">

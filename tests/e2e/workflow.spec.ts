@@ -349,6 +349,7 @@ async function chooseRepairDevice(page: Page, name: string) {
   const dialog = page.getByRole("dialog", {
     name: "Dispositivo del cliente",
   });
+  await expect(dialog).toHaveCSS("width", "900px");
   await dialog
     .locator(".customer-device-row")
     .filter({ hasText: name })
@@ -926,6 +927,7 @@ test("repair project picker selects multiple items and removes a summary on hove
   const picker = page.getByRole("dialog", {
     name: "Seleziona interventi",
   });
+  await expect(picker).toHaveCSS("width", "900px");
   const displayProject = repairProjectOption(picker, "sostituzione display");
   await expect(displayProject).toHaveCount(1);
   await displayProject.click();
@@ -1883,6 +1885,12 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
   const devicePicker = page.getByRole("dialog", {
     name: "Dispositivi associati",
   });
+  const pickerBox = await devicePicker.boundingBox();
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  expect(pickerBox!.x).toBeGreaterThanOrEqual(16);
+  expect(
+    viewportWidth - (pickerBox!.x + pickerBox!.width),
+  ).toBeGreaterThanOrEqual(16);
   const deviceRow = devicePicker
     .locator(".customer-device-row")
     .filter({ hasText: "Apple iPhone 13" });
@@ -1919,6 +1927,31 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
   const addDeviceBox = await addDevice.boundingBox();
   const deviceGridBox = await deviceGrid.boundingBox();
   expect(Math.abs(addDeviceBox!.width - deviceGridBox!.width)).toBeLessThan(1);
+});
+
+test("quick service device and service selectors retain the large dialog size", async ({
+  page,
+}) => {
+  await page.goto("/orders/new?type=quick");
+  await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+
+  await page.getByRole("button", { name: "Dispositivo", exact: true }).click();
+  const devicePicker = page.getByRole("dialog", {
+    name: "Dispositivi associati",
+  });
+  await expect(devicePicker).toHaveCSS("width", "900px");
+  await devicePicker
+    .getByRole("button", { name: "Annulla", exact: true })
+    .click();
+
+  await page.getByRole("button", { name: "Servizi", exact: true }).click();
+  const servicePicker = page.getByRole("dialog", {
+    name: "Seleziona servizi",
+  });
+  await expect(servicePicker).toHaveCSS("width", "900px");
+  await servicePicker
+    .getByRole("button", { name: "Annulla", exact: true })
+    .click();
 });
 
 test("manages one quick service for held service orders and retail checkout", async ({

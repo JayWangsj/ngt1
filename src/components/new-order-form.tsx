@@ -599,6 +599,7 @@ export function NewOrderWizard({
             {choosingDevice && customer && (
               <FormDialog
                 title={it.chooseDevice}
+                size="large"
                 onClose={() => setChoosingDevice(false)}
               >
                 <DialogBody className="quick-service-picker">
