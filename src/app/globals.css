@@ -7195,53 +7195,6 @@ details.secondary-actions {
   border-color: #e1e5e3;
   cursor: not-allowed;
 }
-.business-select-trigger {
-  display: flex;
-  width: 100%;
-  min-height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 11px;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-control);
-  background: #fff;
-  color: var(--text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 180ms var(--ease-ui),
-    box-shadow 180ms var(--ease-ui),
-    background 180ms var(--ease-ui);
-}
-.business-select-trigger .is-placeholder {
-  color: var(--text-tertiary);
-}
-.business-select-trigger:hover:not(:disabled) {
-  border-color: var(--action);
-}
-.business-select.is-open .business-select-trigger {
-  border-color: var(--action);
-  box-shadow: 0 0 0 3px hsl(45 100% 25% / 16%);
-}
-.business-select-trigger:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
-}
-.business-select-trigger svg {
-  flex: 0 0 auto;
-  color: #7e8884;
-  transition: transform 180ms var(--ease-ui);
-}
-.business-select.is-open .business-select-trigger svg {
-  transform: rotate(180deg);
-}
-.business-select-trigger:disabled {
-  background: #f4f5f5;
-  color: #9ca3a0;
-  cursor: default;
-}
 .option-delete {
   width: 28px;
   height: 28px;

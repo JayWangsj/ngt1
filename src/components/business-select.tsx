@@ -14,7 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessages } from "./language";
-import styles from "./business-select-panel.module.css";
+import styles from "./business-select.module.css";
 import {
   ensureComfortableInteractionSpace,
   focusComfortably,
@@ -399,7 +399,7 @@ export function SelectDropdown({
   return (
     <div
       ref={trigger}
-      className={`business-select ${open ? "is-open" : ""} ${className}`}
+      className={`business-select ${styles.scope} ${open ? "is-open" : ""} ${className}`}
       data-prevent-card-autosave
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}

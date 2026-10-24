@@ -200,6 +200,12 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
     throw new Error("The DatePicker CSS Module scope was not rendered.");
 
   const selectTrigger = page.locator(".business-select-trigger").first();
+  const selectRoot = selectTrigger.locator("xpath=..");
+  await expect(selectTrigger).toHaveCSS("display", "flex");
+  await expect(selectTrigger).toHaveCSS("border-radius", "8px");
+  await expect(selectTrigger).toHaveCSS("min-height", "41px");
+  await selectTrigger.focus();
+  await expect(selectTrigger).toHaveCSS("outline-style", "solid");
   await selectTrigger.click();
   const selectPanel = page.locator(
     ".business-select-panel.is-entering:visible",
@@ -212,6 +218,12 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
   );
   if (!businessSelectScopeClass)
     throw new Error("The business-select CSS Module scope was not rendered.");
+  await expect(selectRoot).toHaveClass(new RegExp(businessSelectScopeClass));
+  await expect(selectTrigger).toHaveAttribute("aria-expanded", "true");
+  const openTriggerShadow = await selectTrigger.evaluate(
+    (element) => getComputedStyle(element).boxShadow,
+  );
+  expect(openTriggerShadow).not.toBe("none");
   await selectTrigger.click();
   await expect(selectPanel).toHaveCount(0);
 
