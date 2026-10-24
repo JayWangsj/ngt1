@@ -1,0 +1,65 @@
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.cards > :global(.quick-service-device-card.is-add.add-device-action) {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.card {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.icon {
+  flex: 0 0 46px;
+}
+
+.content {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.content small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.card .removeButton {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--muted);
+}
+
+@media (hover: hover) {
+  .card .removeButton {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  .card:hover .removeButton,
+  .card:focus-within .removeButton {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

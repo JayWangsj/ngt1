@@ -31,6 +31,7 @@ import {
 } from "./customers";
 import { RecordIcon } from "./ui/record-icon";
 import { useBusinessDay } from "./business-date";
+import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
 
 type Customer = CustomerOption & { devices: { id: string }[] };
 
@@ -225,19 +226,21 @@ export function NewServiceOrder({
             </section>
             <section className="quick-service-section">
               <h2>{it.quickService.selectDevices}</h2>
-              <div className="quick-service-device-cards">
+              <div
+                className={`quick-service-device-cards ${quickServiceDeviceCardStyles.cards}`}
+              >
                 {selectedDevices.map((device) => (
                   <article
-                    className="quick-service-device-card"
+                    className={`quick-service-device-card ${quickServiceDeviceCardStyles.card}`}
                     key={device.id}
                   >
                     <span
-                      className="quick-service-picker-icon"
+                      className={`quick-service-picker-icon ${quickServiceDeviceCardStyles.icon}`}
                       aria-hidden="true"
                     >
                       <Smartphone size={22} />
                     </span>
-                    <div>
+                    <div className={quickServiceDeviceCardStyles.content}>
                       <strong>
                         {device.brand} {device.model}
                       </strong>
@@ -245,7 +248,7 @@ export function NewServiceOrder({
                     </div>
                     <button
                       type="button"
-                      className="x-icon-button"
+                      className={`x-icon-button ${quickServiceDeviceCardStyles.removeButton}`}
                       aria-label={`${it.remove} ${device.brand} ${device.model}`}
                       onClick={() =>
                         setDeviceIds((current) =>

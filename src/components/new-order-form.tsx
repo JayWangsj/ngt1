@@ -25,6 +25,7 @@ import { translateError } from "@/lib/i18n";
 import { prefersReducedMotion } from "@/lib/motion-preference";
 import { DatePicker, SimpleSelect } from "./business-select";
 import orderStepCardStyles from "./order-step-card.module.css";
+import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
 import {
   DeviceForm,
   DialogBody,
@@ -518,7 +519,9 @@ export function NewOrderWizard({
                 onChange={changeDevice}
               />
             ) : (
-              <div className="quick-service-device-cards">
+              <div
+                className={`quick-service-device-cards ${quickServiceDeviceCardStyles.cards}`}
+              >
                 <button
                   type="button"
                   className="quick-service-device-card is-add add-device-action"

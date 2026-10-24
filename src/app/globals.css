@@ -4481,51 +4481,10 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   margin: 0;
   font-size: 15px;
 }
-.quick-service-device-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 12px;
-}
-.quick-service-device-card {
-  min-height: 76px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 13px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  text-align: left;
-}
-.quick-service-device-card > .quick-service-picker-icon {
-  flex: 0 0 46px;
-}
-.quick-service-device-card > div {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-.quick-service-device-card small,
 .quick-service-device-option small {
   display: block;
   color: var(--muted);
   font-size: 11px;
-}
-.quick-service-device-card > button {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  flex: 0 0 28px;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: var(--soft);
-  color: var(--muted);
-}
-.quick-service-device-card.is-add {
-  justify-content: center;
-  cursor: pointer;
 }
 .quick-service-picker {
   display: grid;
@@ -4644,7 +4603,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   color: var(--muted);
   cursor: pointer;
 }
-.quick-service-device-card.is-add,
 .quick-service-picker-add,
 .quick-service-service-add {
   transition:
@@ -4676,15 +4634,12 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   color: var(--muted);
 }
 @media (hover: hover) {
-  .quick-service-device-card:not(.is-add) > button,
   .quick-service-picker-service .record-actions > .record-icon,
   .quick-service-remove {
     opacity: 0;
     pointer-events: none;
     transition: opacity 160ms ease;
   }
-  .quick-service-device-card:not(.is-add):hover > button,
-  .quick-service-device-card:not(.is-add):focus-within > button,
   .quick-service-picker-service:hover .record-actions > .record-icon,
   .quick-service-picker-service:focus-within .record-actions > .record-icon,
   .selected-project-summary:hover .quick-service-remove,
@@ -6415,9 +6370,6 @@ details.secondary-actions {
     border-color 150ms ease-out,
     box-shadow 150ms ease-out,
     color 150ms ease-out;
-}
-.quick-service-device-card.is-add.add-device-action {
-  grid-column: 1 / -1;
 }
 .add-device-action:hover:not(:disabled) {
   border-color: #d7aa00;

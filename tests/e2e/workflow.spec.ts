@@ -1838,6 +1838,59 @@ test("removing a default repair part persists and allows later reselection", asy
   );
 });
 
+test("quick service device cards fit a narrow grid and reveal removal on hover", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/orders/new?type=quick");
+  await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+
+  const addDevice = page.getByRole("button", {
+    name: "Dispositivo",
+    exact: true,
+  });
+  await addDevice.click();
+  const devicePicker = page.getByRole("dialog", {
+    name: "Dispositivi associati",
+  });
+  const deviceRow = devicePicker
+    .locator(".customer-device-row")
+    .filter({ hasText: "Apple iPhone 13" });
+  await deviceRow.locator('input[type="checkbox"]').check();
+  await devicePicker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+
+  const deviceGrid = page.locator(
+    ".service-mode-form-quick .quick-service-device-cards",
+  );
+  const deviceCard = deviceGrid.locator(
+    ".quick-service-device-card:not(.is-add)",
+  );
+  const removeDevice = deviceCard.getByRole("button", {
+    name: /Rimuovi Apple iPhone 13/,
+  });
+  await expect(deviceCard).toContainText("Apple iPhone 13");
+  await expect(deviceGrid).toHaveCSS("display", "grid");
+  await expect(deviceGrid).toHaveCSS("gap", "12px");
+  await expect(deviceCard).toHaveCSS("min-height", "76px");
+  await expect(deviceCard).toHaveCSS("padding", "13px 14px");
+  await expect(removeDevice).toHaveCSS("width", "28px");
+  await expect(removeDevice).toHaveCSS("border-radius", "50%");
+  const narrowDeviceLayout = await deviceGrid.evaluate((element) => ({
+    columns: getComputedStyle(element).gridTemplateColumns,
+    overflows: element.scrollWidth > element.clientWidth,
+  }));
+  expect(narrowDeviceLayout.columns.split(" ")).toHaveLength(1);
+  expect(narrowDeviceLayout.overflows).toBe(false);
+  await expect(removeDevice).toHaveCSS("opacity", "0");
+  await deviceCard.hover();
+  await expect(removeDevice).toHaveCSS("opacity", "1");
+  const addDeviceBox = await addDevice.boundingBox();
+  const deviceGridBox = await deviceGrid.boundingBox();
+  expect(Math.abs(addDeviceBox!.width - deviceGridBox!.width)).toBeLessThan(1);
+});
+
 test("manages one quick service for held service orders and retail checkout", async ({
   page,
 }) => {
