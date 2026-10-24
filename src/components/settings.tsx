@@ -43,6 +43,7 @@ import {
   type SavedModelView,
 } from "./catalog-managers";
 import settingsCardStyles from "./settings-card.module.css";
+import settingsEntryStyles from "./settings-entry.module.css";
 
 function SettingsEntry({
   href,
@@ -60,12 +61,15 @@ function SettingsEntry({
   return (
     <Link
       href={href}
-      className={`panel padded settings-card ${settingsCardStyles.card} settings-entry dashboard-action-link ${className}`.trim()}
+      className={`panel padded settings-card ${settingsCardStyles.card} settings-entry ${settingsEntryStyles.entry} ${settingsEntryStyles.dashboardLink} dashboard-action-link ${className}`.trim()}
     >
-      <span className="settings-entry-icon" aria-hidden="true">
+      <span
+        className={`settings-entry-icon ${settingsEntryStyles.icon}`}
+        aria-hidden="true"
+      >
         {icon}
       </span>
-      <span className="settings-entry-copy">
+      <span className={`settings-entry-copy ${settingsEntryStyles.copy}`}>
         <strong className="dashboard-link-label">{title}</strong>
         <small>{description}</small>
       </span>

@@ -3030,6 +3030,10 @@ test("settings opens system update as a separate page", async ({ page }) => {
     ]);
   const entry = page.locator(".system-update-entry");
   await expect(entry).toContainText("Versione corrente");
+  const entryIcon = entry.locator(".settings-entry-icon");
+  await expect(entryIcon).toHaveCSS("width", "38px");
+  await expect(entryIcon).toHaveCSS("height", "38px");
+  await expect(entry.locator(".settings-entry-copy")).toHaveCSS("gap", "5px");
   const label = entry.locator(".dashboard-link-label");
   const arrow = entry.locator("svg").last();
   await expect(label, "title underline starts collapsed").toHaveCSS(
@@ -3046,6 +3050,7 @@ test("settings opens system update as a separate page", async ({ page }) => {
   await entry.hover();
   await expect(entry).toHaveCSS("border-top-color", "rgb(231, 201, 90)");
   await expect(entry).toHaveCSS("transform", "none");
+  await expect(entryIcon.locator("svg")).toHaveCSS("transform", "none");
   await expect
     .poll(() =>
       arrow.evaluate((element) => getComputedStyle(element).transform),
