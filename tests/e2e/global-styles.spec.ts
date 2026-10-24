@@ -370,6 +370,10 @@ test("searchable business select keeps its scoped control styles", async ({
   await expect(createAction).toBeVisible();
   await expect(createAction).toHaveCSS("width", "38px");
   await expect(createAction.locator("span")).toHaveCSS("position", "absolute");
+  const clearAction = searchableSelectRoot.locator(".business-combobox-clear");
+  await expect(clearAction).toBeVisible();
+  await expect(clearAction).toHaveCSS("width", "24px");
+  await expect(clearAction).toHaveCSS("min-height", "24px");
   await expect(searchBox).toHaveCSS("display", "flex");
   await expect(searchBox).toHaveCSS("min-height", "38px");
   await expect(searchBox).toHaveCSS("border-radius", "8px");

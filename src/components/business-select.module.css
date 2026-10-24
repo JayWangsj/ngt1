@@ -96,6 +96,15 @@
   border-color: #e1e5e3;
   cursor: not-allowed;
 }
+:where(.scope) :global(.business-combobox-clear) {
+  color: #7e8884;
+}
+:where(.scope) :global(.business-combobox-clear.x-icon-button) {
+  width: 24px;
+  min-height: 24px;
+  flex: 0 0 24px;
+  border: 0;
+}
 :where(.scope) :global(.business-select-create) {
   display: inline-flex;
   max-width: 100px;

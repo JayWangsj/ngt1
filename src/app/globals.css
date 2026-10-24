@@ -7064,13 +7064,6 @@ details.secondary-actions {
   box-shadow: 0 0 0 3px rgb(235 196 39 / 12%);
   outline: none;
 }
-.business-combobox-clear {
-  width: 24px;
-  min-height: 24px;
-  flex: 0 0 24px;
-  border: 0;
-  color: #7e8884;
-}
 .editable-field .business-select-create {
   max-width: none;
 }
