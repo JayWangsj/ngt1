@@ -7606,6 +7606,18 @@ test("price editor and mobile yellow layout support both languages", async ({
     "flex-wrap",
     "wrap",
   );
+  const optionData = lcdOption.locator(".price-option-data");
+  const gridColumnCount = () =>
+    optionData.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+          .length,
+    );
+  expect(await gridColumnCount()).toBe(6);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(gridColumnCount).toBe(2);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect.poll(gridColumnCount).toBe(6);
   const setLcdDefault = lcdOption.getByRole("button", {
     name: "Imposta predefinita",
   });

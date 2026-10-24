@@ -7429,27 +7429,6 @@ details.secondary-actions {
   display: grid;
   gap: 10px;
 }
-.price-option-none {
-  grid-template-columns: 46px minmax(0, 1fr);
-  align-items: center;
-}
-.price-option-data {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-}
-.price-option-inventory-data {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.price-option-data > span {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-.price-option-data strong {
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
 .price-option-actions {
   margin-left: 0;
   align-items: center;
@@ -7654,9 +7633,6 @@ details.secondary-actions {
   }
   .price-row-actions {
     width: 36px;
-  }
-  .price-option-data {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
