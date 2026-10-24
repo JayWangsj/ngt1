@@ -18,6 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { RecordIcon } from "./ui/record-icon";
+import motionSwitchStyles from "./ui/motion-switch.module.css";
 import { EditableSelect } from "./editable-select";
 import priceOptionCardStyles from "./price-option-card.module.css";
 import {
@@ -907,7 +908,7 @@ export function ProductForm({
           <Field label={it.inventory.unlimitedStock}>
             <button
               type="button"
-              className="motion-switch"
+              className={`motion-switch ${motionSwitchStyles.switch}`}
               role="switch"
               aria-checked={unlimitedStock}
               aria-label={it.inventory.unlimitedStock}

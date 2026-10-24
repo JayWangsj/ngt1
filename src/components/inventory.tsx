@@ -42,6 +42,7 @@ import { DatePicker, SimpleSelect } from "./business-select";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
+import motionSwitchStyles from "./ui/motion-switch.module.css";
 import {
   CompatibilityAddEditor,
   type CompatibilityDeviceDraft,
@@ -1340,7 +1341,7 @@ export function InventoryWorkspace({
                       {selected && product.usage === "RETAIL" && (
                         <button
                           type="button"
-                          className="motion-switch"
+                          className={`motion-switch ${motionSwitchStyles.switch}`}
                           role="switch"
                           aria-checked={product.unlimitedStock}
                           aria-label={it.inventory.unlimitedStock}

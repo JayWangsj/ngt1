@@ -47,6 +47,7 @@ import settingsEntryStyles from "./settings-entry.module.css";
 import businessDateStyles from "./business-date-settings.module.css";
 import settingsActionStyles from "./settings-action.module.css";
 import motionSettingControlStyles from "./motion-setting-control.module.css";
+import motionSwitchStyles from "./ui/motion-switch.module.css";
 
 function SettingsEntry({
   href,
@@ -226,7 +227,7 @@ export function MotionSettings() {
           <span>{alwaysMotion ? it.motionAlways : it.motionSystem}</span>
           <button
             type="button"
-            className="motion-switch"
+            className={`motion-switch ${motionSwitchStyles.switch}`}
             role="switch"
             aria-checked={alwaysMotion}
             aria-label={it.alwaysPlayMotion}
@@ -249,7 +250,7 @@ export function MotionSettings() {
           </span>
           <button
             type="button"
-            className="motion-switch"
+            className={`motion-switch ${motionSwitchStyles.switch}`}
             role="switch"
             aria-checked={followOrderMotion}
             aria-label={it.followRepairRowMotion}

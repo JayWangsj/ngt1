@@ -3049,6 +3049,10 @@ test("settings action rows keep shared layout and responsive behavior", async ({
   await expect(updateAction).toHaveCSS("display", "flex");
   await expect(updateAction).toHaveCSS("gap", "24px");
   await expect(updateAction).toHaveCSS("padding-bottom", "0px");
+  await expect(page.locator(".update-preferences .motion-switch")).toHaveCSS(
+    "width",
+    "46px",
+  );
 
   await page.goto("/settings/data");
   const actions = page.locator(".settings-action");
@@ -3702,11 +3706,24 @@ test("settings can force interface animations when Windows reduces motion", asyn
   const motionSwitch = page.getByRole("switch", {
     name: "Riproduci sempre le animazioni",
   });
+  const motionSwitchThumb = motionSwitch.locator(":scope > span");
   await expect(motionSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(motionSwitch).toHaveCSS("width", "46px");
+  await expect(motionSwitch).toHaveCSS("height", "26px");
+  await expect(motionSwitchThumb).toHaveCSS("transition-duration", "0s");
 
   await motionSwitch.click();
   await expect(motionSwitch).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("html")).toHaveAttribute("data-motion", "always");
+  await expect(motionSwitchThumb).toHaveCSS(
+    "transform",
+    "matrix(1, 0, 0, 1, 20, 0)",
+  );
+  expect(
+    await motionSwitchThumb.evaluate(
+      (element) => getComputedStyle(element).transitionDuration,
+    ),
+  ).toContain("0.18s");
 
   await page.goto("/");
   await expect(page.getByTestId("dashboard-motion")).toHaveClass(
@@ -4102,9 +4119,12 @@ test("creates and sells a retail product with unlimited stock", async ({
   await chooseBusinessOption(page, "Categoria", "Accessori", dialog);
   await dialog.getByLabel("Costo", { exact: true }).fill("2");
   await dialog.getByLabel("Prezzo", { exact: true }).fill("5");
-  await dialog
-    .getByRole("switch", { name: "Scorta illimitata", exact: true })
-    .click();
+  const unlimitedStockSwitch = dialog.getByRole("switch", {
+    name: "Scorta illimitata",
+    exact: true,
+  });
+  await expect(unlimitedStockSwitch).toHaveCSS("width", "46px");
+  await unlimitedStockSwitch.click();
   await expect(
     dialog.getByLabel("Scorta iniziale", { exact: true }),
   ).toHaveCount(0);

@@ -29,6 +29,7 @@ import {
 } from "@/lib/update-preference";
 import settingsCardStyles from "./settings-card.module.css";
 import settingsActionStyles from "./settings-action.module.css";
+import motionSwitchStyles from "./ui/motion-switch.module.css";
 
 type GitHubAuth = {
   status: "opening" | "waiting";
@@ -755,7 +756,7 @@ export function SystemUpdate({
           </div>
           <button
             type="button"
-            className="motion-switch"
+            className={`motion-switch ${motionSwitchStyles.switch}`}
             role="switch"
             aria-checked={autoCheck}
             aria-label={it.autoCheckUpdates}
