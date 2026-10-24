@@ -2900,15 +2900,16 @@ test("reports route opens the requested monthly receipt dialog", async ({
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto("/reports?day=2026-10-03");
   await expect(page).toHaveURL(/\/\?receipts=2026-10&day=2026-10-03$/);
-  await expect(
-    page.getByRole("dialog", { name: "Incassi mensili" }),
-  ).toBeVisible();
+  const monthlyReceiptDialog = page.getByRole("dialog", {
+    name: "Incassi mensili",
+  });
+  await expect(monthlyReceiptDialog).toBeVisible();
+  await expect(monthlyReceiptDialog).toHaveCSS("width", "680px");
 
   await page.goto("/reports?month=2025-09");
   await expect(page).toHaveURL(/\/\?receipts=2025-09$/);
-  await expect(
-    page.getByRole("dialog", { name: "Incassi mensili" }),
-  ).toBeVisible();
+  await expect(monthlyReceiptDialog).toBeVisible();
+  await expect(monthlyReceiptDialog).toHaveCSS("width", "680px");
   expect(pageErrors).toEqual([]);
 });
 

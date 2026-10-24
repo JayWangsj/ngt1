@@ -6199,7 +6199,7 @@ export function FormDialog({
   subtitle?: string;
   onClose: () => void;
   restoreFocusComfortably?: boolean;
-  size?: "wide" | "compact";
+  size?: "wide" | "medium" | "compact";
   children: ReactNode;
 }) {
   const it = useMessages();

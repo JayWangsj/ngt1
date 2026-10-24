@@ -3464,9 +3464,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   align-self: center;
   flex: 0 0 auto;
 }
-.form-dialog:has(.monthly-receipt-dialog) {
-  width: min(680px, calc(100vw - 32px));
-}
 .monthly-receipt-dialog {
   display: grid;
   gap: 24px;

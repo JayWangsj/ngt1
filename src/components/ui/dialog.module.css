@@ -16,6 +16,10 @@
   width: min(920px, calc(100vw - 32px));
 }
 
+.formDialog.medium {
+  width: min(680px, calc(100vw - 32px));
+}
+
 .formDialog.compact {
   width: min(460px, calc(100vw - 32px));
 }
@@ -222,6 +226,10 @@
 
   .formDialog.wide {
     width: min(920px, calc(100vw - 32px));
+  }
+
+  .formDialog.medium {
+    width: min(680px, calc(100vw - 32px));
   }
 
   .formDialog.compact {

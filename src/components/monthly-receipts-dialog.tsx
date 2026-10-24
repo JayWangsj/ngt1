@@ -70,6 +70,7 @@ export function MonthlyReceiptsDialog({
         <FormDialog
           title={it.dashboard.monthlyReceipts}
           subtitle={it.dashboard.monthlyReceiptsDescription}
+          size="medium"
           onClose={close}
         >
           <DialogBody className="monthly-receipt-dialog">
