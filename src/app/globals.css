@@ -6715,17 +6715,6 @@ details.secondary-actions {
   width: 100%;
   min-width: 0;
 }
-.motion-setting-control {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 12px;
-}
-.motion-setting-control > span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
 .motion-switch {
   position: relative;
   width: 46px;
@@ -7254,9 +7243,6 @@ details.secondary-actions {
   color: #8f3f36;
 }
 @media (max-width: 700px) {
-  .motion-setting-control {
-    justify-content: space-between;
-  }
   .test-data-generator,
   .test-motion-heading,
   .test-motion-grid {

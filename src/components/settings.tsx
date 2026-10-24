@@ -46,6 +46,7 @@ import settingsCardStyles from "./settings-card.module.css";
 import settingsEntryStyles from "./settings-entry.module.css";
 import businessDateStyles from "./business-date-settings.module.css";
 import settingsActionStyles from "./settings-action.module.css";
+import motionSettingControlStyles from "./motion-setting-control.module.css";
 
 function SettingsEntry({
   href,
@@ -219,7 +220,9 @@ export function MotionSettings() {
           <strong>{it.alwaysPlayMotion}</strong>
           <p>{it.motionPreferenceHelp}</p>
         </div>
-        <div className="motion-setting-control">
+        <div
+          className={`motion-setting-control ${motionSettingControlStyles.control}`}
+        >
           <span>{alwaysMotion ? it.motionAlways : it.motionSystem}</span>
           <button
             type="button"
@@ -238,7 +241,9 @@ export function MotionSettings() {
           <strong>{it.followRepairRowMotion}</strong>
           <p>{it.followRepairRowMotionHelp}</p>
         </div>
-        <div className="motion-setting-control">
+        <div
+          className={`motion-setting-control ${motionSettingControlStyles.control}`}
+        >
           <span>
             {followOrderMotion ? it.motionFollowOn : it.motionFollowOff}
           </span>

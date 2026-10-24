@@ -3648,6 +3648,21 @@ test("settings can force interface animations when Windows reduces motion", asyn
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/settings/interface-motion");
+  const motionControls = page.locator(".motion-setting-control");
+  await expect(motionControls).toHaveCount(2);
+  const motionControl = motionControls.first();
+  await expect(motionControl).toHaveCSS("display", "flex");
+  await expect(motionControl).toHaveCSS("align-items", "center");
+  await expect(motionControl).toHaveCSS("gap", "12px");
+  await expect(motionControl.locator(":scope > span")).toHaveCSS(
+    "font-size",
+    "12px",
+  );
+  const desktopViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(motionControl).toHaveCSS("justify-content", "space-between");
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
+
   const motionSwitch = page.getByRole("switch", {
     name: "Riproduci sempre le animazioni",
   });
