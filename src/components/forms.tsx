@@ -6199,7 +6199,7 @@ export function FormDialog({
   subtitle?: string;
   onClose: () => void;
   restoreFocusComfortably?: boolean;
-  size?: "wide";
+  size?: "wide" | "compact";
   children: ReactNode;
 }) {
   const it = useMessages();
@@ -6224,7 +6224,7 @@ export function FormDialog({
   return createPortal(
     <dialog
       ref={dialog}
-      className={`${dialogStyles.formDialog}${size === "wide" ? ` ${dialogStyles.wide}` : ""} form-dialog`}
+      className={`${dialogStyles.formDialog}${size ? ` ${dialogStyles[size]}` : ""} form-dialog`}
       data-prevent-card-autosave
       aria-labelledby={titleId}
       onKeyDownCapture={(event) => {

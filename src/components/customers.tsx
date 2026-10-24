@@ -92,6 +92,7 @@ export function DeleteRecordDialog({
           ? it.deleteCustomerQuestion
           : it.deleteDeviceQuestion
       }
+      size="compact"
       onClose={onClose}
     >
       <DialogBody className="confirm-delete-dialog">

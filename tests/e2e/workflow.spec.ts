@@ -5524,6 +5524,7 @@ test("sales history uses a monthly filter", async ({ page }) => {
     name: "Elimina vendita",
   });
   await expect(deleteDialog).toBeVisible();
+  await expect(deleteDialog).toHaveCSS("width", "460px");
   await expect(deleteDialog).toContainText(
     "Eliminare definitivamente questa vendita e ripristinare le scorte?",
   );
@@ -8963,8 +8964,12 @@ test("customer page adds, edits and deletes a customer", async ({ page }) => {
   await updatedSummary
     .getByRole("button", { name: "Elimina cliente", exact: true })
     .click();
-  await page
-    .getByRole("dialog", { name: "Eliminare il cliente?", exact: true })
+  const deleteCustomerDialog = page.getByRole("dialog", {
+    name: "Eliminare il cliente?",
+    exact: true,
+  });
+  await expect(deleteCustomerDialog).toHaveCSS("width", "460px");
+  await deleteCustomerDialog
     .getByRole("button", { name: "Elimina cliente", exact: true })
     .click();
   await expect(page).toHaveURL(/customers$/);
@@ -9000,6 +9005,15 @@ test("quick service delete confirmation uses the shared dialog layout", async ({
   const body = dialog.locator(":scope > .dialog-body.confirm-delete-dialog");
   const footer = dialog.locator(":scope > .dialog-footer");
   await expect(body).toBeVisible();
+  const left = await dialog.evaluate(
+    (element) => element.getBoundingClientRect().left,
+  );
+  const right = await dialog.evaluate(
+    (element) => element.getBoundingClientRect().right,
+  );
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  expect(left).toBeGreaterThanOrEqual(16);
+  expect(viewportWidth - right).toBeGreaterThanOrEqual(16);
   await expect(footer).toBeInViewport();
   await expect(footer).toHaveCSS("flex-direction", "column");
   await expect(

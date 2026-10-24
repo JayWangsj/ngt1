@@ -9121,9 +9121,6 @@ summary.record-icon::-webkit-details-marker {
 .customer-detail-dialog .table-panel {
   border-radius: 9px;
 }
-.form-dialog:has(.confirm-delete-dialog) {
-  width: min(460px, calc(100vw - 32px));
-}
 .form-dialog:has(.confirm-update-dialog) {
   width: min(520px, calc(100vw - 32px));
 }
@@ -9170,7 +9167,6 @@ summary.record-icon::-webkit-details-marker {
   flex: 1;
 }
 .retail-period-picker {
-  width: 180px;
   min-height: 36px;
   margin: 0;
   cursor: pointer;
@@ -9181,6 +9177,7 @@ summary.record-icon::-webkit-details-marker {
   z-index: 1;
   top: 24px;
   right: 68px;
+  width: 180px;
 }
 @media (max-width: 600px) {
   .form-dialog:has(.retail-history-dialog) .retail-period-picker,

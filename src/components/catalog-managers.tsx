@@ -276,6 +276,7 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
       {deleting && (
         <FormDialog
           title={it.quickService.delete}
+          size="compact"
           onClose={() => {
             if (!pending) {
               setError("");

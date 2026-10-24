@@ -140,6 +140,7 @@ export function RetailSalesHistory({
       {saleToDelete && (
         <FormDialog
           title={it.retail.deleteSale}
+          size="compact"
           onClose={() => {
             if (!pending) {
               setError("");
