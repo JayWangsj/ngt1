@@ -3007,6 +3007,40 @@ test("settings cards use one scoped layout", async ({ page }) => {
   );
 });
 
+test("settings detail pages use a scoped shell layout", async ({ page }) => {
+  await page.goto("/settings/language");
+  const shell = page.locator(".settings-detail-page");
+  await expect(shell).toHaveCSS("display", "grid");
+  await expect(shell).toHaveCSS("gap", "14px");
+  await expect(shell.locator(":scope > .back-link")).toHaveCSS(
+    "justify-self",
+    "start",
+  );
+  const header = shell.locator(":scope > .page-header");
+  await expect(header).toHaveCSS("align-items", "flex-start");
+  await expect(header).toHaveCSS("margin-bottom", "2px");
+  await expect(shell.locator(":scope > .settings-card")).toHaveCSS(
+    "padding",
+    "20px",
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await shell.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(false);
+
+  await page.goto("/settings/system-update");
+  const updatePanels = page.locator(".system-update-page > .panel");
+  await expect(updatePanels).toHaveCount(2);
+  expect(
+    await updatePanels.evaluateAll((elements) =>
+      elements.map((element) => getComputedStyle(element).padding),
+    ),
+  ).toEqual(["20px", "20px"]);
+});
+
 test("settings action rows keep shared layout and responsive behavior", async ({
   page,
 }) => {

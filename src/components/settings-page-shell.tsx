@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { BackButton, PageHeader } from "./common";
+import styles from "./settings-page-shell.module.css";
 
 export function SettingsPageShell({
   title,
@@ -13,7 +14,7 @@ export function SettingsPageShell({
   children: ReactNode;
 }) {
   return (
-    <div className="settings-detail-page">
+    <div className={`settings-detail-page ${styles.page}`}>
       <BackButton href="/settings" label={backLabel} />
       <PageHeader title={title} description={description} />
       {children}

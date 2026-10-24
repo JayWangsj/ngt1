@@ -6711,26 +6711,6 @@ details.secondary-actions {
   display: grid;
   gap: 22px;
 }
-.settings-detail-page {
-  display: grid;
-  width: 100%;
-  gap: 14px;
-}
-.settings-detail-page > .back-link {
-  justify-self: start;
-}
-.settings-detail-page > :not(.back-link) {
-  width: min(100%, 920px);
-  margin-inline: auto;
-}
-.settings-detail-page > .page-header {
-  align-items: flex-start;
-  margin-bottom: 2px;
-}
-.settings-detail-page > .settings-card,
-.settings-detail-page .system-update-page > .panel {
-  padding: 20px;
-}
 .settings-inline-manager {
   width: 100%;
   min-width: 0;

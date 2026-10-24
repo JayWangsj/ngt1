@@ -1,0 +1,24 @@
+.page {
+  display: grid;
+  width: 100%;
+  gap: 14px;
+}
+
+.page > :global(.back-link) {
+  justify-self: start;
+}
+
+.page > *:not(:global(.back-link)) {
+  width: min(100%, 920px);
+  margin-inline: auto;
+}
+
+.page > :global(.page-header) {
+  align-items: flex-start;
+  margin-bottom: 2px;
+}
+
+.page > :global(.settings-card),
+.page :global(.system-update-page) > :global(.panel) {
+  padding: 20px;
+}
