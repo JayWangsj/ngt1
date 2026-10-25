@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { DialogBody, FormDialog } from "./forms";
+import customerDetailStyles from "./customer-detail-dialog.module.css";
 
 export function CustomerDetailDialog({
   title,
@@ -24,7 +25,11 @@ export function CustomerDetailDialog({
         router.back();
       }}
     >
-      <DialogBody className="customer-detail-dialog">{children}</DialogBody>
+      <DialogBody
+        className={`${customerDetailStyles.detailBody} customer-detail-dialog`}
+      >
+        {children}
+      </DialogBody>
     </FormDialog>
   );
 }

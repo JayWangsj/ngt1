@@ -8780,6 +8780,18 @@ test("customer detail adds a device from a dialog below existing devices", async
     .first()
     .click();
   const detailDialog = page.getByRole("dialog", { name: "Dettagli cliente" });
+  const detailBody = detailDialog.locator(
+    ":scope > .dialog-body.customer-detail-dialog",
+  );
+  await expect(detailBody).toHaveCSS("display", "grid");
+  await expect(detailDialog.locator(".customer-summary")).toHaveCSS(
+    "box-shadow",
+    "none",
+  );
+  await expect(detailDialog.locator(".customer-device-list")).toHaveCSS(
+    "border-radius",
+    "9px",
+  );
   const deviceRow = detailDialog.locator(".customer-device-row").first();
   await expect(deviceRow).toBeVisible();
   const addDevice = detailDialog.getByRole("button", {

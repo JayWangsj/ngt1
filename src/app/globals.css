@@ -9097,20 +9097,6 @@ summary.record-icon::-webkit-details-marker {
   max-height: calc(100dvh - 150px);
   overflow-y: auto;
 }
-.customer-detail-dialog {
-  display: grid;
-}
-.customer-detail-dialog .customer-summary {
-  padding: 0 0 18px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  box-shadow: none;
-}
-.customer-detail-dialog .customer-device-list,
-.customer-detail-dialog .table-panel {
-  border-radius: 9px;
-}
 .form-dialog:has(.confirm-update-dialog) {
   width: min(520px, calc(100vw - 32px));
 }

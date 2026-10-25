@@ -1,0 +1,16 @@
+.detailBody {
+  display: grid;
+}
+
+.detailBody :global(.customer-summary) {
+  padding: 0 0 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.detailBody :global(.customer-device-list),
+.detailBody :global(.table-panel) {
+  border-radius: 9px;
+}
