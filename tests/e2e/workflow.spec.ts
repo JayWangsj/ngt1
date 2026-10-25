@@ -4398,6 +4398,9 @@ test("filters inventory by compatible device and exposes compatibility", async (
     name: "Dispositivi compatibili",
     exact: true,
   });
+  await expect(deviceFilterTrigger).toHaveCSS("display", "grid");
+  await expect(deviceFilterTrigger).toHaveCSS("height", "40px");
+  await expect(deviceFilterTrigger).toHaveCSS("border-radius", "8px");
   await expect(deviceFilterTrigger).toHaveCSS("border-top-width", "0px");
   await expect(deviceFilterTrigger).toHaveCSS(
     "background-color",
@@ -4419,6 +4422,10 @@ test("filters inventory by compatible device and exposes compatibility", async (
   let popover = page.getByRole("dialog", {
     name: "Dispositivi compatibili",
   });
+  await expect(popover).toHaveCSS("position", "fixed");
+  await expect(popover).toHaveCSS("width", "290px");
+  await expect(popover).toHaveCSS("padding", "16px");
+  await expect(popover).toHaveCSS("border-radius", "13px");
   await expect(popover.locator(".business-select-trigger").first()).toHaveCSS(
     "min-height",
     "39px",

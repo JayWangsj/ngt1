@@ -689,10 +689,13 @@ function DeviceCompatibilityFilter({
   }, [open, draft.brand, draft.category, draft.model]);
 
   return (
-    <div className="inventory-device-filter" ref={root}>
+    <div
+      className={`${inventoryStyles.deviceFilter} inventory-device-filter`}
+      ref={root}
+    >
       <button
         type="button"
-        className={`inventory-device-filter-trigger${active ? " is-active" : ""}`}
+        className={`${inventoryStyles.deviceFilterTrigger} inventory-device-filter-trigger${active ? " is-active" : ""}`}
         aria-label={it.inventory.compatibleDevices}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -719,7 +722,9 @@ function DeviceCompatibilityFilter({
               if (event.key === "Escape") setOpen(false);
             }}
           >
-            <div className="inventory-device-popover-heading">
+            <div
+              className={`${inventoryStyles.devicePopoverHeading} inventory-device-popover-heading`}
+            >
               <strong>{it.inventory.compatibleDevices}</strong>
               <button
                 type="button"
@@ -805,7 +810,9 @@ function DeviceCompatibilityFilter({
                 />
               </>
             )}
-            <div className="inventory-device-popover-actions">
+            <div
+              className={`${inventoryStyles.devicePopoverActions} inventory-device-popover-actions`}
+            >
               <Button
                 type="button"
                 variant="ghost"

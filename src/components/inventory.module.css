@@ -71,6 +71,109 @@
   min-height: 39px;
 }
 
+.deviceFilter {
+  position: relative;
+  min-width: 0;
+}
+
+.deviceFilterTrigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.deviceFilterTrigger:hover {
+  background: #fff8d9;
+  color: var(--ink);
+}
+
+.deviceFilterTrigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deviceFilterTrigger:global(.is-active) {
+  background: #fff9e8;
+  color: #765b00;
+  box-shadow: inset 0 0 0 1px rgb(217 169 0 / 32%);
+}
+
+.devicePopover {
+  position: fixed;
+  z-index: 120;
+  display: grid;
+  width: 290px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--shadow-4);
+}
+
+.devicePopover::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: calc(50% - 6px);
+  width: 12px;
+  height: 12px;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  transform: rotate(45deg);
+}
+
+.devicePopoverHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.devicePopoverHeading strong {
+  font-size: 15px;
+}
+
+.devicePopoverHeading :global(.icon-button) {
+  width: 30px;
+  min-height: 30px;
+}
+
+.devicePopover > label {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.devicePopoverActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.devicePopoverActions :global(.button) {
+  justify-content: center;
+  min-height: 39px;
+}
+
 .compatibilityDialog :global(.compatibility-overview),
 .compatibilityDialog :global(.compatibility-device-list) {
   display: grid;
