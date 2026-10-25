@@ -49,6 +49,7 @@ import batchControlsStyles from "./ui/batch-controls.module.css";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import emptyStateStyles from "./ui/empty-state.module.css";
+import recordIconStyles from "./ui/record-icon.module.css";
 import {
   CompatibilityAddEditor,
   type CompatibilityDeviceDraft,
@@ -303,7 +304,7 @@ function ProductCompatibilityDialog({
                   </div>
                   <button
                     type="button"
-                    className="record-icon record-icon-delete"
+                    className={`${recordIconStyles.icon} record-icon record-icon-delete`}
                     aria-label={`${it.remove} ${device.brand} ${device.model}`}
                     onClick={() =>
                       setValue((current) =>

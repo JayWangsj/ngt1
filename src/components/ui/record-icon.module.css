@@ -1,0 +1,51 @@
+.icon:global(.record-icon),
+.icon:global(.icon-button):global(.record-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--record-action-size, 40px);
+  min-width: var(--record-action-size, 40px);
+  height: var(--record-action-size, 40px);
+  padding: 0;
+  flex-shrink: 0;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 7px;
+  list-style: none;
+}
+
+.icon:global(.record-icon-compact) {
+  --record-action-size: 28px;
+}
+
+.icon:global(.record-icon-edit) {
+  color: #806000;
+}
+
+.icon:global(.record-icon-delete) {
+  color: #a64642;
+}
+
+.icon:global(.record-icon):hover:not(:disabled),
+.icon:global(.record-icon):focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: #fff7d6;
+}
+
+.icon:global(.record-icon):focus-visible {
+  outline: 2px solid #806000;
+  outline-offset: 3px;
+}
+
+.icon:global(.record-icon-edit):hover:not(:disabled),
+.icon:global(.record-icon-edit):focus-visible:not(:disabled) {
+  color: #6d5510;
+  background: #ffedaa;
+}
+
+.icon:global(.record-icon-delete):hover:not(:disabled),
+.icon:global(.record-icon-delete):focus-visible:not(:disabled) {
+  color: #913737;
+  border-color: transparent;
+  background: #fbe9e8;
+}

@@ -5932,6 +5932,12 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await historyRow.hover();
   await expect(deleteAction).toHaveCSS("opacity", "1");
   await expect(deleteAction).toHaveCSS("pointer-events", "auto");
+  await deleteAction.hover();
+  await expect(deleteAction).toHaveCSS(
+    "background-color",
+    "rgb(251, 233, 232)",
+  );
+  await expect(deleteAction).toHaveCSS("color", "rgb(145, 55, 55)");
   const saleNumber = historyRow.locator(".sale-number-button");
   const saleNumberLabel = saleNumber.locator(":scope > span");
   await expect(saleNumber).toHaveCSS("color", "rgb(113, 83, 0)");
@@ -10138,6 +10144,18 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await expect(
     actions.getByRole("button", { name: "Modifica preventivo" }),
   ).toHaveCSS("opacity", "1");
+  const editAction = actions.getByRole("button", {
+    name: "Modifica preventivo",
+  });
+  await expect(editAction).toHaveCSS("width", "36px");
+  await editAction.hover();
+  await expect(editAction).toHaveCSS("background-color", "rgb(255, 237, 170)");
+  await expect(editAction).toHaveCSS("color", "rgb(109, 85, 16)");
+  await editAction.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(editAction).toHaveCSS("outline-color", "rgb(128, 96, 0)");
+  await expect(editAction).toHaveCSS("outline-offset", "3px");
   const hoveredProjectPosition = await row
     .locator("button.inline-rule-project")
     .boundingBox();

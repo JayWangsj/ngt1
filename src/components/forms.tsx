@@ -18,6 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { RecordIcon } from "./ui/record-icon";
+import recordIconStyles from "./ui/record-icon.module.css";
 import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import { EditableSelect } from "./editable-select";
@@ -598,7 +599,7 @@ export function ProductCompatibilityFields({
             </div>
             <button
               type="button"
-              className="record-icon record-icon-delete"
+              className={`${recordIconStyles.icon} record-icon record-icon-delete`}
               aria-label={`${it.remove} ${device.brand} ${device.model}`}
               onClick={() =>
                 onChange(
@@ -3128,7 +3129,7 @@ export function NewOrderForm({
               {managingFaults && (
                 <button
                   type="button"
-                  className="record-icon record-icon-delete record-icon-compact"
+                  className={`${recordIconStyles.icon} record-icon record-icon-delete record-icon-compact`}
                   aria-label={it.deleteFault + " " + f.label}
                   onClick={async () => {
                     try {

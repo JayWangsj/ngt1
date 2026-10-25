@@ -1,6 +1,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "./button";
 import type { ComponentProps } from "react";
+import styles from "./record-icon.module.css";
 export function RecordIcon({
   kind,
   label,
@@ -16,7 +17,7 @@ export function RecordIcon({
       type="button"
       variant="ghost"
       {...props}
-      className={`record-icon record-icon-${kind} ${className}`.trim()}
+      className={`${styles.icon} record-icon record-icon-${kind} ${className}`.trim()}
       aria-label={label}
       title={label}
     >

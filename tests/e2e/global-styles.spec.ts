@@ -455,7 +455,7 @@ test("shared actions keep visible focus, stable hover, and clear disabled feedba
   await expect(disabledButton).toHaveCSS("transform", "none");
 });
 
-test("dialog and record actions keep clear spacing and hover feedback", async ({
+test("dialog form spacing and cancel actions keep clear hover feedback", async ({
   page,
 }) => {
   await loadCompiledAppStyles(page);
@@ -481,18 +481,13 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
       </div>
     `;
     document.body.append(fixture);
-    const embeddedActions = document.createElement("div");
-    embeddedActions.className = "standalone-actions";
-    embeddedActions.innerHTML = `
-      <button class="button button-cancel">Standalone cancel</button>
-      <button class="button button-ghost record-icon record-icon-edit" aria-label="Edit">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20h4l11-11-4-4L4 16v4Z" /></svg>
-      </button>
-      <button class="button button-ghost record-icon record-icon-delete" aria-label="Delete">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" /></svg>
-      </button>
-    `;
-    document.body.append(embeddedActions);
+    const standaloneActions = document.createElement("div");
+    standaloneActions.className = "standalone-actions";
+    standaloneActions.style.cssText =
+      "position: fixed; left: 400px; top: 24px; z-index: 1000";
+    standaloneActions.innerHTML =
+      '<button class="button button-cancel">Standalone cancel</button>';
+    document.body.append(standaloneActions);
   });
 
   const close = page.getByRole("button", { name: "Close" });
@@ -595,16 +590,6 @@ test("dialog and record actions keep clear spacing and hover feedback", async ({
   expect(
     bodyBox!.x + bodyBox!.width - fieldBox!.x - fieldBox!.width,
   ).toBeGreaterThanOrEqual(4);
-
-  const edit = page.getByRole("button", { name: "Edit" });
-  await expect(edit).toBeVisible();
-  await edit.hover();
-  await expect(edit).toHaveCSS("background-color", "rgb(255, 237, 170)");
-
-  const remove = page.getByRole("button", { name: "Delete" });
-  await expect(remove).toBeVisible();
-  await remove.hover();
-  await expect(remove).toHaveCSS("background-color", "rgb(251, 233, 232)");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(optionFooter).toHaveCSS("flex-direction", "column");

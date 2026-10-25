@@ -7580,53 +7580,13 @@ details summary {
   color: #ab4444;
   border-color: #d58a87;
 }
-/* Compact, accessible record actions: targets stay still on hover. */
-.record-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--record-action-size, 40px);
-  min-width: var(--record-action-size, 40px);
-  height: var(--record-action-size, 40px);
-  padding: 0;
-  flex-shrink: 0;
-  border-color: transparent;
-  background: transparent;
-  border-radius: 7px;
-  list-style: none;
-}
 .catalog-manager-row,
 .product-compatibility-row,
 .order-product-line {
   --record-action-size: 36px;
 }
-.record-icon-compact {
-  --record-action-size: 28px;
-}
-.record-icon-edit {
-  color: #806000;
-}
-.record-icon-delete {
-  color: #a64642;
-}
 summary.record-icon::-webkit-details-marker {
   display: none;
-}
-.record-icon:hover,
-.record-icon:focus-visible {
-  border-color: transparent;
-  background: #fff7d6;
-}
-.record-icon.record-icon-edit:hover:not(:disabled),
-.record-icon.record-icon-edit:focus-visible:not(:disabled) {
-  color: #6d5510;
-  background: #ffedaa;
-}
-.record-icon.record-icon-delete:hover:not(:disabled),
-.record-icon.record-icon-delete:focus-visible:not(:disabled) {
-  color: #913737;
-  border-color: transparent;
-  background: #fbe9e8;
 }
 .x-icon-button,
 .quick-service-remove,
@@ -7674,7 +7634,6 @@ summary.record-icon::-webkit-details-marker {
 .retail-clear.button:active:not(:disabled) {
   background: #fbdedb;
 }
-.record-icon:focus-visible,
 .x-icon-button:focus-visible,
 .quick-service-remove:focus-visible,
 .retail-remove:focus-visible,
