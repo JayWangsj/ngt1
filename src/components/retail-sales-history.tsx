@@ -10,6 +10,7 @@ import { RecordIcon } from "./ui/record-icon";
 import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { Button } from "./ui/button";
 import retailSalesHistoryStyles from "./retail-sales-history.module.css";
+import monthPeriodPickerStyles from "./month-period-picker.module.css";
 
 export type SaleHistoryRow = {
   id: string;
@@ -69,7 +70,7 @@ export function RetailSalesHistory({
   return (
     <DialogBody className="retail-history-dialog">
       <DatePicker
-        className="retail-period-picker"
+        className={`${monthPeriodPickerStyles.monthPeriodPicker} retail-period-picker`}
         aria-label={it.month}
         name="period"
         type="month"

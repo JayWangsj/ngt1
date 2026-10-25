@@ -3879,6 +3879,26 @@ test("inventory movement history uses the shared dialog body", async ({
   await expect(
     dialog.locator(":scope > .dialog-body.inventory-movements-dialog"),
   ).toBeVisible();
+  const monthPicker = dialog.locator(".retail-period-picker");
+  await expect(monthPicker).toHaveCSS("position", "absolute");
+  await expect(monthPicker).toHaveCSS("width", "180px");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(monthPicker).toHaveCSS("position", "relative");
+  const [dialogBox, monthPickerBox] = await Promise.all([
+    dialog.boundingBox(),
+    monthPicker.boundingBox(),
+  ]);
+  expect(monthPickerBox!.x).toBeGreaterThanOrEqual(dialogBox!.x);
+  expect(monthPickerBox!.x + monthPickerBox!.width).toBeLessThanOrEqual(
+    dialogBox!.x + dialogBox!.width,
+  );
+  const firstMovementBox = await dialog
+    .locator(".movement-row")
+    .first()
+    .boundingBox();
+  expect(monthPickerBox!.y + monthPickerBox!.height).toBeLessThanOrEqual(
+    firstMovementBox!.y,
+  );
   await dialog.getByRole("button", { name: "Chiudi" }).click();
   await expect(dialog).toHaveCount(0);
 });
@@ -5525,6 +5545,9 @@ test("sales history uses a monthly filter", async ({ page }) => {
   const dialogBox = await dialog.boundingBox();
   expect(dialogBox?.width).toBe(880);
   expect(dialogBox?.height).toBe(680);
+  const periodPicker = dialog.locator(".retail-period-picker");
+  await expect(periodPicker).toHaveCSS("position", "absolute");
+  await expect(periodPicker).toHaveCSS("width", "180px");
   const period = dialog.getByLabel("Mese", { exact: true });
   await expect(period).toHaveAttribute("type", "month");
   await expect(period).toHaveCSS("cursor", "pointer");

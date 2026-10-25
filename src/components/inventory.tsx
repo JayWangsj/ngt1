@@ -39,6 +39,7 @@ import {
   type ProductCompatibilityDraft,
 } from "./forms";
 import { DatePicker, SimpleSelect } from "./business-select";
+import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
@@ -473,7 +474,7 @@ export function InventoryHistoryCard({
         >
           <DialogBody className="inventory-movements-dialog">
             <DatePicker
-              className="retail-period-picker"
+              className={`${monthPeriodPickerStyles.monthPeriodPicker} retail-period-picker`}
               aria-label={it.month}
               name="period"
               type="month"

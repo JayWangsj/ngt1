@@ -9128,27 +9128,6 @@ summary.record-icon::-webkit-details-marker {
   color: #c62828;
   background: #ffebee;
 }
-.retail-period-picker {
-  min-height: 36px;
-  margin: 0;
-  cursor: pointer;
-}
-.form-dialog:has(.retail-history-dialog) .retail-period-picker,
-.form-dialog:has(.inventory-movements-dialog) .retail-period-picker {
-  position: absolute;
-  z-index: 1;
-  top: 24px;
-  right: 68px;
-  width: 180px;
-}
-@media (max-width: 600px) {
-  .form-dialog:has(.retail-history-dialog) .retail-period-picker,
-  .form-dialog:has(.inventory-movements-dialog) .retail-period-picker {
-    position: static;
-    width: 100%;
-    margin-bottom: 14px;
-  }
-}
 .order-product-form.has-selection {
   grid-template-columns: minmax(180px, 1fr) 136px auto;
 }
