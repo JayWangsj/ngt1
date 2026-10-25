@@ -7059,12 +7059,19 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   await page.goto("/settings/device-models");
   const modelManager = page.locator(".model-manager");
   await expect(modelManager).toBeVisible();
+  await expect(modelManager).toHaveCSS("display", "grid");
+  await expect(modelManager).toHaveCSS("gap", "12px");
   const firstGroup = modelManager.locator("section").first();
+  await expect(firstGroup).toHaveCSS("display", "grid");
+  await expect(firstGroup).toHaveCSS("gap", "8px");
   const firstHeading = firstGroup.locator(".model-group-heading");
+  await expect(firstHeading).toHaveCSS("padding", "10px 12px");
+  await expect(firstHeading).toHaveCSS("border-radius", "10px");
   await expect(firstHeading).toHaveAttribute("aria-expanded", "true");
   await expect(firstHeading.locator("small")).toHaveCount(0);
   await firstHeading.click();
   await expect(firstHeading).toHaveAttribute("aria-expanded", "false");
+  await expect(firstHeading.locator("svg")).not.toHaveCSS("transform", "none");
   await expect(firstGroup.locator(".model-group-items")).toHaveCount(0);
   await firstHeading.click();
 
@@ -7079,6 +7086,20 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   }
   expect(editableGroup).not.toBeNull();
   const modelButtons = editableGroup!.locator(".model-name-button");
+  await expect(editableGroup!.locator(".model-group-items")).toHaveCSS(
+    "flex-wrap",
+    "wrap",
+  );
+  await expect(modelButtons.first()).toHaveCSS("min-height", "38px");
+  await expect(modelButtons.first()).toHaveCSS("border-radius", "999px");
+  const modelDesktopViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await editableGroup!.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(1);
+  await page.setViewportSize(modelDesktopViewport);
   const originalModel = (await modelButtons.nth(0).textContent())!.trim();
   const duplicateModel = (await modelButtons.nth(1).textContent())!.trim();
   await modelButtons.nth(0).click();

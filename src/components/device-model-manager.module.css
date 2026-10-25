@@ -1,0 +1,72 @@
+.manager {
+  display: grid;
+  gap: 12px;
+}
+
+.manager > section {
+  display: grid;
+  gap: 8px;
+}
+
+.manager :global(.model-group-heading) {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf7;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.manager :global(.model-group-heading span) {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.manager :global(.model-group-heading small) {
+  color: var(--muted);
+}
+
+.manager :global(.model-group-heading svg) {
+  transition: transform var(--motion-base) var(--ease-ui);
+}
+
+.manager :global(.model-group-heading[aria-expanded="false"] svg) {
+  transform: rotate(-90deg);
+}
+
+.manager :global(.model-group-items) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 4px 6px;
+}
+
+.manager :global(.model-name-button),
+.manager :global(.model-inline-name) {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.manager :global(.model-name-button) {
+  cursor: pointer;
+}
+
+.manager :global(.model-inline-name) {
+  width: auto;
+  min-width: 8ch;
+  field-sizing: content;
+  border-color: #e4b600;
+  outline: 2px solid #f8e49a;
+  outline-offset: 1px;
+}

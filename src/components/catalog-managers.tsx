@@ -23,6 +23,7 @@ import { RecordIcon } from "./ui/record-icon";
 import settingsInlineManagerStyles from "./settings-inline-manager.module.css";
 import dialogStyles from "./ui/dialog.module.css";
 import catalogManagerListStyles from "./catalog-manager-list.module.css";
+import deviceModelManagerStyles from "./device-model-manager.module.css";
 
 export type QuickServiceView = {
   id: string;
@@ -417,7 +418,7 @@ export function DeviceModelManager({ items }: { items: SavedModelView[] }) {
 
   return (
     <div
-      className={`model-manager settings-inline-manager ${settingsInlineManagerStyles.manager}`}
+      className={`model-manager settings-inline-manager ${settingsInlineManagerStyles.manager} ${deviceModelManagerStyles.manager}`}
     >
       {groups.map((group) => (
         <section key={group.key}>
