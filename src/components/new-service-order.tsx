@@ -367,7 +367,7 @@ export function NewServiceOrder({
                     {!editingServicePrices[service.id] && (
                       <button
                         type="button"
-                        className="quick-service-remove"
+                        className={`quick-service-remove ${quickServiceActionStyles.remove}`}
                         aria-label={`${it.remove} ${service.name}`}
                         onClick={() =>
                           setSelectedServices((current) => {

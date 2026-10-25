@@ -2081,6 +2081,23 @@ test("quick service device and service selectors retain the large dialog size", 
   await expect(serviceCards.locator(".selected-project-summary")).toHaveCount(
     1,
   );
+  const selectedService = serviceCards.locator(".selected-project-summary");
+  const removeService = selectedService.locator(".quick-service-remove");
+  await expect(removeService).toHaveCSS("width", "28px");
+  await expect(removeService).toHaveCSS("height", "28px");
+  await expect(removeService).toHaveCSS("border-radius", "7px");
+  await expect(removeService).toHaveCSS("opacity", "0");
+  await selectedService.hover();
+  await expect(removeService).toHaveCSS("opacity", "1");
+  await removeService.hover();
+  await expect(removeService).toHaveCSS(
+    "background-color",
+    "rgb(255, 240, 238)",
+  );
+  await selectedService.locator(".summary-price-button").focus();
+  await page.keyboard.press("Tab");
+  await expect(removeService).toBeFocused();
+  await expect(removeService).toHaveCSS("outline-style", "solid");
 });
 
 test("manages one quick service for held service orders and retail checkout", async ({

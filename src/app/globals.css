@@ -4161,36 +4161,16 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   padding-left: 20px;
   border-left: 1px solid var(--line);
 }
-.quick-service-remove {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--soft);
-  color: var(--muted);
-}
 @media (hover: hover) {
-  .quick-service-picker-service .record-actions > .record-icon,
-  .quick-service-remove {
+  .quick-service-picker-service .record-actions > .record-icon {
     opacity: 0;
     pointer-events: none;
     transition: opacity 160ms ease;
   }
   .quick-service-picker-service:hover .record-actions > .record-icon,
-  .quick-service-picker-service:focus-within .record-actions > .record-icon,
-  .selected-project-summary:hover .quick-service-remove,
-  .selected-project-summary:focus-within .quick-service-remove,
-  .selected-part-summary:hover .quick-service-remove,
-  .selected-part-summary:focus-within .quick-service-remove {
+  .quick-service-picker-service:focus-within .record-actions > .record-icon {
     opacity: 1;
     pointer-events: auto;
-  }
-  .items-editor.is-remove-suppressed .quick-service-remove {
-    opacity: 0;
-    pointer-events: none;
   }
 }
 .catalog-manager-actions {
@@ -6841,7 +6821,6 @@ summary.record-icon::-webkit-details-marker {
   display: none;
 }
 .x-icon-button,
-.quick-service-remove,
 .retail-remove {
   border-color: transparent;
   background: transparent;
@@ -6849,8 +6828,6 @@ summary.record-icon::-webkit-details-marker {
 }
 .x-icon-button:hover:not(:disabled),
 .x-icon-button:focus-visible,
-.quick-service-remove:hover:not(:disabled),
-.quick-service-remove:focus-visible,
 .retail-remove:hover:not(:disabled),
 .retail-remove:focus-visible {
   border-color: transparent;
@@ -6865,7 +6842,6 @@ summary.record-icon::-webkit-details-marker {
   background: #fbdedb;
 }
 .x-icon-button:hover:not(:disabled),
-.quick-service-remove:hover:not(:disabled),
 .retail-remove:hover:not(:disabled),
 .update-notification button:hover:not(:disabled) {
   border-color: transparent;
@@ -6887,7 +6863,6 @@ summary.record-icon::-webkit-details-marker {
   background: #fbdedb;
 }
 .x-icon-button:focus-visible,
-.quick-service-remove:focus-visible,
 .retail-remove:focus-visible,
 .order-link:focus-visible,
 .dashboard-action-link:focus-visible {

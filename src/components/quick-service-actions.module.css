@@ -46,3 +46,50 @@
 .serviceAdd:active:not(:disabled) {
   background: #ffe99d;
 }
+
+.remove {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.remove:hover:not(:disabled) {
+  border-color: transparent;
+  background: #fff0ee;
+  color: #a64642;
+}
+
+.remove:focus-visible {
+  border-color: transparent;
+  background: #fff7d6;
+  outline: 2px solid #806000;
+  outline-offset: 3px;
+}
+
+@media (hover: hover) {
+  .remove {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  :global(.selected-project-summary):hover .remove,
+  :global(.selected-project-summary):focus-within .remove,
+  :global(.selected-part-summary):hover .remove,
+  :global(.selected-part-summary):focus-within .remove {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  :global(.items-editor.is-remove-suppressed) .remove {
+    opacity: 0;
+    pointer-events: none;
+  }
+}

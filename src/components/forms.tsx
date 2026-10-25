@@ -1139,7 +1139,7 @@ function PriceOptionPicker({
             {onRemove && !disabled && (
               <button
                 type="button"
-                className="quick-service-remove"
+                className={`quick-service-remove ${quickServiceActionStyles.remove}`}
                 aria-label={`${it.remove} ${product?.name ?? it.noRequiredPart}`}
                 onClick={onRemove}
               >
@@ -1819,7 +1819,7 @@ export function ItemsEditor({
                       </button>
                       <button
                         type="button"
-                        className="quick-service-remove"
+                        className={`quick-service-remove ${quickServiceActionStyles.remove}`}
                         aria-label={`${it.remove} ${item.project}`}
                         onClick={(event) => {
                           event.currentTarget.blur();
@@ -2109,7 +2109,7 @@ export function ItemsEditor({
                           {projectPicker && (
                             <button
                               type="button"
-                              className="quick-service-remove"
+                              className={`quick-service-remove ${quickServiceActionStyles.remove}`}
                               aria-label={`${it.remove} ${selectedProduct.name}`}
                               onClick={() =>
                                 update(index, {
@@ -4041,7 +4041,7 @@ function ReworkPartSummary({
         {product && !disabled && (
           <button
             type="button"
-            className="quick-service-remove"
+            className={`quick-service-remove ${quickServiceActionStyles.remove}`}
             aria-label={`${it.remove} ${product.name}`}
             onClick={onRemove}
           >

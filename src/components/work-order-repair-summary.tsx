@@ -251,7 +251,7 @@ export function WorkOrderRepairSummary({
                     {removable && (
                       <button
                         type="button"
-                        className="quick-service-remove"
+                        className={`quick-service-remove ${quickServiceActionStyles.remove}`}
                         aria-label={`${it.remove} ${item.project}`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -333,7 +333,7 @@ export function WorkOrderRepairSummary({
                     {removable && historicalProductName && (
                       <button
                         type="button"
-                        className="quick-service-remove"
+                        className={`quick-service-remove ${quickServiceActionStyles.remove}`}
                         aria-label={`${it.remove} ${historicalProductName}`}
                         onClick={(event) => {
                           event.stopPropagation();
