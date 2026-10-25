@@ -10428,7 +10428,11 @@ test("price editor keeps deletion inside batch management", async ({
     .click();
   const dialog = page.getByRole("dialog");
   await enterBusinessValue(page, "Intervento", "Da eliminare", dialog);
-  await dialog.getByLabel("Prezzo suggerito (€)", { exact: true }).fill("25");
+  const suggestedPrice = dialog.getByLabel("Prezzo suggerito (€)", {
+    exact: true,
+  });
+  await suggestedPrice.fill("25");
+  await expect(suggestedPrice).toHaveValue("25");
   await dialog
     .getByRole("button", { name: "Salva ed esci", exact: true })
     .click();
