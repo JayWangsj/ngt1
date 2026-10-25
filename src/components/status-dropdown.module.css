@@ -1,0 +1,229 @@
+:where(.scope) :global(.status-dropdown) {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+:where(.scope) :global(.status-dropdown-trigger) {
+  --status-color: #66737b;
+  --status-bg: #f4f6f7;
+  --status-bg-hover: #edf1f2;
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--status-color) 22%, white);
+  border-radius: 7px;
+  background: var(--status-bg);
+  color: var(--status-color);
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+:where(.scope) :global(.status-dropdown-trigger:hover:not(:disabled)),
+:where(.scope) :global(.status-dropdown-trigger:focus-visible) {
+  border-color: color-mix(in srgb, var(--status-color) 42%, white);
+  background: var(--status-bg-hover);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--status-color) 10%, transparent);
+}
+
+:where(.scope) :global(.status-dropdown.is-open .status-dropdown-trigger) {
+  border-color: color-mix(in srgb, var(--status-color) 48%, white);
+  background: var(--status-bg-hover);
+}
+
+:where(.scope) :global(.status-dropdown-trigger:disabled) {
+  cursor: default;
+  opacity: 0.72;
+}
+
+:where(.scope) :global(.status-dropdown-trigger svg) {
+  transition: transform 180ms var(--ease-ui);
+}
+
+:where(.scope) :global(.status-dropdown.is-open .status-dropdown-trigger svg) {
+  transform: rotate(180deg);
+}
+
+:where(.scope) :global(.status-dropdown-dot) {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--status-color);
+}
+
+:where(.scope) :global(.status-dropdown-label) {
+  min-width: 0;
+}
+
+:where(.scope) :global(.status-dropdown-menu) {
+  position: fixed;
+  z-index: 1200;
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #e1e5e4;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow-3);
+  animation: statusMenuIn 170ms var(--ease-ui);
+}
+
+@keyframes statusMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+:where(.scope) :global(.status-dropdown-option) {
+  --status-color: #66737b;
+  --status-bg: #f4f6f7;
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #39433f;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:where(.scope) :global(.status-dropdown-option:hover),
+:where(.scope) :global(.status-dropdown-option:focus-visible) {
+  background: var(--status-bg);
+  outline: none;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-received),
+:where(.scope) :global(.status-action-trigger.status-received),
+:where(.scope) :global(.status-dropdown-option.status-received) {
+  --status-color: #6d7880;
+  --status-bg: #f3f5f6;
+  --status-bg-hover: #ebeff1;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-diagnosing),
+:where(.scope) :global(.status-action-trigger.status-diagnosing),
+:where(.scope) :global(.status-dropdown-option.status-diagnosing) {
+  --status-color: #81649a;
+  --status-bg: #f6f2f8;
+  --status-bg-hover: #eee7f3;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-ready),
+:where(.scope) :global(.status-action-trigger.status-ready),
+:where(.scope) :global(.status-dropdown-option.status-ready) {
+  --status-color: #9b741e;
+  --status-bg: #fdf8e9;
+  --status-bg-hover: #f9f0d2;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-repairing),
+:where(.scope) :global(.status-action-trigger.status-repairing),
+:where(.scope) :global(.status-dropdown-option.status-repairing) {
+  --status-color: #4779a8;
+  --status-bg: #f0f6fb;
+  --status-bg-hover: #e6f0f8;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-parts_missing),
+:where(.scope) :global(.status-action-trigger.status-parts_missing),
+:where(.scope) :global(.status-dropdown-option.status-parts_missing) {
+  --status-color: #a9632f;
+  --status-bg: #fbf3ec;
+  --status-bg-hover: #f6e8db;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-completed),
+:where(.scope) :global(.status-action-trigger.status-completed),
+:where(.scope) :global(.status-dropdown-option.status-completed) {
+  --status-color: #377b50;
+  --status-bg: #eff8f2;
+  --status-bg-hover: #e4f2e8;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-reworking),
+:where(.scope) :global(.status-action-trigger.status-reworking),
+:where(.scope) :global(.status-dropdown-option.status-reworking) {
+  --status-color: #be185d;
+  --status-bg: #fce7f3;
+  --status-bg-hover: #fbcfe8;
+}
+
+:where(.scope) :global(.status-dropdown-trigger.status-refunded),
+:where(.scope) :global(.status-action-trigger.status-refunded),
+:where(.scope) :global(.status-dropdown-option.status-refunded),
+:where(.scope) :global(.status-dropdown-trigger.status-cancelled),
+:where(.scope) :global(.status-action-trigger.status-cancelled),
+:where(.scope) :global(.status-dropdown-option.status-cancelled) {
+  --status-color: #6f7a80;
+  --status-bg: #f4f6f7;
+  --status-bg-hover: #eceff1;
+}
+
+:where(.scope) :global(.detail-primary-actions .status-dropdown-trigger),
+:where(.scope) :global(.detail-primary-actions .status-action-trigger) {
+  min-height: 30px;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--status-color) 22%, white);
+  border-radius: 7px;
+  background: var(--status-bg);
+  box-shadow: none;
+  color: var(--status-color);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+:where(.scope)
+  :global(
+    .detail-primary-actions .status-dropdown-trigger:hover:not(:disabled)
+  ),
+:where(.scope)
+  :global(.detail-primary-actions .status-dropdown-trigger:focus-visible),
+:where(.scope)
+  :global(.detail-primary-actions .status-action-trigger:hover:not(:disabled)),
+:where(.scope)
+  :global(.detail-primary-actions .status-action-trigger:focus-visible) {
+  border-color: color-mix(in srgb, var(--status-color) 42%, white);
+  background: var(--status-bg-hover);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--status-color) 10%, transparent);
+}
+
+:where(.scope)
+  :global(
+    .detail-primary-actions .secondary-actions > summary.status-action-trigger
+  ) {
+  width: auto;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-color: color-mix(in srgb, var(--status-color) 22%, white);
+  background: var(--status-bg);
+  color: var(--status-color);
+}

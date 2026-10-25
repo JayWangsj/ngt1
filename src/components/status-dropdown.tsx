@@ -127,7 +127,7 @@ function StatusSelect({
   }
   return (
     <span
-      className={`status-dropdown status-dropdown-sm ${open ? "is-open" : ""}`}
+      className={`status-dropdown ${open ? "is-open" : ""}`}
       data-prevent-card-autosave
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}

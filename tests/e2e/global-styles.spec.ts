@@ -77,7 +77,8 @@ async function loadCompiledAppStyles(page: Page) {
       css.includes("--action-primary") ||
       css.includes(".button-primary") ||
       css.includes(".dialog-heading") ||
-      css.includes(".date-picker-popover")
+      css.includes(".date-picker-popover") ||
+      css.includes(".status-dropdown-menu")
     );
   });
 
@@ -95,6 +96,11 @@ async function loadCompiledAppStyles(page: Page) {
   expect(
     appStylesheets.some((stylesheet) =>
       readFileSync(stylesheet, "utf8").includes(".date-picker-popover"),
+    ),
+  ).toBe(true);
+  expect(
+    appStylesheets.some((stylesheet) =>
+      readFileSync(stylesheet, "utf8").includes(".status-dropdown-menu"),
     ),
   ).toBe(true);
   await page.setContent("<main></main>");
@@ -338,6 +344,8 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
   await expect(deleteButton).toHaveCSS("pointer-events", "auto");
 
   const panelFixture = page.locator("#global-shadow-business-select");
+  const statusMenuFixture = page.locator("#global-shadow-status-menu");
+  await expect(statusMenuFixture).toHaveCSS("border-radius", "8px");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(panelFixture).toHaveCSS("max-width", "374px");
   await page.emulateMedia({ reducedMotion: "reduce" });

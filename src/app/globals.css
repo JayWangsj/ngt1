@@ -1114,9 +1114,8 @@ small {
   border-radius: 100%;
   background: var(--teal);
 }
-/* A single semantic palette is shared by badges, dropdown triggers and options. */
-.badge[class*="status-"],
-.status-select[class*="status-"] {
+/* Status badges use the shared status palette. */
+.badge[class*="status-"] {
   color: var(--status-color) !important;
   background: var(--status-bg) !important;
 }
@@ -1403,8 +1402,7 @@ td small {
   border-radius: 50%;
   background: currentColor;
 }
-.badge-label,
-.status-dropdown-label {
+.badge-label {
   min-width: 0;
 }
 .badge.status-diagnosing {
@@ -1445,52 +1443,11 @@ td small {
   display: grid;
   gap: 3px;
 }
-.status-select,
 .order-due-input {
   min-height: 32px;
   padding: 5px 8px;
   font-size: 11px;
   border-radius: 6px;
-}
-.status-select.status-received {
-  background: #f0f3f5;
-  color: #5e6c75;
-}
-.status-select.status-diagnosing {
-  background: #f4f0f9;
-  color: #76558f;
-}
-.status-select.status-waiting_approval {
-  background: #fbeed8;
-  color: #986b17;
-}
-.status-select.status-repairing {
-  background: #e7f1fb;
-  color: #2f6eaa;
-}
-.status-select.status-parts_missing {
-  background: #fde2e2;
-  color: #aa2020;
-}
-.status-select.status-ready {
-  background: #fff0b5;
-  color: #896200;
-}
-.status-select.status-completed {
-  background: #dff4e5;
-  color: #216b3d;
-}
-.status-select.status-reworking {
-  background: #fce7f3;
-  color: #be185d;
-}
-.status-select.status-refunded {
-  background: #f9e4e2;
-  color: #9b3f3f;
-}
-.status-select.status-cancelled {
-  background: #f5e9e9;
-  color: #8e4d4d;
 }
 .inline-control-error {
   padding-left: 8px;
@@ -1789,6 +1746,7 @@ td small {
 }
 .filters input {
   width: 100%;
+  height: 41px;
 }
 .filters .business-select-trigger,
 .filters .date-picker,
@@ -2141,164 +2099,6 @@ label {
   margin-top: 4px;
   color: var(--ink);
   font-size: 13px;
-}
-.status-dropdown {
-  display: inline-flex;
-  vertical-align: middle;
-}
-.status-dropdown-trigger {
-  --status-color: #66737b;
-  --status-bg: #f4f6f7;
-  --status-bg-hover: #edf1f2;
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 1px solid color-mix(in srgb, var(--status-color) 22%, white);
-  border-radius: 7px;
-  background: var(--status-bg);
-  color: var(--status-color);
-  font: inherit;
-  font-size: 10px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    border-color 150ms ease-out,
-    background-color 150ms ease-out,
-    box-shadow 150ms ease-out;
-}
-.status-dropdown-trigger:hover:not(:disabled),
-.status-dropdown-trigger:focus-visible {
-  border-color: color-mix(in srgb, var(--status-color) 42%, white);
-  background: var(--status-bg-hover);
-  box-shadow: 0 3px 9px color-mix(in srgb, var(--status-color) 10%, transparent);
-}
-.status-dropdown.is-open .status-dropdown-trigger {
-  border-color: color-mix(in srgb, var(--status-color) 48%, white);
-  background: var(--status-bg-hover);
-}
-.status-dropdown-trigger:disabled {
-  cursor: default;
-  opacity: 0.72;
-}
-.status-dropdown-trigger svg {
-  transition: transform 180ms var(--ease-ui);
-}
-.status-dropdown.is-open .status-dropdown-trigger svg {
-  transform: rotate(180deg);
-}
-.status-dropdown-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 50%;
-  background: var(--status-color);
-}
-.status-dropdown-menu {
-  position: fixed;
-  z-index: 1200;
-  display: grid;
-  gap: 2px;
-  padding: 4px;
-  border: 1px solid #e1e5e4;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: var(--shadow-3);
-  animation: status-menu-in 170ms var(--ease-ui);
-}
-@keyframes status-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(-3px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.status-dropdown-option {
-  --status-color: #66737b;
-  --status-bg: #f4f6f7;
-  display: flex;
-  width: 100%;
-  min-height: 36px;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #39433f;
-  font: inherit;
-  font-size: 11px;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.status-dropdown-option:hover,
-.status-dropdown-option:focus-visible {
-  background: var(--status-bg);
-  outline: none;
-}
-.status-dropdown-trigger.status-received,
-.status-action-trigger.status-received,
-.status-dropdown-option.status-received {
-  --status-color: #6d7880;
-  --status-bg: #f3f5f6;
-  --status-bg-hover: #ebeff1;
-}
-.status-dropdown-trigger.status-diagnosing,
-.status-action-trigger.status-diagnosing,
-.status-dropdown-option.status-diagnosing {
-  --status-color: #81649a;
-  --status-bg: #f6f2f8;
-  --status-bg-hover: #eee7f3;
-}
-.status-dropdown-trigger.status-ready,
-.status-action-trigger.status-ready,
-.status-dropdown-option.status-ready {
-  --status-color: #9b741e;
-  --status-bg: #fdf8e9;
-  --status-bg-hover: #f9f0d2;
-}
-.status-dropdown-trigger.status-repairing,
-.status-action-trigger.status-repairing,
-.status-dropdown-option.status-repairing {
-  --status-color: #4779a8;
-  --status-bg: #f0f6fb;
-  --status-bg-hover: #e6f0f8;
-}
-.status-dropdown-trigger.status-parts_missing,
-.status-action-trigger.status-parts_missing,
-.status-dropdown-option.status-parts_missing {
-  --status-color: #a9632f;
-  --status-bg: #fbf3ec;
-  --status-bg-hover: #f6e8db;
-}
-.status-dropdown-trigger.status-completed,
-.status-action-trigger.status-completed,
-.status-dropdown-option.status-completed {
-  --status-color: #377b50;
-  --status-bg: #eff8f2;
-  --status-bg-hover: #e4f2e8;
-}
-.status-dropdown-trigger.status-reworking,
-.status-action-trigger.status-reworking,
-.status-dropdown-option.status-reworking {
-  --status-color: #be185d;
-  --status-bg: #fce7f3;
-  --status-bg-hover: #fbcfe8;
-}
-.status-dropdown-trigger.status-refunded,
-.status-action-trigger.status-refunded,
-.status-dropdown-option.status-refunded,
-.status-dropdown-trigger.status-cancelled,
-.status-action-trigger.status-cancelled,
-.status-dropdown-option.status-cancelled {
-  --status-color: #6f7a80;
-  --status-bg: #f4f6f7;
-  --status-bg-hover: #eceff1;
 }
 .checkout-summary {
   display: grid;
@@ -6961,42 +6761,6 @@ details.secondary-actions {
 }
 .price-option-dialog > .price-option-add {
   margin-top: 12px;
-}
-.detail-primary-actions .status-dropdown-trigger,
-.detail-primary-actions .status-action-trigger {
-  min-height: 30px;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 1px solid color-mix(in srgb, var(--status-color) 22%, white);
-  border-radius: 7px;
-  background: var(--status-bg);
-  box-shadow: none;
-  color: var(--status-color);
-  font: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  transition:
-    border-color 150ms ease-out,
-    background-color 150ms ease-out,
-    box-shadow 150ms ease-out;
-}
-.detail-primary-actions .status-dropdown-trigger:hover:not(:disabled),
-.detail-primary-actions .status-dropdown-trigger:focus-visible,
-.detail-primary-actions .status-action-trigger:hover:not(:disabled),
-.detail-primary-actions .status-action-trigger:focus-visible {
-  border-color: color-mix(in srgb, var(--status-color) 42%, white);
-  background: var(--status-bg-hover);
-  box-shadow: 0 3px 9px color-mix(in srgb, var(--status-color) 10%, transparent);
-}
-.detail-primary-actions .secondary-actions > summary.status-action-trigger {
-  width: auto;
-  min-height: 30px;
-  padding: 5px 8px;
-  border-color: color-mix(in srgb, var(--status-color) 22%, white);
-  background: var(--status-bg);
-  color: var(--status-color);
 }
 .quote-price-switch-notice {
   display: flex;

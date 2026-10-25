@@ -2353,6 +2353,7 @@ test("manages one quick service for held service orders and retail checkout", as
   const statusAction = page.locator(
     ".detail-primary-actions .status-dropdown .status-dropdown-trigger",
   );
+  await expect(statusAction).toHaveCSS("font-weight", "600");
   const detailMoreActions = page.locator(
     ".detail-primary-actions .secondary-actions summary",
   );
@@ -4924,15 +4925,20 @@ test("repair list exposes month, status, due-date and payment controls", async (
   await expect(row.locator(".order-due-cell button")).toHaveCount(0);
   const status = row.locator(".status-dropdown-trigger");
   await expect(status).toBeVisible();
+  await expect(status).toHaveCSS("min-height", "30px");
+  await expect(status).toHaveCSS("border-radius", "7px");
   await expect(row.locator("select.status-select")).toHaveCount(0);
   const currentStatus = (await status.textContent())?.trim() ?? "";
   const rowHeight = await row.evaluate(
     (element) => element.getBoundingClientRect().height,
   );
   await status.click();
-  await expect(page.locator(".status-dropdown-menu")).toHaveCSS(
-    "position",
-    "fixed",
+  const statusMenu = page.locator(".status-dropdown-menu");
+  await expect(statusMenu).toHaveCSS("position", "fixed");
+  await expect(statusMenu).toHaveCSS("border-radius", "8px");
+  await expect(statusMenu.getByRole("option").first()).toHaveCSS(
+    "min-height",
+    "36px",
   );
   await expect(
     page
