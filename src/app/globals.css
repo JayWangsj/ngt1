@@ -4165,7 +4165,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .quick-service-order-form,
 .catalog-manager,
-.catalog-manager-list,
 .model-manager {
   display: grid;
   gap: 12px;
@@ -4360,43 +4359,9 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     pointer-events: none;
   }
 }
-.catalog-manager-row small {
-  display: block;
-  margin-top: 3px;
-  color: var(--muted);
-}
 .catalog-manager-actions {
   display: flex;
   justify-content: flex-end;
-}
-.catalog-manager-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto 80px;
-  gap: 16px;
-  align-items: center;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  text-align: left;
-  background: var(--surface);
-  cursor: pointer;
-}
-.catalog-manager-row .record-actions {
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-}
-@media (hover: hover) {
-  .catalog-manager-row .record-icon {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 160ms ease;
-  }
-  .catalog-manager-row:hover .record-icon,
-  .catalog-manager-row:focus-within .record-icon {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 .model-manager section {
   display: grid;
@@ -4616,8 +4581,7 @@ details.secondary-actions {
 }
 @media (max-width: 760px) {
   .quick-service-choice,
-  .product-compatibility-row,
-  .catalog-manager-row {
+  .product-compatibility-row {
     grid-template-columns: 1fr;
   }
   .compatibility-device-edit {

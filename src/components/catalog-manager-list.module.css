@@ -1,0 +1,49 @@
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto 80px;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-align: left;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.row :global(.record-actions) {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+@media (hover: hover) {
+  .row :global(.record-icon) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  .row:hover :global(.record-icon),
+  .row:focus-within :global(.record-icon) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

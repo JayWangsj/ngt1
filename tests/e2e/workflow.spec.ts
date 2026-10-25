@@ -6948,6 +6948,26 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   const firstServiceRow = serviceManager
     .locator(".catalog-manager-row")
     .first();
+  await expect(serviceManager.locator(".catalog-manager-list")).toHaveCSS(
+    "gap",
+    "12px",
+  );
+  await expect(firstServiceRow).toHaveCSS("display", "grid");
+  await expect(firstServiceRow).toHaveCSS("gap", "16px");
+  await expect(firstServiceRow).toHaveCSS("padding", "12px");
+  const catalogDesktopViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileCatalogColumns = await firstServiceRow.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  );
+  expect(mobileCatalogColumns).toBe(1);
+  expect(
+    await firstServiceRow.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(1);
+  await page.setViewportSize(catalogDesktopViewport);
   const serviceEdit = firstServiceRow.getByRole("button", {
     name: /Modifica/,
   });
@@ -6964,13 +6984,13 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
   await expect(serviceEdit).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await serviceEdit.hover();
   await expect(serviceEdit).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
-  await expect(serviceEdit).toHaveCSS("background-color", "rgb(255, 247, 214)");
+  await expect(serviceEdit).toHaveCSS("background-color", "rgb(255, 237, 170)");
   await expect(serviceDelete).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await serviceDelete.hover();
   await expect(serviceDelete).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await expect(serviceDelete).toHaveCSS(
     "background-color",
-    "rgb(255, 240, 238)",
+    "rgb(251, 233, 232)",
   );
   const serviceDeleteWidth = (await serviceDelete.boundingBox())!.width;
   await serviceDelete.click();

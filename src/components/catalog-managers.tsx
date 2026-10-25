@@ -22,6 +22,7 @@ import {
 import { RecordIcon } from "./ui/record-icon";
 import settingsInlineManagerStyles from "./settings-inline-manager.module.css";
 import dialogStyles from "./ui/dialog.module.css";
+import catalogManagerListStyles from "./catalog-manager-list.module.css";
 
 export type QuickServiceView = {
   id: string;
@@ -194,10 +195,12 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
         className={`catalog-manager settings-inline-manager ${settingsInlineManagerStyles.manager}`}
       >
         {drafts.length ? (
-          <div className="catalog-manager-list">
+          <div
+            className={`catalog-manager-list ${catalogManagerListStyles.list}`}
+          >
             {drafts.map((item) => (
               <div
-                className="catalog-manager-row business-list-row"
+                className={`catalog-manager-row business-list-row ${catalogManagerListStyles.row}`}
                 key={item.id}
                 onClick={() => editor(item)}
               >
