@@ -781,9 +781,7 @@ fn take_acceptance_failure_stage(install_root: &Path) -> Option<String> {
     {
         return None;
     }
-    let marker = install_root
-        .join(".local")
-        .join("acceptance-failure-stage");
+    let marker = install_root.join(".local").join("acceptance-failure-stage");
     let stage = fs::read_to_string(&marker).ok()?.trim().to_owned();
     if stage != "release-deployment" || fs::remove_file(marker).is_err() {
         return None;
