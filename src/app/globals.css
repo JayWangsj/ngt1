@@ -8023,8 +8023,7 @@ details summary {
 .catalog-manager-row,
 .price-rule-row,
 .product-compatibility-row,
-.order-product-line,
-.sale-actions-cell {
+.order-product-line {
   --record-action-size: 36px;
 }
 .record-icon-compact {
@@ -9044,26 +9043,6 @@ summary.record-icon::-webkit-details-marker {
 .order-balance-value {
   color: var(--muted);
   font-size: 11px;
-}
-.sale-actions-heading,
-.sale-actions-cell {
-  width: 52px;
-  padding-left: 0 !important;
-}
-.sale-actions-cell {
-  text-align: center;
-}
-@media (hover: hover) {
-  .sale-actions-cell .record-icon-delete {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 160ms ease;
-  }
-  .business-list-row:hover .sale-actions-cell .record-icon-delete,
-  .business-list-row:focus-within .sale-actions-cell .record-icon-delete {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 .form-dialog:has(.customer-detail-dialog) {
   overflow: visible;

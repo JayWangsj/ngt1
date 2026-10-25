@@ -5581,6 +5581,14 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await period.fill(currentMonth);
   const historyRow = dialog.locator("tbody tr").first();
   await expect(historyRow).toBeVisible();
+  const deleteAction = historyRow.locator(
+    ".sale-actions-cell .record-icon-delete",
+  );
+  await expect(deleteAction).toHaveCSS("opacity", "0");
+  await expect(deleteAction).toHaveCSS("pointer-events", "none");
+  await historyRow.hover();
+  await expect(deleteAction).toHaveCSS("opacity", "1");
+  await expect(deleteAction).toHaveCSS("pointer-events", "auto");
   const saleNumber = historyRow.locator(".sale-number-button");
   const saleNumberLabel = saleNumber.locator(":scope > span");
   await expect(saleNumber).toHaveCSS("color", "rgb(113, 83, 0)");

@@ -68,6 +68,35 @@
   cursor: pointer;
 }
 
+.historyDialog :global(.sale-actions-heading),
+.historyDialog :global(.sale-actions-cell) {
+  width: 52px;
+  padding-left: 0 !important;
+}
+
+.historyDialog :global(.sale-actions-cell) {
+  --record-action-size: 36px;
+  text-align: center;
+}
+
+@media (hover: hover) {
+  .historyDialog :global(.sale-actions-cell .record-icon-delete) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  .historyDialog
+    :global(.business-list-row:hover .sale-actions-cell .record-icon-delete),
+  .historyDialog
+    :global(
+      .business-list-row:focus-within .sale-actions-cell .record-icon-delete
+    ) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .saleDialog {
   display: grid;
   gap: 16px;
