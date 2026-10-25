@@ -5880,6 +5880,31 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
   await expect(status).toContainText("Consegnato");
 });
 
+test("retail history deep link hydrates before showing its dialog", async ({
+  page,
+}) => {
+  const hydrationErrors: string[] = [];
+  page.on("pageerror", (error) => {
+    if (error.message.includes("Hydration failed"))
+      hydrationErrors.push(error.message);
+  });
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      message.text().includes("Hydration failed")
+    )
+      hydrationErrors.push(message.text());
+  });
+
+  await page.goto("/retail?view=sales");
+  const history = page.getByRole("dialog", { name: "Storico vendite" });
+  await expect(history).toBeVisible();
+  await history.getByRole("button", { name: "Chiudi" }).click();
+  await expect(history).toHaveCount(0);
+  await expect(page).toHaveURL(/\/retail$/);
+  expect(hydrationErrors).toEqual([]);
+});
+
 test("sales history uses a monthly filter", async ({ page }) => {
   await page.goto("/retail");
   await page.getByRole("button", { name: /Cavo USB-C Test/ }).click();

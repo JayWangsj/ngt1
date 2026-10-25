@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useId,
+  useSyncExternalStore,
   useTransition,
   Children,
   isValidElement,
@@ -6203,6 +6204,8 @@ function PriceTreeCheckbox({
   );
 }
 
+const subscribeToBrowser = () => () => {};
+
 export function FormDialog({
   title,
   subtitle,
@@ -6222,12 +6225,19 @@ export function FormDialog({
   const it = useMessages();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const mounted = useSyncExternalStore(
+    subscribeToBrowser,
+    () => true,
+    () => false,
+  );
   const busy = () =>
     Boolean(dialog.current?.querySelector('[aria-busy="true"]'));
   useEffect(() => {
+    if (!mounted) return;
     const element = dialog.current;
+    if (!element) return;
     const previous = document.activeElement as HTMLElement | null;
-    element?.showModal();
+    element.showModal();
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -6236,8 +6246,8 @@ export function FormDialog({
       if (restoreFocusComfortably) focusComfortably(previous);
       else focusWithoutScrolling(previous);
     };
-  }, [restoreFocusComfortably]);
-  if (typeof document === "undefined") return null;
+  }, [mounted, restoreFocusComfortably]);
+  if (!mounted) return null;
   return createPortal(
     <dialog
       ref={dialog}
