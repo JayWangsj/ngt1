@@ -1,0 +1,103 @@
+.editor {
+  display: grid;
+  gap: 18px;
+}
+
+.deviceFields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.deviceFields > label,
+.deviceFields > :global(.editable-field) {
+  margin: 0;
+}
+
+.projectField {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.projectField > header {
+  display: grid;
+  gap: 3px;
+}
+
+.projectField small {
+  color: var(--muted);
+}
+
+.projectSelector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.projectChip {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px 4px 10px;
+  border-radius: 7px;
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.projectChip button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.projectChip button:hover:not(:disabled) {
+  border-color: transparent;
+  background: #fff0ee;
+  color: #a64642;
+}
+
+.projectAdd {
+  width: 100%;
+}
+
+.projectPicker,
+.projectChoices,
+.newProject {
+  display: grid;
+  gap: 10px;
+}
+
+.projectChoices :global(.price-option-card) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.newProject {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.newProject label {
+  display: grid;
+  gap: 6px;
+}
+
+.newProject :global(.message) {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .deviceFields {
+    grid-template-columns: 1fr;
+  }
+}

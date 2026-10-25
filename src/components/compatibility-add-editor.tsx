@@ -11,6 +11,7 @@ import { EditableSelect } from "./editable-select";
 import { SimpleSelect } from "./business-select";
 import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import priceOptionCardStyles from "./price-option-card.module.css";
+import compatibilityAddEditorStyles from "./compatibility-add-editor.module.css";
 import { Button } from "./ui/button";
 import type {
   DeviceCatalogDeletionView,
@@ -95,8 +96,12 @@ export function CompatibilityAddEditor({
   );
 
   return (
-    <div className="compatibility-add-editor">
-      <div className="compatibility-device-fields">
+    <div
+      className={`${compatibilityAddEditorStyles.editor} compatibility-add-editor`}
+    >
+      <div
+        className={`${compatibilityAddEditorStyles.deviceFields} compatibility-device-fields`}
+      >
         <label>
           <span>{it.deviceType}</span>
           <SimpleSelect
@@ -144,14 +149,21 @@ export function CompatibilityAddEditor({
           }
         />
       </div>
-      <section className="compatibility-project-field">
+      <section
+        className={`${compatibilityAddEditorStyles.projectField} compatibility-project-field`}
+      >
         <header>
           <strong>{it.project}</strong>
           <small>{it.inventory.compatibilityProjectsHelp}</small>
         </header>
-        <div className="compatibility-project-selector">
+        <div
+          className={`${compatibilityAddEditorStyles.projectSelector} compatibility-project-selector`}
+        >
           {value.projects.map((project) => (
-            <span className="compatibility-project-chip" key={project}>
+            <span
+              className={`${compatibilityAddEditorStyles.projectChip} compatibility-project-chip`}
+              key={project}
+            >
               {project}
               <button
                 type="button"
@@ -169,7 +181,7 @@ export function CompatibilityAddEditor({
           ))}
           <button
             type="button"
-            className="quick-service-picker-add compatibility-project-add"
+            className={`quick-service-picker-add ${compatibilityAddEditorStyles.projectAdd} compatibility-project-add`}
             disabled={!value.model}
             onClick={() => {
               setPickerProjects([]);
@@ -189,8 +201,12 @@ export function CompatibilityAddEditor({
             setProjectError("");
           }}
         >
-          <DialogBody className="compatibility-project-picker">
-            <div className="compatibility-project-choices">
+          <DialogBody
+            className={`${compatibilityAddEditorStyles.projectPicker} compatibility-project-picker`}
+          >
+            <div
+              className={`${compatibilityAddEditorStyles.projectChoices} compatibility-project-choices`}
+            >
               {unselectedProjects.length ? (
                 unselectedProjects.map((project) => (
                   <button
@@ -261,7 +277,9 @@ export function CompatibilityAddEditor({
           }}
         >
           <DialogBody className="compatibility-new-project-dialog">
-            <div className="compatibility-new-project">
+            <div
+              className={`${compatibilityAddEditorStyles.newProject} compatibility-new-project`}
+            >
               <label>
                 {it.project}
                 <input

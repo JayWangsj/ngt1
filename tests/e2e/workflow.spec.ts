@@ -8510,6 +8510,14 @@ test("inventory repair products retain their compatibility editor", async ({
   await expect(editorDialog.locator(".compatibility-project-chip")).toHaveText([
     "sostituzione batteria",
   ]);
+  await expect(editorDialog.locator(".compatibility-project-chip")).toHaveCSS(
+    "display",
+    "flex",
+  );
+  await expect(editorDialog.locator(".compatibility-project-chip")).toHaveCSS(
+    "min-height",
+    "30px",
+  );
   await openProjects.click();
   await expect(
     page
@@ -8543,6 +8551,16 @@ test("inventory repair products retain their compatibility editor", async ({
   await expect(
     existingModelDialog.locator(".compatibility-project-chip"),
   ).toHaveText(["sostituzione batteria"]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await existingModelDialog
+      .locator(".compatibility-device-fields")
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+            .length,
+      ),
+  ).toBe(1);
 });
 
 test("new repair products add compatible devices in a modal", async ({
@@ -8608,6 +8626,9 @@ test("new repair products add compatible devices in a modal", async ({
   await expect(
     projectPicker.locator(":scope > .dialog-body.compatibility-project-picker"),
   ).toBeVisible();
+  await expect(
+    projectPicker.locator(":scope > .dialog-body.compatibility-project-picker"),
+  ).toHaveCSS("gap", "10px");
   await expect(projectPicker.locator(":scope > .dialog-footer")).toBeVisible();
   const projectChoice = projectPicker.getByRole("button", {
     name: "sostituzione display",
@@ -8632,6 +8653,12 @@ test("new repair products add compatible devices in a modal", async ({
       ":scope > .dialog-body.compatibility-new-project-dialog",
     ),
   ).toBeVisible();
+  await expect(
+    newProjectDialog.locator(".compatibility-new-project"),
+  ).toHaveCSS("display", "grid");
+  await expect(
+    newProjectDialog.locator(".compatibility-new-project"),
+  ).toHaveCSS("gap", "10px");
   await expect(
     newProjectDialog.locator(":scope > .dialog-footer"),
   ).toBeVisible();

@@ -4687,88 +4687,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   gap: 8px;
   align-items: center;
 }
-.compatibility-add-editor {
-  display: grid;
-  gap: 18px;
-}
-.compatibility-device-fields {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-.compatibility-device-fields > label,
-.compatibility-device-fields > .editable-field {
-  margin: 0;
-}
-.compatibility-project-field {
-  display: grid;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-.compatibility-project-field > header {
-  display: grid;
-  gap: 3px;
-}
-.compatibility-project-field small {
-  color: var(--muted);
-}
-.compatibility-project-selector {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.compatibility-project-chip {
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 7px 4px 10px;
-  border-radius: 7px;
-  background: var(--soft);
-  color: var(--ink);
-  font-size: 0.78rem;
-}
-.compatibility-project-chip button {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-}
-.compatibility-project-add {
-  width: 100%;
-}
-.compatibility-project-picker,
-.compatibility-project-choices,
-.compatibility-new-project {
-  display: grid;
-  gap: 10px;
-}
-.compatibility-project-choices .price-option-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.compatibility-new-project {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.compatibility-new-project label {
-  display: grid;
-  gap: 6px;
-}
-.compatibility-new-project .message {
-  grid-column: 1 / -1;
-}
-@media (max-width: 760px) {
-  .compatibility-device-fields {
-    grid-template-columns: 1fr;
-  }
-}
 .order-type-tag {
   display: inline-flex;
   width: max-content;
@@ -7984,7 +7902,6 @@ summary.record-icon::-webkit-details-marker {
 .x-icon-button:hover:not(:disabled),
 .quick-service-remove:hover:not(:disabled),
 .retail-remove:hover:not(:disabled),
-.compatibility-project-chip button:hover:not(:disabled),
 .update-notification button:hover:not(:disabled),
 .batch-control-button.batch-control-finish:hover:not(:disabled) {
   border-color: transparent;
