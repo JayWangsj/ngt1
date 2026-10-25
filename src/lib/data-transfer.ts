@@ -428,6 +428,7 @@ export async function importBusinessData(
             costPrice: source.costPrice,
             salePrice: source.salePrice,
             stockQuantity: source.stockQuantity,
+            unlimitedStock: source.unlimitedStock ?? false,
             minStock: source.minStock,
             favorite: source.favorite,
             enabled: source.enabled,
@@ -583,6 +584,7 @@ export async function importBusinessData(
             category: source.category,
             unitPrice: source.unitPrice,
             quantity: source.quantity,
+            stockTracked: source.stockTracked ?? true,
             subtotal: source.subtotal,
           },
         });
@@ -1071,6 +1073,7 @@ export async function importBusinessData(
             unitPrice: source.unitPrice,
             discount: source.discount,
             quantity: source.quantity,
+            stockTracked: source.stockTracked ?? true,
             consumedAt: date(source.consumedAt),
             createdAt: date(source.createdAt) ?? new Date(),
           },

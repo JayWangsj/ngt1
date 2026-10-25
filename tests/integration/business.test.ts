@@ -4193,7 +4193,17 @@ describe("versioned data backup and merge import", () => {
     expect(await db.customer.count()).toBe(1);
     expect(
       await db.product.findUniqueOrThrow({ where: { id: product.id } }),
-    ).toMatchObject({ stockQuantity: 4 });
+    ).toMatchObject({ stockQuantity: 4, unlimitedStock: false });
+    expect(
+      await db.retailSaleItem.findFirstOrThrow({
+        where: { productId: product.id },
+      }),
+    ).toMatchObject({ stockTracked: true });
+    expect(
+      await db.workOrderProduct.findFirstOrThrow({
+        where: { productId: product.id },
+      }),
+    ).toMatchObject({ stockTracked: true });
     expect(await db.inventoryMovement.count()).toBe(3);
     expect(await db.retailSale.count()).toBe(1);
     expect(await db.paymentAllocation.count()).toBe(2);
@@ -4221,6 +4231,197 @@ describe("versioned data backup and merge import", () => {
     expect(second.skipped).toBeGreaterThan(0);
     expect(await db.workOrder.count()).toBe(1);
     expect(await db.customer.count()).toBe(1);
+  });
+
+  it("preserves unlimited stock history and behavior through a v10 round trip", async () => {
+    const limited = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Cover backup limitata",
+      category: "Accessori",
+      usage: "RETAIL",
+      costPrice: "2",
+      salePrice: "8",
+      initialStock: 6,
+      minStock: 1,
+    });
+    const unlimited = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Servizio retail illimitato",
+      category: "Accessori",
+      usage: "RETAIL",
+      costPrice: "1",
+      salePrice: "5",
+      initialStock: 3,
+      minStock: 0,
+    });
+    await updateProduct(owner, unlimited.id, {
+      name: unlimited.name,
+      category: unlimited.category,
+      usage: "RETAIL",
+      costPrice: "1",
+      salePrice: "5",
+      stockQuantity: 3,
+      minStock: 0,
+      favorite: false,
+      unlimitedStock: true,
+    });
+    const limitedSale = await createRetailSale(owner, {
+      requestId: randomUUID(),
+      items: [{ productId: limited.id, quantity: 2 }],
+      discount: "0",
+      method: "CASH",
+    });
+    const unlimitedSale = await createRetailSale(owner, {
+      requestId: randomUUID(),
+      items: [{ productId: unlimited.id, quantity: 25 }],
+      discount: "0",
+      method: "CASH",
+    });
+    const order = await createOrder(
+      owner,
+      input({ deposit: "100", items: [{ project: "Display", final: "100" }] }),
+    );
+    await addWorkOrderProduct(owner, order.id, {
+      productId: unlimited.id,
+      kind: "RETAIL_ADDON",
+      quantity: 20,
+    });
+    await changeStatus(owner, order.id, { status: "READY" });
+
+    const backup = await exportBusinessData();
+    const movementCount = backup.data.inventoryMovements.length;
+    expect(
+      backup.data.products.find((product) => product.id === unlimited.id),
+    ).toMatchObject({ stockQuantity: 3, unlimitedStock: true });
+    expect(
+      backup.data.retailSaleItems.find(
+        (item) => item.saleId === unlimitedSale.id,
+      ),
+    ).toMatchObject({ stockTracked: false });
+    expect(
+      backup.data.workOrderProducts.find((line) => line.orderId === order.id),
+    ).toMatchObject({ stockTracked: false, consumedAt: null });
+
+    await clearBusinessData(owner);
+    const first = await importBusinessData(owner, backup);
+    expect(first.imported).toBeGreaterThan(0);
+    expect(
+      await db.product.findUniqueOrThrow({ where: { id: unlimited.id } }),
+    ).toMatchObject({ stockQuantity: 3, unlimitedStock: true });
+    expect(
+      await db.retailSaleItem.findFirstOrThrow({
+        where: { saleId: unlimitedSale.id },
+      }),
+    ).toMatchObject({ stockTracked: false });
+    expect(
+      await db.workOrderProduct.findFirstOrThrow({
+        where: { orderId: order.id },
+      }),
+    ).toMatchObject({ stockTracked: false, consumedAt: null });
+    expect(await db.inventoryMovement.count()).toBe(movementCount);
+    const unlimitedMovementCount = await db.inventoryMovement.count({
+      where: { productId: unlimited.id },
+    });
+
+    const second = await importBusinessData(owner, backup);
+    expect(second.imported).toBe(0);
+    expect(await db.inventoryMovement.count()).toBe(movementCount);
+    expect(await db.retailSale.count()).toBe(2);
+    expect(await db.workOrderProduct.count()).toBe(1);
+
+    await deleteRetailSale(owner, unlimitedSale.id);
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: unlimited.id } }))
+        .stockQuantity,
+    ).toBe(3);
+    await deleteRetailSale(owner, limitedSale.id);
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: limited.id } }))
+        .stockQuantity,
+    ).toBe(6);
+    await checkoutWorkOrder(owner, order.id, {
+      requestId: randomUUID(),
+      amount: "100",
+      method: "CASH",
+      pickedUpBy: "Cliente backup",
+    });
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: unlimited.id } }))
+        .stockQuantity,
+    ).toBe(3);
+    expect(
+      await db.inventoryMovement.count({ where: { productId: unlimited.id } }),
+    ).toBe(unlimitedMovementCount);
+  });
+
+  it("uses finite-stock semantics when v9 inventory fields are absent", async () => {
+    const product = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Prodotto backup v9",
+      category: "Accessori",
+      usage: "RETAIL",
+      costPrice: "2",
+      salePrice: "10",
+      initialStock: 5,
+      minStock: 1,
+    });
+    const sale = await createRetailSale(owner, {
+      requestId: randomUUID(),
+      items: [{ productId: product.id, quantity: 1 }],
+      discount: "0",
+      method: "CASH",
+    });
+    const order = await createOrder(
+      owner,
+      input({ deposit: "100", items: [{ project: "Display", final: "100" }] }),
+    );
+    await addWorkOrderProduct(owner, order.id, {
+      productId: product.id,
+      kind: "RETAIL_ADDON",
+      quantity: 1,
+    });
+    await changeStatus(owner, order.id, { status: "READY" });
+
+    const legacy = structuredClone(await exportBusinessData());
+    legacy.version = 9;
+    for (const source of legacy.data.products)
+      delete (source as Partial<typeof source>).unlimitedStock;
+    for (const source of legacy.data.retailSaleItems)
+      delete (source as Partial<typeof source>).stockTracked;
+    for (const source of legacy.data.workOrderProducts)
+      delete (source as Partial<typeof source>).stockTracked;
+    const movementCount = legacy.data.inventoryMovements.length;
+
+    await clearBusinessData(owner);
+    await importBusinessData(owner, legacy);
+    expect(
+      await db.product.findUniqueOrThrow({ where: { id: product.id } }),
+    ).toMatchObject({ stockQuantity: 4, unlimitedStock: false });
+    expect(
+      await db.retailSaleItem.findFirstOrThrow({ where: { saleId: sale.id } }),
+    ).toMatchObject({ stockTracked: true });
+    expect(
+      await db.workOrderProduct.findFirstOrThrow({
+        where: { orderId: order.id },
+      }),
+    ).toMatchObject({ stockTracked: true, consumedAt: null });
+    expect(await db.inventoryMovement.count()).toBe(movementCount);
+
+    await deleteRetailSale(owner, sale.id);
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: product.id } }))
+        .stockQuantity,
+    ).toBe(5);
+    await checkoutWorkOrder(owner, order.id, {
+      requestId: randomUUID(),
+      amount: "10",
+      method: "CASH",
+      pickedUpBy: "Cliente v9",
+    });
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { id: product.id } }))
+        .stockQuantity,
+    ).toBe(4);
   });
 
   it("restores a v9 legacy part rule and preserves its order and reservation through v10", async () => {
