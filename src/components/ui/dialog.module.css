@@ -200,6 +200,15 @@
   gap: 16px;
 }
 
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-left: auto;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e5e5;
+}
+
 .formDialog .actionForm .dialogActions,
 :global(.form-dialog) :global(.action-form) :global(.dialog-actions),
 .formDialog > .dialogForm .dialogActions,

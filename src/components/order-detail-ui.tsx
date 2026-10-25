@@ -13,6 +13,7 @@ import { ChevronDown, ChevronRight, ChevronUp, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
+import dialogStyles from "./ui/dialog.module.css";
 import {
   FormSaveContext,
   FormCloseContext,
@@ -312,7 +313,9 @@ export function OrderDetailCard({
                 <FormCloseContext.Provider value={closeEdit}>
                   {edit}
                   {persistent}
-                  <div className="dialog-actions order-card-edit-actions">
+                  <div
+                    className={`${dialogStyles.dialogActions} dialog-actions order-card-edit-actions`}
+                  >
                     <Button
                       type="button"
                       variant="cancel"
@@ -347,7 +350,7 @@ export function OrderDetailCard({
           restoreFocusComfortably={false}
         >
           <p>{it.unsavedChangesHelp}</p>
-          <div className="dialog-actions">
+          <div className={`${dialogStyles.dialogActions} dialog-actions`}>
             <Button
               type="button"
               variant="cancel"

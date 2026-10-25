@@ -21,6 +21,7 @@ import { Button } from "./ui/button";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import { OrderDetailCard } from "./order-detail-ui";
 import { FormDialog } from "./forms";
+import dialogStyles from "./ui/dialog.module.css";
 import recordIconStyles from "./ui/record-icon.module.css";
 import {
   DatePicker,
@@ -342,7 +343,7 @@ export function WorkOrderCheckout({
         />
       </label>
       {error && <p className="message error">{error}</p>}
-      <div className="dialog-actions">
+      <div className={`${dialogStyles.dialogActions} dialog-actions`}>
         {onClose && (
           <Button
             type="button"

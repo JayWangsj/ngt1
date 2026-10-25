@@ -18,6 +18,7 @@ import {
 } from "./forms";
 import { DatePicker } from "./business-select";
 import { Button } from "./ui/button";
+import dialogStyles from "./ui/dialog.module.css";
 import selectionSummaryStyles from "./selection-summary.module.css";
 import {
   CustomerPicker,
@@ -387,7 +388,7 @@ export function NewServiceOrder({
               </Field>
             </section>
             {error && <p className="message error">{error}</p>}
-            <div className="dialog-actions">
+            <div className={`${dialogStyles.dialogActions} dialog-actions`}>
               <Button
                 type="button"
                 variant="cancel"

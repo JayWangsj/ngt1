@@ -8,6 +8,7 @@ import { cents, money } from "@/lib/domain";
 import { useMessages } from "./language";
 import { Field, FormDialog } from "./forms";
 import { Button } from "./ui/button";
+import dialogStyles from "./ui/dialog.module.css";
 import { DatePicker } from "./business-select";
 
 type QuickServiceItem = { id: string; project: string; final: string };
@@ -216,7 +217,7 @@ export function QuickServiceOrderEditor({
                 {error}
               </p>
             )}
-            <div className="dialog-actions">
+            <div className={`${dialogStyles.dialogActions} dialog-actions`}>
               <Button
                 type="button"
                 variant="cancel"

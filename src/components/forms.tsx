@@ -986,7 +986,7 @@ export function ProductForm({
           {translateError(error, locale)}
         </p>
       )}
-      <div className="dialog-actions">
+      <div className={`${dialogStyles.dialogActions} dialog-actions`}>
         <Button
           type="button"
           variant="cancel"
@@ -2561,7 +2561,7 @@ export function ItemsEditor({
             {newProjectExists && (
               <p className="field-error">{it.repairProjectExists}</p>
             )}
-            <div className="dialog-actions">
+            <div className={`${dialogStyles.dialogActions} dialog-actions`}>
               <Button
                 type="button"
                 variant="cancel"
@@ -3513,7 +3513,7 @@ function ActionForm({
       {children}
       <Message error={error} success={success} />
       {registerSave ? null : closeDialog ? (
-        <div className="dialog-actions">
+        <div className={`${dialogStyles.dialogActions} dialog-actions`}>
           <Button
             type="button"
             variant="cancel"

@@ -6688,15 +6688,6 @@ details.secondary-actions {
   }
 }
 
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-left: auto;
-  gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid #e5e5e5;
-}
-
 .business-combobox-control.has-middle {
   grid-template-columns: minmax(220px, 1fr) 36px minmax(118px, 145px) auto;
 }

@@ -10652,12 +10652,15 @@ for (const width of [1280, 390]) {
         name: saveLabel,
         exact: true,
       });
+      const actions = dialog.locator(".dialog-actions");
+      await expect(actions).toHaveCSS("display", "flex");
+      await expect(actions).toHaveCSS("gap", "8px");
       const lastInput = dialog.locator("input").last();
       await lastInput.scrollIntoViewIfNeeded();
       await expect(lastInput).toBeInViewport();
       const cancelBox = await cancel.boundingBox();
       const saveBox = await saveButton.boundingBox();
-      const footer = await dialog.locator(".dialog-actions").boundingBox();
+      const footer = await actions.boundingBox();
       const lastInputBox = await lastInput.boundingBox();
       expect(cancelBox!.x + cancelBox!.width).toBeLessThan(saveBox!.x);
       expect(Math.abs(cancelBox!.y - saveBox!.y)).toBeLessThan(2);
