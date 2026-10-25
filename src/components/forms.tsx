@@ -22,6 +22,7 @@ import compatibilityDeviceListStyles from "./compatibility-device-list.module.cs
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import { EditableSelect } from "./editable-select";
 import priceListControlsStyles from "./price-list-controls.module.css";
+import priceRuleListStyles from "./price-rule-list.module.css";
 import priceOptionCardStyles from "./price-option-card.module.css";
 import {
   deviceProjects,
@@ -6066,9 +6067,11 @@ export function PriceList({
                             !query.trim() && !expanded.includes(group.key)
                           }
                         >
-                          <div className="rule-list">
+                          <div
+                            className={`${priceRuleListStyles.ruleList} rule-list`}
+                          >
                             <div
-                              className={`price-rule-header${batchMode ? " is-batch" : ""}`}
+                              className={`${priceRuleListStyles.header} price-rule-header${batchMode ? " is-batch" : ""}`}
                             >
                               {batchMode && <span aria-hidden="true" />}
                               <strong>{it.project}</strong>
@@ -6083,7 +6086,7 @@ export function PriceList({
                             {group.rules.map((rule) => (
                               <article
                                 key={rule.id}
-                                className={`price-rule-row business-list-row${batchMode ? " is-batch" : ""}${!batchMode && activeRuleId === rule.id ? " order-row-active" : ""}`}
+                                className={`${priceRuleListStyles.row} price-rule-row business-list-row${batchMode ? " is-batch" : ""}${!batchMode && activeRuleId === rule.id ? " order-row-active" : ""}`}
                                 data-price-rule={rule.id}
                                 onClick={() => {
                                   if (!batchMode) setActiveRuleId(rule.id);

@@ -10103,6 +10103,11 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   ).toBeLessThan(2);
   const row = rows.first();
   await expect(row).toBeVisible();
+  const desktopColumnCount = await row.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(desktopColumnCount).toBe(4);
   const rowPosition = await row.boundingBox();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(
@@ -10197,6 +10202,11 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await page
     .getByRole("button", { name: "Gestisci selezione", exact: true })
     .click();
+  const batchColumnCount = await changed.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(batchColumnCount).toBe(5);
   await expect(nextRow).not.toHaveClass(/order-row-active/);
   const modelSelection = page.getByRole("checkbox", {
     name: "Seleziona iPhone 13",
@@ -10243,6 +10253,11 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await changed.scrollIntoViewIfNeeded();
+  const mobileColumnCount = await changed.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(mobileColumnCount).toBe(4);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -10256,6 +10271,11 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await page
     .getByRole("button", { name: "Gestisci selezione", exact: true })
     .click();
+  const mobileBatchColumnCount = await changed.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(mobileBatchColumnCount).toBe(5);
   await expect(changed.getByRole("checkbox")).not.toBeChecked();
   expect(
     await page.evaluate(

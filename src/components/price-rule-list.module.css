@@ -1,0 +1,221 @@
+.ruleList:global(.rule-list) {
+  width: 100%;
+  margin: 8px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.header:global(.price-rule-header) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px 92px 42px;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 10px 7px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f5f6f6;
+  font-size: 12px;
+}
+
+.header:global(.price-rule-header):global(.is-batch) {
+  grid-template-columns: 18px minmax(0, 1fr) 112px 92px 42px;
+  padding-left: 10px;
+}
+
+.header:global(.price-rule-header) strong {
+  padding-inline: 6px;
+}
+
+.header :global(.price-rule-heading-quote),
+.header :global(.price-option-count-heading) {
+  text-align: right;
+}
+
+.row:global(.price-rule-row) {
+  --record-action-size: 36px;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px 92px 42px;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 5px 10px 5px 12px;
+  border-bottom: 1px solid var(--line);
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+.row:global(.price-rule-row):global(.is-batch) {
+  grid-template-columns: 18px minmax(0, 1fr) 112px 92px 42px;
+}
+
+.row:global(.price-rule-row):last-child {
+  border-bottom: 0;
+}
+
+.row:global(.price-rule-row):hover,
+.row:global(.price-rule-row):focus-within,
+.row:global(.price-rule-row):has(> input[type="checkbox"]:checked) {
+  background: #fffbea;
+}
+
+.row :global(.inline-rule-project) {
+  width: 100%;
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.row :global(.inline-rule-suggested) {
+  width: 100%;
+  min-width: 0;
+}
+
+.row :global(.inline-rule-value) {
+  border: 0;
+  padding: 5px 6px;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.row :global(.inline-rule-value):hover,
+.row :global(.inline-rule-value):focus-visible {
+  background: var(--surface-hover, #f5f7f7);
+}
+
+.row :global(.inline-rule-value.inline-rule-suggested) {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.row :global(.inline-rule-value.inline-rule-project):hover,
+.row :global(.inline-rule-value.inline-rule-project):focus-visible,
+.row :global(.inline-rule-value.inline-rule-suggested):hover,
+.row :global(.inline-rule-value.inline-rule-suggested):focus-visible {
+  transform: none;
+  background: transparent;
+}
+
+.row :global(.inline-rule-input) {
+  min-height: 34px;
+  padding: 5px 6px;
+}
+
+.row :global(.price-row-actions) {
+  width: 42px;
+  min-height: 40px;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.row :global(.price-option-count) {
+  padding-inline: 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.row:global(.price-rule-row):global(.business-list-row) {
+  transform: none;
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+.row:global(.price-rule-row):global(.business-list-row):hover:not(
+    :global(.order-row-active)
+  ):not(:global(.order-row-hover-suppressed)):not(
+    :global(.order-row-status-moving)
+  ):not(:global(.order-row-status-highlight)) {
+  background: #fffbea;
+  box-shadow: inset 2px 0 #e4b600;
+  transform: none;
+}
+
+.row:global(.price-rule-row):global(.business-list-row):global(
+    .order-row-active
+  ) {
+  box-shadow:
+    inset 2px 0 #e4b600,
+    inset 0 1px rgb(228 182 0 / 18%),
+    inset -1px 0 rgb(228 182 0 / 18%),
+    inset 0 -1px rgb(228 182 0 / 18%);
+  transform: none;
+}
+
+.row:global(.price-rule-row) > input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.row :global(.button) {
+  min-height: 36px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.row :global(.price-row-actions) > :global(.record-icon) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.row:global(.price-rule-row):hover
+  :global(.price-row-actions)
+  > :global(.record-icon),
+.row:global(.price-rule-row):focus-within
+  :global(.price-row-actions)
+  > :global(.record-icon) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .row :global(.price-row-actions) > :global(.record-icon) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .row:global(.price-rule-row) {
+    grid-template-columns: minmax(0, 1fr) 74px 62px 36px;
+    gap: 6px;
+  }
+
+  .row:global(.price-rule-row):global(.is-batch) {
+    grid-template-columns: 18px minmax(0, 1fr) 74px 62px 36px;
+  }
+
+  .header:global(.price-rule-header) {
+    grid-template-columns: minmax(0, 1fr) 74px 62px 36px;
+  }
+
+  .header:global(.price-rule-header):global(.is-batch) {
+    grid-template-columns: 18px minmax(0, 1fr) 74px 62px 36px;
+  }
+
+  .row :global(.button) {
+    min-height: 40px;
+    padding: 6px;
+  }
+
+  .row :global(.rule-price) {
+    font-size: 12px;
+  }
+
+  .row :global(.price-row-actions) {
+    width: 36px;
+  }
+}
