@@ -10045,7 +10045,7 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await expect(addProject).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(addProject).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await addProject.hover();
-  await expect(addProject).toHaveCSS("background-color", "rgb(255, 245, 201)");
+  await expect(addProject).toHaveCSS("background-color", "rgb(255, 241, 182)");
   await addProject.click();
   const createDialog = page.getByRole("dialog");
   await enterBusinessValue(
@@ -10076,7 +10076,7 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await expect(batchButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(batchButton).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await batchButton.hover();
-  await expect(batchButton).toHaveCSS("background-color", "rgb(255, 245, 201)");
+  await expect(batchButton).toHaveCSS("background-color", "rgb(255, 241, 182)");
   const ruleListPosition = await page
     .locator(".rule-list")
     .first()

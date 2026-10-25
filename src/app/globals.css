@@ -7321,7 +7321,6 @@ details.secondary-actions {
 }
 .price-add-project.button:hover {
   border-color: transparent;
-  background: #fff5c9;
   color: #332700;
 }
 .price-add-project.button:active {
@@ -7805,7 +7804,6 @@ details summary {
 .batch-control-button.button:hover,
 .batch-control-button.button:focus-visible {
   border-color: transparent;
-  background: #fff5c9;
   color: #332700;
 }
 .batch-control-button.button:active {
