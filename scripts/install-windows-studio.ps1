@@ -216,7 +216,7 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
         if ((-not $manualInstall -and -not $onlineInstall) -or $installMode -notin @("first-install", "upgrade")) {
           throw "Studio release is already installed: $stableRoot"
         }
-        if ($manualInstall) { Invoke-NgtInstallStage "incomplete-release-recovery" {
+        if ($manualInstall -or $onlineInstall) { Invoke-NgtInstallStage "incomplete-release-recovery" {
           Move-NgtStudioIncompleteCandidateRelease `
             -InstallRoot $stableInstallRoot `
             -ReleaseRoot $stableRoot `

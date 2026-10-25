@@ -699,6 +699,9 @@ describe("Windows persistent startup", () => {
     expect(installerScript).toContain(
       "$manualReservation.marker.previousRelease",
     );
+    expect(installerScript).toContain(
+      'if ($manualInstall -or $onlineInstall) { Invoke-NgtInstallStage "incomplete-release-recovery"',
+    );
     expect(
       installerScript.indexOf(
         "$stableInstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)",

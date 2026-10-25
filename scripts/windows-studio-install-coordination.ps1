@@ -494,12 +494,25 @@ function Move-NgtStudioIncompleteCandidateRelease(
   $release = [System.IO.Path]::GetFullPath($ReleaseRoot)
   $reservation = Get-NgtManualInstallReservation $root
   $marker = $reservation.marker
+  if (-not $marker) {
+    throw "The installer cannot replace a release directory without a maintenance marker."
+  }
+  $operation = [string]$marker.operation
+  $statusTaskId = if ($operation -eq "manual-install") {
+    [string]$reservation.status.manualInstallId
+  } else {
+    [string]$reservation.status.updateId
+  }
   $expectedRelease = [System.IO.Path]::GetFullPath((Join-Path $root ("releases\v" + [string]$marker.targetVersion)))
-  if (-not $marker -or
+  if ($operation -notin @("manual-install", "online-update") -or
       [string]$marker.updateId -ne $UpdateId -or
       [string]$reservation.lock.updateId -ne $UpdateId -or
-      [string]$reservation.status.manualInstallId -ne $UpdateId -or
+      $statusTaskId -ne $UpdateId -or
+      [string]$reservation.lock.operation -ne $operation -or
+      [string]$reservation.status.operation -ne $operation -or
       [string]$marker.targetVersion -eq "" -or
+      [string]$reservation.lock.targetVersion -ne [string]$marker.targetVersion -or
+      [string]$reservation.status.targetVersion -ne [string]$marker.targetVersion -or
       [string]$marker.installMode -notin @("first-install", "upgrade") -or
       $release -ine $expectedRelease) {
     throw "The installer cannot replace a release directory outside its reserved candidate path."

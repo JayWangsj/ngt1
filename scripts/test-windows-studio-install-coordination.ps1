@@ -260,6 +260,135 @@ try {
     throw "A partial upgrade candidate was not isolated from the still-active previous release."
   }
 
+  $onlineCandidate = New-NgtInstallFixture (Join-Path $testRoot "online-upgrade-candidate")
+  $onlineCandidateId = [guid]::NewGuid().ToString()
+  $onlineCandidateLock = [pscustomobject]@{
+    updateId = $onlineCandidateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  }
+  $onlineCandidateStatus = [pscustomobject]@{
+    updateId = $onlineCandidateId
+    operation = "online-update"
+    status = "installing"
+    stage = "installing"
+    targetVersion = "2.0.15"
+  }
+  $onlineCandidateMarker = [pscustomobject]@{
+    updateId = $onlineCandidateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+    previousVersion = "2.0.11"
+    previousRelease = $onlineCandidate.oldRelease
+    dataRoot = Join-Path $onlineCandidate.installRoot "data-store"
+    installMode = "upgrade"
+  }
+  Write-NgtInstallJsonAtomic (Join-Path $onlineCandidate.installRoot "update.lock") $onlineCandidateLock
+  Write-NgtInstallJsonAtomic (Join-Path $onlineCandidate.installRoot "update-status.json") $onlineCandidateStatus
+  Write-NgtInstallJsonAtomic `
+    (Join-Path $onlineCandidate.installRoot ".local\update-maintenance.json") $onlineCandidateMarker
+  $businessDataSentinel = Join-Path $onlineCandidate.installRoot "data-store\business-data.txt"
+  New-Item -ItemType Directory -Path (Split-Path -Parent $businessDataSentinel) -Force | Out-Null
+  Set-Content -LiteralPath $businessDataSentinel -Value "preserve business data" -NoNewline
+  Set-Content -LiteralPath (Join-Path $onlineCandidate.newRelease "partial-only.txt") `
+    -Value "interrupted deployment" -NoNewline
+
+  $wrongOnlineOwnerRejected = $false
+  try {
+    Move-NgtStudioIncompleteCandidateRelease -InstallRoot $onlineCandidate.installRoot `
+      -ReleaseRoot $onlineCandidate.newRelease -UpdateId ([guid]::NewGuid().ToString()) | Out-Null
+  } catch { $wrongOnlineOwnerRejected = $_.Exception.Message -like "The installer cannot replace*" }
+  if (-not $wrongOnlineOwnerRejected -or -not (Test-Path -LiteralPath $onlineCandidate.newRelease)) {
+    throw "An unrelated online task was allowed to move the candidate release."
+  }
+
+  $onlineCandidateMarker.targetVersion = "2.0.16"
+  Write-NgtInstallJsonAtomic `
+    (Join-Path $onlineCandidate.installRoot ".local\update-maintenance.json") $onlineCandidateMarker
+  $wrongOnlineVersionRejected = $false
+  try {
+    Move-NgtStudioIncompleteCandidateRelease -InstallRoot $onlineCandidate.installRoot `
+      -ReleaseRoot $onlineCandidate.newRelease -UpdateId $onlineCandidateId | Out-Null
+  } catch { $wrongOnlineVersionRejected = $_.Exception.Message -like "The installer cannot replace*" }
+  if (-not $wrongOnlineVersionRejected -or -not (Test-Path -LiteralPath $onlineCandidate.newRelease)) {
+    throw "A mismatched online target version was allowed to move the candidate release."
+  }
+  $onlineCandidateMarker.targetVersion = "2.0.15"
+  Write-NgtInstallJsonAtomic `
+    (Join-Path $onlineCandidate.installRoot ".local\update-maintenance.json") $onlineCandidateMarker
+
+  $onlineCandidateMarker.operation = "manual-install"
+  Write-NgtInstallJsonAtomic `
+    (Join-Path $onlineCandidate.installRoot ".local\update-maintenance.json") $onlineCandidateMarker
+  $wrongOnlineMarkerRejected = $false
+  try {
+    Move-NgtStudioIncompleteCandidateRelease -InstallRoot $onlineCandidate.installRoot `
+      -ReleaseRoot $onlineCandidate.newRelease -UpdateId $onlineCandidateId | Out-Null
+  } catch { $wrongOnlineMarkerRejected = $_.Exception.Message -like "The installer cannot replace*" }
+  if (-not $wrongOnlineMarkerRejected -or -not (Test-Path -LiteralPath $onlineCandidate.newRelease)) {
+    throw "A mismatched maintenance operation was allowed to move the online candidate release."
+  }
+  $onlineCandidateMarker.operation = "online-update"
+  Write-NgtInstallJsonAtomic `
+    (Join-Path $onlineCandidate.installRoot ".local\update-maintenance.json") $onlineCandidateMarker
+
+  Move-NgtStudioIncompleteCandidateRelease -InstallRoot $onlineCandidate.installRoot `
+    -ReleaseRoot $onlineCandidate.newRelease -UpdateId $onlineCandidateId | Out-Null
+  $onlineFailedReleases = @(
+    Get-ChildItem -LiteralPath (Join-Path $onlineCandidate.installRoot ".local\failed-install-releases") -Directory
+  )
+  $repeatMove = Move-NgtStudioIncompleteCandidateRelease -InstallRoot $onlineCandidate.installRoot `
+    -ReleaseRoot $onlineCandidate.newRelease -UpdateId $onlineCandidateId
+  if ((Test-Path -LiteralPath $onlineCandidate.newRelease) -or
+      -not (Test-Path -LiteralPath $onlineCandidate.oldRelease) -or
+      -not (Test-Path -LiteralPath $businessDataSentinel) -or
+      $onlineFailedReleases.Count -ne 1 -or $null -ne $repeatMove) {
+    throw "An online retry did not isolate exactly one incomplete candidate while preserving the active release and data."
+  }
+  New-Item -ItemType Directory -Path $onlineCandidate.newRelease -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $onlineCandidate.newRelease "studio-release.json") `
+    -Value '{"version":"2.0.15"}' -NoNewline
+  if ((Test-Path -LiteralPath (Join-Path $onlineCandidate.newRelease "partial-only.txt")) -or
+      -not (Test-Path -LiteralPath (Join-Path $onlineCandidate.newRelease "studio-release.json"))) {
+    throw "A same-version online retry reused files from the interrupted candidate."
+  }
+
+  $activeCandidate = New-NgtInstallFixture (Join-Path $testRoot "online-active-candidate")
+  $activeCandidateId = [guid]::NewGuid().ToString()
+  $activeCandidateConfigPath = Join-Path $activeCandidate.installRoot ".local\studio.json"
+  $activeCandidateConfig = Get-NgtInstallJson $activeCandidateConfigPath
+  $activeCandidateConfig.activeRelease = $activeCandidate.newRelease
+  Write-NgtInstallJsonAtomic $activeCandidateConfigPath $activeCandidateConfig
+  Write-NgtInstallJsonAtomic (Join-Path $activeCandidate.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $activeCandidateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $activeCandidate.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $activeCandidateId
+    operation = "online-update"
+    status = "installing"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic `
+    (Join-Path $activeCandidate.installRoot ".local\update-maintenance.json") ([pscustomobject]@{
+      updateId = $activeCandidateId
+      operation = "online-update"
+      targetVersion = "2.0.15"
+      previousVersion = "2.0.11"
+      previousRelease = $activeCandidate.oldRelease
+      dataRoot = Join-Path $activeCandidate.installRoot "data-store"
+      installMode = "upgrade"
+    })
+  $activeCandidateRejected = $false
+  try {
+    Move-NgtStudioIncompleteCandidateRelease -InstallRoot $activeCandidate.installRoot `
+      -ReleaseRoot $activeCandidate.newRelease -UpdateId $activeCandidateId | Out-Null
+  } catch { $activeCandidateRejected = $true }
+  if (-not $activeCandidateRejected -or -not (Test-Path -LiteralPath $activeCandidate.newRelease)) {
+    throw "The active online release was moved as if it were an incomplete candidate."
+  }
+
   $activeRoot = Join-Path $testRoot "active"
   $active = New-NgtInstallFixture $activeRoot
   $updateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16"
