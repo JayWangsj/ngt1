@@ -6036,6 +6036,34 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await expect(page).toHaveURL(/\/retail$/);
 });
 
+test("retail success dialog keeps its component layout", async ({ page }) => {
+  await page.goto("/", { waitUntil: "commit" });
+  await page.waitForLoadState("networkidle");
+  await page.goto("/retail", { waitUntil: "commit" });
+  await page.waitForLoadState("networkidle");
+  const cable = page
+    .locator(".retail-product-grid")
+    .getByRole("button", { name: /Cavo USB-C Test/ });
+  await cable.click();
+  await cable.click();
+  await page.getByRole("button", { name: "Carta", exact: true }).click();
+  await page.getByRole("button", { name: /Conferma incasso/ }).click();
+
+  const dialog = page.getByRole("dialog");
+  const successStatus = dialog.getByRole("status");
+  await expect(successStatus).toContainText("Vendita completata");
+  await expect(successStatus).toHaveCSS("max-width", "520px");
+  await expect(successStatus).toHaveCSS("padding", "20px");
+  await expect(successStatus).toHaveCSS("box-shadow", "none");
+  await expect(dialog.locator(":scope > .dialog-heading")).toHaveCSS(
+    "position",
+    "absolute",
+  );
+  await expect(successStatus.locator(":scope > div")).toHaveCSS("gap", "10px");
+  await dialog.getByRole("button", { name: "Prossima vendita" }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test("completes a retail sale and opens its immutable receipt", async ({
   page,
 }) => {

@@ -35,6 +35,7 @@ import { Button } from "./ui/button";
 import backButtonStyles from "./ui/back-button.module.css";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import retailSalesHistoryStyles from "./retail-sales-history.module.css";
+import retailSuccessStyles from "./retail-success-dialog.module.css";
 
 type RetailProduct = {
   id: string;
@@ -609,7 +610,7 @@ export function RetailWorkbench({
           {dialog.view === "detail" && <RetailSaleDetail sale={dialog.sale} />}
           {dialog.view === "completed" && (
             <section
-              className="retail-success retail-success-dialog"
+              className={`retail-success retail-success-dialog ${retailSuccessStyles.successDialog}`}
               role="status"
             >
               <span>

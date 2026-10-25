@@ -5678,46 +5678,6 @@ details.secondary-actions {
   width: 100%;
   min-height: 48px;
 }
-.retail-success {
-  max-width: 520px;
-  margin: 70px auto;
-  padding: 42px;
-  text-align: center;
-}
-.retail-success-dialog {
-  margin: 10px auto 20px;
-  padding: 20px;
-  box-shadow: none;
-}
-.form-dialog:has(.retail-success-dialog) > .dialog-heading {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 1;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.retail-success > span {
-  display: grid;
-  place-items: center;
-  width: 70px;
-  height: 70px;
-  margin: 0 auto 18px;
-  border-radius: 50%;
-  color: #2e7d46;
-  background: #e6f4e9;
-}
-.retail-success > strong {
-  display: block;
-  font-size: 34px;
-}
-.retail-success > div {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 22px;
-}
 .retail-detail-grid {
   grid-template-columns: minmax(0, 1fr) 340px;
 }
