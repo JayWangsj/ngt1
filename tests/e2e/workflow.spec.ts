@@ -3134,10 +3134,13 @@ test("settings detail pages use a scoped shell layout", async ({ page }) => {
   const shell = page.locator(".settings-detail-page");
   await expect(shell).toHaveCSS("display", "grid");
   await expect(shell).toHaveCSS("gap", "14px");
-  await expect(shell.locator(":scope > .back-link")).toHaveCSS(
-    "justify-self",
-    "start",
-  );
+  const backButton = shell.locator(":scope > .back-link");
+  await expect(backButton).toHaveCSS("justify-self", "start");
+  await expect(backButton).toHaveCSS("display", "flex");
+  await expect(backButton).toHaveCSS("margin-bottom", "18px");
+  await expect(backButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await backButton.hover();
+  await expect(backButton).toHaveCSS("background-color", "rgb(255, 248, 217)");
   const header = shell.locator(":scope > .page-header");
   await expect(header).toHaveCSS("align-items", "flex-start");
   await expect(header).toHaveCSS("margin-bottom", "2px");
@@ -5993,9 +5996,13 @@ test("sales history uses a monthly filter", async ({ page }) => {
     "gap",
     "8px",
   );
-  await expect(
-    dialog.getByRole("button", { name: /Storico vendite/ }),
-  ).toHaveCSS("margin", "0px");
+  const backToHistory = dialog.getByRole("button", { name: /Storico vendite/ });
+  await expect(backToHistory).toHaveCSS("margin", "0px");
+  await backToHistory.hover();
+  await expect(backToHistory).toHaveCSS(
+    "background-color",
+    "rgb(255, 248, 217)",
+  );
   const detailDialogBox = await dialog.boundingBox();
   expect(detailDialogBox?.width).toBe(880);
   expect(detailDialogBox?.height).toBe(680);

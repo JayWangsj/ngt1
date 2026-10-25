@@ -32,6 +32,7 @@ import {
   type SaleHistoryRow,
 } from "./retail-sales-history";
 import { Button } from "./ui/button";
+import backButtonStyles from "./ui/back-button.module.css";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import retailSalesHistoryStyles from "./retail-sales-history.module.css";
 
@@ -565,7 +566,7 @@ export function RetailWorkbench({
                 <Button
                   type="button"
                   variant="outline"
-                  className={`back-link ${retailSalesHistoryStyles.dialogBack}`}
+                  className={`back-link ${backButtonStyles.backLink} ${retailSalesHistoryStyles.dialogBack}`}
                   onClick={() =>
                     setDialog(
                       dialog.returnTo === "history"

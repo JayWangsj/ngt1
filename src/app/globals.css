@@ -1536,8 +1536,7 @@ td small {
 .order-link,
 .section-heading a,
 .dashboard-detail-link,
-.customer-back,
-.back-link {
+.customer-back {
   transition:
     background-color 150ms ease-out,
     color 150ms ease-out;
@@ -1555,9 +1554,7 @@ td small {
 .dashboard-detail-link:hover,
 .dashboard-detail-link:focus-visible,
 .customer-back:hover,
-.customer-back:focus-visible,
-.back-link:hover,
-.back-link:focus-visible {
+.customer-back:focus-visible {
   color: #6e5200;
 }
 .bottom-grid {
@@ -2058,12 +2055,6 @@ label {
   border-left-color: var(--feedback-warning);
   background: var(--feedback-warning-surface);
   color: var(--feedback-warning);
-}
-.back-link {
-  font-size: 12px;
-  color: var(--teal);
-  display: block;
-  margin-bottom: 20px;
 }
 .detail-status {
   display: flex;
@@ -7515,7 +7506,6 @@ details summary:hover {
   background: #fff1b6;
   border-color: #806000;
 }
-.back-link.button,
 .customer-back.button {
   display: inline-flex;
   padding: 9px 14px;
@@ -7525,8 +7515,6 @@ details summary:hover {
   font-size: 13px;
   font-weight: 600;
 }
-.back-link.button:hover,
-.back-link.button:focus-visible,
 .customer-back.button:hover,
 .customer-back.button:focus-visible,
 .retail-sales-trigger.button:hover,
@@ -7535,7 +7523,6 @@ details summary:hover {
   background: #fff8d9;
   color: #574200;
 }
-.back-link.button:active,
 .customer-back.button:active,
 .retail-sales-trigger.button:active {
   background: #ffe99d;

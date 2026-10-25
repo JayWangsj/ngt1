@@ -1,0 +1,21 @@
+.backLink:global(.button):global(.button-outline) {
+  display: inline-flex;
+  padding: 9px 14px;
+  margin-bottom: 18px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.backLink:global(.button):global(.button-outline):hover,
+.backLink:global(.button):global(.button-outline):focus-visible {
+  border-color: transparent;
+  background: #fff8d9;
+  color: #574200;
+}
+
+.backLink:global(.button):global(.button-outline):active {
+  background: #ffe99d;
+}

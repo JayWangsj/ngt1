@@ -3,7 +3,7 @@
   gap: 8px;
 }
 
-.dialogBack:global(.back-link) {
+:global(.button).dialogBack:global(.back-link):global(.button-outline) {
   width: max-content;
   margin: 0;
 }

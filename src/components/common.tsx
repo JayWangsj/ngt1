@@ -19,11 +19,16 @@ import {
   type OrderStatus,
 } from "@/lib/domain";
 import { Button } from "./ui/button";
+import backButtonStyles from "./ui/back-button.module.css";
 import { OrderListBody } from "./order-list-controls";
 import { getBusinessDay } from "@/lib/business-date";
 export function BackButton({ href, label }: { href: string; label: string }) {
   return (
-    <Button asChild variant="outline" className="back-link">
+    <Button
+      asChild
+      variant="outline"
+      className={`back-link ${backButtonStyles.backLink}`}
+    >
       <Link href={href}>← {label}</Link>
     </Button>
   );
