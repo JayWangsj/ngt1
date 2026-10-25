@@ -4177,10 +4177,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   padding-left: 20px;
   border-left: 1px solid var(--line);
 }
-.quick-service-service-cards {
-  display: grid;
-  gap: 10px;
-}
 .quick-service-service-add {
   width: 100%;
   min-height: 58px;

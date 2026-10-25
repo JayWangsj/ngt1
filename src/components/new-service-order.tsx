@@ -288,7 +288,9 @@ export function NewServiceOrder({
               className={`quick-service-section ${newServiceOrderStyles.section}`}
             >
               <h2>{it.quickService.serviceItems}</h2>
-              <div className="quick-service-service-cards">
+              <div
+                className={`quick-service-service-cards ${newServiceOrderStyles.serviceCards}`}
+              >
                 {selectedServiceItems.map((service) => (
                   <article
                     className={`selection-summary selected-project-summary ${selectionSummaryStyles.scope}`}

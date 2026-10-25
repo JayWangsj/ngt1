@@ -63,3 +63,8 @@
 .schedule > label {
   width: min(100%, 620px);
 }
+
+.serviceCards {
+  display: grid;
+  gap: 10px;
+}
