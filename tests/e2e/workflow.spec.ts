@@ -4358,6 +4358,25 @@ test("filters inventory by compatible device and exposes compatibility", async (
     "padding",
     "12px 14px",
   );
+  for (const [selector, minWidth] of [
+    ["th.inventory-product-cell", "210px"],
+    ["th.inventory-category-cell", "150px"],
+    ["th.inventory-usage-cell", "110px"],
+    ["th.inventory-compatible-cell", "220px"],
+    ["th.inventory-price-cell", "82px"],
+    ["th.inventory-stepper-cell", "146px"],
+    ["th.inventory-quantity-cell", "70px"],
+    ["th.inventory-status-cell", "80px"],
+  ]) {
+    await expect(inventoryTable.locator(selector).first()).toHaveCSS(
+      "min-width",
+      minWidth,
+    );
+  }
+  await expect(inventoryTable.locator("th.inventory-status-cell")).toHaveCSS(
+    "padding",
+    "12px 6px",
+  );
   await expect(filters).toHaveCSS("display", "grid");
   await expect(filters).toHaveCSS("gap", "10px");
   await expect(filters).toHaveCSS("padding", "12px 16px");
