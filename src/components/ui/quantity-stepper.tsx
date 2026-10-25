@@ -2,6 +2,7 @@
 
 import { Minus, Plus } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
+import styles from "./quantity-stepper.module.css";
 
 type QuantityStepperProps = {
   name?: string;
@@ -91,6 +92,7 @@ export function QuantityStepper({
         <Minus size={16} aria-hidden="true" />
       </button>
       <input
+        className={styles.input}
         name={name}
         aria-label={ariaLabel}
         type="number"

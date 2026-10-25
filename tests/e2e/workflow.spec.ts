@@ -4209,6 +4209,10 @@ test("keeps inventory row editor styles compact and scoped", async ({
   await expect(tableStepper.locator("input")).toHaveCSS("min-height", "30px");
   await expect(tableStepper.locator("input")).toHaveCSS("padding", "3px");
   await expect(tableStepper.locator("input")).toHaveCSS("text-align", "center");
+  await expect(tableStepper.locator("input")).toHaveCSS(
+    "appearance",
+    "textfield",
+  );
 });
 
 test("keeps inventory batch selection controls sized", async ({ page }) => {
