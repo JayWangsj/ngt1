@@ -2062,8 +2062,14 @@ test("quick service device and service selectors retain the large dialog size", 
     "rgb(232, 187, 21)",
   );
   await servicePicker
-    .getByRole("button", { name: "Annulla", exact: true })
+    .getByRole("button", { name: "Conferma selezione", exact: true })
     .click();
+  const serviceCards = page.locator(".quick-service-service-cards");
+  await expect(serviceCards).toHaveCSS("display", "grid");
+  await expect(serviceCards).toHaveCSS("gap", "10px");
+  await expect(serviceCards.locator(".selected-project-summary")).toHaveCount(
+    1,
+  );
 });
 
 test("manages one quick service for held service orders and retail checkout", async ({

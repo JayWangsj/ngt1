@@ -97,7 +97,7 @@ export default async function NewOrder({
           id: service.id,
           name: service.name,
           notes: service.notes,
-          defaultPrice: Number(service.defaultPrice) * 100,
+          defaultPrice: Math.round(Number(service.defaultPrice) * 100),
         }))}
         repairForm={
           <NewOrderWizard
