@@ -2931,6 +2931,13 @@ test("reports route opens the requested monthly receipt dialog", async ({
 }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      message.text().includes("Hydration failed")
+    )
+      pageErrors.push(message.text());
+  });
   await page.goto("/reports?day=2026-10-03");
   await expect(page).toHaveURL(/\/\?receipts=2026-10&day=2026-10-03$/);
   const monthlyReceiptDialog = page.getByRole("dialog", {

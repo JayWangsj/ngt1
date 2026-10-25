@@ -2,7 +2,6 @@
 
 import { CalendarRange } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useSyncExternalStore } from "react";
 import { money } from "@/lib/domain";
 import { DatePicker } from "./business-select";
 import { DialogBody, FormDialog } from "./forms";
@@ -17,8 +16,6 @@ type MonthlyReceiptSummary = {
     changePercentage: number | null;
   }[];
 };
-
-const subscribeToBrowser = () => () => {};
 
 export function MonthlyReceiptsDialog({
   open,
@@ -37,12 +34,6 @@ export function MonthlyReceiptsDialog({
 }) {
   const it = useMessages();
   const router = useRouter();
-  const mounted = useSyncExternalStore(
-    subscribeToBrowser,
-    () => true,
-    () => false,
-  );
-
   function receiptUrl(nextMonth?: string) {
     const params = new URLSearchParams(window.location.search);
     if (nextMonth) params.set("receipts", nextMonth);
@@ -66,7 +57,7 @@ export function MonthlyReceiptsDialog({
         <CalendarRange size={16} aria-hidden="true" />
         {it.dashboard.monthlyReceipts}
       </Button>
-      {mounted && open && summary && (
+      {open && summary && (
         <FormDialog
           title={it.dashboard.monthlyReceipts}
           subtitle={it.dashboard.monthlyReceiptsDescription}
