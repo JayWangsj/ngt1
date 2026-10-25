@@ -217,7 +217,10 @@ function ProductCompatibilityDialog({
       size="wide"
       onClose={() => (adding ? setAdding(null) : onClose())}
     >
-      <DialogBody data-product-compatibility-dialog>
+      <DialogBody
+        className={inventoryStyles.compatibilityDialog}
+        data-product-compatibility-dialog
+      >
         {adding ? (
           <CompatibilityAddEditor
             value={adding}

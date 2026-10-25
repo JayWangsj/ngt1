@@ -4687,32 +4687,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   gap: 8px;
   align-items: center;
 }
-.compatibility-overview,
-.compatibility-device-list {
-  display: grid;
-  gap: 10px;
-}
-.compatibility-product-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-}
-.compatibility-product-summary > span:last-child,
-.compatibility-list-heading {
-  display: grid;
-  gap: 3px;
-}
-.compatibility-product-summary small,
-.compatibility-list-heading small {
-  color: var(--muted);
-}
-.compatibility-list-heading {
-  padding: 8px 0 2px;
-}
 .compatibility-device-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -4776,10 +4750,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .compatibility-project-label:focus-within button {
   opacity: 1;
   pointer-events: auto;
-}
-.compatibility-add-device {
-  width: 100%;
-  margin-top: 6px;
 }
 .compatibility-add-editor {
   display: grid;

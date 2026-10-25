@@ -21,3 +21,39 @@
   color: #ad3939;
   background: #fee8e8;
 }
+
+.compatibilityDialog :global(.compatibility-overview),
+.compatibilityDialog :global(.compatibility-device-list) {
+  display: grid;
+  gap: 10px;
+}
+
+.compatibilityDialog :global(.compatibility-product-summary) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.compatibilityDialog :global(.compatibility-product-summary > span:last-child),
+.compatibilityDialog :global(.compatibility-list-heading) {
+  display: grid;
+  gap: 3px;
+}
+
+.compatibilityDialog :global(.compatibility-product-summary small),
+.compatibilityDialog :global(.compatibility-list-heading small) {
+  color: var(--muted);
+}
+
+.compatibilityDialog :global(.compatibility-list-heading) {
+  padding: 8px 0 2px;
+}
+
+.compatibilityDialog :global(.compatibility-add-device) {
+  width: 100%;
+  margin-top: 6px;
+}

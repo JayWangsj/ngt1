@@ -8407,6 +8407,13 @@ test("inventory repair products retain their compatibility editor", async ({
   await expect(
     dialog.locator(":scope > .dialog-body[data-product-compatibility-dialog]"),
   ).toBeVisible();
+  const overview = dialog.locator(".compatibility-overview");
+  await expect(overview).toHaveCSS("display", "grid");
+  await expect(overview).toHaveCSS("gap", "10px");
+  await expect(dialog.locator(".compatibility-product-summary")).toHaveCSS(
+    "padding",
+    "10px 12px",
+  );
   await expect(dialog.locator(":scope > .dialog-footer")).toBeVisible();
   const compatibilityAdd = dialog.getByRole("button", {
     name: "Compatibilità",
