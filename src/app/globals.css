@@ -1535,8 +1535,7 @@ td small {
 
 .order-link,
 .section-heading a,
-.dashboard-detail-link,
-.customer-back {
+.dashboard-detail-link {
   transition:
     background-color 150ms ease-out,
     color 150ms ease-out;
@@ -1552,9 +1551,7 @@ td small {
 .section-heading a:hover,
 .section-heading a:focus-visible,
 .dashboard-detail-link:hover,
-.dashboard-detail-link:focus-visible,
-.customer-back:hover,
-.customer-back:focus-visible {
+.dashboard-detail-link:focus-visible {
   color: #6e5200;
 }
 .bottom-grid {
@@ -7300,12 +7297,6 @@ details.secondary-actions {
 .customer-section-heading h2 {
   margin: 0;
 }
-.customer-back {
-  display: inline-block;
-  margin-bottom: 14px;
-  color: var(--teal);
-  font-size: 13px;
-}
 .customer-device-row {
   display: flex;
   justify-content: space-between;
@@ -7506,24 +7497,12 @@ details summary:hover {
   background: #fff1b6;
   border-color: #806000;
 }
-.customer-back.button {
-  display: inline-flex;
-  padding: 9px 14px;
-  margin-bottom: 18px;
-  border-color: transparent;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 600;
-}
-.customer-back.button:hover,
-.customer-back.button:focus-visible,
 .retail-sales-trigger.button:hover,
 .retail-sales-trigger.button:focus-visible {
   border-color: transparent;
   background: #fff8d9;
   color: #574200;
 }
-.customer-back.button:active,
 .retail-sales-trigger.button:active {
   background: #ffe99d;
 }

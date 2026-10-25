@@ -9484,7 +9484,22 @@ test("customer page adds, edits and deletes a customer", async ({ page }) => {
   await page.getByRole("button", { name: "Salva", exact: true }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(page).toHaveURL(/customers$/);
-  await page.getByRole("link", { name: "Da modificare", exact: true }).click();
+  const customerLink = page.getByRole("link", {
+    name: "Da modificare",
+    exact: true,
+  });
+  const customerHref = await customerLink.getAttribute("href");
+  await page.goto(customerHref!);
+  const customerBack = page.locator(".customer-back");
+  await expect(customerBack).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await customerBack.hover();
+  await expect(customerBack).toHaveCSS(
+    "background-color",
+    "rgb(255, 248, 217)",
+  );
+  await customerBack.click();
+  await expect(page).toHaveURL(/customers$/);
+  await customerLink.click();
   await expect(page).toHaveURL(/\/customers\/[^/]+$/);
   const detailDialog = page.getByRole("dialog", {
     name: "Dettagli cliente",

@@ -6,6 +6,7 @@ import { CustomerDevices, CustomerSummary } from "./customers";
 import { CustomerDetailDialog } from "./customer-detail-dialog";
 import { getMessages } from "@/lib/i18n-server";
 import { Button } from "./ui/button";
+import backButtonStyles from "./ui/back-button.module.css";
 
 export async function CustomerDetail({
   id,
@@ -76,7 +77,11 @@ export async function CustomerDetail({
 
   return (
     <>
-      <Button asChild variant="outline" className="customer-back">
+      <Button
+        asChild
+        variant="outline"
+        className={`customer-back ${backButtonStyles.backLink}`}
+      >
         <Link href={returnTo}>← {it.backCustomers}</Link>
       </Button>
       {content}
