@@ -1007,7 +1007,7 @@ export function InventoryWorkspace({
     });
   }
   return (
-    <section className="panel inventory-main">
+    <section className={`${inventoryStyles.main} panel inventory-main`}>
       <div className={`${inventoryStyles.filters} inventory-filters`}>
         <input
           aria-label={it.inventory.search}

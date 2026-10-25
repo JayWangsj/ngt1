@@ -8158,16 +8158,6 @@ summary.record-icon::-webkit-details-marker {
   color: #ee9700;
   transform: translateX(8px);
 }
-.inventory-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 18px;
-  align-items: start;
-}
-.inventory-main {
-  min-width: 0;
-  overflow: hidden;
-}
 .inventory-table {
   min-width: 1380px;
   overflow-anchor: none;
@@ -8835,9 +8825,6 @@ summary.record-icon::-webkit-details-marker {
   }
   .inventory-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .inventory-layout {
-    grid-template-columns: 1fr;
   }
   .inventory-movements {
     position: static;
