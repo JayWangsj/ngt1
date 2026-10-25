@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import { RecordIcon } from "./ui/record-icon";
 import recordIconStyles from "./ui/record-icon.module.css";
 import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
+import productCompatibilityEditorStyles from "./product-compatibility-editor.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
 import { EditableSelect } from "./editable-select";
@@ -555,7 +556,9 @@ export function ProductCompatibilityFields({
   );
   return (
     <>
-      <fieldset className="product-compatibility-editor">
+      <fieldset
+        className={`${productCompatibilityEditorStyles.editor} product-compatibility-editor`}
+      >
         <legend>{it.inventory.compatibleDevices}</legend>
         {devices.map((device) => (
           <div

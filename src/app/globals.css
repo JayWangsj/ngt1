@@ -4168,16 +4168,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   display: grid;
   gap: 12px;
 }
-.product-compatibility-editor {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.product-compatibility-editor legend {
-  padding: 0 6px;
-  font-weight: 700;
-}
 .quick-service-section {
   display: grid;
   gap: 14px;
@@ -4352,10 +4342,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .detail-repair-add {
   margin-top: 4px;
-}
-.product-compatibility-editor {
-  display: grid;
-  gap: 10px;
 }
 .product-compatibility-row {
   display: grid;

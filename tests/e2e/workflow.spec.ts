@@ -9100,6 +9100,17 @@ test("new repair products add compatible devices in a modal", async ({
   await expect(productForm).toHaveCSS("padding-top", "0px");
   await expect(productForm).toHaveCSS("padding-bottom", "22px");
   await chooseBusinessOption(page, "Utilizzo", "Riparazione", productDialog);
+  const compatibilityEditor = productDialog.locator(
+    "fieldset.product-compatibility-editor",
+  );
+  await expect(compatibilityEditor).toHaveCSS("display", "grid");
+  await expect(compatibilityEditor).toHaveCSS("min-width", "0px");
+  await expect(compatibilityEditor).toHaveCSS("gap", "10px");
+  await expect(compatibilityEditor).toHaveCSS("padding", "14px");
+  await expect(compatibilityEditor.locator("legend")).toHaveCSS(
+    "padding",
+    "0px 6px",
+  );
   const addCompatibility = productDialog.getByRole("button", {
     name: "Compatibilità",
     exact: true,
@@ -9260,6 +9271,18 @@ test("new repair products add compatible devices in a modal", async ({
   await expect(
     productDialog.locator(".compatibility-device-row"),
   ).not.toContainText(newProject);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const compatibilityBox = await compatibilityEditor.boundingBox();
+  expect(compatibilityBox).not.toBeNull();
+  expect(compatibilityBox!.x).toBeGreaterThanOrEqual(0);
+  expect(compatibilityBox!.x + compatibilityBox!.width).toBeLessThanOrEqual(
+    390,
+  );
+  expect(
+    await compatibilityEditor.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
   await productDialog
     .getByRole("button", { name: "Annulla", exact: true })
     .click();

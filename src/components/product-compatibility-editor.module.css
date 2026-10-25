@@ -1,0 +1,13 @@
+.editor {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.editor legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
