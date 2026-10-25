@@ -12,6 +12,38 @@
   white-space: nowrap;
 }
 
+.control {
+  min-height: 36px;
+  padding: 7px 10px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #5d625f;
+}
+
+.control:active:not(:disabled) {
+  background: #ffedaa;
+}
+
+.danger {
+  border-color: transparent;
+  background: transparent;
+  color: #ab4444;
+}
+
+.danger:hover:not(:disabled),
+.danger:focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: #fbe9e8;
+  color: #913737;
+}
+
+.finish:hover:not(:disabled) {
+  border-color: transparent;
+  background: #fff0ee;
+  color: #a64642;
+}
+
 .customerToolbar {
   justify-content: flex-start;
   flex-wrap: wrap;

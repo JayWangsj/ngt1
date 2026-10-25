@@ -41,7 +41,7 @@ export function BatchControls({
     return (
       <Button
         variant="ghost"
-        className="batch-control-button"
+        className={`${styles.control} batch-control-button`}
         aria-pressed="false"
         disabled={pending}
         onClick={onStart}
@@ -62,7 +62,7 @@ export function BatchControls({
       {showSelectAll && (
         <Button
           variant="ghost"
-          className="batch-control-button"
+          className={`${styles.control} batch-control-button`}
           disabled={pending || !hasItems}
           onClick={onSelectAll}
         >
@@ -71,7 +71,7 @@ export function BatchControls({
       )}
       <Button
         variant="danger"
-        className="batch-control-button batch-control-danger"
+        className={`${styles.control} ${styles.danger} batch-control-button batch-control-danger`}
         disabled={!selectedCount || pending || deleteDisabled}
         onClick={onDelete}
       >
@@ -80,7 +80,7 @@ export function BatchControls({
       </Button>
       <Button
         variant="ghost"
-        className="batch-control-button batch-control-finish"
+        className={`${styles.control} ${styles.finish} batch-control-button batch-control-finish`}
         disabled={pending}
         onClick={onFinish}
       >

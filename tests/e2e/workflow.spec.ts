@@ -4061,6 +4061,19 @@ test("keeps inventory batch selection controls sized", async ({ page }) => {
   await expect(selectAll).toHaveCSS("width", "18px");
   await expect(selectAll).toHaveCSS("height", "18px");
   await expect(selectAll).toHaveCSS("padding", "0px");
+  await selectAll.check();
+  const deleteBatch = batchToolbar.getByRole("button", {
+    name: "Elimina",
+    exact: true,
+  });
+  await deleteBatch.hover();
+  await expect(deleteBatch).toHaveCSS("background-color", "rgb(251, 233, 232)");
+  const finishBatch = batchToolbar.getByRole("button", {
+    name: "Fine",
+    exact: true,
+  });
+  await finishBatch.hover();
+  await expect(finishBatch).toHaveCSS("background-color", "rgb(255, 240, 238)");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(batchToolbar).toHaveCSS("justify-content", "flex-start");
   await expect(batchToolbar).toHaveCSS("flex-wrap", "wrap");
@@ -10394,9 +10407,12 @@ test("price batch selection count uses shared status styles", async ({
   page,
 }) => {
   await page.goto("/prices");
-  await page
-    .getByRole("button", { name: "Gestisci selezione", exact: true })
-    .click();
+  const manageSelection = page.getByRole("button", {
+    name: "Gestisci selezione",
+    exact: true,
+  });
+  await expect(manageSelection).toHaveCSS("min-height", "36px");
+  await manageSelection.click();
 
   const toolbar = page.locator(".price-batch-toolbar");
   const selectedCount = toolbar.getByRole("status");

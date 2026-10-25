@@ -7793,34 +7793,6 @@ details summary {
   color: #ab4444;
   border-color: #d58a87;
 }
-.batch-control-button.button {
-  min-height: 36px;
-  padding: 7px 10px;
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  color: #5d625f;
-}
-.batch-control-button.button:hover,
-.batch-control-button.button:focus-visible {
-  border-color: transparent;
-  color: #332700;
-}
-.batch-control-button.button:active {
-  background: #ffedaa;
-}
-.batch-control-button.batch-control-danger {
-  border-color: transparent;
-  background: transparent;
-  color: #ab4444;
-}
-.batch-control-button.batch-control-danger:hover,
-.batch-control-button.batch-control-danger:focus-visible {
-  border-color: transparent;
-  background: #fbe9e8;
-  color: #913737;
-}
-
 /* Compact, accessible record actions: targets stay still on hover. */
 .record-icon {
   display: inline-flex;
@@ -7897,8 +7869,7 @@ summary.record-icon::-webkit-details-marker {
 .x-icon-button:hover:not(:disabled),
 .quick-service-remove:hover:not(:disabled),
 .retail-remove:hover:not(:disabled),
-.update-notification button:hover:not(:disabled),
-.batch-control-button.batch-control-finish:hover:not(:disabled) {
+.update-notification button:hover:not(:disabled) {
   border-color: transparent;
   background: #fff0ee;
   color: #a64642;
