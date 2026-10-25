@@ -3879,6 +3879,20 @@ test("inventory movement history uses the shared dialog body", async ({
   await expect(
     dialog.locator(":scope > .dialog-body.inventory-movements-dialog"),
   ).toBeVisible();
+  const movementRow = dialog.locator(".movement-row").first();
+  await expect(movementRow).toHaveCSS("display", "grid");
+  await expect(movementRow).toHaveCSS(
+    "grid-template-columns",
+    /^40px \d+(\.\d+)?px \d+(\.\d+)?px$/,
+  );
+  await expect(movementRow.locator(":scope > span")).toHaveCSS(
+    "font-weight",
+    "700",
+  );
+  await expect(movementRow.locator(":scope > span")).toHaveCSS(
+    "color",
+    "rgb(39, 132, 74)",
+  );
   const monthPicker = dialog.locator(".retail-period-picker");
   await expect(monthPicker).toHaveCSS("position", "absolute");
   await expect(monthPicker).toHaveCSS("width", "180px");

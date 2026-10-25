@@ -9158,45 +9158,11 @@ summary.record-icon::-webkit-details-marker {
   position: sticky;
   top: 24px;
 }
-.inventory-movements-dialog {
-  display: grid;
-  padding-right: 3px;
-}
-.movement-row {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-}
-.movement-row:last-child {
-  border-bottom: 0;
-}
-.movement-row > span {
-  font-weight: 700;
-}
-.movement-row > span,
-.movement-row > b {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 .movement-positive {
   color: #27844a;
 }
 .movement-negative {
   color: #bd4242;
-}
-.movement-row div {
-  min-width: 0;
-}
-.movement-row strong,
-.movement-row small {
-  display: block;
-}
-.movement-row small {
-  color: var(--muted);
-  margin-top: 2px;
 }
 .dialog-form {
   display: grid;

@@ -1,0 +1,41 @@
+.dialogBody {
+  display: grid;
+  padding-right: 3px;
+}
+
+.dialogBody :global(.movement-row) {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialogBody :global(.movement-row:last-child) {
+  border-bottom: 0;
+}
+
+.dialogBody :global(.movement-row > span) {
+  font-weight: 700;
+}
+
+.dialogBody :global(.movement-row > span),
+.dialogBody :global(.movement-row > b) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialogBody :global(.movement-row div) {
+  min-width: 0;
+}
+
+.dialogBody :global(.movement-row strong),
+.dialogBody :global(.movement-row small) {
+  display: block;
+}
+
+.dialogBody :global(.movement-row small) {
+  margin-top: 2px;
+  color: var(--muted);
+}

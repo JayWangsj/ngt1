@@ -38,6 +38,7 @@ import {
   type DeviceCatalogDeletionView,
   type ProductCompatibilityDraft,
 } from "./forms";
+import inventoryMovementsStyles from "./inventory-movements.module.css";
 import { DatePicker, SimpleSelect } from "./business-select";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import { Button } from "./ui/button";
@@ -472,7 +473,9 @@ export function InventoryHistoryCard({
           title={it.inventory.movementHistory}
           onClose={() => setOpen(false)}
         >
-          <DialogBody className="inventory-movements-dialog">
+          <DialogBody
+            className={`${inventoryMovementsStyles.dialogBody} inventory-movements-dialog`}
+          >
             <DatePicker
               className={`${monthPeriodPickerStyles.monthPeriodPicker} retail-period-picker`}
               aria-label={it.month}
