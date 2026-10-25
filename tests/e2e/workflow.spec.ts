@@ -4014,6 +4014,47 @@ test("keeps inventory compatibility editor and labels scoped", async ({
   );
 });
 
+test("animates overflowing inventory names and respects reduced motion", async ({
+  page,
+}) => {
+  await page.goto("/inventory");
+  await expect(page.getByRole("heading", { name: "Magazzino" })).toBeVisible();
+  const productName = `Cavo USB-C E2E con descrizione prodotto molto lunga ${Date.now()}`;
+  await page.getByRole("button", { name: "Nuovo prodotto" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Prodotto", { exact: true }).fill(productName);
+  await chooseBusinessOption(page, "Categoria", "Ricarica", dialog);
+  await chooseBusinessOption(page, "Utilizzo", "Vendita", dialog);
+  await dialog.getByLabel("Costo", { exact: true }).fill("4.50");
+  await dialog.getByLabel("Prezzo", { exact: true }).fill("12");
+  await dialog.getByRole("button", { name: "Salva prodotto" }).click();
+
+  const row = page.locator(".inventory-table tbody tr").filter({
+    hasText: productName,
+  });
+  await expect(row).toHaveCount(1);
+  const viewport = row.locator(".product-name-viewport");
+  await expect(viewport).toHaveAttribute("data-overflowing", "true");
+  await viewport.hover();
+  const scrollingName = viewport.locator("strong");
+  await expect
+    .poll(() =>
+      scrollingName.evaluate(
+        (element) => getComputedStyle(element).animationName,
+      ),
+    )
+    .toBe("product-name-scroll");
+  await page.waitForTimeout(350);
+  await expect
+    .poll(() =>
+      scrollingName.evaluate((element) => getComputedStyle(element).transform),
+    )
+    .not.toBe("none");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(scrollingName).toHaveCSS("animation-name", "none");
+});
+
 test("creates and edits a product directly in the inventory row", async ({
   page,
 }) => {

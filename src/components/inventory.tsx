@@ -115,9 +115,13 @@ function ProductName({ name, favorite }: { name: string; favorite: boolean }) {
   }, [name]);
 
   return (
-    <span className="product-name">
+    <span className={`${inventoryStyles.productName} product-name`}>
       {favorite && <Star size={14} fill="currentColor" />}
-      <span ref={viewport} className="product-name-viewport" title={name}>
+      <span
+        ref={viewport}
+        className={`${inventoryStyles.productNameViewport} product-name-viewport`}
+        title={name}
+      >
         <strong ref={text}>{name}</strong>
       </span>
     </span>

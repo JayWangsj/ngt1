@@ -8180,35 +8180,10 @@ summary.record-icon::-webkit-details-marker {
   font-weight: 650;
   white-space: nowrap;
 }
-.product-name {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 7px;
-  overflow: hidden;
-}
-.product-name-viewport {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.product-name-viewport strong {
-  display: inline-block;
-  min-width: 0;
-  white-space: nowrap;
-}
 .product-name-viewport[data-overflowing="true"]:hover strong {
   will-change: transform;
   animation: product-name-scroll var(--product-name-duration) ease-in-out 300ms
     infinite alternate;
-}
-.product-name svg {
-  flex: 0 0 auto;
-  color: #d69a00;
 }
 @keyframes product-name-scroll {
   0%,
@@ -8218,13 +8193,6 @@ summary.record-icon::-webkit-details-marker {
   90%,
   100% {
     transform: translateX(calc(-1 * var(--product-name-travel)));
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  html:not([data-motion="always"])
-    .product-name-viewport[data-overflowing="true"]:hover
-    strong {
-    animation: none;
   }
 }
 .inventory-category-field {

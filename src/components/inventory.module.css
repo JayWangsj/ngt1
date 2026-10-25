@@ -388,6 +388,43 @@
   margin-top: 6px;
 }
 
+.productName {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+}
+
+.productNameViewport {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.productNameViewport strong {
+  display: inline-block;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.productName svg {
+  flex: 0 0 auto;
+  color: #d69a00;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global(html:not([data-motion="always"]))
+    .productNameViewport[data-overflowing="true"]:hover
+    strong {
+    animation: none;
+  }
+}
+
 @media (max-width: 1200px) {
   .filters {
     grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(130px, 1fr));
