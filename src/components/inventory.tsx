@@ -48,7 +48,6 @@ import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import batchControlsStyles from "./ui/batch-controls.module.css";
 import { QuantityStepper } from "./ui/quantity-stepper";
-import motionSwitchStyles from "./ui/motion-switch.module.css";
 import emptyStateStyles from "./ui/empty-state.module.css";
 import recordIconStyles from "./ui/record-icon.module.css";
 import {
@@ -603,12 +602,7 @@ function StockEditor({
   onSave: (value: number) => void;
 }) {
   return (
-    <div
-      onClick={(event) => {
-        event.stopPropagation();
-        event.currentTarget.closest("tr")?.focus({ preventScroll: true });
-      }}
-    >
+    <div onClick={(event) => event.stopPropagation()}>
       <QuantityStepper
         key={value}
         className={`${inventoryStyles.tableStepper} is-table`}
@@ -1399,32 +1393,36 @@ export function InventoryWorkspace({
                       )}
                     </td>
                     <td className="inventory-stepper-cell">
-                      {selected && product.usage === "RETAIL" && (
-                        <button
-                          type="button"
-                          className={`motion-switch ${motionSwitchStyles.switch}`}
-                          role="switch"
-                          aria-checked={product.unlimitedStock}
-                          aria-label={it.inventory.unlimitedStock}
-                          onClick={() =>
-                            updateDraft(product, {
-                              unlimitedStock: !product.unlimitedStock,
-                            })
-                          }
-                        >
-                          <span aria-hidden="true" />
-                        </button>
-                      )}
-                      {product.unlimitedStock ? (
+                      {selected ? (
+                        <div className={inventoryStyles.stockControls}>
+                          {!product.unlimitedStock && (
+                            <StockEditor
+                              value={product.stockQuantity}
+                              label={it.inventory.currentStock}
+                              onSave={(value) =>
+                                updateDraft(product, { stockQuantity: value })
+                              }
+                            />
+                          )}
+                          {product.usage === "RETAIL" && (
+                            <button
+                              type="button"
+                              className={inventoryStyles.unlimitedStockToggle}
+                              aria-pressed={product.unlimitedStock}
+                              aria-label={it.inventory.unlimitedStock}
+                              title={it.inventory.unlimitedStock}
+                              onClick={() =>
+                                updateDraft(product, {
+                                  unlimitedStock: !product.unlimitedStock,
+                                })
+                              }
+                            >
+                              <span aria-hidden="true">∞</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : product.unlimitedStock ? (
                         "∞"
-                      ) : selected ? (
-                        <StockEditor
-                          value={product.stockQuantity}
-                          label={it.inventory.currentStock}
-                          onSave={(value) =>
-                            updateDraft(product, { stockQuantity: value })
-                          }
-                        />
                       ) : (
                         product.stockQuantity
                       )}

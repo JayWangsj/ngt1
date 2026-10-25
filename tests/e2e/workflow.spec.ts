@@ -4213,6 +4213,42 @@ test("keeps inventory row editor styles compact and scoped", async ({
     "appearance",
     "textfield",
   );
+
+  const retailRow = page.getByRole("row", { name: /Cavo USB-C Test/ });
+  await retailRow.click();
+  const unlimitedStock = retailRow.getByRole("button", {
+    name: "Scorta illimitata",
+    exact: true,
+  });
+  await expect(unlimitedStock).toContainText("∞");
+  await expect(unlimitedStock).toHaveAttribute("aria-pressed", /true|false/);
+  await expect(retailRow.locator(".motion-switch")).toHaveCount(0);
+
+  const stockInput = retailRow.getByRole("spinbutton", {
+    name: "Disponibilità",
+    exact: true,
+  });
+  const originalStock = await stockInput.inputValue();
+  await stockInput.click();
+  await expect(stockInput).toBeFocused();
+  const [stockEditorBox, unlimitedStockBox] = await Promise.all([
+    stockInput.locator("..").boundingBox(),
+    unlimitedStock.boundingBox(),
+  ]);
+  expect(
+    Math.abs(
+      stockEditorBox!.y +
+        stockEditorBox!.height / 2 -
+        (unlimitedStockBox!.y + unlimitedStockBox!.height / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
+  expect(unlimitedStockBox!.x).toBeGreaterThan(
+    stockEditorBox!.x + stockEditorBox!.width,
+  );
+  await stockInput.fill(String(Number(originalStock) + 1));
+  await expect(stockInput).toHaveValue(String(Number(originalStock) + 1));
+  await stockInput.fill(originalStock);
+  await stockInput.press("Enter");
 });
 
 test("keeps inventory batch selection controls sized", async ({ page }) => {
