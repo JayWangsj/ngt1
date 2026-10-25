@@ -390,20 +390,6 @@ async function writeJsonAtomically(filePath: string, value: unknown) {
   }
 }
 
-async function withUpdateOwnership(
-  installRoot: string,
-  updateId: string,
-  action: (lock: StudioUpdateLock) => Promise<void>,
-) {
-  return withUpdateMutationMutex(installRoot, async () => {
-    const current = await readUpdateLock(lockPath(installRoot));
-    if (current.unreadable || current.value?.updateId !== updateId)
-      return false;
-    await action(current.value);
-    return true;
-  });
-}
-
 function inspectUpdaterProcess(
   options: Parameters<ProcessInspector>[0],
 ): Promise<boolean | undefined> {

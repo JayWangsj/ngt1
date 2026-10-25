@@ -148,6 +148,12 @@ afterEach(async () => {
 });
 
 describe("studio update", () => {
+  it("uses the active mutation mutex without the unused ownership wrapper", async () => {
+    const source = await readFile("src/lib/studio-update.ts", "utf8");
+    expect(source).toContain("withUpdateMutationMutex");
+    expect(source).not.toContain("withUpdateOwnership");
+  });
+
   it("compares release versions numerically", () => {
     expect(compareVersions("v1.11.58", "1.11.57")).toBe(1);
     expect(compareVersions("1.11.57", "v1.11.57")).toBe(0);
