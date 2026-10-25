@@ -4342,12 +4342,19 @@ test("filters inventory by compatible device and exposes compatibility", async (
   await page.setViewportSize({ width: 1920, height: 900 });
   await page.goto("/inventory");
   const inventoryMain = page.locator(".inventory-main");
+  const filters = inventoryMain.locator(".inventory-filters");
   const search = inventoryMain.getByLabel(
     "Cerca prodotto, ricambio, marca o modello",
   );
   const battery = inventoryMain.getByRole("row", { name: /Batteria Test/ });
   const cable = inventoryMain.getByRole("row", { name: /Cavo USB-C Test/ });
   const tableScroll = inventoryMain.locator(".inventory-table-scroll");
+  await expect(filters).toHaveCSS("display", "grid");
+  await expect(filters).toHaveCSS("gap", "10px");
+  await expect(filters).toHaveCSS("padding", "12px 16px");
+  await expect(search).toHaveCSS("height", "42px");
+  await expect(search).toHaveCSS("border-radius", "10px");
+  await expect(search).toHaveCSS("padding", "10px 12px");
   expect(
     await tableScroll.evaluate(
       (element) => element.scrollWidth <= element.clientWidth,
@@ -4455,6 +4462,26 @@ test("filters inventory by compatible device and exposes compatibility", async (
   await popover.getByRole("button", { name: "Cancella", exact: true }).click();
   await expect(trigger).not.toHaveClass(/is-active/);
   await expect(cable).toBeVisible();
+
+  const filterColumnCount = () =>
+    filters.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").length,
+    );
+  expect(await filterColumnCount()).toBe(6);
+  for (const [width, columns] of [
+    [1100, 3],
+    [900, 2],
+    [390, 1],
+  ]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await filterColumnCount()).toBe(columns);
+  }
+  expect(
+    await filters.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
 });
 
 test("repair list exposes month, status, due-date and payment controls", async ({
