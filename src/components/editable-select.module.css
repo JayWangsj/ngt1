@@ -1,0 +1,12 @@
+.editableField {
+  min-width: 0;
+  margin-bottom: 17px;
+}
+
+.editableField > label {
+  margin-bottom: 7px;
+}
+
+.editableField :global(.business-select-create) {
+  max-width: none;
+}

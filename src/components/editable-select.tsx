@@ -3,6 +3,7 @@ import { useMessages } from "./language";
 import { uniqueOptions } from "@/lib/options";
 import { SearchableCombobox } from "./business-select";
 import { Trash2 } from "lucide-react";
+import styles from "./editable-select.module.css";
 export function EditableSelect({
   label,
   value,
@@ -59,7 +60,7 @@ export function EditableSelect({
   if (value && !choices.some((option) => option.value === value))
     choices.unshift({ value, label: value, trailing: undefined });
   return (
-    <div className="editable-field">
+    <div className={`${styles.editableField} editable-field`}>
       <label>{label}</label>
       <SearchableCombobox
         name={name}

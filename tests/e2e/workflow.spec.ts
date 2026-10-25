@@ -9432,6 +9432,19 @@ test("customer device edit form keeps its responsive grid", async ({
     ".customer-device-list > .customer-device-row .action-form",
   );
   await expect(form).toBeVisible();
+  const brandField = form.locator(".editable-field").first();
+  await expect(brandField).toHaveCSS("margin-bottom", "17px");
+  await expect(brandField.locator(":scope > label")).toHaveCSS(
+    "margin-bottom",
+    "7px",
+  );
+  const brandInput = brandField.getByRole("combobox");
+  await brandInput.fill("zz-ngt-custom-brand");
+  const createBrand = brandField.locator(".business-select-create");
+  await expect(createBrand).toBeVisible();
+  await expect(createBrand).toHaveCSS("max-width", "none");
+  await brandInput.press("Escape");
+
   const desktopColumns = await form.evaluate(
     (element) =>
       getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
@@ -9444,6 +9457,10 @@ test("customer device edit form keeps its responsive grid", async ({
       getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
   );
   expect(mobileColumns).toBe(1);
+  await detailDialog
+    .getByRole("button", { name: "Annulla", exact: true })
+    .click();
+  await expect(form).toHaveCount(0);
 });
 
 test("customer list searches instantly, preserves navigation and supports compact editing", async ({
