@@ -3972,6 +3972,23 @@ test("creates and edits a product directly in the inventory row", async ({
     ".inventory-category-cell .business-select-trigger",
   );
   await expect(categoryTrigger).toBeVisible();
+  await expect(categoryTrigger).toHaveCSS("min-width", "0px");
+  await expect(
+    repairPartRow.locator(".inventory-usage-cell .business-select-trigger"),
+  ).toHaveCSS("min-width", "0px");
+  await expect(
+    repairPartRow.locator(".inventory-category-cell .business-select"),
+  ).toHaveCSS("min-width", "0px");
+  const [categoryCellBox, categorySelectBox] = await Promise.all([
+    repairPartRow.locator("td.inventory-category-cell").boundingBox(),
+    repairPartRow
+      .locator(".inventory-category-cell .business-select")
+      .boundingBox(),
+  ]);
+  expect(categorySelectBox!.x).toBeGreaterThanOrEqual(categoryCellBox!.x);
+  expect(categorySelectBox!.x + categorySelectBox!.width).toBeLessThanOrEqual(
+    categoryCellBox!.x + categoryCellBox!.width,
+  );
   await expect(
     repairPartRow.locator(".inventory-category-cell .business-combobox-input"),
   ).toHaveCount(0);

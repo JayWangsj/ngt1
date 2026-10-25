@@ -8273,20 +8273,6 @@ summary.record-icon::-webkit-details-marker {
   width: 100%;
   min-width: 180px;
 }
-.inventory-category-cell .business-select {
-  width: 100%;
-  min-width: 0;
-}
-.inventory-category-cell .business-select-trigger {
-  min-width: 0;
-}
-.inventory-usage-cell .business-select {
-  width: 100%;
-  min-width: 0;
-}
-.inventory-usage-cell .business-select-trigger {
-  min-width: 0;
-}
 .favorite-toggle {
   border: 0;
   background: transparent;

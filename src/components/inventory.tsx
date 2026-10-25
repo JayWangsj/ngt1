@@ -1243,7 +1243,9 @@ export function InventoryWorkspace({
                         />
                       )}
                     </td>
-                    <td className="inventory-category-cell">
+                    <td
+                      className={`${inventoryStyles.categoryCell} inventory-category-cell`}
+                    >
                       {selected ? (
                         <SimpleSelect
                           value={product.category}
@@ -1264,7 +1266,9 @@ export function InventoryWorkspace({
                         product.category
                       )}
                     </td>
-                    <td className="inventory-usage-cell">
+                    <td
+                      className={`${inventoryStyles.usageCell} inventory-usage-cell`}
+                    >
                       {selected ? (
                         <SimpleSelect
                           value={product.usage}

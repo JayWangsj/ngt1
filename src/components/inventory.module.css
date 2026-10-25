@@ -22,6 +22,17 @@
   background: #fee8e8;
 }
 
+.categoryCell :global(.business-select),
+.usageCell :global(.business-select) {
+  width: 100%;
+  min-width: 0;
+}
+
+.categoryCell :global(.business-select-trigger),
+.usageCell :global(.business-select-trigger) {
+  min-width: 0;
+}
+
 .compatibilityDialog :global(.compatibility-overview),
 .compatibilityDialog :global(.compatibility-device-list) {
   display: grid;
