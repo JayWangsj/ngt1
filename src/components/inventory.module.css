@@ -136,6 +136,46 @@
   font-variant-numeric: tabular-nums;
 }
 
+.table :global(.button-ghost) {
+  white-space: nowrap;
+}
+
+.compatibilityEdit:global(.button-ghost) {
+  min-height: 30px;
+  gap: 5px;
+  padding: 5px 7px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #806000;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.compatibilityEdit:global(.button-ghost):hover,
+.compatibilityEdit:global(.button-ghost):focus-visible {
+  border-color: transparent;
+  background: #fff7d6;
+}
+
+.compatibilityList {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.compatibilityList > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.universal {
+  color: var(--muted);
+}
+
 .filters {
   display: grid;
   grid-template-columns:

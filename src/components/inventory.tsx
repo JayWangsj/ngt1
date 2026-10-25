@@ -1306,7 +1306,7 @@ export function InventoryWorkspace({
                         <Button
                           type="button"
                           variant="ghost"
-                          className="inventory-compatible-edit"
+                          className={`${inventoryStyles.compatibilityEdit} inventory-compatible-edit`}
                           aria-label={it.inventory.editCompatibleDevices}
                           title={it.inventory.editCompatibleDevices}
                           onClick={() => setCompatibilityEditor(product.id)}
@@ -1315,13 +1315,17 @@ export function InventoryWorkspace({
                           <Pencil size={15} aria-hidden="true" />
                         </Button>
                       ) : compatibilityPaths(product).length ? (
-                        <span className="inventory-compatibility-list">
+                        <span
+                          className={`${inventoryStyles.compatibilityList} inventory-compatibility-list`}
+                        >
                           {compatibilityPaths(product).map((path) => (
                             <span key={path}>{path}</span>
                           ))}
                         </span>
                       ) : (
-                        <span className="inventory-universal">
+                        <span
+                          className={`${inventoryStyles.universal} inventory-universal`}
+                        >
                           {it.inventory.universal}
                         </span>
                       )}

@@ -3981,6 +3981,39 @@ test("keeps inventory batch selection controls sized", async ({ page }) => {
   await expect(selectAll).toHaveCSS("padding", "0px");
 });
 
+test("keeps inventory compatibility editor and labels scoped", async ({
+  page,
+}) => {
+  await page.goto("/inventory");
+  const batteryRow = page.getByRole("row", { name: /Batteria Test/ });
+  const compatibilityList = batteryRow.locator(".inventory-compatibility-list");
+  await expect(compatibilityList).toBeVisible();
+  await expect(compatibilityList).toHaveCSS("display", "grid");
+  await expect(compatibilityList).toHaveCSS("gap", "3px");
+  const compatibilityPath = compatibilityList.locator("> span").first();
+  await expect(compatibilityPath).toHaveCSS("overflow", "hidden");
+  await expect(compatibilityPath).toHaveCSS("text-overflow", "ellipsis");
+  await expect(compatibilityPath).toHaveCSS("white-space", "nowrap");
+
+  const universalLabel = page
+    .getByRole("row", { name: /Cavo USB-C Test/ })
+    .locator(".inventory-universal");
+  await expect(universalLabel).toBeVisible();
+  await batteryRow.click();
+  const compatibilityEdit = batteryRow.getByRole("button", {
+    name: "Modifica dispositivi compatibili",
+  });
+  await expect(compatibilityEdit).toHaveCSS("min-height", "30px");
+  await expect(compatibilityEdit).toHaveCSS("padding", "5px 7px");
+  await expect(compatibilityEdit).toHaveCSS("font-size", "12px");
+  await expect(compatibilityEdit).toHaveCSS("white-space", "nowrap");
+  await compatibilityEdit.hover();
+  await expect(compatibilityEdit).toHaveCSS(
+    "background-color",
+    "rgb(255, 247, 214)",
+  );
+});
+
 test("creates and edits a product directly in the inventory row", async ({
   page,
 }) => {
