@@ -3326,6 +3326,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   --dashboard-repair: #f5bd27;
   --dashboard-retail: #5b9cf6;
   display: block;
+  margin-top: 16px;
   margin-bottom: 20px;
   padding: 18px 20px;
 }

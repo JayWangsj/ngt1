@@ -2855,7 +2855,7 @@ test("dashboard opens monthly receipts and keeps receipt charts", async ({
   ]);
   expect(headerBox!.y + headerBox!.height).toBeLessThanOrEqual(kpiBox!.y);
   expect(kpiBox!.y + kpiBox!.height).toBeLessThanOrEqual(listBox!.y);
-  expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(chartBox!.y);
+  expect(Math.round(chartBox!.y - (listBox!.y + listBox!.height))).toBe(16);
   expect(recentOrdersBox!.width).toBeGreaterThan(prioritiesBox!.width);
   expect(receiptBox!.height).toBeLessThanOrEqual(192);
   expect(kpiBox!.height).toBeLessThanOrEqual(192);
