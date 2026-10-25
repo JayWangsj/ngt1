@@ -68,7 +68,9 @@ export function RetailSalesHistory({
     });
   }
   return (
-    <DialogBody className="retail-history-dialog">
+    <DialogBody
+      className={`${retailSalesHistoryStyles.historyDialog} retail-history-dialog`}
+    >
       <DatePicker
         className={`${monthPeriodPickerStyles.monthPeriodPicker} retail-period-picker`}
         aria-label={it.month}

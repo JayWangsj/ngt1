@@ -5567,7 +5567,19 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await period.fill(currentMonth);
   const historyRow = dialog.locator("tbody tr").first();
   await expect(historyRow).toBeVisible();
-  await historyRow.locator(".sale-number-button").click();
+  const saleNumber = historyRow.locator(".sale-number-button");
+  const saleNumberLabel = saleNumber.locator(":scope > span");
+  await expect(saleNumber).toHaveCSS("color", "rgb(113, 83, 0)");
+  await saleNumber.hover();
+  await expect(saleNumber).toHaveCSS("color", "rgb(84, 62, 0)");
+  await expect
+    .poll(() =>
+      saleNumberLabel.evaluate(
+        (element) => getComputedStyle(element, "::after").opacity,
+      ),
+    )
+    .toBe("1");
+  await saleNumber.click();
   await expect(
     dialog.locator(":scope > .dialog-body.retail-sale-dialog"),
   ).toBeVisible();

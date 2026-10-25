@@ -8870,7 +8870,6 @@ summary.record-icon::-webkit-details-marker {
 }
 .order-list-body .order-link,
 .order-detail-card .order-customer-link,
-.retail-history-dialog .order-code-link,
 .customer-name .order-link,
 .dashboard-action-link {
   position: relative;
@@ -8895,7 +8894,6 @@ summary.record-icon::-webkit-details-marker {
 }
 .order-list-body .order-link > span,
 .order-detail-card .order-customer-link > span,
-.retail-history-dialog .order-code-link > span,
 .customer-name .order-link > span,
 .dashboard-action-link .dashboard-link-label,
 .sidebar-update-copy strong {
@@ -8903,7 +8901,6 @@ summary.record-icon::-webkit-details-marker {
 }
 .order-list-body .order-link > span::after,
 .order-detail-card .order-customer-link > span::after,
-.retail-history-dialog .order-code-link > span::after,
 .customer-name .order-link > span::after,
 .dashboard-action-link .dashboard-link-label::after,
 .sidebar-update-copy strong::after {
@@ -8933,8 +8930,6 @@ summary.record-icon::-webkit-details-marker {
 .order-list-body .order-link:focus-visible,
 .order-detail-card .order-customer-link:hover,
 .order-detail-card .order-customer-link:focus-visible,
-.retail-history-dialog .order-code-link:hover,
-.retail-history-dialog .order-code-link:focus-visible,
 .customer-name .order-link:hover,
 .customer-name .order-link:focus-visible,
 .dashboard-action-link:hover,
@@ -8951,8 +8946,6 @@ summary.record-icon::-webkit-details-marker {
 .order-list-body .order-link:focus-visible > span::after,
 .order-detail-card .order-customer-link:hover > span::after,
 .order-detail-card .order-customer-link:focus-visible > span::after,
-.retail-history-dialog .order-code-link:hover > span::after,
-.retail-history-dialog .order-code-link:focus-visible > span::after,
 .customer-name .order-link:hover > span::after,
 .customer-name .order-link:focus-visible > span::after,
 .dashboard-action-link:hover .dashboard-link-label::after,
@@ -8965,7 +8958,6 @@ summary.record-icon::-webkit-details-marker {
 .order-list-body .order-code-link svg,
 .order-list-body .order-customer-link svg,
 .order-detail-card .order-customer-link svg,
-.retail-history-dialog .order-code-link svg,
 .customer-name .order-link svg,
 .dashboard-action-link svg,
 .sidebar-update-arrow {
@@ -8977,8 +8969,6 @@ summary.record-icon::-webkit-details-marker {
 .order-list-body .order-customer-link:focus-visible svg,
 .order-detail-card .order-customer-link:hover svg,
 .order-detail-card .order-customer-link:focus-visible svg,
-.retail-history-dialog .order-code-link:hover svg,
-.retail-history-dialog .order-code-link:focus-visible svg,
 .customer-name .order-link:hover svg,
 .customer-name .order-link:focus-visible svg,
 .dashboard-action-link:hover svg,
@@ -9054,13 +9044,6 @@ summary.record-icon::-webkit-details-marker {
 .order-balance-value {
   color: var(--muted);
   font-size: 11px;
-}
-.sale-number-button {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  cursor: pointer;
 }
 .sale-actions-heading,
 .sale-actions-cell {
