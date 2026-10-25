@@ -5548,6 +5548,16 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await expect(
     dialog.locator(":scope > .dialog-body.retail-sale-dialog"),
   ).toBeVisible();
+  const detailBody = dialog.locator(":scope > .dialog-body.retail-sale-dialog");
+  await expect(detailBody).toHaveCSS("display", "grid");
+  await expect(detailBody).toHaveCSS("gap", "16px");
+  await expect(dialog.locator(".dialog-heading h2 > span")).toHaveCSS(
+    "gap",
+    "8px",
+  );
+  await expect(
+    dialog.getByRole("button", { name: /Storico vendite/ }),
+  ).toHaveCSS("margin", "0px");
   const detailDialogBox = await dialog.boundingBox();
   expect(detailDialogBox?.width).toBe(880);
   expect(detailDialogBox?.height).toBe(680);

@@ -9149,18 +9149,6 @@ summary.record-icon::-webkit-details-marker {
     margin-bottom: 14px;
   }
 }
-.retail-dialog-title {
-  display: grid;
-  gap: 8px;
-}
-.retail-dialog-back.back-link {
-  width: max-content;
-  margin: 0;
-}
-.retail-sale-dialog {
-  display: grid;
-  gap: 16px;
-}
 .order-product-form.has-selection {
   grid-template-columns: minmax(180px, 1fr) 136px auto;
 }

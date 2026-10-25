@@ -9,6 +9,7 @@ import { money } from "@/lib/domain";
 import { RecordIcon } from "./ui/record-icon";
 import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { Button } from "./ui/button";
+import retailSalesHistoryStyles from "./retail-sales-history.module.css";
 
 export type SaleHistoryRow = {
   id: string;
@@ -189,7 +190,9 @@ export function RetailSalesHistory({
 export function RetailSaleDetail({ sale }: { sale: SaleHistoryRow }) {
   const it = useMessages();
   return (
-    <DialogBody className="retail-sale-dialog">
+    <DialogBody
+      className={`${retailSalesHistoryStyles.saleDialog} retail-sale-dialog`}
+    >
       <div className="table-scroll">
         <table>
           <thead>

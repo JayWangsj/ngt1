@@ -33,6 +33,7 @@ import {
 } from "./retail-sales-history";
 import { Button } from "./ui/button";
 import { QuantityStepper } from "./ui/quantity-stepper";
+import retailSalesHistoryStyles from "./retail-sales-history.module.css";
 
 type RetailProduct = {
   id: string;
@@ -560,11 +561,11 @@ export function RetailWorkbench({
           }
           title={
             dialog.view === "detail" ? (
-              <span className="retail-dialog-title">
+              <span className={retailSalesHistoryStyles.dialogTitle}>
                 <Button
                   type="button"
                   variant="outline"
-                  className="back-link retail-dialog-back"
+                  className={`back-link ${retailSalesHistoryStyles.dialogBack}`}
                   onClick={() =>
                     setDialog(
                       dialog.returnTo === "history"

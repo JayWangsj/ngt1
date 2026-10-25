@@ -1,0 +1,14 @@
+.dialogTitle {
+  display: grid;
+  gap: 8px;
+}
+
+.dialogBack:global(.back-link) {
+  width: max-content;
+  margin: 0;
+}
+
+.saleDialog {
+  display: grid;
+  gap: 16px;
+}
