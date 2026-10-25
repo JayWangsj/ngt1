@@ -10556,6 +10556,7 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await expect(batchButton).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await batchButton.hover();
   await expect(batchButton).toHaveCSS("background-color", "rgb(255, 241, 182)");
+  await expect(batchButton).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   const ruleListPosition = await page
     .locator(".rule-list")
     .first()

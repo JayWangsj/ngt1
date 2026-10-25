@@ -25,6 +25,10 @@
   background: #ffedaa;
 }
 
+.control:hover:not(:disabled) {
+  border-color: transparent;
+}
+
 .danger {
   border-color: transparent;
   background: transparent;
