@@ -35,6 +35,7 @@ import { RecordIcon } from "./ui/record-icon";
 import { useBusinessDay } from "./business-date";
 import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
 import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
+import quickServicePickerContentStyles from "./quick-service-picker-content.module.css";
 import newServiceOrderStyles from "./new-service-order.module.css";
 
 type Customer = CustomerOption & { devices: { id: string }[] };
@@ -247,7 +248,7 @@ export function NewServiceOrder({
                     key={device.id}
                   >
                     <span
-                      className={`quick-service-picker-icon ${quickServiceDeviceCardStyles.icon}`}
+                      className={`quick-service-picker-icon ${quickServicePickerContentStyles.icon} ${quickServiceDeviceCardStyles.icon}`}
                       aria-hidden="true"
                     >
                       <Smartphone size={22} />
@@ -536,16 +537,22 @@ export function NewServiceOrder({
                           }
                           onClick={(event) => event.stopPropagation()}
                         />
-                        <span className="quick-service-picker-icon">
+                        <span
+                          className={`quick-service-picker-icon ${quickServicePickerContentStyles.icon}`}
+                        >
                           <Zap size={22} aria-hidden="true" />
                         </span>
-                        <span className="quick-service-picker-copy">
+                        <span
+                          className={`quick-service-picker-copy ${quickServicePickerContentStyles.copy}`}
+                        >
                           <strong>{service.name}</strong>
                           <small>
                             {service.notes || it.quickService.quickMode}
                           </small>
                         </span>
-                        <strong className="quick-service-picker-price">
+                        <strong
+                          className={`quick-service-picker-price ${quickServicePickerContentStyles.price}`}
+                        >
                           {money(service.defaultPrice)}
                         </strong>
                         <div

@@ -1,0 +1,31 @@
+.icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 9px;
+  background: #f4f5f4;
+  color: #59635f;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy small {
+  color: var(--muted);
+}
+
+.price {
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+  text-align: right;
+}

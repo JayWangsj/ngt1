@@ -4170,36 +4170,12 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   color: #6d5510;
   font-weight: 650;
 }
-.quick-service-picker-icon {
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background: #f4f5f4;
-  color: #59635f;
-}
-.quick-service-picker-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-.quick-service-picker-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.quick-service-picker-copy small,
 .quick-service-picker-meta {
   color: var(--muted);
 }
-.quick-service-picker-meta,
-.quick-service-picker-price {
+.quick-service-picker-meta {
   padding-left: 20px;
   border-left: 1px solid var(--line);
-}
-.quick-service-picker-price {
-  text-align: right;
 }
 .quick-service-service-cards {
   display: grid;

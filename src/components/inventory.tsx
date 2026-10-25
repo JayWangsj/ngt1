@@ -41,6 +41,7 @@ import {
 import inventoryMovementsStyles from "./inventory-movements.module.css";
 import inventoryStyles from "./inventory.module.css";
 import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
+import quickServicePickerContentStyles from "./quick-service-picker-content.module.css";
 import { DatePicker, SimpleSelect } from "./business-select";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import { Button } from "./ui/button";
@@ -241,7 +242,10 @@ function ProductCompatibilityDialog({
         ) : (
           <div className="compatibility-overview">
             <section className="compatibility-product-summary">
-              <span className="quick-service-picker-icon" aria-hidden="true">
+              <span
+                className={`quick-service-picker-icon ${quickServicePickerContentStyles.icon}`}
+                aria-hidden="true"
+              >
                 <PackageOpen size={22} />
               </span>
               <span>

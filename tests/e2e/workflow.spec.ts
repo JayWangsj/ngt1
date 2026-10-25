@@ -2042,6 +2042,17 @@ test("quick service device and service selectors retain the large dialog size", 
   await expect(serviceOption).toHaveCSS("gap", "12px");
   await expect(serviceOption).toHaveCSS("padding", "10px 14px");
   await expect(serviceOption).toHaveCSS("border-radius", "10px");
+  const serviceIcon = serviceOption.locator(".quick-service-picker-icon");
+  await expect(serviceIcon).toHaveCSS("width", "46px");
+  await expect(serviceIcon).toHaveCSS("height", "46px");
+  await expect(serviceIcon).toHaveCSS("display", "grid");
+  const serviceCopy = serviceOption.locator(".quick-service-picker-copy");
+  await expect(serviceCopy).toHaveCSS("display", "grid");
+  await expect(serviceCopy).toHaveCSS("gap", "3px");
+  const servicePrice = serviceOption.locator(".quick-service-picker-price");
+  await expect(servicePrice).toHaveCSS("padding-left", "20px");
+  await expect(servicePrice).toHaveCSS("border-left-width", "1px");
+  await expect(servicePrice).toHaveCSS("text-align", "right");
   const serviceCheckbox = serviceOption.locator('input[type="checkbox"]');
   await expect(serviceCheckbox).toHaveCSS("width", "16px");
   await serviceCheckbox.check();
@@ -9007,6 +9018,12 @@ test("inventory repair products retain their compatibility editor", async ({
   const overview = dialog.locator(".compatibility-overview");
   await expect(overview).toHaveCSS("display", "grid");
   await expect(overview).toHaveCSS("gap", "10px");
+  const productIcon = dialog.locator(
+    ".compatibility-product-summary .quick-service-picker-icon",
+  );
+  await expect(productIcon).toHaveCSS("width", "46px");
+  await expect(productIcon).toHaveCSS("height", "46px");
+  await expect(productIcon).toHaveCSS("display", "grid");
   await expect(dialog.locator(".compatibility-product-summary")).toHaveCSS(
     "padding",
     "10px 12px",

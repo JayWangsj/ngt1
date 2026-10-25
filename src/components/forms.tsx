@@ -24,6 +24,7 @@ import compatibilityDeviceListStyles from "./compatibility-device-list.module.cs
 import productCompatibilityEditorStyles from "./product-compatibility-editor.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
+import quickServicePickerContentStyles from "./quick-service-picker-content.module.css";
 import { EditableSelect } from "./editable-select";
 import priceListControlsStyles from "./price-list-controls.module.css";
 import priceRuleListStyles from "./price-rule-list.module.css";
@@ -1258,10 +1259,14 @@ function PriceOptionPicker({
                 disabled={disabled}
                 onClick={() => setDraftOptionId("")}
               >
-                <span className="quick-service-picker-icon">
+                <span
+                  className={`quick-service-picker-icon ${quickServicePickerContentStyles.icon}`}
+                >
                   <Package size={20} aria-hidden="true" />
                 </span>
-                <span className="quick-service-picker-copy">
+                <span
+                  className={`quick-service-picker-copy ${quickServicePickerContentStyles.copy}`}
+                >
                   <strong>{it.noRequiredPart}</strong>
                   <small>{it.noPartOptions}</small>
                 </span>
@@ -2423,14 +2428,20 @@ export function ItemsEditor({
                       onChange={() => toggleDraftProject(choice.project)}
                       onClick={(event) => event.stopPropagation()}
                     />
-                    <span className="quick-service-picker-icon">
+                    <span
+                      className={`quick-service-picker-icon ${quickServicePickerContentStyles.icon}`}
+                    >
                       <Wrench size={22} aria-hidden="true" />
                     </span>
-                    <span className="quick-service-picker-copy">
+                    <span
+                      className={`quick-service-picker-copy ${quickServicePickerContentStyles.copy}`}
+                    >
                       <strong>{choice.project}</strong>
                       <small>{choice.notes || it.priceListProject}</small>
                     </span>
-                    <strong className="quick-service-picker-price">
+                    <strong
+                      className={`quick-service-picker-price ${quickServicePickerContentStyles.price}`}
+                    >
                       {money(cents(choice.final))}
                     </strong>
                     {custom && (
