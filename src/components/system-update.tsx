@@ -30,6 +30,7 @@ import {
 import settingsCardStyles from "./settings-card.module.css";
 import settingsActionStyles from "./settings-action.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
+import systemUpdateDialogStyles from "./system-update-dialog.module.css";
 
 type GitHubAuth = {
   status: "opening" | "waiting";
@@ -778,8 +779,13 @@ export function SystemUpdate({
               void confirmUpdate();
             }}
           >
-            <DialogBody className="confirm-update-dialog">
-              <div className="confirm-update-icon" aria-hidden="true">
+            <DialogBody
+              className={`confirm-update-dialog ${systemUpdateDialogStyles.confirmationBody}`}
+            >
+              <div
+                className={`confirm-update-icon ${systemUpdateDialogStyles.confirmationIcon}`}
+                aria-hidden="true"
+              >
                 <Download size={22} />
               </div>
               <p>{it.updateConfirm.replace("{version}", info.latestVersion)}</p>

@@ -6672,9 +6672,17 @@ test("system update page checks a private release and shows real progress", asyn
   await expect(confirmation).toContainText("Conferma aggiornamento");
   await expect(confirmation).toContainText("1.11.58");
   const confirmationForm = confirmation.locator(":scope > .dialog-form-layout");
-  await expect(
-    confirmationForm.locator(":scope > .dialog-body.confirm-update-dialog"),
-  ).toBeVisible();
+  const confirmationBody = confirmationForm.locator(
+    ":scope > .dialog-body.confirm-update-dialog",
+  );
+  await expect(confirmation).toHaveCSS(
+    "width",
+    `${Math.min(520, page.viewportSize()!.width - 32)}px`,
+  );
+  await expect(confirmationBody).toBeVisible();
+  await expect(confirmationBody).toHaveCSS("display", "grid");
+  await expect(confirmationBody).toHaveCSS("gap", "14px");
+  await expect(confirmationBody.locator("p")).toHaveCSS("margin", "0px");
   await expect(
     confirmationForm.locator(":scope > .dialog-footer"),
   ).toBeVisible();
