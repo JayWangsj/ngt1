@@ -91,7 +91,7 @@ try {
 
   . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
   . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
-  $processRoot = Join-Path $testRoot "process-fixture"
+  $processRoot = Join-Path $testRoot "process-fixture-管理"
   $processInstallRoot = Join-Path $processRoot "install"
   $processReleaseRoot = Join-Path $processInstallRoot "releases\v-test"
   $processDataRoot = Join-Path $processRoot "data"
@@ -105,6 +105,13 @@ try {
     activeRelease = $processReleaseRoot
   })
   $script:NgtStateDirectory = $processStateDirectory
+  $configuredEnvironment = Set-NgtStudioEnvironment
+  if ([System.IO.Path]::GetFullPath([string]$configuredEnvironment.activeRelease) -ine
+        [System.IO.Path]::GetFullPath($processReleaseRoot) -or
+      [System.IO.Path]::GetFullPath([string]$env:NGT_DATA_ROOT) -ine
+        [System.IO.Path]::GetFullPath($processDataRoot)) {
+    throw "A BOM-less UTF-8 Studio configuration was not read correctly."
+  }
   $script:FixturePorts = @()
   $script:FixtureProcesses = @{}
   $script:FixtureStopCalls = @()

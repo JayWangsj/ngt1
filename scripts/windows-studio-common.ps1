@@ -42,7 +42,10 @@ function Set-NgtStudioEnvironment {
   if (-not (Test-Path -LiteralPath $configPath)) {
     throw "Studio mode is not installed. Run scripts/install-windows-studio.ps1 first."
   }
-  $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+  $config = [System.IO.File]::ReadAllText(
+    $configPath,
+    [System.Text.Encoding]::UTF8
+  ) | ConvertFrom-Json
   if (-not $config.dataRoot) {
     throw "Studio configuration is missing dataRoot."
   }
@@ -288,7 +291,10 @@ function Stop-NgtStudioProcesses {
   if (-not (Test-Path -LiteralPath $studioConfigFile)) {
     throw "Studio configuration is missing; refusing to stop unverified processes."
   }
-  $studioConfig = Get-Content -LiteralPath $studioConfigFile -Raw | ConvertFrom-Json
+  $studioConfig = [System.IO.File]::ReadAllText(
+    $studioConfigFile,
+    [System.Text.Encoding]::UTF8
+  ) | ConvertFrom-Json
   if (-not $studioConfig.installRoot -or -not $studioConfig.dataRoot -or -not $studioConfig.activeRelease) {
     throw "Studio configuration is incomplete; refusing to stop unverified processes."
   }
