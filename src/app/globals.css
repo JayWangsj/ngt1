@@ -8017,24 +8017,6 @@ summary.record-icon::-webkit-details-marker {
   }
 }
 
-.inventory-metrics {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 14px;
-  margin: 20px 0 16px;
-}
-.inventory-metrics .metric {
-  min-width: 0;
-  padding: 16px;
-}
-.inventory-metrics .metric > strong {
-  margin-top: 10px;
-  font-size: 28px;
-}
-.inventory-metrics .metric-icon {
-  width: 32px;
-  height: 32px;
-}
 .inventory-history-card {
   position: relative;
   width: 100%;
@@ -8649,9 +8631,6 @@ summary.record-icon::-webkit-details-marker {
   .orders-page .order-filters > .order-month-filter {
     grid-column: 3;
   }
-  .inventory-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
   .inventory-movements {
     position: static;
   }
@@ -8685,12 +8664,6 @@ summary.record-icon::-webkit-details-marker {
   }
   .orders-page .order-filters > label:last-of-type {
     grid-column: 1 / -1;
-  }
-  .inventory-metrics {
-    grid-template-columns: 1fr;
-  }
-  .inventory-metrics {
-    gap: 10px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

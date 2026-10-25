@@ -3,6 +3,28 @@
   overflow: hidden;
 }
 
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+  margin: 20px 0 16px;
+}
+
+.metrics > :global(.metric) {
+  min-width: 0;
+  padding: 16px;
+}
+
+.metrics > :global(.metric) > strong {
+  margin-top: 10px;
+  font-size: 28px;
+}
+
+.metrics :global(.metric-icon) {
+  width: 32px;
+  height: 32px;
+}
+
 .table {
   min-width: 1380px;
   overflow-anchor: none;
@@ -426,6 +448,10 @@
 }
 
 @media (max-width: 1200px) {
+  .metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .filters {
     grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(130px, 1fr));
   }
@@ -438,6 +464,11 @@
 }
 
 @media (max-width: 600px) {
+  .metrics {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
   .filters {
     grid-template-columns: 1fr;
   }

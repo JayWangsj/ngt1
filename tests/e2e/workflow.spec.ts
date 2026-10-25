@@ -3926,6 +3926,48 @@ test("inventory movement history uses the shared dialog body", async ({
   await expect(dialog).toHaveCount(0);
 });
 
+test("inventory summary metrics adapt from desktop to mobile columns", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/inventory");
+
+  const metrics = page.locator(".inventory-metrics");
+  await expect(metrics).toBeVisible();
+  await expect(metrics.locator(":scope > .metric")).toHaveCount(6);
+  await expect(metrics).toHaveCSS("gap", "14px");
+  await expect(metrics.locator(":scope > .metric").first()).toHaveCSS(
+    "padding",
+    "16px",
+  );
+  expect(
+    await metrics.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+          .length,
+    ),
+  ).toBe(6);
+
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  expect(
+    await metrics.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+          .length,
+    ),
+  ).toBe(3);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(metrics).toHaveCSS("gap", "10px");
+  expect(
+    await metrics.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+          .length,
+    ),
+  ).toBe(1);
+});
+
 test("keeps inventory row editor styles compact and scoped", async ({
   page,
 }) => {

@@ -10,6 +10,7 @@ import { cents, dateTime, inventoryStatus, money, romeDay } from "@/lib/domain";
 import { getLocale, getMessages } from "@/lib/i18n-server";
 import { requireActor } from "@/lib/session";
 import { PageHeader } from "@/components/common";
+import styles from "@/components/inventory.module.css";
 import {
   InventoryHistoryCard,
   InventoryWorkspace,
@@ -165,7 +166,7 @@ export default async function InventoryPage({
           />
         }
       />
-      <div className="inventory-metrics">
+      <div className={`${styles.metrics} inventory-metrics`}>
         {metrics.map(({ label, value, icon: Icon }) => (
           <div className="metric" key={label}>
             <div className="metric-top">
