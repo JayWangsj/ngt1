@@ -163,66 +163,72 @@ export const paymentInput = z.object({
   method: z.enum(["CASH", "CARD", "OTHER"]),
   kind: z.enum(["DEPOSIT", "BALANCE", "OTHER"]),
 });
-export const productInput = z.object({
-  requestId: z.string().uuid(),
-  name: short,
-  category: short,
-  usage: z.enum(["RETAIL", "REPAIR"]),
-  unlimitedStock: z.boolean().default(false),
-  costPrice: amountInput,
-  salePrice: amountInput,
-  initialStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
-  minStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
-  favorite: z.boolean().default(false),
-  enabled: z.boolean().default(true),
-  compatibilities: z
-    .array(
-      z.object({
-        category: z.string().trim().min(1).max(30),
-        brand: short,
-        model: short,
-        project: z.string().trim().max(120).default(""),
-      }),
-    )
-    .max(100)
-    .default([]),
-}).superRefine((data, ctx) => {
-  if (data.unlimitedStock && data.usage !== "RETAIL")
-    ctx.addIssue({
-      code: "custom",
-      path: ["unlimitedStock"],
-      message: "La disponibilità illimitata è consentita solo per i prodotti retail.",
-    });
-});
-export const productUpdateInput = z.object({
-  name: short,
-  category: short,
-  usage: z.enum(["RETAIL", "REPAIR"]),
-  unlimitedStock: z.boolean().optional(),
-  costPrice: amountInput,
-  salePrice: amountInput,
-  stockQuantity: z.coerce.number().int().min(0).max(1_000_000),
-  minStock: z.coerce.number().int().min(0).max(1_000_000),
-  favorite: z.boolean(),
-  compatibilities: z
-    .array(
-      z.object({
-        category: z.string().trim().min(1).max(30),
-        brand: short,
-        model: short,
-        project: z.string().trim().max(120).default(""),
-      }),
-    )
-    .max(100)
-    .optional(),
-}).superRefine((data, ctx) => {
-  if (data.unlimitedStock && data.usage !== "RETAIL")
-    ctx.addIssue({
-      code: "custom",
-      path: ["unlimitedStock"],
-      message: "La disponibilità illimitata è consentita solo per i prodotti retail.",
-    });
-});
+export const productInput = z
+  .object({
+    requestId: z.string().uuid(),
+    name: short,
+    category: short,
+    usage: z.enum(["RETAIL", "REPAIR"]),
+    unlimitedStock: z.boolean().default(false),
+    costPrice: amountInput,
+    salePrice: amountInput,
+    initialStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
+    minStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
+    favorite: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    compatibilities: z
+      .array(
+        z.object({
+          category: z.string().trim().min(1).max(30),
+          brand: short,
+          model: short,
+          project: z.string().trim().max(120).default(""),
+        }),
+      )
+      .max(100)
+      .default([]),
+  })
+  .superRefine((data, ctx) => {
+    if (data.unlimitedStock && data.usage !== "RETAIL")
+      ctx.addIssue({
+        code: "custom",
+        path: ["unlimitedStock"],
+        message:
+          "La disponibilità illimitata è consentita solo per i prodotti retail.",
+      });
+  });
+export const productUpdateInput = z
+  .object({
+    name: short,
+    category: short,
+    usage: z.enum(["RETAIL", "REPAIR"]),
+    unlimitedStock: z.boolean().optional(),
+    costPrice: amountInput,
+    salePrice: amountInput,
+    stockQuantity: z.coerce.number().int().min(0).max(1_000_000),
+    minStock: z.coerce.number().int().min(0).max(1_000_000),
+    favorite: z.boolean(),
+    compatibilities: z
+      .array(
+        z.object({
+          category: z.string().trim().min(1).max(30),
+          brand: short,
+          model: short,
+          project: z.string().trim().max(120).default(""),
+        }),
+      )
+      .max(100)
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.unlimitedStock && data.usage !== "RETAIL")
+      ctx.addIssue({
+        code: "custom",
+        path: ["unlimitedStock"],
+        message:
+          "La disponibilità illimitata è consentita solo per i prodotti retail.",
+      });
+  });
 export const paidTotalInput = z.object({
   requestId: z.string().uuid(),
   amount: amountInput,
