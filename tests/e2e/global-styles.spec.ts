@@ -26,11 +26,6 @@ const elevationSurfaces = [
     className: "date-picker-popover",
     token: "--shadow-4",
   },
-  {
-    id: "inventory-filter",
-    className: "inventory-device-popover",
-    token: "--shadow-4",
-  },
   { id: "chart-tooltip", className: "revenue-tooltip", token: "--shadow-3" },
   {
     id: "update-notification",

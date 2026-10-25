@@ -4669,6 +4669,16 @@ test("filters inventory by compatible device and exposes compatibility", async (
   await expect(popover).toHaveCSS("width", "290px");
   await expect(popover).toHaveCSS("padding", "16px");
   await expect(popover).toHaveCSS("border-radius", "13px");
+  const popoverUsesShadowToken = await popover.evaluate((element) => {
+    const probe = document.createElement("div");
+    probe.style.boxShadow = "var(--shadow-4)";
+    element.parentElement?.append(probe);
+    const expected = getComputedStyle(probe).boxShadow;
+    const actual = getComputedStyle(element).boxShadow;
+    probe.remove();
+    return actual !== "none" && actual === expected;
+  });
+  expect(popoverUsesShadowToken).toBe(true);
   await expect(popover.locator(".business-select-trigger").first()).toHaveCSS(
     "min-height",
     "39px",
