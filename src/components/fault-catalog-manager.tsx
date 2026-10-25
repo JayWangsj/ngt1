@@ -16,6 +16,7 @@ import { Button } from "./ui/button";
 import { ToggleSwitch } from "./ui/toggle-switch";
 import { focusComfortably } from "@/lib/comfortable-scroll";
 import settingsInlineManagerStyles from "./settings-inline-manager.module.css";
+import faultCatalogManagerStyles from "./fault-catalog-manager.module.css";
 
 export type FaultCatalogItem = {
   id: string;
@@ -434,7 +435,11 @@ export function FaultCatalogManager({
       {managerContent}
     </div>
   ) : (
-    <DialogBody className="fault-manager">{managerContent}</DialogBody>
+    <DialogBody
+      className={`fault-manager ${faultCatalogManagerStyles.dialogBody}`}
+    >
+      {managerContent}
+    </DialogBody>
   );
 
   return (

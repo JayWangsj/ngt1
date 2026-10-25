@@ -5115,11 +5115,6 @@ details.secondary-actions {
   display: grid;
   gap: 20px;
 }
-.form-dialog > [data-form-dialog-body].fault-manager {
-  max-height: none;
-  overflow: visible;
-  padding: 4px 8px 4px 2px;
-}
 .catalog-toolbar.fault-manager-toolbar {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;

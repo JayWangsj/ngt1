@@ -9904,6 +9904,10 @@ test("hides managed faults without changing historical records", async ({
   await expect(
     dialog.locator(":scope > .dialog-body.fault-manager"),
   ).toBeVisible();
+  const managerBody = dialog.locator(":scope > .dialog-body.fault-manager");
+  await expect(managerBody).toHaveCSS("max-height", "none");
+  await expect(managerBody).toHaveCSS("overflow-y", "visible");
+  await expect(managerBody).toHaveCSS("padding", "4px 8px 4px 2px");
   await expect(dialog.locator(":scope > .dialog-footer")).toBeVisible();
   await expect(dialog).toContainText(
     "Problemi frequenti per nuove schede · Telefono",
