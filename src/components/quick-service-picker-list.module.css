@@ -22,3 +22,40 @@
   border-color: #e8bb15;
   box-shadow: inset 0 0 0 1px rgb(232 187 21 / 12%);
 }
+
+.list :global(.quick-service-picker-option) {
+  display: grid;
+  grid-template-columns: auto 46px minmax(0, 1fr) minmax(150px, auto);
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.list :global(.quick-service-picker-option.is-selected) {
+  border-color: #e8bb15;
+  background: #fffaf0;
+  box-shadow: 0 0 0 1px rgb(232 187 21 / 12%);
+}
+
+.list :global(.quick-service-picker-option .record-actions) {
+  justify-content: flex-end;
+}
+
+.list :global(.quick-service-picker-service) {
+  grid-template-columns: auto 46px minmax(0, 1fr) minmax(110px, auto) minmax(
+      34px,
+      auto
+    );
+}
+
+.list :global(.quick-service-picker-option input) {
+  width: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  accent-color: #e4b900;
+}

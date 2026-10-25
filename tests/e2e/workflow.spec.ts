@@ -2035,6 +2035,21 @@ test("quick service device and service selectors retain the large dialog size", 
   );
   await expect(servicePickerBody).toHaveCSS("display", "grid");
   await expect(servicePickerBody).toHaveCSS("gap", "14px");
+  const serviceOption = servicePicker
+    .locator(".quick-service-picker-option")
+    .first();
+  await expect(serviceOption).toHaveCSS("display", "grid");
+  await expect(serviceOption).toHaveCSS("gap", "12px");
+  await expect(serviceOption).toHaveCSS("padding", "10px 14px");
+  await expect(serviceOption).toHaveCSS("border-radius", "10px");
+  const serviceCheckbox = serviceOption.locator('input[type="checkbox"]');
+  await expect(serviceCheckbox).toHaveCSS("width", "16px");
+  await serviceCheckbox.check();
+  await expect(serviceOption).toHaveClass(/is-selected/);
+  await expect(serviceOption).toHaveCSS(
+    "border-top-color",
+    "rgb(232, 187, 21)",
+  );
   await servicePicker
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
