@@ -11024,7 +11024,7 @@ test("settings exports data and re-import skips existing records", async ({
   expect(result.skipped).toBeGreaterThan(0);
 });
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 768, 390]) {
   test(`creation buttons and dialog actions stay consistent at ${width}px`, async ({
     page,
   }) => {
