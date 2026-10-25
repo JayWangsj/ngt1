@@ -7992,11 +7992,6 @@ summary.record-icon::-webkit-details-marker {
   position: sticky;
   top: 24px;
 }
-.dialog-form {
-  display: grid;
-  gap: 18px;
-  padding: 0 22px 22px;
-}
 .dialog-checks {
   display: flex;
   gap: 20px;

@@ -836,7 +836,7 @@ export function ProductForm({
     .sort();
   return (
     <form
-      className="dialog-form"
+      className={`${dialogStyles.dialogForm} dialog-form`}
       onSubmit={submit}
       aria-busy={pending}
       noValidate

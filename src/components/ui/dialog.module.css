@@ -172,6 +172,12 @@
   flex: 1;
 }
 
+.dialogForm {
+  display: grid;
+  gap: 18px;
+  padding: 0 22px 22px;
+}
+
 .formDialog > .actionForm,
 :global(.form-dialog) > :global(.action-form) {
   display: grid;

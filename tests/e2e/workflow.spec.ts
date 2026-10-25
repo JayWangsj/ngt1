@@ -8991,6 +8991,11 @@ test("new repair products add compatible devices in a modal", async ({
     .getByRole("button", { name: "Nuovo prodotto", exact: true })
     .click();
   const productDialog = page.getByRole("dialog");
+  const productForm = productDialog.locator(":scope > form.dialog-form");
+  await expect(productForm).toHaveCSS("display", "grid");
+  await expect(productForm).toHaveCSS("gap", "18px");
+  await expect(productForm).toHaveCSS("padding-top", "0px");
+  await expect(productForm).toHaveCSS("padding-bottom", "22px");
   await chooseBusinessOption(page, "Utilizzo", "Riparazione", productDialog);
   const addCompatibility = productDialog.getByRole("button", {
     name: "Compatibilità",

@@ -120,7 +120,7 @@ export function QuickServiceOrderEditor({
           restoreFocusComfortably={false}
         >
           <form
-            className="dialog-form quick-service-order-edit"
+            className={`${dialogStyles.dialogForm} dialog-form quick-service-order-edit`}
             aria-busy={pending}
             onSubmit={submit}
           >
