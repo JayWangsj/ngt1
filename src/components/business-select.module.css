@@ -305,6 +305,27 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+:where(.scope) :global(.option-delete) {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #87908d;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+:where(.scope) :global(.option-delete:hover),
+:where(.scope) :global(.option-delete:focus-visible) {
+  background: #fff0ee;
+  color: #a64642;
+}
 :where(.scope) :global(.business-select-option:hover .option-delete),
 :where(.scope) :global(.business-select-option:focus-within .option-delete) {
   opacity: 1;

@@ -6653,27 +6653,6 @@ details.secondary-actions {
   outline: 2px solid rgb(210 174 33 / 45%);
   outline-offset: 2px;
 }
-.option-delete {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #87908d;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 160ms ease,
-    background 160ms ease,
-    color 160ms ease;
-}
-.option-delete:hover,
-.option-delete:focus-visible {
-  background: #fff0ee;
-  color: #a64642;
-}
 .inventory-category-field .icon-button {
   opacity: 0;
   transition: opacity 160ms ease;

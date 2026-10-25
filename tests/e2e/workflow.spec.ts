@@ -9028,6 +9028,24 @@ test("new repair products add compatible devices in a modal", async ({
     .getByLabel("Prodotto", { exact: true })
     .fill("Prodotto di prova");
   await expect(addCompatibility).toBeDisabled();
+  const categoryInput = productDialog.getByRole("combobox", {
+    name: "Categoria",
+    exact: true,
+  });
+  await categoryInput.fill("Schermi");
+  const categoryPanel = productDialog.locator(
+    ".business-select-panel.is-entering:visible",
+  );
+  const deletableCategory = categoryPanel.locator(
+    ".business-select-option:has(.option-delete)",
+  );
+  await expect(deletableCategory).toBeVisible();
+  const deleteCategory = deletableCategory.locator(".option-delete");
+  await expect(deleteCategory).toHaveCSS("width", "28px");
+  await expect(deleteCategory).toHaveCSS("opacity", "0");
+  await deletableCategory.hover();
+  await expect(deleteCategory).toHaveCSS("opacity", "1");
+  await expect(deleteCategory).toHaveCSS("pointer-events", "auto");
   await chooseBusinessOption(page, "Categoria", "Ricambi", productDialog);
   await productDialog.getByLabel("Costo", { exact: true }).fill("12");
   await expect(addCompatibility).toBeEnabled();
