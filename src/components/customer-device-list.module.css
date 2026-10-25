@@ -1,0 +1,21 @@
+.deviceList :global(.action-form) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.deviceList :global(.action-form) > :global(.message),
+.deviceList :global(.action-form) > :global(.dialog-actions) {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .deviceList :global(.action-form) {
+    grid-template-columns: 1fr;
+  }
+
+  .deviceList :global(.action-form) > :global(.message),
+  .deviceList :global(.action-form) > :global(.dialog-actions) {
+    grid-column: 1;
+  }
+}

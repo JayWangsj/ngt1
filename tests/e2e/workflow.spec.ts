@@ -9412,6 +9412,40 @@ test("customer summary edit form keeps its responsive grid", async ({
   expect(mobileColumns).toBe(1);
 });
 
+test("customer device edit form keeps its responsive grid", async ({
+  page,
+}) => {
+  await page.goto("/customers");
+  await page.getByRole("link", { name: "Cliente Playwright" }).first().click();
+
+  const detailDialog = page.getByRole("dialog", {
+    name: "Dettagli cliente",
+    exact: true,
+  });
+  const deviceRow = detailDialog.locator(".customer-device-row").first();
+  await deviceRow.hover();
+  await deviceRow
+    .getByRole("button", { name: "Modifica dispositivo", exact: true })
+    .click();
+
+  const form = detailDialog.locator(
+    ".customer-device-list > .customer-device-row .action-form",
+  );
+  await expect(form).toBeVisible();
+  const desktopColumns = await form.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(desktopColumns).toBe(2);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileColumns = await form.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(mobileColumns).toBe(1);
+});
+
 test("customer list searches instantly, preserves navigation and supports compact editing", async ({
   page,
 }) => {

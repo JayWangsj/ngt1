@@ -16,6 +16,7 @@ import { BatchControls } from "./ui/batch-controls";
 import batchControlsStyles from "./ui/batch-controls.module.css";
 import dialogStyles from "./ui/dialog.module.css";
 import customerSummaryStyles from "./customer-summary.module.css";
+import customerDeviceListStyles from "./customer-device-list.module.css";
 import { useLanguage, useMessages } from "./language";
 import {
   deleteCustomerAction,
@@ -542,7 +543,9 @@ export function CustomerDevices({
           {it.devices} ({devices.length})
         </h2>
       </div>
-      <div className="panel customer-device-list">
+      <div
+        className={`${customerDeviceListStyles.deviceList} panel customer-device-list`}
+      >
         {devices.length ? (
           devices.map((device) =>
             editingId === device.id ? (

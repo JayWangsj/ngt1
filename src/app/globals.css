@@ -7230,15 +7230,6 @@ details.secondary-actions {
 .customer-device-row > .customer-device-icon + div {
   flex: 1;
 }
-.customer-device-list .action-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.customer-device-list .action-form > .message,
-.customer-device-list .action-form > .dialog-actions {
-  grid-column: 1 / -1;
-}
 .customer-device-row + .customer-device-row {
   border-top: 1px solid var(--line);
 }
@@ -7348,13 +7339,6 @@ details.secondary-actions {
   }
   .customer-search .grow {
     min-width: 0;
-  }
-  .customer-device-list .action-form {
-    grid-template-columns: 1fr;
-  }
-  .customer-device-list .action-form > .message,
-  .customer-device-list .action-form > .dialog-actions {
-    grid-column: 1;
   }
   .customer-row-actions .record-actions {
     flex-wrap: wrap;
