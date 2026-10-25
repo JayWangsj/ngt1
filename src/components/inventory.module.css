@@ -69,6 +69,21 @@
   padding-left: 6px;
 }
 
+.table :global(.inventory-selection) {
+  width: 42px;
+  text-align: center;
+}
+
+.table :global(.inventory-selection input[type="checkbox"]) {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  aspect-ratio: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
 .table tbody tr {
   cursor: pointer;
 }

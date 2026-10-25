@@ -3962,6 +3962,25 @@ test("keeps inventory row editor styles compact and scoped", async ({
   await expect(tableStepper.locator("input")).toHaveCSS("text-align", "center");
 });
 
+test("keeps inventory batch selection controls sized", async ({ page }) => {
+  await page.goto("/inventory");
+  const inventoryMain = page.locator(".inventory-main");
+  await inventoryMain
+    .getByRole("button", { name: "Gestisci selezione", exact: true })
+    .click();
+
+  const selectionHeader = inventoryMain.locator(
+    ".inventory-table thead th.inventory-selection",
+  );
+  await expect(selectionHeader).toBeVisible();
+  await expect(selectionHeader).toHaveCSS("width", "42px");
+  await expect(selectionHeader).toHaveCSS("text-align", "center");
+  const selectAll = selectionHeader.getByRole("checkbox");
+  await expect(selectAll).toHaveCSS("width", "18px");
+  await expect(selectAll).toHaveCSS("height", "18px");
+  await expect(selectAll).toHaveCSS("padding", "0px");
+});
+
 test("creates and edits a product directly in the inventory row", async ({
   page,
 }) => {
