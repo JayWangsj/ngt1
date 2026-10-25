@@ -2,6 +2,16 @@
   display: grid;
 }
 
+:global(.form-dialog[open]:has(> .dialog-body)):has(> .detailBody) {
+  overflow: visible;
+}
+
+:global(.form-dialog[open]:has(> .dialog-body)):has(> .detailBody)
+  > .detailBody {
+  max-height: calc(100dvh - 150px);
+  overflow-y: auto;
+}
+
 .detailBody :global(.customer-summary) {
   padding: 0 0 18px;
   border: 0;

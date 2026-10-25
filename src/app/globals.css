@@ -8021,13 +8021,6 @@ summary.record-icon::-webkit-details-marker {
   color: var(--muted);
   font-size: 11px;
 }
-.form-dialog:has(.customer-detail-dialog) {
-  overflow: visible;
-}
-.form-dialog:has(.customer-detail-dialog) > .customer-detail-dialog {
-  max-height: calc(100dvh - 150px);
-  overflow-y: auto;
-}
 .form-dialog:has(.confirm-update-dialog) {
   width: min(520px, calc(100vw - 32px));
 }

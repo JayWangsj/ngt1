@@ -11074,6 +11074,13 @@ test("customer links from repair list and detail open the shared dialog", async 
     exact: true,
   });
   await expect(dialog).toBeVisible();
+  const detailBody = dialog.locator(".customer-detail-dialog");
+  await expect(dialog).toHaveCSS("overflow", "visible");
+  await expect(detailBody).toHaveCSS(
+    "max-height",
+    `${page.viewportSize()!.height - 150}px`,
+  );
+  await expect(detailBody).toHaveCSS("overflow-y", "auto");
   await dialog.getByRole("button", { name: "Chiudi" }).click();
   await expect(page).toHaveURL(/\/orders/);
 
