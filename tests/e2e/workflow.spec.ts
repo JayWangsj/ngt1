@@ -3948,6 +3948,11 @@ test("inventory movement history uses the shared dialog body", async ({
   expect(monthPickerBox!.y + monthPickerBox!.height).toBeLessThanOrEqual(
     firstMovementBox!.y,
   );
+  await monthPicker.locator('input[type="month"]').fill("2099-12");
+  const emptyState = dialog.locator(".inventory-empty");
+  await expect(emptyState).toBeVisible();
+  await expect(emptyState).toHaveCSS("min-height", "112px");
+  await expect(emptyState).toHaveCSS("padding", "24px 16px");
   await dialog.getByRole("button", { name: "Chiudi" }).click();
   await expect(dialog).toHaveCount(0);
 });
@@ -5876,7 +5881,10 @@ test("sales history uses a monthly filter", async ({ page }) => {
   );
   const currentMonth = await period.inputValue();
   await period.fill("2025-01");
-  await expect(dialog).toContainText("Nessuna vendita registrata.");
+  const emptyState = dialog.locator(".inventory-empty");
+  await expect(emptyState).toContainText("Nessuna vendita registrata.");
+  await expect(emptyState).toHaveCSS("min-height", "128px");
+  await expect(emptyState).toHaveCSS("padding", "32px 24px");
   await period.fill(currentMonth);
   const historyRow = dialog.locator("tbody tr").first();
   await expect(historyRow).toBeVisible();

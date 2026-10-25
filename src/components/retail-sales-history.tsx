@@ -11,6 +11,7 @@ import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { Button } from "./ui/button";
 import retailSalesHistoryStyles from "./retail-sales-history.module.css";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
+import emptyStateStyles from "./ui/empty-state.module.css";
 
 export type SaleHistoryRow = {
   id: string;
@@ -133,7 +134,9 @@ export function RetailSalesHistory({
             </table>
           </div>
         ) : (
-          <p className="inventory-empty">{it.retail.noSales}</p>
+          <p className={`${emptyStateStyles.inventoryEmpty} inventory-empty`}>
+            {it.retail.noSales}
+          </p>
         )}
       </section>
       {error && !saleToDelete && (

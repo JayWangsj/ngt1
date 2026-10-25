@@ -47,6 +47,7 @@ import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
+import emptyStateStyles from "./ui/empty-state.module.css";
 import {
   CompatibilityAddEditor,
   type CompatibilityDeviceDraft,
@@ -536,7 +537,11 @@ export function InventoryHistoryCard({
                 </div>
               ))
             ) : (
-              <p className="inventory-empty">{it.inventory.noMovements}</p>
+              <p
+                className={`${emptyStateStyles.inventoryEmpty} inventory-empty`}
+              >
+                {it.inventory.noMovements}
+              </p>
             )}
           </DialogBody>
         </FormDialog>
@@ -1449,7 +1454,9 @@ export function InventoryWorkspace({
           </table>
         </div>
       ) : (
-        <p className="inventory-empty">{it.inventory.noProducts}</p>
+        <p className={`${emptyStateStyles.inventoryEmpty} inventory-empty`}>
+          {it.inventory.noProducts}
+        </p>
       )}
       {compatibilityEditor &&
         (() => {
