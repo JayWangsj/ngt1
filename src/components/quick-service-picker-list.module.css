@@ -1,0 +1,19 @@
+.list {
+  display: grid;
+  gap: 9px;
+  max-height: min(48vh, 440px);
+  padding: 2px;
+  overflow-y: auto;
+}
+
+.list :global(.customer-device-row) {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.list :global(.customer-device-row.is-selected),
+.list :global(.customer-device-row.business-list-row:hover) {
+  border-color: #e8bb15;
+  box-shadow: inset 0 0 0 1px rgb(232 187 21 / 12%);
+}

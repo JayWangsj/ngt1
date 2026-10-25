@@ -34,6 +34,7 @@ import {
 import { RecordIcon } from "./ui/record-icon";
 import { useBusinessDay } from "./business-date";
 import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
+import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
 
 type Customer = CustomerOption & { devices: { id: string }[] };
 
@@ -419,7 +420,9 @@ export function NewServiceOrder({
                 onClose={() => setChoosingDevices(false)}
               >
                 <DialogBody className="quick-service-picker">
-                  <div className="quick-service-picker-list">
+                  <div
+                    className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
+                  >
                     {customer.devices.map((device) => (
                       <CustomerDeviceCard
                         key={device.id}
@@ -489,7 +492,9 @@ export function NewServiceOrder({
                 onClose={() => setChoosingServices(false)}
               >
                 <DialogBody className="quick-service-picker">
-                  <div className="quick-service-picker-list">
+                  <div
+                    className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
+                  >
                     {availableServices.map((service) => (
                       <article
                         className={`quick-service-picker-option quick-service-picker-service business-list-row${draftServiceIds.includes(service.id) ? " is-selected" : ""}`}

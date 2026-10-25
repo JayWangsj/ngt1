@@ -22,6 +22,7 @@ import { RecordIcon } from "./ui/record-icon";
 import recordIconStyles from "./ui/record-icon.module.css";
 import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
+import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
 import { EditableSelect } from "./editable-select";
 import priceListControlsStyles from "./price-list-controls.module.css";
 import priceRuleListStyles from "./price-rule-list.module.css";
@@ -2390,7 +2391,9 @@ export function ItemsEditor({
           onClose={() => setChoosingProjects(false)}
         >
           <DialogBody className="quick-service-picker">
-            <div className="quick-service-picker-list">
+            <div
+              className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
+            >
               {pickerProjects.map((choice) => {
                 const selected = draftProjects.some(
                   (project) =>

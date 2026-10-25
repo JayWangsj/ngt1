@@ -929,6 +929,11 @@ test("repair project picker selects multiple items and removes a summary on hove
     name: "Seleziona interventi",
   });
   await expect(picker).toHaveCSS("width", "900px");
+  const projectPickerList = picker.locator(".quick-service-picker-list");
+  await expect(projectPickerList).toHaveCSS("display", "grid");
+  await expect(projectPickerList).toHaveCSS("gap", "9px");
+  await expect(projectPickerList).toHaveCSS("padding", "2px");
+  await expect(projectPickerList).toHaveCSS("overflow-y", "auto");
   const displayProject = repairProjectOption(picker, "sostituzione display");
   await expect(displayProject).toHaveCount(1);
   await displayProject.click();
@@ -1892,6 +1897,16 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
   const devicePicker = page.getByRole("dialog", {
     name: "Dispositivi associati",
   });
+  const devicePickerList = devicePicker.locator(".quick-service-picker-list");
+  await expect(devicePickerList).toHaveCSS("display", "grid");
+  await expect(devicePickerList).toHaveCSS("gap", "9px");
+  await expect(devicePickerList).toHaveCSS("padding", "2px");
+  await expect(devicePickerList).toHaveCSS("overflow-y", "auto");
+  const devicePickerListMaxHeight = await devicePickerList.evaluate((element) =>
+    parseFloat(getComputedStyle(element).maxHeight),
+  );
+  expect(devicePickerListMaxHeight).toBeGreaterThan(0);
+  expect(devicePickerListMaxHeight).toBeLessThanOrEqual(440);
   const pickerAddDevice = devicePicker.getByRole("button", {
     name: "Dispositivo",
     exact: true,
@@ -1914,7 +1929,11 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
   const deviceRow = devicePicker
     .locator(".customer-device-row")
     .filter({ hasText: "Apple iPhone 13" });
+  await expect(deviceRow).toHaveCSS("margin", "0px");
+  await expect(deviceRow).toHaveCSS("border-radius", "10px");
   await deviceRow.locator('input[type="checkbox"]').check();
+  await expect(deviceRow).toHaveClass(/is-selected/);
+  await expect(deviceRow).toHaveCSS("border-top-color", "rgb(232, 187, 21)");
   await devicePicker
     .getByRole("button", { name: "Conferma selezione", exact: true })
     .click();

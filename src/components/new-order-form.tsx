@@ -26,6 +26,7 @@ import { prefersReducedMotion } from "@/lib/motion-preference";
 import { DatePicker, SimpleSelect } from "./business-select";
 import orderStepCardStyles from "./order-step-card.module.css";
 import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
+import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
 import selectionSummaryStyles from "./selection-summary.module.css";
 import {
   DeviceForm,
@@ -604,7 +605,9 @@ export function NewOrderWizard({
                 onClose={() => setChoosingDevice(false)}
               >
                 <DialogBody className="quick-service-picker">
-                  <div className="quick-service-picker-list">
+                  <div
+                    className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
+                  >
                     {customer.devices.map((device) => (
                       <CustomerDeviceCard
                         key={device.id}
