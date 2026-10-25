@@ -107,6 +107,7 @@
 :global(.dialog-close.icon-button) {
   margin-left: 0;
   padding: 0;
+  border-color: transparent;
 }
 
 .dialogClose svg,
@@ -117,13 +118,19 @@
 .dialogClose:hover:not(:disabled),
 .dialogClose:focus-visible,
 :global(.dialog-close):hover:not(:disabled),
-:global(.dialog-close):focus-visible {
+:global(.dialog-close):focus-visible,
+.dialogClose:global(.icon-button):hover:not(:disabled),
+.dialogClose:global(.icon-button):focus-visible,
+:global(.dialog-close.icon-button):hover:not(:disabled),
+:global(.dialog-close.icon-button):focus-visible {
   border-color: transparent;
   background: #fff7d6;
 }
 
 .dialogClose:hover:not(:disabled),
-:global(.dialog-close):hover:not(:disabled) {
+:global(.dialog-close):hover:not(:disabled),
+.dialogClose:global(.icon-button):hover:not(:disabled),
+:global(.dialog-close.icon-button):hover:not(:disabled) {
   background: #fff0ee;
   color: #a64642;
   transform: none;
