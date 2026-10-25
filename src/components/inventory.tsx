@@ -585,7 +585,7 @@ function StockEditor({
     >
       <QuantityStepper
         key={value}
-        className="is-table"
+        className={`${inventoryStyles.tableStepper} is-table`}
         ariaLabel={label}
         defaultValue={value}
         min={0}
@@ -1218,11 +1218,13 @@ export function InventoryWorkspace({
                     </td>
                     <td className="inventory-product-cell">
                       {selected ? (
-                        <div className="inventory-name-edit">
+                        <div
+                          className={`${inventoryStyles.nameEdit} inventory-name-edit`}
+                        >
                           <button
                             type="button"
                             aria-label={it.inventory.favorite}
-                            className="favorite-toggle"
+                            className={`${inventoryStyles.favoriteToggle} favorite-toggle`}
                             onClick={() =>
                               updateDraft(product, {
                                 favorite: !product.favorite,
@@ -1327,7 +1329,7 @@ export function InventoryWorkspace({
                     <td className="numeric inventory-price-cell">
                       {selected ? (
                         <input
-                          className="price-input"
+                          className={`${inventoryStyles.priceInput} price-input`}
                           inputMode="decimal"
                           defaultValue={decimal(product.costPrice)}
                           onBlur={(event) =>
@@ -1348,7 +1350,7 @@ export function InventoryWorkspace({
                         "—"
                       ) : selected ? (
                         <input
-                          className="price-input"
+                          className={`${inventoryStyles.priceInput} price-input`}
                           inputMode="decimal"
                           defaultValue={decimal(product.salePrice)}
                           onBlur={(event) =>

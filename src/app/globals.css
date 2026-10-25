@@ -8189,46 +8189,9 @@ summary.record-icon::-webkit-details-marker {
 .inventory-universal {
   color: var(--muted);
 }
-.inventory-table input,
-.inventory-table select {
-  min-height: 32px;
-  max-width: none;
-  padding: 4px 7px;
-  font-size: 11px;
-}
-.inventory-name-edit {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.inventory-name-edit input {
-  width: 100%;
-  min-width: 180px;
-}
-.favorite-toggle {
-  border: 0;
-  background: transparent;
-  color: #d69a00;
-  padding: 4px;
-}
-.number-stepper.is-table {
-  width: max-content;
-  margin-inline: auto;
-  grid-template-columns: 32px 52px 32px;
-}
-.number-stepper.is-table button,
-.number-stepper.is-table input {
-  min-height: 30px;
-  padding: 3px;
-}
-.number-stepper.is-table input,
 .retail-cart-row .number-stepper input {
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-.inventory-table .price-input {
-  width: 76px;
-  text-align: right;
 }
 .inventory-batch-controls {
   display: flex;

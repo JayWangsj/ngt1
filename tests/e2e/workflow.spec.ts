@@ -3926,6 +3926,42 @@ test("inventory movement history uses the shared dialog body", async ({
   await expect(dialog).toHaveCount(0);
 });
 
+test("keeps inventory row editor styles compact and scoped", async ({
+  page,
+}) => {
+  await page.goto("/inventory");
+  await expect(page.getByRole("heading", { name: "Magazzino" })).toBeVisible();
+  const repairPartRow = page.getByRole("row", { name: /Batteria Test/ });
+  await expect(repairPartRow).toContainText("Riparazione");
+  await repairPartRow.click();
+
+  const nameInput = repairPartRow.locator(".inventory-name-edit input");
+  await expect(nameInput).toHaveCSS("min-height", "32px");
+  await expect(nameInput).toHaveCSS("min-width", "180px");
+  await expect(nameInput).toHaveCSS("padding", "4px 7px");
+  await expect(nameInput).toHaveCSS("font-size", "11px");
+  const favoriteToggle = repairPartRow.locator(".favorite-toggle");
+  await expect(favoriteToggle).toHaveCSS("border-top-width", "0px");
+  await expect(favoriteToggle).toHaveCSS("padding", "4px");
+  await expect(favoriteToggle).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  const priceInput = repairPartRow.locator(".price-input");
+  await expect(priceInput).toHaveCSS("width", "76px");
+  await expect(priceInput).toHaveCSS("text-align", "right");
+  const tableStepper = repairPartRow
+    .locator(".number-stepper.is-table")
+    .first();
+  await expect(tableStepper).toHaveCSS(
+    "grid-template-columns",
+    "32px 52px 32px",
+  );
+  await expect(tableStepper.locator("input")).toHaveCSS("min-height", "30px");
+  await expect(tableStepper.locator("input")).toHaveCSS("padding", "3px");
+  await expect(tableStepper.locator("input")).toHaveCSS("text-align", "center");
+});
+
 test("creates and edits a product directly in the inventory row", async ({
   page,
 }) => {

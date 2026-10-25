@@ -73,6 +73,54 @@
   cursor: pointer;
 }
 
+.table input,
+.table select {
+  min-height: 32px;
+  max-width: none;
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+.nameEdit {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nameEdit input {
+  width: 100%;
+  min-width: 180px;
+}
+
+.favoriteToggle {
+  border: 0;
+  background: transparent;
+  color: #d69a00;
+  padding: 4px;
+}
+
+.priceInput {
+  width: 76px;
+  text-align: right;
+}
+
+.tableStepper {
+  width: max-content;
+  margin-inline: auto;
+  grid-template-columns: 32px 52px 32px;
+}
+
+.tableStepper :global(button),
+.tableStepper :global(input) {
+  min-height: 30px;
+  padding: 3px;
+}
+
+.tableStepper :global(input) {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .filters {
   display: grid;
   grid-template-columns:
