@@ -15,6 +15,7 @@ import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import batchControlsStyles from "./ui/batch-controls.module.css";
 import dialogStyles from "./ui/dialog.module.css";
+import customerSummaryStyles from "./customer-summary.module.css";
 import { useLanguage, useMessages } from "./language";
 import {
   deleteCustomerAction,
@@ -473,7 +474,7 @@ export function CustomerSummary({
   const [deleting, setDeleting] = useState(false);
   return (
     <section
-      className={`panel padded customer-summary ${editing ? "is-editing" : ""}`}
+      className={`${customerSummaryStyles.summary} panel padded customer-summary ${editing ? "is-editing" : ""}`}
     >
       {editing ? (
         <CustomerForm

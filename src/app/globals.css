@@ -7230,21 +7230,14 @@ details.secondary-actions {
 .customer-device-row > .customer-device-icon + div {
   flex: 1;
 }
-.customer-summary .action-form,
 .customer-device-list .action-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-.customer-summary .action-form > .phone-row,
-.customer-summary .action-form > .message,
-.customer-summary .action-form > .dialog-actions,
 .customer-device-list .action-form > .message,
 .customer-device-list .action-form > .dialog-actions {
   grid-column: 1 / -1;
-}
-.customer-summary .action-form > .button:not(.dialog-actions .button) {
-  justify-self: start;
 }
 .customer-device-row + .customer-device-row {
   border-top: 1px solid var(--line);
@@ -7356,13 +7349,9 @@ details.secondary-actions {
   .customer-search .grow {
     min-width: 0;
   }
-  .customer-summary .action-form,
   .customer-device-list .action-form {
     grid-template-columns: 1fr;
   }
-  .customer-summary .action-form > .phone-row,
-  .customer-summary .action-form > .message,
-  .customer-summary .action-form > .dialog-actions,
   .customer-device-list .action-form > .message,
   .customer-device-list .action-form > .dialog-actions {
     grid-column: 1;

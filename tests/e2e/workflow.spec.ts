@@ -9383,6 +9383,37 @@ test("customer detail adds a device from a dialog below existing devices", async
   await expect(createDialog).toHaveCount(0);
 });
 
+test("customer summary edit form keeps its responsive grid", async ({
+  page,
+}) => {
+  await page.goto("/customers");
+  await page.getByRole("link", { name: "Cliente Playwright" }).first().click();
+
+  const detailDialog = page.getByRole("dialog", {
+    name: "Dettagli cliente",
+    exact: true,
+  });
+  await detailDialog.locator(".customer-summary").hover();
+  await detailDialog
+    .getByRole("button", { name: "Modifica cliente", exact: true })
+    .click();
+
+  const form = detailDialog.locator(".customer-summary > .action-form");
+  await expect(form).toBeVisible();
+  const desktopColumns = await form.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(desktopColumns).toBe(2);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileColumns = await form.evaluate(
+    (element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(mobileColumns).toBe(1);
+});
+
 test("customer list searches instantly, preserves navigation and supports compact editing", async ({
   page,
 }) => {
