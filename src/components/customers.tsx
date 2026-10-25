@@ -14,6 +14,7 @@ import { RecordIcon } from "./ui/record-icon";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
 import batchControlsStyles from "./ui/batch-controls.module.css";
+import dialogStyles from "./ui/dialog.module.css";
 import { useLanguage, useMessages } from "./language";
 import {
   deleteCustomerAction,
@@ -96,8 +97,13 @@ export function DeleteRecordDialog({
       size="compact"
       onClose={onClose}
     >
-      <DialogBody className="confirm-delete-dialog">
-        <div className="confirm-delete-icon" aria-hidden="true">
+      <DialogBody
+        className={`confirm-delete-dialog ${dialogStyles.confirmDeleteBody}`}
+      >
+        <div
+          className={`confirm-delete-icon ${dialogStyles.confirmDeleteIcon}`}
+          aria-hidden="true"
+        >
           <Trash2 size={22} />
         </div>
         <p>

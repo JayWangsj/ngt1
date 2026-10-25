@@ -9,6 +9,7 @@ import { money } from "@/lib/domain";
 import { RecordIcon } from "./ui/record-icon";
 import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import { Button } from "./ui/button";
+import dialogStyles from "./ui/dialog.module.css";
 import retailSalesHistoryStyles from "./retail-sales-history.module.css";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import emptyStateStyles from "./ui/empty-state.module.css";
@@ -155,8 +156,14 @@ export function RetailSalesHistory({
             }
           }}
         >
-          <DialogBody className="confirm-delete-dialog" aria-busy={pending}>
-            <div className="confirm-delete-icon" aria-hidden="true">
+          <DialogBody
+            className={`confirm-delete-dialog ${dialogStyles.confirmDeleteBody}`}
+            aria-busy={pending}
+          >
+            <div
+              className={`confirm-delete-icon ${dialogStyles.confirmDeleteIcon}`}
+              aria-hidden="true"
+            >
               <Trash2 size={22} />
             </div>
             <p>{it.retail.deleteSaleConfirm}</p>

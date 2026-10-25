@@ -9613,6 +9613,10 @@ test("quick service delete confirmation uses the shared dialog layout", async ({
   const body = dialog.locator(":scope > .dialog-body.confirm-delete-dialog");
   const footer = dialog.locator(":scope > .dialog-footer");
   await expect(body).toBeVisible();
+  await expect(body).toHaveCSS("display", "grid");
+  await expect(body).toHaveCSS("gap", "14px");
+  await expect(body.locator("p").first()).toHaveCSS("margin", "0px");
+  await expect(body.locator(".confirm-delete-icon")).toHaveCSS("width", "46px");
   const left = await dialog.evaluate(
     (element) => element.getBoundingClientRect().left,
   );
