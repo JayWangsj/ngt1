@@ -1088,7 +1088,7 @@ export function InventoryWorkspace({
       {error && <p className="message error">{error}</p>}
       {filtered.length ? (
         <div className="table-scroll inventory-table-scroll">
-          <table className="inventory-table">
+          <table className={`${inventoryStyles.table} inventory-table`}>
             <thead>
               <tr>
                 {batchMode && (

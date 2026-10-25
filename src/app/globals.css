@@ -8158,18 +8158,6 @@ summary.record-icon::-webkit-details-marker {
   color: #ee9700;
   transform: translateX(8px);
 }
-.inventory-table {
-  min-width: 1380px;
-  overflow-anchor: none;
-  table-layout: fixed;
-}
-.inventory-table th,
-.inventory-table td {
-  padding-top: 12px;
-  padding-bottom: 12px;
-  padding-right: 14px;
-  padding-left: 14px;
-}
 .inventory-product-cell {
   width: 20%;
   min-width: 210px;

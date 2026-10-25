@@ -4349,8 +4349,15 @@ test("filters inventory by compatible device and exposes compatibility", async (
   const battery = inventoryMain.getByRole("row", { name: /Batteria Test/ });
   const cable = inventoryMain.getByRole("row", { name: /Cavo USB-C Test/ });
   const tableScroll = inventoryMain.locator(".inventory-table-scroll");
+  const inventoryTable = inventoryMain.locator(".inventory-table");
   await expect(inventoryMain).toHaveCSS("min-width", "0px");
   await expect(inventoryMain).toHaveCSS("overflow", "hidden");
+  await expect(inventoryTable).toHaveCSS("min-width", "1380px");
+  await expect(inventoryTable).toHaveCSS("table-layout", "fixed");
+  await expect(inventoryTable.locator("th.inventory-product-cell")).toHaveCSS(
+    "padding",
+    "12px 14px",
+  );
   await expect(filters).toHaveCSS("display", "grid");
   await expect(filters).toHaveCSS("gap", "10px");
   await expect(filters).toHaveCSS("padding", "12px 16px");
