@@ -25,6 +25,7 @@ import productCompatibilityEditorStyles from "./product-compatibility-editor.mod
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
 import quickServicePickerContentStyles from "./quick-service-picker-content.module.css";
+import quickServiceActionStyles from "./quick-service-actions.module.css";
 import { EditableSelect } from "./editable-select";
 import priceListControlsStyles from "./price-list-controls.module.css";
 import priceRuleListStyles from "./price-rule-list.module.css";
@@ -1150,7 +1151,7 @@ function PriceOptionPicker({
       ) : (
         <button
           type="button"
-          className="quick-service-service-add quote-required-part-add"
+          className={`quick-service-service-add quote-required-part-add ${quickServiceActionStyles.serviceAdd}`}
           disabled={disabled}
           onClick={openPicker}
         >
@@ -1275,7 +1276,7 @@ function PriceOptionPicker({
             {onAdd && (
               <button
                 type="button"
-                className="quick-service-picker-add price-option-add"
+                className={`quick-service-picker-add price-option-add ${quickServiceActionStyles.pickerAdd}`}
                 disabled={disabled}
                 onClick={() => {
                   onAdd();
@@ -2158,7 +2159,7 @@ export function ItemsEditor({
                     ) : projectPicker && !editingPart ? (
                       <button
                         type="button"
-                        className="quick-service-service-add quote-required-part-add"
+                        className={`quick-service-service-add quote-required-part-add ${quickServiceActionStyles.serviceAdd}`}
                         onClick={() =>
                           setEditingParts((current) => ({
                             ...current,
@@ -2373,7 +2374,7 @@ export function ItemsEditor({
       {projectPicker && (
         <button
           type="button"
-          className="quick-service-service-add"
+          className={`quick-service-service-add ${quickServiceActionStyles.serviceAdd}`}
           onClick={openProjectPicker}
         >
           <Plus size={18} /> {it.project}
@@ -2492,7 +2493,7 @@ export function ItemsEditor({
             </div>
             <button
               type="button"
-              className="quick-service-picker-add"
+              className={`quick-service-picker-add ${quickServiceActionStyles.pickerAdd}`}
               onClick={() => {
                 setNewProject("");
                 setNewProjectPrice("");
@@ -5252,7 +5253,7 @@ export function RuleForm({
         {project.trim() && (
           <button
             type="button"
-            className="quick-service-picker-add price-option-add"
+            className={`quick-service-picker-add price-option-add ${quickServiceActionStyles.pickerAdd}`}
             disabled={optionPending}
             onClick={async () => {
               if (selectedProjectRule && !ruleId) {

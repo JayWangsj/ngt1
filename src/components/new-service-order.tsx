@@ -37,6 +37,7 @@ import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css
 import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
 import quickServicePickerContentStyles from "./quick-service-picker-content.module.css";
 import newServiceOrderStyles from "./new-service-order.module.css";
+import quickServiceActionStyles from "./quick-service-actions.module.css";
 
 type Customer = CustomerOption & { devices: { id: string }[] };
 
@@ -383,7 +384,7 @@ export function NewServiceOrder({
                 ))}
                 <button
                   type="button"
-                  className="quick-service-service-add"
+                  className={`quick-service-service-add ${quickServiceActionStyles.serviceAdd}`}
                   onClick={openServicePicker}
                 >
                   <Plus size={18} /> {it.quickService.serviceItems}
@@ -464,7 +465,7 @@ export function NewServiceOrder({
                   <Button
                     type="button"
                     variant="addDevice"
-                    className="quick-service-picker-add add-device-action"
+                    className={`quick-service-picker-add add-device-action ${quickServiceActionStyles.pickerAdd}`}
                     onClick={() => {
                       setChoosingDevices(false);
                       setCreatingDevice(true);
@@ -578,7 +579,7 @@ export function NewServiceOrder({
                   </div>
                   <button
                     type="button"
-                    className="quick-service-picker-add"
+                    className={`quick-service-picker-add ${quickServiceActionStyles.pickerAdd}`}
                     onClick={() => {
                       setChoosingServices(false);
                       setCreatingService(true);

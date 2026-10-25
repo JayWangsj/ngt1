@@ -18,6 +18,7 @@ import {
   type OrderDetailEditTarget,
 } from "./order-detail-ui";
 import selectionSummaryStyles from "./selection-summary.module.css";
+import quickServiceActionStyles from "./quick-service-actions.module.css";
 
 type Product = {
   id: string;
@@ -352,7 +353,7 @@ export function WorkOrderRepairSummary({
       {cardEdit?.editing && !locked && (
         <button
           type="button"
-          className="quick-service-service-add detail-repair-add"
+          className={`quick-service-service-add detail-repair-add ${quickServiceActionStyles.serviceAdd}`}
           onClick={addProject}
         >
           <Plus size={18} /> {it.project}

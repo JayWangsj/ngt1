@@ -1,0 +1,48 @@
+.pickerAdd {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed #d8c98d;
+  border-radius: 10px;
+  background: #fffdf7;
+  color: #6d5510;
+  font-weight: 650;
+}
+
+.serviceAdd {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pickerAdd,
+.serviceAdd {
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.pickerAdd:hover:not(:disabled),
+.serviceAdd:hover:not(:disabled) {
+  border-color: #e4b600;
+  background: #fff8d9;
+  box-shadow: 0 2px 6px rgb(128 96 0 / 8%);
+  color: #6d5510;
+}
+
+.pickerAdd:active:not(:disabled),
+.serviceAdd:active:not(:disabled) {
+  background: #ffe99d;
+}

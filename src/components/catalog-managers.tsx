@@ -24,6 +24,7 @@ import settingsInlineManagerStyles from "./settings-inline-manager.module.css";
 import dialogStyles from "./ui/dialog.module.css";
 import catalogManagerListStyles from "./catalog-manager-list.module.css";
 import deviceModelManagerStyles from "./device-model-manager.module.css";
+import quickServiceActionStyles from "./quick-service-actions.module.css";
 
 export type QuickServiceView = {
   id: string;
@@ -247,7 +248,7 @@ export function QuickServiceManager({ items }: { items: QuickServiceView[] }) {
         )}
         <button
           type="button"
-          className="quick-service-service-add"
+          className={`quick-service-service-add ${quickServiceActionStyles.serviceAdd}`}
           onClick={() => editor()}
         >
           <Plus size={18} /> {it.quickService.new}

@@ -2035,6 +2035,17 @@ test("quick service device and service selectors retain the large dialog size", 
   );
   await expect(servicePickerBody).toHaveCSS("display", "grid");
   await expect(servicePickerBody).toHaveCSS("gap", "14px");
+  const addServiceFromPicker = servicePicker.locator(
+    ".quick-service-picker-add",
+  );
+  await expect(addServiceFromPicker).toHaveCSS("min-height", "48px");
+  await expect(addServiceFromPicker).toHaveCSS("gap", "7px");
+  await expect(addServiceFromPicker).toHaveCSS("border-top-style", "dashed");
+  await addServiceFromPicker.hover();
+  await expect(addServiceFromPicker).toHaveCSS(
+    "background-color",
+    "rgb(255, 248, 217)",
+  );
   const serviceOption = servicePicker
     .locator(".quick-service-picker-option")
     .first();

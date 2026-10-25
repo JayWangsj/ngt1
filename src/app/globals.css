@@ -4154,56 +4154,12 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   color: var(--muted);
   font-size: 11px;
 }
-.quick-service-picker-add {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px dashed #d8c98d;
-  border-radius: 10px;
-  background: #fffdf7;
-  color: #6d5510;
-  font-weight: 650;
-}
 .quick-service-picker-meta {
   color: var(--muted);
 }
 .quick-service-picker-meta {
   padding-left: 20px;
   border-left: 1px solid var(--line);
-}
-.quick-service-service-add {
-  width: 100%;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px dashed var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-}
-.quick-service-picker-add,
-.quick-service-service-add {
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out,
-    box-shadow 150ms ease-out,
-    color 150ms ease-out;
-}
-.quick-service-picker-add:hover:not(:disabled),
-.quick-service-service-add:hover:not(:disabled) {
-  border-color: #e4b600;
-  background: #fff8d9;
-  box-shadow: 0 2px 6px rgb(128 96 0 / 8%);
-  color: #6d5510;
-}
-.quick-service-picker-add:active:not(:disabled),
-.quick-service-service-add:active:not(:disabled) {
-  background: #ffe99d;
 }
 .quick-service-remove {
   width: 28px;

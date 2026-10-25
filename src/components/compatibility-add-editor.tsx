@@ -13,6 +13,7 @@ import { DialogBody, DialogFooter, FormDialog } from "./forms";
 import priceOptionCardStyles from "./price-option-card.module.css";
 import compatibilityAddEditorStyles from "./compatibility-add-editor.module.css";
 import { Button } from "./ui/button";
+import quickServiceActionStyles from "./quick-service-actions.module.css";
 import type {
   DeviceCatalogDeletionView,
   ProductCompatibilityDraft,
@@ -181,7 +182,7 @@ export function CompatibilityAddEditor({
           ))}
           <button
             type="button"
-            className={`quick-service-picker-add ${compatibilityAddEditorStyles.projectAdd} compatibility-project-add`}
+            className={`quick-service-picker-add ${quickServiceActionStyles.pickerAdd} ${compatibilityAddEditorStyles.projectAdd} compatibility-project-add`}
             disabled={!value.model}
             onClick={() => {
               setPickerProjects([]);
@@ -231,7 +232,7 @@ export function CompatibilityAddEditor({
             </div>
             <button
               type="button"
-              className="quick-service-picker-add"
+              className={`quick-service-picker-add ${quickServiceActionStyles.pickerAdd}`}
               onClick={() => {
                 setNewProject("");
                 setNewPrice("");
