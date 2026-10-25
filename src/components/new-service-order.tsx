@@ -35,6 +35,7 @@ import { RecordIcon } from "./ui/record-icon";
 import { useBusinessDay } from "./business-date";
 import quickServiceDeviceCardStyles from "./quick-service-device-card.module.css";
 import quickServicePickerListStyles from "./quick-service-picker-list.module.css";
+import newServiceOrderStyles from "./new-service-order.module.css";
 
 type Customer = CustomerOption & { devices: { id: string }[] };
 
@@ -218,8 +219,12 @@ export function NewServiceOrder({
         hidden={mode !== "QUICK_SERVICE"}
       >
         <div className="new-order-layout quick-service-layout">
-          <section className="panel padded quick-service-order-form service-order-form-column">
-            <section className="quick-service-section">
+          <section
+            className={`panel padded quick-service-order-form service-order-form-column ${newServiceOrderStyles.orderForm}`}
+          >
+            <section
+              className={`quick-service-section ${newServiceOrderStyles.section}`}
+            >
               <h2>{it.customerSection}</h2>
               <CustomerPicker
                 customers={customers}
@@ -227,7 +232,9 @@ export function NewServiceOrder({
                 onChange={changeCustomer}
               />
             </section>
-            <section className="quick-service-section">
+            <section
+              className={`quick-service-section ${newServiceOrderStyles.section}`}
+            >
               <h2>{it.quickService.selectDevices}</h2>
               <div
                 className={`quick-service-device-cards ${quickServiceDeviceCardStyles.cards}`}
@@ -274,7 +281,9 @@ export function NewServiceOrder({
                 </Button>
               </div>
             </section>
-            <section className="quick-service-section">
+            <section
+              className={`quick-service-section ${newServiceOrderStyles.section}`}
+            >
               <h2>{it.quickService.serviceItems}</h2>
               <div className="quick-service-service-cards">
                 {selectedServiceItems.map((service) => (
@@ -376,7 +385,9 @@ export function NewServiceOrder({
                 </button>
               </div>
             </section>
-            <section className="quick-service-section quick-service-schedule">
+            <section
+              className={`quick-service-section quick-service-schedule ${newServiceOrderStyles.section} ${newServiceOrderStyles.schedule}`}
+            >
               <h2>{it.quickService.expectedAt}</h2>
               <Field label={it.quickService.expectedAt}>
                 <DatePicker

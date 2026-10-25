@@ -1881,6 +1881,32 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/orders/new?type=quick");
+  const quickServiceForm = page.locator(".quick-service-order-form");
+  const quickServiceSections = quickServiceForm.locator(
+    ":scope > .quick-service-section",
+  );
+  await expect(quickServiceForm).toHaveCSS("display", "grid");
+  await expect(quickServiceForm).toHaveCSS("gap", "12px");
+  await expect(quickServiceSections).toHaveCount(4);
+  await expect(quickServiceSections.first()).toHaveCSS("display", "grid");
+  await expect(quickServiceSections.first()).toHaveCSS("gap", "14px");
+  await expect(quickServiceSections.first()).toHaveCSS(
+    "padding-bottom",
+    "18px",
+  );
+  await expect(quickServiceSections.first()).toHaveCSS(
+    "border-bottom-width",
+    "1px",
+  );
+  const quickServiceSchedule = quickServiceForm.locator(
+    ":scope > .quick-service-schedule",
+  );
+  await expect(quickServiceSchedule).toHaveCSS("border-bottom-width", "0px");
+  expect(
+    await quickServiceForm.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
   await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
 
   const addDevice = page.getByRole("button", {

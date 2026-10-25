@@ -1,0 +1,24 @@
+.orderForm {
+  display: grid;
+  gap: 12px;
+}
+
+.section {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.section h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.schedule {
+  border-bottom: 0;
+}
+
+.schedule > label {
+  width: min(100%, 620px);
+}

@@ -4163,20 +4163,9 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   background: #ffed9b;
   box-shadow: inset 0 -2px #e0ac00;
 }
-.quick-service-order-form,
 .catalog-manager {
   display: grid;
   gap: 12px;
-}
-.quick-service-section {
-  display: grid;
-  gap: 14px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
-}
-.quick-service-section h2 {
-  margin: 0;
-  font-size: 15px;
 }
 .quick-service-device-option small {
   display: block;
@@ -4261,12 +4250,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 }
 .quick-service-picker-price {
   text-align: right;
-}
-.quick-service-schedule {
-  border-bottom: 0;
-}
-.quick-service-schedule > label {
-  width: min(100%, 620px);
 }
 .quick-service-service-cards {
   display: grid;
