@@ -4123,17 +4123,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   margin: 10mm;
 }
 
-.service-mode-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: min(100%, 400px);
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  margin-bottom: 18px;
-}
-.service-mode-switch button,
 .payment-methods button {
   display: inline-flex;
   align-items: center;
@@ -4147,16 +4136,13 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   font-weight: 700;
   cursor: pointer;
 }
-.service-mode-switch button:hover,
 .payment-methods button:hover {
   background: #fff8d9;
   color: var(--ink);
 }
-.service-mode-switch button:active,
 .payment-methods button:active {
   background: #ffe99d;
 }
-.service-mode-switch button.active,
 .payment-methods button.active {
   color: var(--ink);
   border-color: transparent;

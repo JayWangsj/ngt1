@@ -1881,6 +1881,17 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/orders/new?type=quick");
+  const modeSwitch = page.locator(".service-mode-switch");
+  await expect(modeSwitch).toHaveCSS("display", "grid");
+  await expect(modeSwitch).toHaveCSS("grid-template-columns", /.+ .+/);
+  await expect(modeSwitch).toHaveCSS("gap", "8px");
+  const quickMode = modeSwitch.getByRole("button", {
+    name: "Servizio rapido",
+    exact: true,
+  });
+  await expect(quickMode).toHaveClass(/active/);
+  await expect(quickMode).toHaveCSS("min-height", "44px");
+  await expect(quickMode).toHaveCSS("background-color", "rgb(255, 237, 155)");
   const quickServiceForm = page.locator(".quick-service-order-form");
   const quickServiceSections = quickServiceForm.locator(
     ":scope > .quick-service-section",

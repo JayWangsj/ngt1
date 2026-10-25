@@ -193,7 +193,9 @@ export function NewServiceOrder({
 
   return (
     <>
-      <div className="service-mode-switch panel">
+      <div
+        className={`service-mode-switch panel ${newServiceOrderStyles.modeSwitch}`}
+      >
         <button
           type="button"
           className={mode === "REPAIR" ? "active" : ""}
