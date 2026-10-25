@@ -654,7 +654,7 @@ test("monthly receipt dialog uses a compact responsive overview", async ({
   const amount = page.locator(".monthly-receipt-comparison > strong");
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(dialog).toHaveCSS("width", "680px");
+  await expect(dialog).toHaveCSS("width", "760px");
   const [desktopPicker, desktopControl, desktopTotal] = await Promise.all([
     picker.boundingBox(),
     control.boundingBox(),

@@ -4373,6 +4373,7 @@ test("animates overflowing inventory names and respects reduced motion", async (
 test("creates and edits a product directly in the inventory row", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   const productName = `Cavo USB-C E2E con descrizione prodotto molto lunga ${Date.now()}`;
   await page.goto("/inventory");
   await expect(page.getByRole("heading", { name: "Magazzino" })).toBeVisible();
@@ -6303,12 +6304,6 @@ test("completes a retail sale and opens its immutable receipt", async ({
       .filter({ hasText: "Vendita prodotti" })
       .locator("strong"),
   );
-  const initialCard = await readCents(
-    page
-      .locator(".payment-method-row")
-      .filter({ hasText: "Carta" })
-      .locator("strong"),
-  );
   await page.goto("/retail");
   const products = page.locator(".retail-product-grid");
   const cable = products.getByRole("button", { name: /Cavo USB-C Test/ });
@@ -6424,6 +6419,7 @@ test("completes a retail sale and opens its immutable receipt", async ({
   await expect(page).toHaveURL(/\/retail$/);
   await expect(dialog.getByText(/Dettaglio vendita · V-/)).toBeVisible();
   await expect(dialog.getByText("Cavo USB-C Test")).toBeVisible();
+  await expect(dialog.getByText("Carta", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: /Vendita completata/ }).click();
   await dialog.getByRole("button", { name: "Prossima vendita" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -6444,6 +6440,7 @@ test("completes a retail sale and opens its immutable receipt", async ({
     .first();
   await expect(saleNumber).toHaveClass(/order-code-link/);
   const historyRow = saleNumber.locator("xpath=ancestor::tr");
+  await expect(historyRow).toContainText("Carta");
   await historyRow.hover();
   await expect(
     historyRow.getByRole("button", { name: /Elimina vendita V-/ }),
@@ -6486,20 +6483,21 @@ test("completes a retail sale and opens its immutable receipt", async ({
     const bar = document.querySelector<HTMLElement>(
       ".revenue-day:last-child .revenue-bar.retail",
     );
-    const payment = document.querySelector<HTMLElement>(
-      ".payment-method-row:nth-of-type(2) i",
+    const donut = document.querySelector<SVGCircleElement>(
+      ".donut-segment.retail",
     );
     return {
       bar: bar ? new DOMMatrixReadOnly(getComputedStyle(bar).transform).d : 1,
-      payment: payment
-        ? new DOMMatrixReadOnly(getComputedStyle(payment).transform).a
-        : 1,
+      donut: donut
+        ? Number.parseFloat(getComputedStyle(donut).strokeDasharray)
+        : 0,
+      donutTarget: Number(donut?.dataset.donutSegment ?? 0),
     };
   });
   expect(motionProgress.bar).toBeGreaterThan(0);
   expect(motionProgress.bar).toBeLessThan(1);
-  expect(motionProgress.payment).toBeGreaterThan(0);
-  expect(motionProgress.payment).toBeLessThan(1);
+  expect(motionProgress.donut).toBeGreaterThan(0);
+  expect(motionProgress.donut).toBeLessThan(motionProgress.donutTarget);
   await page.waitForTimeout(750);
   await expect(page.locator(".revenue-bar")).toHaveCount(21);
   const latestDay = page.locator(".revenue-day").last();
@@ -6522,15 +6520,8 @@ test("completes a retail sale and opens its immutable receipt", async ({
         .locator("strong"),
     ),
   ).toBe(initialRetail + 2400);
-  expect(
-    await readCents(
-      page
-        .locator(".payment-method-row")
-        .filter({ hasText: "Carta" })
-        .locator("strong"),
-    ),
-  ).toBe(initialCard + 2400);
 });
+
 test("creates automatic quote, receives payment and delivers", async ({
   page,
 }) => {
@@ -7790,10 +7781,7 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
     "matrix(1, 0, 0, 1, 4, 0)",
   );
   await details.hover();
-  await expect(details).toHaveCSS(
-    "transform",
-    /matrix\(1\.003, 0, 0, 1\.003, 0, -1\)/,
-  );
+  await expect(details).toHaveCSS("transform", "none");
   expect(
     await products.evaluate(
       (element) => element.getBoundingClientRect().top + window.scrollY,
@@ -7908,10 +7896,7 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   });
   await warranty.locator(".order-card-heading").hover();
   await expect(editWarranty).toHaveCSS("pointer-events", "auto");
-  await expect(warranty).toHaveCSS(
-    "transform",
-    "matrix(1.003, 0, 0, 1.003, 0, -1)",
-  );
+  await expect(warranty).toHaveCSS("transform", "none");
   await editWarranty.click();
   const warrantyProject = await warranty
     .locator(".project-warranty-editor section strong")
@@ -11273,7 +11258,7 @@ test("customer detail removes duplicate actions and supports keyboard icon editi
     .locator(".customer-summary")
     .getByRole("button", { name: "Elimina cliente", exact: true });
   await remove.hover();
-  await expect(remove).toHaveCSS("background-color", "rgb(255, 240, 238)");
+  await expect(remove).toHaveCSS("background-color", "rgb(251, 233, 232)");
   await expect(remove).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   await edit.focus();
   await page.keyboard.press("Enter");

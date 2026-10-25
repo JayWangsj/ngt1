@@ -152,14 +152,16 @@
   transform: translateX(8px);
 }
 
-:global(html:not([data-motion="always"])) .historyArrow {
-  transition:
-    color 150ms ease-out 260ms,
-    transform 150ms ease-out 260ms;
-}
+@media (prefers-reduced-motion: reduce) {
+  :global(html:not([data-motion="always"])) .historyArrow {
+    transition:
+      color 150ms ease-out 260ms,
+      transform 150ms ease-out 260ms;
+  }
 
-:global(html:not([data-motion="always"])) .historyUnderline {
-  transition: none;
+  :global(html:not([data-motion="always"])) .historyUnderline {
+    transition: none;
+  }
 }
 
 .table {

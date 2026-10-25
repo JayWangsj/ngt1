@@ -3879,6 +3879,10 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     > :not(.service-order-print) {
     display: none !important;
   }
+  .main-content:has(.order-detail-page > .service-order-print)
+    > .print-brand-header {
+    display: none !important;
+  }
   .service-order-print {
     display: block;
     width: 100%;
@@ -7025,6 +7029,10 @@ summary.record-icon::-webkit-details-marker {
   pointer-events: none;
   transform-origin: center;
   will-change: transform, box-shadow;
+}
+.order-floating-table th,
+.order-floating-table td {
+  padding-block: 12px;
 }
 .order-floating-table .order-row-floating > td {
   background: #fff1b2;
