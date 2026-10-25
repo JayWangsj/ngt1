@@ -190,6 +190,7 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
   );
   assert.equal(snapshot.data.product.stockQuantity - 2, 4);
   assert.equal(snapshot.data.movements.length, 2);
+  assert.deepEqual(await runProbe(db, "verify", code, snapshot), snapshot);
   await assert.rejects(
     runProbe(db, "seed", code),
     /Unique constraint failed on user.email/,

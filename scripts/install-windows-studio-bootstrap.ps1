@@ -4,6 +4,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$InstallRoot,
   [string]$UpdateId,
+  [string]$AcceptanceFailureStage = "",
   [Parameter(Mandatory = $true)]
   [string]$LogPath
 )
@@ -14,6 +15,7 @@ Start-Transcript -LiteralPath $LogPath -Force
 try {
   & (Join-Path $PSScriptRoot "install-windows-studio.ps1") `
     -DataRoot $DataRoot -InstallRoot $InstallRoot -UpdateId $UpdateId `
+    -AcceptanceFailureStage $AcceptanceFailureStage `
     -OnlineUpdate:([bool]$UpdateId)
 } catch {
   Write-Error $_

@@ -777,6 +777,21 @@ async function verifyMigratedFixture(db, code, snapshot) {
   return { ...snapshot, postUpgrade };
 }
 
+async function verifySeedFixture(db, code, snapshot) {
+  assert.equal(snapshot?.version, 1, "Business snapshot version is invalid.");
+  assert.equal(
+    snapshot.code,
+    code,
+    "Business snapshot belongs to another run.",
+  );
+  assert.deepEqual(
+    await captureSnapshot(db, snapshot.refs),
+    snapshot.data,
+    "Business data changed during failed update rollback.",
+  );
+  return snapshot;
+}
+
 async function createPostMigrationOrder(db, refs, data, option) {
   const order = await db.workOrder.create({
     data: {
@@ -825,6 +840,7 @@ async function createPostMigrationOrder(db, refs, data, option) {
 
 async function runProbe(db, action, code, snapshot) {
   if (action === "seed") return seedFixture(db, code);
+  if (action === "verify") return verifySeedFixture(db, code, snapshot);
   if (action === "verify-and-write")
     return verifyMigratedFixture(db, code, snapshot);
   throw new Error("Unknown business probe action: " + action);
@@ -837,7 +853,7 @@ if (require.main === module) {
     process.argv.slice(2);
   if (!action || !envFile || !clientPath || !code || !snapshotPath) {
     console.error(
-      "Usage: business-probe <seed|verify-and-write> <env> <client> <code> <snapshot>",
+      "Usage: business-probe <seed|verify|verify-and-write> <env> <client> <code> <snapshot>",
     );
     process.exitCode = 2;
   } else {

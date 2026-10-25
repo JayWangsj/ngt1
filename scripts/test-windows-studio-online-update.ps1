@@ -612,6 +612,68 @@ try {
       }
     }
     Write-Output "Rust and PowerShell update mutex identity matched for case, trailing-separator, and junction aliases."
+
+    $failureMarker = Join-Path $installRoot ".local\acceptance-failure-stage"
+    "release-deployment" | Set-Content -LiteralPath $failureMarker -Encoding ascii
+    $failedStartResponse = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
+      -Method Post -Headers $sameOriginHeaders -ContentType "application/json" `
+      -Body (@{ targetVersion = $TargetTag } | ConvertTo-Json -Compress) -TimeoutSec 30
+    if (-not $failedStartResponse.started -or -not $failedStartResponse.executorConfirmed -or
+        [string]$failedStartResponse.operation -ne "online-update") {
+      throw "The NGT API did not start the injected Rust updater attempt."
+    }
+    $failedUpdateId = [string]$failedStartResponse.updateId
+    $failedUpdater = Get-Process -Id ([int]$failedStartResponse.executorPid) -ErrorAction Stop
+    if ([System.IO.Path]::GetFullPath($failedUpdater.Path) -ine [System.IO.Path]::GetFullPath($updaterPath) -or
+        [int]$failedUpdater.SessionId -ne [int]$sessionEvidence.sessionId) {
+      throw "The injected attempt was not executed by the versioned Rust updater in the tested session."
+    }
+    if (-not $failedUpdater.WaitForExit(1800000)) {
+      throw "The injected Rust updater attempt exceeded 30 minutes."
+    }
+    $failedUpdater.Refresh()
+    if ($failedUpdater.ExitCode -eq 0) {
+      throw "The injected partial deployment unexpectedly succeeded."
+    }
+    if (Test-Path -LiteralPath $failureMarker) {
+      throw "The acceptance-only Rust updater did not consume its failure marker."
+    }
+    $failedStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
+    if ([string]$failedStatus.updateId -ne $failedUpdateId -or
+        [string]$failedStatus.status -ne "failed" -or
+        [string]$failedStatus.failedStage -ne "release-deployment" -or
+        [string]$failedStatus.recoveryStatus -ne "succeeded" -or
+        [string]$failedStatus.actualVersion -ne ($oldTag -replace "^v", "") -or
+        [bool]$failedStatus.manualReview) {
+      throw "The injected deployment failure did not finish with a verified automatic rollback."
+    }
+    $failedLock = Get-Content -LiteralPath $updateLock -Raw | ConvertFrom-Json
+    if ([string]$failedLock.updateId -ne $failedUpdateId -or
+        [string]$failedLock.operation -ne "online-update") {
+      throw "The failed updater lock no longer identifies the injected task."
+    }
+    $maintenanceFile = Join-Path $installRoot ".local\update-maintenance.json"
+    if (Test-Path -LiteralPath $maintenanceFile) {
+      throw "The verified rollback left its maintenance marker behind."
+    }
+    $rolledBackConfig = Get-Content -LiteralPath (Join-Path $installRoot ".local\studio.json") -Raw | ConvertFrom-Json
+    if ([System.IO.Path]::GetFullPath([string]$rolledBackConfig.activeRelease) -ine
+        [System.IO.Path]::GetFullPath($taskRoot)) {
+      throw "The injected failure did not restore the previous active release."
+    }
+    $rolledBackHealth = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health" -TimeoutSec 15
+    if ([string]$rolledBackHealth.currentVersion -ne ($oldTag -replace "^v", "")) {
+      throw "The previous release was not healthy after automatic rollback."
+    }
+    Invoke-BusinessDataProbe -ReleaseRoot $taskRoot -Action "verify" -Code $businessCode -SnapshotPath $businessSnapshotPath
+    $partialReleaseRoot = Join-Path $installRoot "releases\$TargetTag"
+    $partialEntryCount = @(Get-ChildItem -LiteralPath $partialReleaseRoot -Force).Count
+    $sourceEntryCount = @(Get-ChildItem -LiteralPath $baselineRoot -Force).Count
+    if ($partialEntryCount -lt 1 -or $partialEntryCount -ge $sourceEntryCount) {
+      throw "The injected deployment did not leave a demonstrably incomplete candidate directory."
+    }
+    Write-Output "Injected deployment interruption rolled back the release and database with an incomplete candidate retained for retry."
+
     $startResponse = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
       -Method Post -Headers $sameOriginHeaders -ContentType "application/json" `
       -Body (@{ targetVersion = $TargetTag } | ConvertTo-Json -Compress) -TimeoutSec 30
@@ -717,6 +779,13 @@ try {
       throw "The restarted NGT API did not report the verified installed version."
     }
     if (Test-Path -LiteralPath $updateLock) { throw "The updater left its task lock after exiting." }
+    $failedReleaseDirectory = Join-Path $installRoot ".local\failed-install-releases"
+    $quarantinedCandidates = @(Get-ChildItem -LiteralPath $failedReleaseDirectory -Directory -ErrorAction SilentlyContinue |
+      Where-Object Name -Like "$updateId-*")
+    if ($quarantinedCandidates.Count -ne 1 -or
+        @(Get-ChildItem -LiteralPath $quarantinedCandidates[0].FullName -Force).Count -ne $partialEntryCount) {
+      throw "The retry did not quarantine exactly the incomplete candidate owned by its update task."
+    }
     Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
       $sessionEvidence.sessionId, $observedWindowEvidence.Count)
     foreach ($window in $observedWindowEvidence.Values) {

@@ -3,12 +3,19 @@ param(
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "NGT"),
   [string]$PreviousReleaseRoot,
   [string]$UpdateId,
+  [string]$AcceptanceFailureStage = "",
   [switch]$InPlace,
   [switch]$OnlineUpdate
 )
 # v2.0.15 passes these two arguments without -OnlineUpdate.
 if ($InPlace -and $PreviousReleaseRoot -and -not $OnlineUpdate) { $OnlineUpdate = $true }
 $ErrorActionPreference = "Stop"
+if ($AcceptanceFailureStage -and
+    ($AcceptanceFailureStage -ne "release-deployment" -or
+     $env:GITHUB_ACTIONS -ne "true" -or
+     $env:RUNNER_ENVIRONMENT -ne "github-hosted")) {
+  throw "Acceptance failure injection is restricted to the hosted release acceptance."
+}
 . (Join-Path $PSScriptRoot "studio-runtime.ps1")
 
 function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
@@ -233,14 +240,20 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
     }
     New-Item -ItemType Directory -Path $stableRoot -Force | Out-Null
     Invoke-NgtInstallStage "release-deployment" {
+      $copiedEntryCount = 0
       Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $stableRoot -Recurse -Force
+        $copiedEntryCount++
+        if ($AcceptanceFailureStage -eq "release-deployment" -and $copiedEntryCount -eq 1) {
+          throw "Injected hosted acceptance failure after partial release deployment."
+        }
       }
       & (Join-Path $stableRoot "scripts\verify-windows-studio-release.ps1") `
         -ReleaseRoot $stableRoot -ExpectedVersion ([string]$release.version) | Out-Null
     }
     & (Join-Path $stableRoot "scripts\install-windows-studio.ps1") `
-      -DataRoot $DataRoot -InstallRoot $InstallRoot -UpdateId $UpdateId -InPlace -OnlineUpdate:$OnlineUpdate
+      -DataRoot $DataRoot -InstallRoot $InstallRoot -UpdateId $UpdateId `
+      -AcceptanceFailureStage $AcceptanceFailureStage -InPlace -OnlineUpdate:$OnlineUpdate
     return
   }
 }

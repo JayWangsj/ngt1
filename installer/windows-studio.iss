@@ -111,6 +111,7 @@ var
   PowerShellPath: String;
   Parameters: String;
   OnlineUpdateId: String;
+  AcceptanceFailureStage: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -134,6 +135,9 @@ begin
   OnlineUpdateId := ExpandConstant('{param:NGTUpdateId|}');
   if OnlineUpdateId <> '' then
     Parameters := Parameters + ' -UpdateId "' + OnlineUpdateId + '"';
+  AcceptanceFailureStage := ExpandConstant('{param:NGTAcceptanceFailureStage|}');
+  if AcceptanceFailureStage <> '' then
+    Parameters := Parameters + ' -AcceptanceFailureStage "' + AcceptanceFailureStage + '"';
 
   if (not Exec(PowerShellPath, Parameters, ExpandConstant('{tmp}\NGTStudioPackage'),
     SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then

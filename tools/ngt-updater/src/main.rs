@@ -760,10 +760,31 @@ fn run_installer(args: &Args, installer: &Path, log_path: &Path) -> Result<ExitS
         .arg("/NORESTART")
         .arg(format!("/LOG={}", installer_log.display()))
         .arg(format!("/NGTUpdateId={}", args.update_id));
+    #[cfg(feature = "acceptance-api")]
+    if let Some(stage) = take_acceptance_failure_stage(&args.install_root) {
+        command.arg(format!("/NGTAcceptanceFailureStage={stage}"));
+    }
     hide_console(&mut command);
     command
         .status()
         .map_err(|error| UpdateError::new("installing", error.to_string()))
+}
+
+#[cfg(feature = "acceptance-api")]
+fn take_acceptance_failure_stage(install_root: &Path) -> Option<String> {
+    if env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+    {
+        return None;
+    }
+    let marker = install_root
+        .join(".local")
+        .join("acceptance-failure-stage");
+    let stage = fs::read_to_string(&marker).ok()?.trim().to_owned();
+    if stage != "release-deployment" || fs::remove_file(marker).is_err() {
+        return None;
+    }
+    Some(stage)
 }
 
 fn hide_console(command: &mut Command) {

@@ -392,6 +392,14 @@ describe("Windows persistent startup", () => {
       "scripts/test-windows-studio-online-update.ps1",
       "utf8",
     );
+    const installScript = await readFile(
+      "scripts/install-windows-studio.ps1",
+      "utf8",
+    );
+    const installBootstrap = await readFile(
+      "scripts/install-windows-studio-bootstrap.ps1",
+      "utf8",
+    );
     const acceptanceServer = await readFile(
       "scripts/windows-studio-updater-acceptance-server.cjs",
       "utf8",
@@ -431,6 +439,8 @@ describe("Windows persistent startup", () => {
     expect(updater).toContain("check_install_space");
     expect(updater).toContain('"actualVersion": args.target_version');
     expect(updater).toContain("finish_failed");
+    expect(updater).toContain("take_acceptance_failure_stage");
+    expect(updater).toContain('feature = "acceptance-api"');
     expect(updater).toContain("update_log_path");
     expect(onlineUpdateTest).toContain("Get-NgtUpdaterWindowDiagnostics");
     expect(onlineUpdateTest).toContain("Get-NgtInteractiveSessionEvidence");
@@ -447,6 +457,11 @@ describe("Windows persistent startup", () => {
     expect(onlineUpdateTest).toContain("100 MiB design target");
     expect(onlineUpdateTest).toContain("Rust updater peak working set");
     expect(onlineUpdateTest).toContain("NGT_TEST_RELEASE_API_URL");
+    expect(onlineUpdateTest).toContain("acceptance-failure-stage");
+    expect(onlineUpdateTest).toContain(
+      "Injected deployment interruption rolled back the release and database",
+    );
+    expect(onlineUpdateTest).toContain("quarantinedCandidates");
     expect(onlineUpdateTest).toContain(
       "The API started a process other than the versioned Rust updater.",
     );
@@ -456,6 +471,12 @@ describe("Windows persistent startup", () => {
     expect(innoInstaller).toContain("SW_HIDE, ewWaitUntilTerminated");
     expect(innoInstaller).toContain("skipifsilent");
     expect(innoInstaller).toContain("DisableStartupPrompt=yes");
+    expect(innoInstaller).toContain("NGTAcceptanceFailureStage");
+    expect(installBootstrap).toContain("-AcceptanceFailureStage");
+    expect(installScript).toContain('RUNNER_ENVIRONMENT -ne "github-hosted"');
+    expect(installScript).toContain(
+      "Injected hosted acceptance failure after partial release deployment.",
+    );
     expect(onlineUpdateTest).toContain("Assert-ReleaseChecksum $oldAppArchive");
     expect(onlineUpdateTest).toContain(
       "Assert-ReleaseChecksum $oldRuntimeArchive",
