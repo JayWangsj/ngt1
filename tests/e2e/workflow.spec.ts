@@ -3874,6 +3874,15 @@ test("inventory movement history uses the shared dialog body", async ({
   page,
 }) => {
   await page.goto("/inventory");
+  const stockBadge = page
+    .locator(".inventory-table tbody .stock-badge")
+    .first();
+  await expect(stockBadge).toBeVisible();
+  await expect(stockBadge).toHaveCSS("display", "inline-flex");
+  await expect(stockBadge).toHaveCSS("padding-top", "4px");
+  await expect(stockBadge).toHaveCSS("padding-left", "4px");
+  await expect(stockBadge).toHaveCSS("border-radius", "999px");
+  await expect(stockBadge).toHaveCSS("font-size", "11px");
   await page.locator(".inventory-history-card").click();
   const dialog = page.getByRole("dialog", { name: "Registro magazzino" });
   await expect(

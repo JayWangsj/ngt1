@@ -8434,11 +8434,6 @@ summary.record-icon::-webkit-details-marker {
   padding-right: 6px;
   padding-left: 6px;
 }
-.inventory-status-cell .stock-badge {
-  padding-right: 4px;
-  padding-left: 4px;
-  font-size: 11px;
-}
 .inventory-table tbody tr {
   cursor: pointer;
 }
@@ -9100,26 +9095,6 @@ summary.record-icon::-webkit-details-marker {
 }
 .inventory-disabled {
   opacity: 0.58;
-}
-.stock-badge {
-  display: inline-flex;
-  padding: 4px 9px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-.stock-in_stock {
-  color: #317247;
-  background: #e6f4e9;
-}
-.stock-low_stock {
-  color: #9a5b22;
-  background: #fff0df;
-}
-.stock-out_of_stock {
-  color: #ad3939;
-  background: #fee8e8;
 }
 .inventory-empty {
   display: grid;

@@ -39,6 +39,7 @@ import {
   type ProductCompatibilityDraft,
 } from "./forms";
 import inventoryMovementsStyles from "./inventory-movements.module.css";
+import inventoryStyles from "./inventory.module.css";
 import { DatePicker, SimpleSelect } from "./business-select";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import { Button } from "./ui/button";
@@ -1191,7 +1192,9 @@ export function InventoryWorkspace({
                         />
                       </td>
                     )}
-                    <td className="inventory-status-cell">
+                    <td
+                      className={`${inventoryStyles.stockStatusCell} inventory-status-cell`}
+                    >
                       <span
                         className={`stock-badge stock-${productStatus.toLowerCase()}`}
                       >
