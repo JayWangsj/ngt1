@@ -8318,16 +8318,6 @@ summary.record-icon::-webkit-details-marker {
   color: var(--ink);
   padding: 10px 12px;
 }
-.inventory-filters .business-select-trigger {
-  height: 42px;
-  min-height: 42px;
-  padding: 8px 10px;
-}
-.inventory-filters .business-select-trigger > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .inventory-device-filter {
   position: relative;
   min-width: 0;
@@ -8407,9 +8397,6 @@ summary.record-icon::-webkit-details-marker {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
-}
-.inventory-device-popover .business-select-trigger {
-  min-height: 39px;
 }
 .inventory-device-popover-actions {
   display: grid;

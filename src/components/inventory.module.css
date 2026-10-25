@@ -33,6 +33,22 @@
   min-width: 0;
 }
 
+.filters :global(.business-select-trigger) {
+  height: 42px;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.filters :global(.business-select-trigger > span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devicePopover :global(.business-select-trigger) {
+  min-height: 39px;
+}
+
 .compatibilityDialog :global(.compatibility-overview),
 .compatibilityDialog :global(.compatibility-device-list) {
   display: grid;

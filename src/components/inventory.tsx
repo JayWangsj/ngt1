@@ -709,7 +709,7 @@ function DeviceCompatibilityFilter({
         createPortal(
           <div
             ref={panel}
-            className="inventory-device-popover"
+            className={`${inventoryStyles.devicePopover} inventory-device-popover`}
             role="dialog"
             aria-label={it.inventory.compatibleDevices}
             style={position}
@@ -1001,7 +1001,7 @@ export function InventoryWorkspace({
   }
   return (
     <section className="panel inventory-main">
-      <div className="inventory-filters">
+      <div className={`${inventoryStyles.filters} inventory-filters`}>
         <input
           aria-label={it.inventory.search}
           placeholder={it.inventory.search}

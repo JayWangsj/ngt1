@@ -4367,6 +4367,16 @@ test("filters inventory by compatible device and exposes compatibility", async (
       exact: true,
     }),
   ];
+  const categoryFilter = inventoryMain.getByRole("button", {
+    name: "Categoria",
+    exact: true,
+  });
+  await expect(categoryFilter).toHaveCSS("height", "42px");
+  await expect(categoryFilter).toHaveCSS("min-height", "42px");
+  await expect(categoryFilter.locator(":scope > span")).toHaveCSS(
+    "text-overflow",
+    "ellipsis",
+  );
   const filterBoxes = await Promise.all(
     filterControls.map((control) => control.boundingBox()),
   );
@@ -4402,6 +4412,10 @@ test("filters inventory by compatible device and exposes compatibility", async (
   let popover = page.getByRole("dialog", {
     name: "Dispositivi compatibili",
   });
+  await expect(popover.locator(".business-select-trigger").first()).toHaveCSS(
+    "min-height",
+    "39px",
+  );
   await chooseBusinessOption(page, "Marca", "Apple", popover);
   await chooseBusinessOption(page, "Tipo dispositivo", "Telefono", popover);
   expect(
