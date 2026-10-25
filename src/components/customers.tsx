@@ -13,6 +13,7 @@ import {
 import { RecordIcon } from "./ui/record-icon";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
+import batchControlsStyles from "./ui/batch-controls.module.css";
 import { useLanguage, useMessages } from "./language";
 import {
   deleteCustomerAction,
@@ -288,7 +289,9 @@ export function CustomerList({
             {it.clearSearch}
           </Button>
         )}
-        <div className="inventory-batch-controls customer-batch-toolbar">
+        <div
+          className={`${batchControlsStyles.toolbar} ${batchControlsStyles.customerToolbar} inventory-batch-controls customer-batch-toolbar`}
+        >
           <BatchControls
             active={batchMode}
             pending={pending}

@@ -2,6 +2,7 @@
 
 import { ListChecks, Trash2, X } from "lucide-react";
 import { Button } from "./button";
+import styles from "./batch-controls.module.css";
 
 export function BatchControls({
   active,
@@ -52,7 +53,10 @@ export function BatchControls({
 
   return (
     <>
-      <span className="inventory-selected-count" role="status">
+      <span
+        className={`${styles.selectedCount} inventory-selected-count`}
+        role="status"
+      >
         {selectedLabel}
       </span>
       {showSelectAll && (

@@ -45,6 +45,7 @@ import { DatePicker, SimpleSelect } from "./business-select";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import { Button } from "./ui/button";
 import { BatchControls } from "./ui/batch-controls";
+import batchControlsStyles from "./ui/batch-controls.module.css";
 import { QuantityStepper } from "./ui/quantity-stepper";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import emptyStateStyles from "./ui/empty-state.module.css";
@@ -1076,7 +1077,9 @@ export function InventoryWorkspace({
           onApply={setDeviceFilter}
           onClear={() => setDeviceFilter(emptyDeviceFilter)}
         />
-        <div className="inventory-batch-controls">
+        <div
+          className={`${batchControlsStyles.toolbar} inventory-batch-controls`}
+        >
           <BatchControls
             active={batchMode}
             pending={pending}

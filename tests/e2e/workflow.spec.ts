@@ -4041,6 +4041,15 @@ test("keeps inventory batch selection controls sized", async ({ page }) => {
   await inventoryMain
     .getByRole("button", { name: "Gestisci selezione", exact: true })
     .click();
+  const batchToolbar = inventoryMain.locator(".inventory-batch-controls");
+  await expect(batchToolbar).toHaveCSS("display", "flex");
+  await expect(batchToolbar).toHaveCSS("justify-content", "flex-end");
+  await expect(batchToolbar).toHaveCSS("gap", "7px");
+  await expect(batchToolbar.getByRole("status")).toHaveCSS("font-size", "12px");
+  await expect(batchToolbar.getByRole("button").first()).toHaveCSS(
+    "min-height",
+    "40px",
+  );
 
   const selectionHeader = inventoryMain.locator(
     ".inventory-table thead th.inventory-selection",
@@ -4052,6 +4061,10 @@ test("keeps inventory batch selection controls sized", async ({ page }) => {
   await expect(selectAll).toHaveCSS("width", "18px");
   await expect(selectAll).toHaveCSS("height", "18px");
   await expect(selectAll).toHaveCSS("padding", "0px");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(batchToolbar).toHaveCSS("justify-content", "flex-start");
+  await expect(batchToolbar).toHaveCSS("flex-wrap", "wrap");
+  await expect(batchToolbar).toHaveCSS("min-width", "0px");
 });
 
 test("keeps inventory compatibility editor and labels scoped", async ({
@@ -10367,6 +10380,25 @@ test("new quotes show the selected repair project's part plans", async ({
   await dialog.locator(".dialog-close").click();
 });
 
+test("price batch selection count uses shared status styles", async ({
+  page,
+}) => {
+  await page.goto("/prices");
+  await page
+    .getByRole("button", { name: "Gestisci selezione", exact: true })
+    .click();
+
+  const toolbar = page.locator(".price-batch-toolbar");
+  const selectedCount = toolbar.getByRole("status");
+  await expect(selectedCount).toBeVisible();
+  await expect(selectedCount).toHaveCSS("font-size", "12px");
+  await expect(selectedCount).toHaveCSS("font-weight", "650");
+  await expect(selectedCount).toHaveCSS("white-space", "nowrap");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(selectedCount).toHaveCSS("flex-basis", "100%");
+});
+
 test("price editor keeps deletion inside batch management", async ({
   page,
 }) => {
@@ -10608,6 +10640,10 @@ test("customer batch deletion keeps selection scoped and confirms the count", as
     .getByRole("checkbox", { name: "Seleziona tutti", exact: true })
     .check();
   await page.setViewportSize({ width: 390, height: 844 });
+  const customerToolbar = page.locator(".customer-batch-toolbar");
+  await expect(customerToolbar).toHaveCSS("justify-content", "flex-start");
+  await expect(customerToolbar).toHaveCSS("flex-wrap", "wrap");
+  await expect(customerToolbar).toHaveCSS("margin-left", "0px");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

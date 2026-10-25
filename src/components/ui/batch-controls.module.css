@@ -1,0 +1,40 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: max-content;
+}
+
+.toolbar :global(.button) {
+  min-height: 40px;
+  padding: 8px 11px;
+  white-space: nowrap;
+}
+
+.customerToolbar {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin: 0 0 0 auto;
+}
+
+.selectedCount {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .toolbar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .customerToolbar {
+    margin-left: 0;
+  }
+}

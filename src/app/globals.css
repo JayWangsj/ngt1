@@ -7693,9 +7693,6 @@ details.secondary-actions {
   .customer-search .grow {
     min-width: 0;
   }
-  .customer-batch-toolbar {
-    margin-left: 0;
-  }
   .customer-summary .action-form,
   .customer-device-list .action-form {
     grid-template-columns: 1fr;
@@ -7953,11 +7950,6 @@ summary.record-icon::-webkit-details-marker {
   height: 18px;
   cursor: pointer;
 }
-.customer-batch-toolbar {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  margin: 0 0 0 auto;
-}
 .customer-summary h1 {
   margin: 0 0 6px;
   font-size: 26px;
@@ -8034,24 +8026,6 @@ summary.record-icon::-webkit-details-marker {
 .retail-cart-row .number-stepper input {
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-.inventory-batch-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  min-width: max-content;
-}
-.inventory-batch-controls .button {
-  min-height: 40px;
-  padding: 8px 11px;
-  white-space: nowrap;
-}
-.inventory-selected-count {
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 650;
-  white-space: nowrap;
 }
 .product-name-viewport[data-overflowing="true"]:hover strong {
   will-change: transform;
@@ -8507,13 +8481,6 @@ summary.record-icon::-webkit-details-marker {
   }
   .inventory-movements {
     position: static;
-  }
-}
-@media (max-width: 900px) {
-  .inventory-batch-controls {
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    min-width: 0;
   }
 }
 @media (max-width: 600px) {
