@@ -25,6 +25,143 @@
   height: 32px;
 }
 
+.historyCard {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.historyBorderFlow {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.historyBorderFlow svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.historyBorderFlow :global(rect) {
+  fill: none;
+  stroke: #f5aa00;
+  stroke-dasharray: 16 84;
+  stroke-dashoffset: 100;
+  stroke-linecap: round;
+  stroke-opacity: 0;
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.historyHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #647470;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.historyTitle {
+  position: relative;
+  width: max-content;
+}
+
+.historyUnderline {
+  position: absolute;
+  right: 0;
+  bottom: -4px;
+  left: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: #f0a400;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 150ms ease-out;
+}
+
+.historyArrow {
+  flex: 0 0 auto;
+  color: #7c8985;
+  transition:
+    color 150ms ease-out 240ms,
+    transform 150ms ease-out 240ms;
+}
+
+.historyPreview {
+  display: grid;
+  grid-template-columns: 37px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.historyPreview > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.historyPreview strong,
+.historyPreview small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyPreview strong {
+  font-size: 12px;
+}
+
+.historyPreview > span:last-child > span {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.historyPreview em {
+  font-style: normal;
+}
+
+.historyPreview small,
+.historyEmpty {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.historyEmpty {
+  display: block;
+  margin-top: 18px;
+}
+
+.historyCard:hover .historyUnderline,
+.historyCard:focus-visible .historyUnderline {
+  transform: scaleX(1);
+}
+
+.historyCard:hover .historyArrow,
+.historyCard:focus-visible .historyArrow {
+  color: #ee9700;
+  transform: translateX(8px);
+}
+
+:global(html:not([data-motion="always"])) .historyArrow {
+  transition:
+    color 150ms ease-out 260ms,
+    transform 150ms ease-out 260ms;
+}
+
+:global(html:not([data-motion="always"])) .historyUnderline {
+  transition: none;
+}
+
 .table {
   min-width: 1380px;
   overflow-anchor: none;

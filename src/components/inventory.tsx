@@ -421,10 +421,13 @@ export function InventoryHistoryCard({
     <>
       <button
         type="button"
-        className="metric inventory-history-card"
+        className={`${inventoryStyles.historyCard} metric inventory-history-card`}
         onClick={() => setOpen(true)}
       >
-        <span className="inventory-history-border-flow" aria-hidden="true">
+        <span
+          className={`${inventoryStyles.historyBorderFlow} inventory-history-border-flow`}
+          aria-hidden="true"
+        >
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
             <rect
               x="0.75"
@@ -436,22 +439,28 @@ export function InventoryHistoryCard({
             />
           </svg>
         </span>
-        <span className="inventory-history-card-heading">
-          <span className="inventory-history-title">
+        <span
+          className={`${inventoryStyles.historyHeading} inventory-history-card-heading`}
+        >
+          <span
+            className={`${inventoryStyles.historyTitle} inventory-history-title`}
+          >
             {it.inventory.movementHistory}
             <span
-              className="inventory-history-title-underline"
+              className={`${inventoryStyles.historyUnderline} inventory-history-title-underline`}
               aria-hidden="true"
             />
           </span>
           <ArrowRight
-            className="inventory-history-arrow"
+            className={`${inventoryStyles.historyArrow} inventory-history-arrow`}
             size={19}
             aria-hidden="true"
           />
         </span>
         {latest ? (
-          <span className="inventory-history-preview">
+          <span
+            className={`${inventoryStyles.historyPreview} inventory-history-preview`}
+          >
             <span className="metric-icon orange">
               <PackageOpen size={20} aria-hidden="true" />
             </span>
@@ -476,7 +485,9 @@ export function InventoryHistoryCard({
             </span>
           </span>
         ) : (
-          <small className="inventory-history-empty">
+          <small
+            className={`${inventoryStyles.historyEmpty} inventory-history-empty`}
+          >
             {it.inventory.noMovements}
           </small>
         )}

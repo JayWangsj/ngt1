@@ -8017,37 +8017,6 @@ summary.record-icon::-webkit-details-marker {
   }
 }
 
-.inventory-history-card {
-  position: relative;
-  width: 100%;
-  overflow: hidden;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.inventory-history-border-flow {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-.inventory-history-border-flow svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.inventory-history-border-flow rect {
-  fill: none;
-  stroke: #f5aa00;
-  stroke-dasharray: 16 84;
-  stroke-dashoffset: 100;
-  stroke-linecap: round;
-  stroke-opacity: 0;
-  stroke-width: 1.6;
-  vector-effect: non-scaling-stroke;
-}
 @keyframes inventory-history-border-flow {
   0% {
     stroke-dashoffset: 100;
@@ -8058,87 +8027,9 @@ summary.record-icon::-webkit-details-marker {
     stroke-opacity: 0.82;
   }
 }
-.inventory-history-card-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: #647470;
-  font-size: 12px;
-  font-weight: 650;
-}
-.inventory-history-title {
-  position: relative;
-  width: max-content;
-}
-.inventory-history-title-underline {
-  position: absolute;
-  right: 0;
-  bottom: -4px;
-  left: 0;
-  height: 2px;
-  border-radius: 999px;
-  background: #f0a400;
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 150ms ease-out;
-}
-.inventory-history-arrow {
-  flex: 0 0 auto;
-  color: #7c8985;
-  transition:
-    color 150ms ease-out 240ms,
-    transform 150ms ease-out 240ms;
-}
-.inventory-history-preview {
-  display: grid;
-  grid-template-columns: 37px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  margin-top: 14px;
-}
-.inventory-history-preview > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-.inventory-history-preview strong,
-.inventory-history-preview small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.inventory-history-preview strong {
-  font-size: 12px;
-}
-.inventory-history-preview > span:last-child > span {
-  font-size: 12px;
-  font-weight: 650;
-}
-.inventory-history-preview em {
-  font-style: normal;
-}
-.inventory-history-preview small,
-.inventory-history-empty {
-  color: var(--muted);
-  font-size: 10px;
-}
-.inventory-history-empty {
-  display: block;
-  margin-top: 18px;
-}
 .inventory-history-card:hover .inventory-history-border-flow rect,
 .inventory-history-card:focus-visible .inventory-history-border-flow rect {
   animation: inventory-history-border-flow 900ms linear infinite;
-}
-.inventory-history-card:hover .inventory-history-title-underline,
-.inventory-history-card:focus-visible .inventory-history-title-underline {
-  transform: scaleX(1);
-}
-.inventory-history-card:hover .inventory-history-arrow,
-.inventory-history-card:focus-visible .inventory-history-arrow {
-  color: #ee9700;
-  transform: translateX(8px);
 }
 .retail-cart-row .number-stepper input {
   text-align: center;
@@ -8667,14 +8558,6 @@ summary.record-icon::-webkit-details-marker {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  html:not([data-motion="always"]) .inventory-history-arrow {
-    transition:
-      color 150ms ease-out 260ms,
-      transform 150ms ease-out 260ms;
-  }
-  html:not([data-motion="always"]) .inventory-history-title-underline {
-    transition: none;
-  }
   html:not([data-motion="always"]) .summary-action span::after,
   html:not([data-motion="always"]) .fault-manager-trigger > span::after,
   html:not([data-motion="always"])

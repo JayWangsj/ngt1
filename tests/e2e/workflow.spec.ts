@@ -3883,7 +3883,27 @@ test("inventory movement history uses the shared dialog body", async ({
   await expect(stockBadge).toHaveCSS("padding-left", "4px");
   await expect(stockBadge).toHaveCSS("border-radius", "999px");
   await expect(stockBadge).toHaveCSS("font-size", "11px");
-  await page.locator(".inventory-history-card").click();
+  const historyCard = page.locator(".inventory-history-card");
+  await expect(historyCard).toHaveCSS("position", "relative");
+  await expect(historyCard).toHaveCSS("overflow", "hidden");
+  const historyHeading = historyCard.locator(".inventory-history-card-heading");
+  await expect(historyHeading).toHaveCSS("display", "flex");
+  const historyPreview = historyCard.locator(".inventory-history-preview");
+  await expect(historyPreview).toHaveCSS("display", "grid");
+  await expect(historyPreview).toHaveCSS("gap", "10px");
+  const historyUnderline = historyCard.locator(
+    ".inventory-history-title-underline",
+  );
+  const historyArrow = historyCard.locator(".inventory-history-arrow");
+  await historyCard.hover();
+  await expect(historyUnderline).toHaveCSS(
+    "transform",
+    "matrix(1, 0, 0, 1, 0, 0)",
+  );
+  await expect(historyArrow).toHaveCSS("color", "rgb(238, 151, 0)");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(historyUnderline).toHaveCSS("transition-duration", "0s");
+  await historyCard.click();
   const dialog = page.getByRole("dialog", { name: "Registro magazzino" });
   await expect(
     dialog.locator(":scope > .dialog-body.inventory-movements-dialog"),
