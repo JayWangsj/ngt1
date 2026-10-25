@@ -1,0 +1,15 @@
+.editor:global(.price-rule-editor) {
+  display: grid;
+  gap: 16px;
+  margin-top: 0;
+  scroll-padding-bottom: 112px;
+}
+
+.editor:global(.price-rule-editor) > :global(.dialog-actions) {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  width: 100%;
+  padding-bottom: 4px;
+  background: #fff;
+}

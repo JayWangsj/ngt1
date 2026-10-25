@@ -7038,20 +7038,6 @@ details.secondary-actions {
   }
 }
 
-.price-rule-editor {
-  display: grid;
-  gap: 16px;
-  margin-top: 0;
-  scroll-padding-bottom: 112px;
-}
-.price-rule-editor > .dialog-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  width: 100%;
-  padding-bottom: 4px;
-  background: #fff;
-}
 .price-rule-editor-section {
   display: grid;
   gap: 14px;

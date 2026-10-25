@@ -25,6 +25,7 @@ import motionSwitchStyles from "./ui/motion-switch.module.css";
 import { EditableSelect } from "./editable-select";
 import priceListControlsStyles from "./price-list-controls.module.css";
 import priceRuleListStyles from "./price-rule-list.module.css";
+import priceRuleEditorStyles from "./price-rule-editor.module.css";
 import priceOptionCardStyles from "./price-option-card.module.css";
 import {
   deviceProjects,
@@ -4948,7 +4949,7 @@ export function RuleForm({
       disableUnchangedSave={Boolean(rule)}
       changeKey={JSON.stringify([category, brand, model, project])}
       cancelLabel={it.close}
-      className="price-rule-editor"
+      className={`${priceRuleEditorStyles.editor} price-rule-editor`}
       closeOnSuccess
       saveRef={saveBaseQuote}
       onSuccess={(result) => {

@@ -7977,7 +7977,12 @@ test("price editor and mobile yellow layout support both languages", async ({
   await baseSuggested.fill("15");
   await expect(baseSuggested).toHaveValue("15");
   await expect(form.locator(".price-rule-editor-options")).toBeVisible();
+  const editor = form.locator(".price-rule-editor");
+  await expect(editor).toHaveCSS("display", "grid");
+  await expect(editor).toHaveCSS("gap", "16px");
   const footer = form.locator(".dialog-actions");
+  await expect(footer).toHaveCSS("position", "sticky");
+  await expect(footer).toHaveCSS("bottom", "0px");
   await expect(
     footer.getByRole("button", { name: "Salva ed esci" }),
   ).toBeVisible();
