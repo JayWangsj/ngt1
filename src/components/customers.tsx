@@ -570,7 +570,7 @@ export function CustomerDevices({
         {!readOnly && (
           <Button
             type="button"
-            variant="outline"
+            variant="addDevice"
             className="add-device-action customer-detail-add-device"
             onClick={() => setCreating(true)}
           >

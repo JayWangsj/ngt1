@@ -10,6 +10,7 @@ const variants = cva(clsx(styles.button, "button"), {
     variant: {
       default: clsx(styles.primary, "button-primary"),
       outline: clsx(styles.outline, "button-outline"),
+      addDevice: clsx(styles.addDevice, "button-add-device"),
       cancel: clsx(styles.cancel, "button-cancel"),
       secondary: clsx(styles.secondary, "button-secondary"),
       tertiary: clsx(styles.tertiary, "button-tertiary"),

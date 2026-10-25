@@ -133,3 +133,53 @@
   background: var(--danger-surface);
   color: var(--danger);
 }
+
+.addDevice,
+.addDevice:global(.quick-service-picker-add),
+:global(.button-add-device) {
+  width: 100%;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px dashed #e4b600;
+  border-radius: 10px;
+  background: #fffdf5;
+  color: #6d5510;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.addDevice:hover:not(:disabled),
+.addDevice:global(.quick-service-picker-add):hover:not(:disabled),
+:global(.button-add-device):hover:not(:disabled) {
+  border-color: #d7aa00;
+  background: #fff8d9;
+  box-shadow: 0 2px 6px rgb(128 96 0 / 8%);
+  color: #5d4700;
+}
+
+.addDevice:active:not(:disabled),
+.addDevice:global(.quick-service-picker-add):active:not(:disabled),
+:global(.button-add-device):active:not(:disabled) {
+  background: #ffe99d;
+}
+
+.addDevice:focus-visible,
+:global(.button-add-device):focus-visible {
+  outline: 2px solid #d7aa00;
+  outline-offset: 2px;
+}
+
+.addDevice:disabled,
+:global(.button-add-device):disabled {
+  cursor: not-allowed;
+}

@@ -523,14 +523,15 @@ export function NewOrderWizard({
               <div
                 className={`quick-service-device-cards ${quickServiceDeviceCardStyles.cards}`}
               >
-                <button
+                <Button
                   type="button"
+                  variant="addDevice"
                   className="quick-service-device-card is-add add-device-action"
                   disabled={!customer}
                   onClick={changeDevice}
                 >
                   <Plus size={18} /> {it.device}
-                </button>
+                </Button>
               </div>
             )}
             {validDevice && (
@@ -624,8 +625,9 @@ export function NewOrderWizard({
                       <p className="muted">{it.noDevices}</p>
                     )}
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="addDevice"
                     className="quick-service-picker-add add-device-action"
                     onClick={() => {
                       setChoosingDevice(false);
@@ -633,7 +635,7 @@ export function NewOrderWizard({
                     }}
                   >
                     <Plus size={16} /> {it.device}
-                  </button>
+                  </Button>
                 </DialogBody>
                 <DialogFooter>
                   <Button

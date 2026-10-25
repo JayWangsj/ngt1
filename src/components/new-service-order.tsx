@@ -262,14 +262,15 @@ export function NewServiceOrder({
                     </button>
                   </article>
                 ))}
-                <button
+                <Button
                   type="button"
+                  variant="addDevice"
                   className="quick-service-device-card is-add add-device-action"
                   disabled={!customer}
                   onClick={openDevicePicker}
                 >
                   <Plus size={18} /> {it.device}
-                </button>
+                </Button>
               </div>
             </section>
             <section className="quick-service-section">
@@ -439,8 +440,9 @@ export function NewServiceOrder({
                       <p className="muted">{it.noDevices}</p>
                     )}
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="addDevice"
                     className="quick-service-picker-add add-device-action"
                     onClick={() => {
                       setChoosingDevices(false);
@@ -448,7 +450,7 @@ export function NewServiceOrder({
                     }}
                   >
                     <Plus size={16} /> {it.device}
-                  </button>
+                  </Button>
                 </DialogBody>
                 <DialogFooter
                   summary={

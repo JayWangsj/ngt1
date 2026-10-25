@@ -5742,43 +5742,6 @@ details.secondary-actions {
 .nav-item:hover {
   background: #fff8d9;
 }
-.add-device-action {
-  width: 100%;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px dashed #e4b600;
-  border-radius: 10px;
-  background: #fffdf5;
-  color: #6d5510;
-  font: inherit;
-  font-weight: 650;
-  cursor: pointer;
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out,
-    box-shadow 150ms ease-out,
-    color 150ms ease-out;
-}
-.add-device-action:hover:not(:disabled) {
-  border-color: #d7aa00;
-  background: #fff8d9;
-  box-shadow: 0 2px 6px rgb(128 96 0 / 8%);
-  color: #5d4700;
-}
-.add-device-action:active:not(:disabled) {
-  background: #ffe99d;
-}
-.add-device-action:focus-visible {
-  outline: 2px solid #d7aa00;
-  outline-offset: 2px;
-}
-.add-device-action:disabled {
-  cursor: not-allowed;
-}
 .insight,
 .teal {
   background: #fff3bf;
@@ -7417,12 +7380,6 @@ details summary {
   background: #fffdf5;
   color: #574200;
   border-radius: 8px;
-}
-.button-outline.add-device-action {
-  border: 1px dashed #e4b600;
-  background: #fffdf5;
-  color: #6d5510;
-  border-radius: 10px;
 }
 .icon-button:hover,
 details summary:hover {

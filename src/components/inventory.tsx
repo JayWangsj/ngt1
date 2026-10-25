@@ -322,7 +322,7 @@ function ProductCompatibilityDialog({
             </div>
             <Button
               type="button"
-              variant="outline"
+              variant="addDevice"
               className="add-device-action compatibility-add-device"
               onClick={() =>
                 setAdding({

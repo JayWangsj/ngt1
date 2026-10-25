@@ -768,6 +768,7 @@ test("device step gates faults and advances only after faults and due date", asy
 
   await expect(addDevice).toBeEnabled();
   await expect(addDevice).toHaveClass(/add-device-action/);
+  await expect(addDevice).toHaveClass(/button-add-device/);
   await expect(addDevice).toHaveCSS("border-top-style", "dashed");
   await addDevice.hover();
   await expect(addDevice).toHaveCSS("background-color", "rgb(255, 248, 217)");
@@ -1881,10 +1882,29 @@ test("quick service device cards fit a narrow grid and reveal removal on hover",
     name: "Dispositivo",
     exact: true,
   });
+  await expect(addDevice).toHaveClass(/button-add-device/);
+  await expect(addDevice).toHaveCSS("min-height", "58px");
+  await expect(addDevice).toHaveCSS("gap", "8px");
+  await expect(addDevice).toHaveCSS("border-top-style", "dashed");
+  await addDevice.hover();
+  await expect(addDevice).toHaveCSS("background-color", "rgb(255, 248, 217)");
   await addDevice.click();
   const devicePicker = page.getByRole("dialog", {
     name: "Dispositivi associati",
   });
+  const pickerAddDevice = devicePicker.getByRole("button", {
+    name: "Dispositivo",
+    exact: true,
+  });
+  await expect(pickerAddDevice).toHaveClass(/button-add-device/);
+  await expect(pickerAddDevice).toHaveCSS("min-height", "58px");
+  await expect(pickerAddDevice).toHaveCSS("gap", "8px");
+  await expect(pickerAddDevice).toHaveCSS("border-top-style", "dashed");
+  await pickerAddDevice.hover();
+  await expect(pickerAddDevice).toHaveCSS(
+    "background-color",
+    "rgb(255, 248, 217)",
+  );
   const pickerBox = await devicePicker.boundingBox();
   const viewportWidth = await page.evaluate(() => window.innerWidth);
   expect(pickerBox!.x).toBeGreaterThanOrEqual(16);
@@ -2007,6 +2027,7 @@ test("manages one quick service for held service orders and retail checkout", as
   });
   await expect(addQuickDevice).toHaveCount(1);
   await expect(addQuickDevice).toHaveClass(/add-device-action/);
+  await expect(addQuickDevice).toHaveClass(/button-add-device/);
   await expect(addQuickDevice).toHaveCSS("border-top-style", "dashed");
   await addQuickDevice.hover();
   await expect(addQuickDevice).toHaveCSS(
@@ -2037,6 +2058,7 @@ test("manages one quick service for held service orders and retail checkout", as
     exact: true,
   });
   await expect(addPickerDevice).toHaveClass(/add-device-action/);
+  await expect(addPickerDevice).toHaveClass(/button-add-device/);
   await expect(addPickerDevice).toHaveCSS("border-top-style", "dashed");
   await addPickerDevice.hover();
   await expect(addPickerDevice).toHaveCSS(
@@ -9001,6 +9023,8 @@ test("new repair products add compatible devices in a modal", async ({
     name: "Compatibilità",
     exact: true,
   });
+  await expect(addCompatibility).toHaveClass(/button-add-device/);
+  await expect(addCompatibility).toHaveCSS("border-top-style", "dashed");
   await expect(addCompatibility).toBeDisabled();
   await productDialog
     .getByLabel("Prodotto", { exact: true })
@@ -9387,6 +9411,7 @@ test("customer list searches instantly, preserves navigation and supports compac
     exact: true,
   });
   await expect(customerAddDevice).toHaveClass(/add-device-action/);
+  await expect(customerAddDevice).toHaveClass(/button-add-device/);
   await expect(customerAddDevice).toHaveCSS("border-top-style", "dashed");
   await customerAddDevice.hover();
   await expect(customerAddDevice).toHaveCSS(

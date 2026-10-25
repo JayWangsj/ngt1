@@ -615,7 +615,7 @@ export function ProductCompatibilityFields({
         ))}
         <Button
           type="button"
-          variant="outline"
+          variant="addDevice"
           className="add-device-action"
           disabled={!canAdd}
           onClick={() => {
