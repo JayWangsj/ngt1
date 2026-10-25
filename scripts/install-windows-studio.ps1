@@ -208,6 +208,13 @@ if (Test-Path -LiteralPath $releaseFile) {
     $manualInstall = $true
   }
 }
+$resolvedDataRoot = $DataRoot
+if ($onlineInstallPlan) {
+  $resolvedDataRoot = [string]$onlineInstallPlan.dataRoot
+} elseif ($manualInstallPlan -and $manualInstallPlan.mode -ne "first-install") {
+  $resolvedDataRoot = [string]$manualInstallPlan.dataRoot
+}
+$stableDataRoot = [System.IO.Path]::GetFullPath($resolvedDataRoot)
 if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
   $stableRoot = Join-Path ([System.IO.Path]::GetFullPath($InstallRoot)) ("releases\v" + $release.version)
   if ([System.IO.Path]::GetFullPath($sourceRoot) -ne [System.IO.Path]::GetFullPath($stableRoot)) {
@@ -261,7 +268,6 @@ if ((Test-Path -LiteralPath $releaseFile) -and (-not $InPlace)) {
 . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
 Set-Location -LiteralPath $script:NgtProjectRoot
 $projectRoot = [System.IO.Path]::GetFullPath($script:NgtProjectRoot)
-$stableDataRoot = [System.IO.Path]::GetFullPath($DataRoot)
 if ($stableDataRoot.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
   throw "Studio data must be stored outside the application release directory."
 }
@@ -363,6 +369,8 @@ Invoke-NgtInstallStage "database" {
 }
 Invoke-NgtInstallStage "migrations" {
   if ($isRelease) {
+    # The updater inherits NGT's old environment; Prisma gives DATABASE_URL precedence over the new release .env.
+    Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
     Invoke-NgtCommand $nodeExecutable @($prismaCli, "migrate", "deploy")
   } else {
     Invoke-NgtCommand "pnpm" @("db:generate")

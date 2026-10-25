@@ -717,6 +717,16 @@ describe("Windows persistent startup", () => {
     expect(startup).toContain('"service\\windows-studio-launcher.vbs"');
     expect(installerScript).toContain("activeRelease = $projectRoot");
     expect(installerScript).toContain("-InPlace -OnlineUpdate:$OnlineUpdate");
+    expect(installerScript).toContain("$resolvedDataRoot = $DataRoot");
+    expect(installerScript).toContain(
+      "$resolvedDataRoot = [string]$onlineInstallPlan.dataRoot",
+    );
+    expect(installerScript).toContain(
+      "$resolvedDataRoot = [string]$manualInstallPlan.dataRoot",
+    );
+    expect(installerScript).toContain(
+      "Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue",
+    );
     expect(installerScript).toContain(
       "$manualReservation.marker.previousRelease",
     );

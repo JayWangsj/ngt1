@@ -144,8 +144,10 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
   assert.match(acceptanceScript, /standalone\\node_modules\\@prisma\\client/);
 
   const { db, tables } = createDatabase();
+  const preMigrationDb = { ...db };
+  delete preMigrationDb.priceRuleOption;
   const code = "CI-TEST-LEGACY-FIXTURE";
-  let snapshot = await runProbe(db, "seed", code);
+  let snapshot = await runProbe(preMigrationDb, "seed", code);
   assert.equal(Object.hasOwn(snapshot.data.device, "createdAt"), false);
   assert.equal(tables.statusHistory.length, 4);
   assert.ok(
@@ -169,6 +171,7 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
     ],
   );
   assert.equal(snapshot.data.rule.suggested, "100.00");
+  assert.equal(snapshot.data.option, null);
   assert.equal(snapshot.data.product.stockQuantity, 6);
   assert.equal(snapshot.data.rule.requiredQuantity, 2);
   const paidCents = snapshot.data.payments.reduce(
@@ -192,7 +195,7 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
   assert.equal(snapshot.data.movements.length, 2);
   assert.deepEqual(await runProbe(db, "verify", code, snapshot), snapshot);
   await assert.rejects(
-    runProbe(db, "seed", code),
+    runProbe(preMigrationDb, "seed", code),
     /Unique constraint failed on user.email/,
   );
 
@@ -221,6 +224,38 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
     runProbe(db, "verify-and-write", code, snapshot),
     /Historical business data changed during upgrade/,
   );
+});
+
+test("release data probe seeds and preserves a v2.0.19 price-rule option", async () => {
+  const { db, tables } = createDatabase();
+  const code = "CI-TEST-V2019-OPTION-FIXTURE";
+  let snapshot = await runProbe(db, "seed", code);
+  const [option] = tables.priceRuleOption;
+  assert.equal(tables.priceRuleOption.length, 1);
+  assert.equal(option.productId, snapshot.refs.productId);
+  assert.equal(option.ruleId, snapshot.refs.ruleId);
+  assert.equal(option.name, snapshot.data.product.name);
+  assert.equal(option.quantity, 2);
+  assert.equal(option.isDefault, true);
+  assert.equal(snapshot.data.option.id, option.id);
+  assert.equal(snapshot.data.option.updatedAt, "2026-01-08T10:00:00.000Z");
+  for (const itemId of [
+    snapshot.refs.paidItemId,
+    snapshot.refs.reservationItemId,
+  ]) {
+    const item = tables.workOrderItem.find(({ id }) => id === itemId);
+    assert.equal(item.priceOptionId, option.id);
+    assert.equal(item.priceOptionName, option.name);
+    assert.equal(item.requiredProductName, option.name);
+  }
+
+  snapshot = await runProbe(db, "verify-and-write", code, snapshot);
+  snapshot = await runProbe(db, "verify-and-write", code, snapshot);
+  assert.equal(tables.priceRuleOption.length, 1);
+  assert.equal(tables.workOrder.length, 3);
+  assert.equal(tables.workOrderItem.length, 3);
+  assert.equal(tables.workOrderProduct.length, 3);
+  assert.ok(snapshot.postUpgrade.optionId);
 });
 
 test("release probe rejects invalid actions and requires snapshot for migration verification", async () => {

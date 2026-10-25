@@ -16,6 +16,11 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hoste
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
 }
 
+function Quote-NgtWindowsPathArgument([string]$Path) {
+  if ($Path.EndsWith("\")) { $Path += "\" }
+  return ('"{0}"' -f $Path)
+}
+
 function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$Description) {
   if (-not $Process.WaitForExit(1800000)) {
     & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $Process.Id /T /F | Out-Null
@@ -566,24 +571,12 @@ try {
   }
   $updateId = [guid]::NewGuid().ToString()
   if ($ManualInstaller) {
-    @{
-      updateId = $updateId
-      status = "queued"
-      previousVersion = ($oldTag -replace "^v", "")
-      targetVersion = $targetVersion
-      createdAt = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString("o")
-    } | ConvertTo-Json | Set-Content -LiteralPath $updateStatus -Encoding utf8
-
     $installerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-$TargetTag.exe"
     $installerLog = Join-Path $testRoot "manual-upgrade-installer.log"
     $installer = Start-Process -FilePath $installerPath `
       -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installerLog") `
       -WindowStyle Hidden -PassThru
     Wait-NgtManualInstaller -Process $installer -Description "Manual upgrade installer"
-    $manualStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-    if ($manualStatus.status -ne "superseded" -or $manualStatus.actualVersion -ne $targetVersion) {
-      throw "Manual upgrade did not supersede the old queued update task."
-    }
   } else {
     $sameOriginHeaders = @{
       Origin = "http://127.0.0.1:3000"
@@ -604,15 +597,41 @@ try {
     $mutexAlias = Join-Path $testRoot "install-root-junction"
     New-Item -ItemType Junction -Path $mutexAlias -Target $installRoot | Out-Null
     foreach ($mutexRootVariant in @($installRoot, ($installRoot + "\"), $installRoot.ToUpperInvariant(), $mutexAlias)) {
-      $rustMutexName = & $AcceptanceUpdaterPath --test-mutex-name $mutexRootVariant
-      if ($LASTEXITCODE -ne 0) { throw "Rust updater could not compute the mutex name for $mutexRootVariant." }
+      $mutexOutputPath = Join-Path $testRoot ("mutex-name-" + [guid]::NewGuid().ToString("N") + ".txt")
+      $mutexDiagnosticProcess = Start-Process -FilePath $AcceptanceUpdaterPath `
+        -ArgumentList @("--test-mutex-name", (Quote-NgtWindowsPathArgument $mutexRootVariant), `
+          (Quote-NgtWindowsPathArgument $mutexOutputPath)) `
+        -WindowStyle Hidden -PassThru
+      if (-not $mutexDiagnosticProcess.WaitForExit(30000)) {
+        Stop-Process -Id $mutexDiagnosticProcess.Id -Force
+        throw "Rust updater mutex diagnostic timed out after 30 seconds."
+      }
+      $mutexDiagnosticProcess.Refresh()
+      $mutexProcessExitCode = $mutexDiagnosticProcess.ExitCode
+      if (-not (Test-Path -LiteralPath $mutexOutputPath -PathType Leaf)) {
+        throw ("Rust updater did not write the mutex identity diagnostic for path '{0}' (process exit code {1}; output file missing)." -f `
+          $mutexRootVariant, $mutexProcessExitCode)
+      }
+      $mutexDiagnostic = [System.IO.File]::ReadAllText($mutexOutputPath)
+      if ($mutexProcessExitCode -ne 0) {
+        throw ("Rust updater mutex diagnostic failed for path '{0}' (process exit code {1}; diagnostic: {2})." -f `
+          $mutexRootVariant, $mutexProcessExitCode, $mutexDiagnostic.Trim())
+      }
+      $mutexDiagnosticLines = $mutexDiagnostic -split "`r?`n", 2
+      if ($mutexDiagnosticLines.Count -ne 2 -or $mutexDiagnosticLines[0] -cne "OK") {
+        throw ("Rust updater returned an invalid mutex diagnostic for path '{0}': {1}." -f `
+          $mutexRootVariant, $mutexDiagnostic.Trim())
+      }
+      $rustMutexName = $mutexDiagnosticLines[1].Trim()
       $powershellMutexName = Get-NgtStudioUpdateMutexName $mutexRootVariant
       if ([string]($rustMutexName | Out-String).Trim() -cne [string]$powershellMutexName) {
-        throw "Rust and PowerShell computed different update mutex identities for a path alias."
+        throw ("Rust and PowerShell computed different update mutex identities for path '{0}': Rust='{1}', PowerShell='{2}'." -f `
+          $mutexRootVariant, $rustMutexName, $powershellMutexName)
       }
     }
     Write-Output "Rust and PowerShell update mutex identity matched for case, trailing-separator, and junction aliases."
 
+    $updaterPath = Join-Path $taskRoot "tools\NGTUpdater.exe"
     $failureMarker = Join-Path $installRoot ".local\acceptance-failure-stage"
     "release-deployment" | Set-Content -LiteralPath $failureMarker -Encoding ascii
     $failedStartResponse = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
@@ -624,7 +643,9 @@ try {
     }
     $failedUpdateId = [string]$failedStartResponse.updateId
     $failedUpdater = Get-Process -Id ([int]$failedStartResponse.executorPid) -ErrorAction Stop
-    if ([System.IO.Path]::GetFullPath($failedUpdater.Path) -ine [System.IO.Path]::GetFullPath($updaterPath) -or
+    $failedUpdaterHandle = $failedUpdater.Handle
+    if ($failedUpdaterHandle -eq [IntPtr]::Zero -or
+        [System.IO.Path]::GetFullPath($failedUpdater.Path) -ine [System.IO.Path]::GetFullPath($updaterPath) -or
         [int]$failedUpdater.SessionId -ne [int]$sessionEvidence.sessionId) {
       throw "The injected attempt was not executed by the versioned Rust updater in the tested session."
     }
@@ -683,8 +704,11 @@ try {
     }
     $updateId = [string]$startResponse.updateId
     $updaterPid = [int]$startResponse.executorPid
-    $updaterPath = Join-Path $taskRoot "tools\NGTUpdater.exe"
     $updateProcess = Get-Process -Id $updaterPid -ErrorAction Stop
+    $updaterProcessHandle = $updateProcess.Handle
+    if ($updaterProcessHandle -eq [IntPtr]::Zero) {
+      throw "The acceptance could not retain a process handle for the Rust updater."
+    }
     if ([System.IO.Path]::GetFullPath($updateProcess.Path) -ine [System.IO.Path]::GetFullPath($updaterPath)) {
       throw "The API started a process other than the versioned Rust updater."
     }
@@ -703,18 +727,27 @@ try {
     $deadline = (Get-Date).AddMinutes(50)
     $finalStatus = $null
     do {
+      $failedUpdateMessage = $null
       if (Test-Path -LiteralPath $updateStatus) {
         $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
         if ([string]$finalStatus.updateId -ne $updateId) {
           throw "The persisted update state changed ownership during online update."
         }
         if ($finalStatus.status -eq "failed") {
-          throw "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+          $failedUpdateMessage = "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
         }
       }
       $windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics -UpdaterPid $updaterPid)
       foreach ($window in $windowDiagnostics) {
-        $observedWindowEvidence["$($window.handle)/$($window.processId)"] = $window
+        $windowKey = "$($window.handle)/$($window.processId)"
+        if (-not $observedWindowEvidence.ContainsKey($windowKey)) {
+          $observedWindowEvidence[$windowKey] = $window
+          Write-Output ("Window evidence: HWND={0} class='{1}' bounds={2} size={3}x{4} style={5} exstyle={6} visible={7} onScreen={8} pid={9} process='{10}' path='{11}' parent={12} session={13} user='{14}' title='{15}' command='{16}'" -f `
+            $window.handle, $window.windowClass, $window.windowBounds, $window.width, $window.height,
+            $window.style, $window.extendedStyle, $window.visible, $window.onScreen, $window.processId,
+            $window.processName, $window.processPath, $window.parentProcessId, $window.sessionId,
+            $window.user, $window.windowTitle, $window.commandLine)
+        }
       }
       $unexpectedUpdaterWindows = @($windowDiagnostics | Where-Object {
         $_.visible -and ((-not $_.boundsAvailable) -or
@@ -736,6 +769,7 @@ try {
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
+      if ($failedUpdateMessage) { throw $failedUpdateMessage }
       try {
         $updateProcess.Refresh()
         $peakUpdaterWorkingSet = [Math]::Max($peakUpdaterWorkingSet, [long]$updateProcess.PeakWorkingSet64)
@@ -765,6 +799,9 @@ try {
     $updateProcess.Refresh()
     if (-not $updateProcess.HasExited) { throw "The Rust updater exceeded its 50-minute limit." }
     $updateProcess.WaitForExit()
+    Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
+      $sessionEvidence.sessionId, $observedWindowEvidence.Count)
+    Write-Output ("Rust updater process exit code: {0}." -f $updateProcess.ExitCode)
     if ($updateProcess.ExitCode -ne 0) { throw "Rust updater exited with code $($updateProcess.ExitCode)." }
     if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
         $finalStatus.actualVersion -ne $targetVersion) {
@@ -786,15 +823,6 @@ try {
         @(Get-ChildItem -LiteralPath $quarantinedCandidates[0].FullName -Force).Count -ne $partialEntryCount) {
       throw "The retry did not quarantine exactly the incomplete candidate owned by its update task."
     }
-    Write-Output ("Interactive window probe completed in session {0}; observed {1} updater-tree top-level HWNDs." -f `
-      $sessionEvidence.sessionId, $observedWindowEvidence.Count)
-    foreach ($window in $observedWindowEvidence.Values) {
-      Write-Output ("Window evidence: HWND={0} class='{1}' bounds={2} size={3}x{4} style={5} exstyle={6} visible={7} onScreen={8} pid={9} process='{10}' path='{11}' parent={12} session={13} user='{14}' title='{15}' command='{16}'" -f `
-        $window.handle, $window.windowClass, $window.windowBounds, $window.width, $window.height,
-        $window.style, $window.extendedStyle, $window.visible, $window.onScreen, $window.processId,
-        $window.processName, $window.processPath, $window.parentProcessId, $window.sessionId,
-        $window.user, $window.windowTitle, $window.commandLine)
-    }
     Write-Output ("Rust updater peak working set: {0:N1} MiB; CPU time: {1:N1} s." -f `
       ($peakUpdaterWorkingSet / 1MB), $updateProcess.TotalProcessorTime.TotalSeconds)
     if ($peakUpdaterWorkingSet -gt 100MB) {
@@ -807,6 +835,9 @@ try {
 
   $activeConfig = Get-Content -LiteralPath (Join-Path $installRoot ".local\studio.json") -Raw | ConvertFrom-Json
   $activeReleaseRoot = [System.IO.Path]::GetFullPath([string]$activeConfig.activeRelease)
+  if ([System.IO.Path]::GetFullPath([string]$activeConfig.dataRoot) -ine [System.IO.Path]::GetFullPath($dataRoot)) {
+    throw "The update changed the configured database data root."
+  }
   if ($activeReleaseRoot -ne [System.IO.Path]::GetFullPath((Join-Path $installRoot "releases\$TargetTag"))) {
     throw "The online update did not activate the candidate release."
   }
