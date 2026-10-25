@@ -2016,6 +2016,11 @@ test("quick service device and service selectors retain the large dialog size", 
     name: "Dispositivi associati",
   });
   await expect(devicePicker).toHaveCSS("width", "900px");
+  const devicePickerBody = devicePicker.locator(
+    ":scope > .dialog-body.quick-service-picker",
+  );
+  await expect(devicePickerBody).toHaveCSS("display", "grid");
+  await expect(devicePickerBody).toHaveCSS("gap", "14px");
   await devicePicker
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
@@ -2025,6 +2030,11 @@ test("quick service device and service selectors retain the large dialog size", 
     name: "Seleziona servizi",
   });
   await expect(servicePicker).toHaveCSS("width", "900px");
+  const servicePickerBody = servicePicker.locator(
+    ":scope > .dialog-body.quick-service-picker",
+  );
+  await expect(servicePickerBody).toHaveCSS("display", "grid");
+  await expect(servicePickerBody).toHaveCSS("gap", "14px");
   await servicePicker
     .getByRole("button", { name: "Annulla", exact: true })
     .click();

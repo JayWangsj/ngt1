@@ -4158,10 +4158,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   color: var(--muted);
   font-size: 11px;
 }
-.quick-service-picker {
-  display: grid;
-  gap: 14px;
-}
 .quick-service-picker-add {
   min-height: 48px;
   display: flex;

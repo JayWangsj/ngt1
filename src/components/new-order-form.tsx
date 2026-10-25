@@ -604,7 +604,9 @@ export function NewOrderWizard({
                 size="large"
                 onClose={() => setChoosingDevice(false)}
               >
-                <DialogBody className="quick-service-picker">
+                <DialogBody
+                  className={`quick-service-picker ${quickServicePickerListStyles.picker}`}
+                >
                   <div
                     className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
                   >

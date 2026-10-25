@@ -432,7 +432,9 @@ export function NewServiceOrder({
                 size="large"
                 onClose={() => setChoosingDevices(false)}
               >
-                <DialogBody className="quick-service-picker">
+                <DialogBody
+                  className={`quick-service-picker ${quickServicePickerListStyles.picker}`}
+                >
                   <div
                     className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
                   >
@@ -504,7 +506,9 @@ export function NewServiceOrder({
                 size="large"
                 onClose={() => setChoosingServices(false)}
               >
-                <DialogBody className="quick-service-picker">
+                <DialogBody
+                  className={`quick-service-picker ${quickServicePickerListStyles.picker}`}
+                >
                   <div
                     className={`quick-service-picker-list ${quickServicePickerListStyles.list}`}
                   >
