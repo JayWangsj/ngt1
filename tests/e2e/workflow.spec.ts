@@ -5916,15 +5916,13 @@ test("retail history deep link hydrates before showing its dialog", async ({
   page,
 }) => {
   const hydrationErrors: string[] = [];
+  const hydrationMismatch = /hydration|hydrated|server[- ]rendered html/i;
   page.on("pageerror", (error) => {
-    if (error.message.includes("Hydration failed"))
+    if (hydrationMismatch.test(error.message))
       hydrationErrors.push(error.message);
   });
   page.on("console", (message) => {
-    if (
-      message.type() === "error" &&
-      message.text().includes("Hydration failed")
-    )
+    if (message.type() === "error" && hydrationMismatch.test(message.text()))
       hydrationErrors.push(message.text());
   });
 
