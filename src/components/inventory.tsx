@@ -471,8 +471,8 @@ export function InventoryHistoryCard({
                 <em
                   className={
                     latest.quantity > 0
-                      ? "movement-positive"
-                      : "movement-negative"
+                      ? `${inventoryMovementsStyles.positive} movement-positive`
+                      : `${inventoryMovementsStyles.negative} movement-negative`
                   }
                 >
                   ({latest.quantity > 0 ? "+" : ""}
@@ -517,8 +517,8 @@ export function InventoryHistoryCard({
                   <span
                     className={
                       movement.quantity > 0
-                        ? "movement-positive"
-                        : "movement-negative"
+                        ? `${inventoryMovementsStyles.positive} movement-positive`
+                        : `${inventoryMovementsStyles.negative} movement-negative`
                     }
                   >
                     {movement.quantity > 0 ? "+" : ""}

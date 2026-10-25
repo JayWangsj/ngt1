@@ -3918,9 +3918,15 @@ test("inventory movement history uses the shared dialog body", async ({
     "font-weight",
     "700",
   );
+  const movementAmount = Number(
+    (await movementRow.locator(":scope > span").textContent())?.replace(
+      "+",
+      "",
+    ),
+  );
   await expect(movementRow.locator(":scope > span")).toHaveCSS(
     "color",
-    "rgb(39, 132, 74)",
+    movementAmount > 0 ? "rgb(39, 132, 74)" : "rgb(189, 66, 66)",
   );
   const monthPicker = dialog.locator(".retail-period-picker");
   await expect(monthPicker).toHaveCSS("position", "absolute");

@@ -8484,12 +8484,6 @@ summary.record-icon::-webkit-details-marker {
   position: sticky;
   top: 24px;
 }
-.movement-positive {
-  color: #27844a;
-}
-.movement-negative {
-  color: #bd4242;
-}
 .dialog-form {
   display: grid;
   gap: 18px;
