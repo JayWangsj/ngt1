@@ -7043,6 +7043,8 @@ test("settings catalogs reuse stable inline and dialog interactions", async ({
 
   const serviceManager = page.locator(".catalog-manager");
   await expect(serviceManager).toBeVisible();
+  await expect(serviceManager).toHaveCSS("display", "grid");
+  await expect(serviceManager).toHaveCSS("gap", "12px");
   const firstServiceRow = serviceManager
     .locator(".catalog-manager-row")
     .first();

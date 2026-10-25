@@ -4149,10 +4149,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   background: #ffed9b;
   box-shadow: inset 0 -2px #e0ac00;
 }
-.catalog-manager {
-  display: grid;
-  gap: 12px;
-}
 .quick-service-device-option small {
   display: block;
   color: var(--muted);

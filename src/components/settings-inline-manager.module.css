@@ -1,4 +1,6 @@
 .manager:global(.settings-inline-manager) {
+  display: grid;
   width: 100%;
   min-width: 0;
+  gap: 12px;
 }
