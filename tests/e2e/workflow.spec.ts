@@ -2389,9 +2389,26 @@ test("manages one quick service for held service orders and retail checkout", as
   await expect(
     page.getByRole("button", { name: "Completa servizio", exact: true }),
   ).toHaveCount(0);
-  await expect(page.locator(".quick-service-detail-list")).toContainText(
-    serviceName,
-  );
+  const quickServiceDetailList = page.locator(".quick-service-detail-list");
+  await expect(quickServiceDetailList).toContainText(serviceName);
+  await expect(quickServiceDetailList).toHaveCSS("display", "grid");
+  await expect(quickServiceDetailList).toHaveCSS("gap", "12px");
+  const quickServiceDetailRow = quickServiceDetailList.locator("> div").first();
+  await expect(quickServiceDetailRow).toHaveCSS("display", "flex");
+  await expect(quickServiceDetailRow).toHaveCSS("padding-top", "10px");
+  const quickServiceDeviceList = page.locator(".quick-service-device-list");
+  await expect(quickServiceDeviceList).toHaveCSS("display", "grid");
+  await expect(quickServiceDeviceList.locator("> div")).toHaveCount(2);
+  const detailDesktopViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const list of [quickServiceDetailList, quickServiceDeviceList]) {
+    expect(
+      await list.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  }
+  await page.setViewportSize(detailDesktopViewport);
   await expect(
     page.getByRole("button", {
       name: "Modifica servizio rapido",

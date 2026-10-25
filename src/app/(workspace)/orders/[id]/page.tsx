@@ -45,6 +45,7 @@ import { ServiceOrderPrint } from "@/components/service-order-print";
 import { it as italianMessages } from "@/messages/it";
 import { priceRuleViews } from "@/lib/price-rule-view";
 import { Button } from "@/components/ui/button";
+import quickServiceDetailListStyles from "@/components/quick-service-detail-list.module.css";
 
 type TimelineEvent = {
   id: string;
@@ -358,7 +359,9 @@ export default async function Detail({
           <div className="stack">
             <section className="panel padded">
               <h2>{it.quickService.serviceItems}</h2>
-              <div className="quick-service-detail-list">
+              <div
+                className={`quick-service-detail-list ${quickServiceDetailListStyles.list} ${quickServiceDetailListStyles.detailList}`}
+              >
                 {order.items.map((item) => (
                   <div key={item.id}>
                     <span>
@@ -377,7 +380,9 @@ export default async function Detail({
             </section>
             <section className="panel padded">
               <h2>{it.quickService.selectDevices}</h2>
-              <div className="quick-service-device-list">
+              <div
+                className={`quick-service-device-list ${quickServiceDetailListStyles.list}`}
+              >
                 {order.relatedDevices.map(({ device }) => (
                   <div key={device.id}>
                     <strong>

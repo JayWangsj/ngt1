@@ -4166,9 +4166,7 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
 .quick-service-order-form,
 .catalog-manager,
 .catalog-manager-list,
-.model-manager,
-.quick-service-detail-list,
-.quick-service-device-list {
+.model-manager {
   display: grid;
   gap: 12px;
 }
@@ -4615,21 +4613,6 @@ details.secondary-actions {
   min-height: 36px;
   text-align: right;
   font-weight: 700;
-}
-.quick-service-detail-list > div,
-.quick-service-device-list > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-.quick-service-detail-list > div > span:first-child {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.quick-service-detail-list > div > strong:last-child {
-  flex: 0 0 auto;
 }
 @media (max-width: 760px) {
   .quick-service-choice,

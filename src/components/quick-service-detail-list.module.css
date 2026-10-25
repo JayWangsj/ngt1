@@ -1,0 +1,21 @@
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.detailList > div > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.detailList > div > strong:last-child {
+  flex: 0 0 auto;
+}
