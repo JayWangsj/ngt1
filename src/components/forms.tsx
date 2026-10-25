@@ -21,6 +21,7 @@ import { RecordIcon } from "./ui/record-icon";
 import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import { EditableSelect } from "./editable-select";
+import priceListControlsStyles from "./price-list-controls.module.css";
 import priceOptionCardStyles from "./price-option-card.module.css";
 import {
   deviceProjects,
@@ -5877,7 +5878,7 @@ export function PriceList({
       {initial && (
         <Button
           variant="ghost"
-          className="price-add-project"
+          className={`${priceListControlsStyles.addProject} price-add-project`}
           onClick={() => {
             setSaved(false);
             setEditing(null);
@@ -5930,7 +5931,9 @@ export function PriceList({
           {it.newRuleAction}
         </Button>
       </header>
-      <div className="filters price-filters price-list-controls">
+      <div
+        className={`filters price-filters ${priceListControlsStyles.listControls} price-list-controls`}
+      >
         <label className="grow">
           <span className="sr-only">{it.search}</span>
           <input
@@ -5944,7 +5947,7 @@ export function PriceList({
           />
         </label>
         <div
-          className={`catalog-toolbar price-batch-toolbar${batchMode ? " is-active" : ""}`}
+          className={`${priceListControlsStyles.batchToolbar} ${batchMode ? priceListControlsStyles.active : ""} catalog-toolbar price-batch-toolbar${batchMode ? " is-active" : ""}`}
         >
           <BatchControls
             active={batchMode}

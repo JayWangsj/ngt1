@@ -10415,6 +10415,8 @@ test("price batch selection count uses shared status styles", async ({
   await manageSelection.click();
 
   const toolbar = page.locator(".price-batch-toolbar");
+  await expect(toolbar).toHaveCSS("justify-content", "flex-start");
+  await expect(toolbar).toHaveCSS("flex-wrap", "wrap");
   const selectedCount = toolbar.getByRole("status");
   await expect(selectedCount).toBeVisible();
   await expect(selectedCount).toHaveCSS("font-size", "12px");
@@ -10423,6 +10425,19 @@ test("price batch selection count uses shared status styles", async ({
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(selectedCount).toHaveCSS("flex-basis", "100%");
+  await expect(toolbar.getByRole("button").first()).toHaveCSS(
+    "flex-basis",
+    "130px",
+  );
+  await expect(toolbar.getByRole("button").first()).toHaveCSS(
+    "white-space",
+    "normal",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 });
 
 test("price editor keeps deletion inside batch management", async ({

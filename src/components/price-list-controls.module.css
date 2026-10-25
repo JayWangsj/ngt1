@@ -1,0 +1,78 @@
+.addProject:global(.button) {
+  min-height: 36px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.addProject:global(.button-ghost) {
+  border-color: transparent;
+  background: transparent;
+  color: #5d4700;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.addProject:global(.button-ghost):hover:not(:disabled) {
+  border-color: transparent;
+  color: #332700;
+}
+
+.addProject:global(.button-ghost):active:not(:disabled) {
+  background: #ffedaa;
+}
+
+.listControls {
+  align-items: center;
+}
+
+.listControls > :global(.grow) {
+  min-width: 320px;
+}
+
+.listControls > .batchToolbar {
+  flex: 0 0 auto;
+}
+
+.batchToolbar {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.batchToolbar.active {
+  padding: 9px 10px;
+  border: 1px solid #ecd58d;
+  border-radius: 9px;
+  background: #fffdf5;
+}
+
+.batchToolbar.active :global(.button-danger) {
+  margin-left: auto;
+}
+
+@media (max-width: 600px) {
+  .listControls > :global(.grow) {
+    min-width: 100%;
+  }
+
+  .listControls > .batchToolbar {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .batchToolbar.active :global(.inventory-selected-count) {
+    flex: 1 0 100%;
+  }
+
+  .batchToolbar.active :global(.button) {
+    flex: 1 1 130px;
+    white-space: normal;
+  }
+
+  .batchToolbar.active :global(.button-danger) {
+    margin-left: 0;
+  }
+}

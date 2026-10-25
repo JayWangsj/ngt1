@@ -7304,50 +7304,10 @@ details.secondary-actions {
   width: 16px;
   height: 16px;
 }
-.price-rule-row .button,
-.price-add-project {
+.price-rule-row .button {
   min-height: 36px;
   padding: 6px 10px;
   flex-shrink: 0;
-}
-.price-add-project.button {
-  border-color: transparent;
-  background: transparent;
-  color: #5d4700;
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out,
-    color 150ms ease-out;
-}
-.price-add-project.button:hover {
-  border-color: transparent;
-  color: #332700;
-}
-.price-add-project.button:active {
-  background: #ffedaa;
-}
-.price-batch-toolbar {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  margin: 0;
-}
-.price-batch-toolbar.is-active {
-  padding: 9px 10px;
-  border: 1px solid #ecd58d;
-  border-radius: 9px;
-  background: #fffdf5;
-}
-.price-batch-toolbar.is-active .button-danger {
-  margin-left: auto;
-}
-.price-list-controls {
-  align-items: center;
-}
-.price-list-controls > .grow {
-  min-width: 320px;
-}
-.price-list-controls > .price-batch-toolbar {
-  flex: 0 0 auto;
 }
 @media (max-width: 600px) {
   .price-rule-row {
@@ -7362,24 +7322,6 @@ details.secondary-actions {
   }
   .price-rule-header.is-batch {
     grid-template-columns: 18px minmax(0, 1fr) 74px 62px 36px;
-  }
-  .price-list-controls > .grow {
-    min-width: 100%;
-  }
-  .price-list-controls > .price-batch-toolbar {
-    flex: 1 1 100%;
-    width: 100%;
-    min-width: 0;
-  }
-  .price-batch-toolbar.is-active .inventory-selected-count {
-    flex: 1 0 100%;
-  }
-  .price-batch-toolbar.is-active .button {
-    flex: 1 1 130px;
-    white-space: normal;
-  }
-  .price-batch-toolbar.is-active .button-danger {
-    margin-left: 0;
   }
   .price-rule-row .button {
     padding: 6px;
