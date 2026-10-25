@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
@@ -256,6 +258,75 @@ test("release data probe seeds and preserves a v2.0.19 price-rule option", async
   assert.equal(tables.workOrderItem.length, 3);
   assert.equal(tables.workOrderProduct.length, 3);
   assert.ok(snapshot.postUpgrade.optionId);
+});
+
+test("release probe CLI loads the snapshot for rollback verification", async () => {
+  const { db } = createDatabase();
+  const code = "CI-TEST-CLI-ROLLBACK-VERIFY";
+  const snapshot = await runProbe(db, "seed", code);
+  const tempDirectory = await mkdtemp(join(tmpdir(), "ngt-business-probe-"));
+  const snapshotPath = join(tempDirectory, "snapshot.json");
+  const envPath = join(tempDirectory, "probe.env");
+  const clientPath = join(tempDirectory, "prisma-client.cjs");
+
+  try {
+    await Promise.all([
+      writeFile(snapshotPath, JSON.stringify(snapshot)),
+      writeFile(envPath, "DATABASE_URL=postgresql://127.0.0.1/probe\n"),
+      writeFile(
+        clientPath,
+        `const { readFileSync } = require("node:fs");
+const { data } = JSON.parse(readFileSync(process.env.NGT_PROBE_SNAPSHOT_PATH, "utf8"));
+const records = {
+  customer: [data.customer],
+  device: [data.device],
+  user: [data.actor],
+  product: [data.product],
+  priceRule: [data.rule],
+  priceRuleOption: [data.option],
+  productCompatibility: [data.compatibility],
+  workOrder: data.orders,
+  workOrderItem: data.items,
+  payment: data.payments,
+  paymentAllocation: data.allocations,
+  statusHistory: data.histories,
+  workOrderProduct: data.orderProducts,
+  inventoryMovement: data.movements,
+};
+class PrismaClient {
+  constructor() {
+    for (const [name, rows] of Object.entries(records)) {
+      this[name] = {
+        findUnique: async ({ where }) => rows.find((row) => row.id === where.id) ?? null,
+      };
+    }
+  }
+  async $disconnect() {}
+}
+module.exports = { PrismaClient };
+`,
+      ),
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        require.resolve("../../scripts/windows-studio-business-probe.cjs"),
+        "verify",
+        envPath,
+        clientPath,
+        code,
+        snapshotPath,
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, NGT_PROBE_SNAPSHOT_PATH: snapshotPath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
 });
 
 test("release probe rejects invalid actions and requires snapshot for migration verification", async () => {

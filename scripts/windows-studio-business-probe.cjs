@@ -378,6 +378,7 @@ function project(record, fields) {
   return Object.fromEntries(
     fields.split(" ").map((field) => {
       const value = record[field];
+      if (value === undefined) return [field, null];
       if (decimalFields.has(field))
         return [field, value == null ? null : money(value)];
       if (dateFields.has(field)) return [field, iso(value)];
@@ -897,10 +898,9 @@ if (require.main === module) {
     process.loadEnvFile(envFile);
     const { PrismaClient } = require(clientPath);
     const db = new PrismaClient();
-    const snapshot =
-      action === "verify-and-write"
-        ? JSON.parse(readFileSync(snapshotPath, "utf8"))
-        : undefined;
+    const snapshot = ["verify", "verify-and-write"].includes(action)
+      ? JSON.parse(readFileSync(snapshotPath, "utf8"))
+      : undefined;
     runProbe(db, action, code, snapshot)
       .then((result) => {
         if (result) writeFileSync(snapshotPath, JSON.stringify(result));
