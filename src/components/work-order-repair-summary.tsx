@@ -353,7 +353,7 @@ export function WorkOrderRepairSummary({
       {cardEdit?.editing && !locked && (
         <button
           type="button"
-          className={`quick-service-service-add detail-repair-add ${quickServiceActionStyles.serviceAdd}`}
+          className={`quick-service-service-add detail-repair-add ${quickServiceActionStyles.serviceAdd} ${quickServiceActionStyles.detailRepairAdd}`}
           onClick={addProject}
         >
           <Plus size={18} /> {it.project}

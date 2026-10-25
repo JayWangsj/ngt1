@@ -6032,6 +6032,10 @@ test("diagnostic order saves faults, date and quote in one progressive flow", as
     "Display OLED alta qualità",
   );
   await details.locator(".selected-part-summary .summary-action").click();
+  await expect(details.locator(".detail-repair-add")).toHaveCSS(
+    "margin-top",
+    "4px",
+  );
   await expect(
     page.getByRole("dialog", { name: "Opzioni ricambio", exact: true }),
   ).toBeVisible();

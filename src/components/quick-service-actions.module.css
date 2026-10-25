@@ -25,6 +25,10 @@
   cursor: pointer;
 }
 
+.detailRepairAdd {
+  margin-top: 4px;
+}
+
 .pickerAdd,
 .serviceAdd {
   transition:

@@ -4149,18 +4149,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
   background: #ffed9b;
   box-shadow: inset 0 -2px #e0ac00;
 }
-.quick-service-device-option small {
-  display: block;
-  color: var(--muted);
-  font-size: 11px;
-}
-.quick-service-picker-meta {
-  color: var(--muted);
-}
-.quick-service-picker-meta {
-  padding-left: 20px;
-  border-left: 1px solid var(--line);
-}
 @media (hover: hover) {
   .quick-service-picker-service .record-actions > .record-icon {
     opacity: 0;
@@ -4172,19 +4160,6 @@ html[data-sidebar-collapsed="true"] .nav-item:focus-visible::after {
     opacity: 1;
     pointer-events: auto;
   }
-}
-.catalog-manager-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-.detail-repair-add {
-  margin-top: 4px;
-}
-.product-compatibility-row {
-  display: grid;
-  grid-template-columns: 150px repeat(3, minmax(120px, 1fr)) auto;
-  gap: 8px;
-  align-items: center;
 }
 .order-type-tag {
   display: inline-flex;
@@ -4331,16 +4306,6 @@ details.secondary-actions {
   text-align: right;
   font-weight: 700;
 }
-@media (max-width: 760px) {
-  .quick-service-choice,
-  .product-compatibility-row {
-    grid-template-columns: 1fr;
-  }
-  .compatibility-device-edit {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* New repair intake: compact step workflow, shared with the existing warm NGT palette. */
 .new-order-back {
   width: fit-content;
@@ -6054,7 +6019,6 @@ details.secondary-actions {
     width: 40px;
     height: 40px;
   }
-  .quick-service-picker-meta,
   .quick-service-picker-price {
     grid-column: 3;
     padding-left: 0;
@@ -6813,7 +6777,6 @@ details summary {
   border-color: #d58a87;
 }
 .catalog-manager-row,
-.product-compatibility-row,
 .order-product-line {
   --record-action-size: 36px;
 }
