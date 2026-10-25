@@ -8365,6 +8365,18 @@ test("removing the last compatible repair project removes its device row", async
   });
   await expect(dialog).toHaveCSS("width", "920px");
   const deviceRow = dialog.locator(".compatibility-device-row").first();
+  await expect(deviceRow).toHaveCSS("display", "grid");
+  await expect(deviceRow).toHaveCSS("gap", "8px");
+  const deviceSummary = deviceRow.locator(".compatibility-device-summary");
+  await expect(deviceSummary).toHaveCSS("display", "grid");
+  await expect(deviceSummary).toHaveCSS("gap", "14px");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await deviceSummary.evaluate(
+      (element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").length,
+    ),
+  ).toBe(1);
   const deviceModel = await deviceRow
     .locator(".compatibility-device-summary strong")
     .innerText();

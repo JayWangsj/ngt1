@@ -18,6 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { RecordIcon } from "./ui/record-icon";
+import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 import { EditableSelect } from "./editable-select";
 import priceOptionCardStyles from "./price-option-card.module.css";
@@ -552,17 +553,24 @@ export function ProductCompatibilityFields({
         <legend>{it.inventory.compatibleDevices}</legend>
         {devices.map((device) => (
           <div
-            className="compatibility-device-row business-list-row"
+            className={`${compatibilityDeviceListStyles.deviceRow} compatibility-device-row business-list-row`}
             key={device.indices[0]}
           >
-            <div className="compatibility-device-summary">
+            <div
+              className={`${compatibilityDeviceListStyles.deviceSummary} compatibility-device-summary`}
+            >
               <strong>
                 {device.brand} {device.model}
               </strong>
-              <span className="compatibility-projects">
+              <span
+                className={`${compatibilityDeviceListStyles.projects} compatibility-projects`}
+              >
                 {device.projects.length ? (
                   device.projects.map((project) => (
-                    <span className="compatibility-project-label" key={project}>
+                    <span
+                      className={`${compatibilityDeviceListStyles.projectLabel} compatibility-project-label`}
+                      key={project}
+                    >
                       {project}
                       <button
                         type="button"

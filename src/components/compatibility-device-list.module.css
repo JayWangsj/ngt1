@@ -1,0 +1,78 @@
+.deviceRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 12px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.deviceRow > :global(.record-icon-delete) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease-out;
+}
+
+.deviceRow:hover > :global(.record-icon-delete),
+.deviceRow:focus-within > :global(.record-icon-delete) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.deviceSummary {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.projects > span {
+  max-width: 100%;
+  padding: 5px 9px;
+  overflow-wrap: anywhere;
+  border-radius: 7px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.projectLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.projectLabel button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.projectLabel:hover button,
+.projectLabel:focus-within button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (max-width: 760px) {
+  .deviceSummary {
+    grid-template-columns: 1fr;
+  }
+}

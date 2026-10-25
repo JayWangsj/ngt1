@@ -40,6 +40,7 @@ import {
 } from "./forms";
 import inventoryMovementsStyles from "./inventory-movements.module.css";
 import inventoryStyles from "./inventory.module.css";
+import compatibilityDeviceListStyles from "./compatibility-device-list.module.css";
 import { DatePicker, SimpleSelect } from "./business-select";
 import monthPeriodPickerStyles from "./month-period-picker.module.css";
 import { Button } from "./ui/button";
@@ -253,16 +254,20 @@ function ProductCompatibilityDialog({
             <div className="compatibility-device-list">
               {devices.map((device) => (
                 <div
-                  className="compatibility-device-row business-list-row"
+                  className={`${compatibilityDeviceListStyles.deviceRow} compatibility-device-row business-list-row`}
                   key={device.indices[0]}
                 >
-                  <div className="compatibility-device-summary">
+                  <div
+                    className={`${compatibilityDeviceListStyles.deviceSummary} compatibility-device-summary`}
+                  >
                     <strong>{device.model}</strong>
-                    <span className="compatibility-projects">
+                    <span
+                      className={`${compatibilityDeviceListStyles.projects} compatibility-projects`}
+                    >
                       {device.projects.length ? (
                         device.projects.map((project) => (
                           <span
-                            className="compatibility-project-label"
+                            className={`${compatibilityDeviceListStyles.projectLabel} compatibility-project-label`}
                             key={project}
                           >
                             {project}
