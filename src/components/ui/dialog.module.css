@@ -36,6 +36,14 @@
   width: min(460px, calc(100vw - 32px));
 }
 
+.formDialog.retail {
+  width: min(880px, calc(100vw - 32px));
+  height: min(680px, calc(100dvh - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .formDialog::backdrop,
 :global(.form-dialog)::backdrop {
   background: rgb(24 29 27 / 42%);
@@ -135,6 +143,12 @@
   max-height: calc(100dvh - 176px);
   overflow-y: auto;
   padding-inline: 4px;
+}
+
+.formDialog.retail > .dialogBody {
+  min-height: 0;
+  max-height: none;
+  flex: 1;
 }
 
 .formDialog > .actionForm,
@@ -258,6 +272,10 @@
 
   .formDialog.compact {
     width: min(460px, calc(100vw - 32px));
+  }
+
+  .formDialog.retail {
+    width: min(880px, calc(100vw - 32px));
   }
 
   .formDialog > .dialogHeading,

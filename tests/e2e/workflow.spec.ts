@@ -5523,8 +5523,8 @@ test("sales history uses a monthly filter", async ({ page }) => {
     dialog.locator(":scope > .dialog-body.retail-history-dialog"),
   ).toBeVisible();
   const dialogBox = await dialog.boundingBox();
-  expect(dialogBox?.width).toBeGreaterThan(800);
-  expect(dialogBox?.height).toBeGreaterThan(600);
+  expect(dialogBox?.width).toBe(880);
+  expect(dialogBox?.height).toBe(680);
   const period = dialog.getByLabel("Mese", { exact: true });
   await expect(period).toHaveAttribute("type", "month");
   await expect(period).toHaveCSS("cursor", "pointer");
@@ -5548,6 +5548,9 @@ test("sales history uses a monthly filter", async ({ page }) => {
   await expect(
     dialog.locator(":scope > .dialog-body.retail-sale-dialog"),
   ).toBeVisible();
+  const detailDialogBox = await dialog.boundingBox();
+  expect(detailDialogBox?.width).toBe(880);
+  expect(detailDialogBox?.height).toBe(680);
   await dialog.getByRole("button", { name: /Storico vendite/ }).click();
   await expect(
     dialog.locator(":scope > .dialog-body.retail-history-dialog"),

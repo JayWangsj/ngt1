@@ -9082,14 +9082,6 @@ summary.record-icon::-webkit-details-marker {
     pointer-events: auto;
   }
 }
-.form-dialog:has(.retail-history-dialog),
-.form-dialog:has(.retail-sale-dialog) {
-  width: min(880px, calc(100vw - 32px));
-  height: min(680px, calc(100dvh - 32px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
 .form-dialog:has(.customer-detail-dialog) {
   overflow: visible;
 }
@@ -9135,12 +9127,6 @@ summary.record-icon::-webkit-details-marker {
   border-radius: 50%;
   color: #c62828;
   background: #ffebee;
-}
-.form-dialog:has(.retail-history-dialog) > [data-form-dialog-body],
-.form-dialog:has(.retail-sale-dialog) > [data-form-dialog-body] {
-  min-height: 0;
-  max-height: none;
-  flex: 1;
 }
 .retail-period-picker {
   min-height: 36px;

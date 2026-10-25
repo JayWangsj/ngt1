@@ -553,6 +553,11 @@ export function RetailWorkbench({
       </div>
       {dialog && (
         <FormDialog
+          size={
+            dialog.view === "history" || dialog.view === "detail"
+              ? "retail"
+              : undefined
+          }
           title={
             dialog.view === "detail" ? (
               <span className="retail-dialog-title">
