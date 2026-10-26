@@ -117,6 +117,37 @@ try {
       [string]$onlineStatusAfterBackup.updateId -ne $onlineUpdateId) {
     throw "Online backup state fields were not persisted for the current update ID."
   }
+  $onlineProgress = New-NgtInstallFixture (Join-Path $testRoot "online-progress-stages")
+  $progressUpdateId = [guid]::NewGuid().ToString()
+  Write-NgtInstallJsonAtomic (Join-Path $onlineProgress.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $progressUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineProgress.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $progressUpdateId
+    operation = "online-update"
+    status = "running"
+    stage = "starting-installer"
+    targetVersion = "2.0.15"
+    updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineProgress.installRoot ".local\update-maintenance.json") ([pscustomobject]@{
+    updateId = $progressUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  foreach ($stage in @("preparing-release", "backing-up", "verifying-backup", "preparing-runtime", "installing", "validating")) {
+    Set-NgtStudioOnlineUpdateStage -InstallRoot $onlineProgress.installRoot `
+      -UpdateId $progressUpdateId -Stage $stage
+  }
+  $onlineProgressStatus = Get-NgtInstallJson (Join-Path $onlineProgress.installRoot "update-status.json")
+  if ([string]$onlineProgressStatus.stage -ne "validating" -or
+      [string]$onlineProgressStatus.status -ne "validating" -or
+      @($onlineProgressStatus.completedStages) -join "," -ne "starting-installer,preparing-release,backing-up,verifying-backup,preparing-runtime,installing" -or
+      $onlineProgressStatus.skippedStages -isnot [array]) {
+    throw "Online update stage changes did not preserve ordered completed and skipped steps."
+  }
   $wrongBackupOwnerRejected = $false
   try {
     Set-NgtStudioOnlineUpdateBackup -InstallRoot $onlineBackup.installRoot `

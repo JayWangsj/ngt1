@@ -19,6 +19,7 @@ import { DialogBody, DialogFooter, DialogForm, FormDialog } from "./forms";
 import { useUpdateState } from "./update-state";
 import {
   classifyUpdateTask,
+  getUpdateStepProgress,
   shouldShowDownloadProgress,
   shouldShowUpdateProgress,
   type UpdateStatus,
@@ -58,6 +59,37 @@ function formatEta(seconds: number, messages: ReturnType<typeof useMessages>) {
     .replace("{seconds}", `${seconds % 60}`);
 }
 
+function formatTimestamp(
+  value: string | undefined,
+  locale: string,
+): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "it-IT", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function manualInstallerUrl(
+  url: string | undefined,
+  version: string | undefined,
+) {
+  if (!url || !version) return null;
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.origin !== "https://github.com" ||
+      parsed.pathname !== `/JayWangsj/ngt1/releases/tag/v${version}`
+    )
+      return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
 function errorMessage(value: string | undefined, fallback: string) {
   switch (value) {
     case "update_target_changed":
@@ -79,8 +111,13 @@ function stageLabel(stage: string, messages: ReturnType<typeof useMessages>) {
     return messages.updateStageReadingRelease;
   if (stage === "downloading") return messages.updateStageDownloading;
   if (stage === "verifying") return messages.updateStageVerifying;
+  if (stage === "starting-installer")
+    return messages.updateStageStartingInstaller;
   if (stage === "preparing-runtime") return messages.updateStageRuntime;
   if (stage === "backing-up") return messages.updateStageBackup;
+  if (stage === "preparing-release")
+    return messages.updateStagePreparingRelease;
+  if (stage === "verifying-backup") return messages.updateStageVerifyingBackup;
   if (stage === "installing") return messages.updateStageInstalling;
   if (stage === "validating") return messages.updateStageValidating;
   if (stage === "complete") return messages.updateStageComplete;
@@ -329,8 +366,11 @@ export function SystemUpdate({
     ["reading-release", it.updateStageReadingRelease],
     ["downloading", it.updateStageDownloading],
     ["verifying", it.updateStageVerifying],
-    ["preparing-runtime", it.updateStageRuntime],
+    ["starting-installer", it.updateStageStartingInstaller],
+    ["preparing-release", it.updateStagePreparingRelease],
     ["backing-up", it.updateStageBackup],
+    ["verifying-backup", it.updateStageVerifyingBackup],
+    ["preparing-runtime", it.updateStageRuntime],
     ["installing", it.updateStageInstalling],
     ["validating", it.updateStageValidating],
   ];
@@ -341,28 +381,64 @@ export function SystemUpdate({
   const percentage = progressKnown
     ? Math.min(100, Math.round((downloaded / total) * 100))
     : 0;
+  const downloadComplete =
+    trustedProgressStatus?.stage === "verifying" &&
+    shouldShowDownloadProgress(trustedProgressStatus) &&
+    progressKnown;
   const lastCheck = check.lastSuccessfulCheckAt
     ? new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "it-IT", {
         dateStyle: "short",
         timeStyle: "short",
       }).format(new Date(check.lastSuccessfulCheckAt))
     : "";
+  const lastConfirmedAt = formatTimestamp(
+    task.lastTrustedStatus?.updatedAt,
+    locale,
+  );
+  const stepProgress = trustedProgressStatus
+    ? getUpdateStepProgress(
+        trustedProgressStatus,
+        stages.map(([stage]) => stage),
+      )
+    : null;
+  const installerReleaseUrl = manualInstallerUrl(
+    info?.releaseUrl,
+    info?.latestVersion,
+  );
   const shouldShowResult = [
     "succeeded",
     "failed",
     "rollback-succeeded",
     "rollback-failed",
   ].includes(taskPhase);
-  const renderStages = (status: UpdateStatus) => (
+  const renderStages = (status: UpdateStatus, stale = false) => (
     <ol className="update-stage-list">
       {stages.map(([stage, label]) => {
         const skipped = (status.skippedStages || []).includes(stage);
-        const complete = (status.completedStages || []).includes(stage);
+        const complete =
+          !skipped && (status.completedStages || []).includes(stage);
         const active =
-          status.stage === stage ||
-          (stage === "reading-release" && status.stage === "checking");
+          !stale &&
+          !skipped &&
+          !complete &&
+          (status.stage === stage ||
+            (stage === "reading-release" && status.stage === "checking"));
         const failed =
           status.status === "failed" && status.failedStage === stage;
+        const stateLabel = failed
+          ? it.updateStepFailed
+          : skipped
+            ? it.updateStepSkipped
+            : complete
+              ? it.updateStepCompleted
+              : stale &&
+                  (status.stage === stage ||
+                    (stage === "reading-release" &&
+                      status.stage === "checking"))
+                ? it.updateStepLastConfirmed
+                : active
+                  ? it.updateStepInProgress
+                  : it.updateStepWaiting;
         return (
           <li
             key={stage}
@@ -388,7 +464,7 @@ export function SystemUpdate({
               <Circle />
             )}
             <span>{label}</span>
-            {skipped && <small>{it.updateStepSkipped}</small>}
+            <small>{stateLabel}</small>
           </li>
         );
       })}
@@ -620,6 +696,26 @@ export function SystemUpdate({
             <p>
               {info.releaseNotes || info.releaseName || it.updateNoReleaseNotes}
             </p>
+            {info.updateAvailable && installerReleaseUrl && (
+              <div className="update-manual-installer">
+                <Button asChild variant="outline">
+                  <a
+                    href={installerReleaseUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink size={16} />
+                    {it.updateManualInstaller}
+                  </a>
+                </Button>
+                <small>
+                  {it.updateManualInstallerHelp.replace(
+                    "{file}",
+                    `ngt-studio-windows-setup-v${info.latestVersion}.exe`,
+                  )}
+                </small>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -638,16 +734,46 @@ export function SystemUpdate({
               </span>
             )}
             {taskPhase === "reconnecting" && (
-              <small>{it.updateReconnecting}</small>
+              <small>
+                {it.updateLastConfirmedAt}:{" "}
+                {lastConfirmedAt || it.updateReconnecting}
+              </small>
+            )}
+            <span>
+              {taskPhase === "reconnecting"
+                ? it.updateLastConfirmedStage
+                : it.updateCurrentStage}
+              : {stageLabel(trustedProgressStatus.stage || "checking", it)}
+            </span>
+            {stepProgress && (
+              <>
+                <span>
+                  {it.updateStepsCompleted
+                    .replace("{completed}", String(stepProgress.completed))
+                    .replace("{total}", String(stepProgress.total))}
+                  {" · "}
+                  {it.updateStepsRemaining.replace(
+                    "{remaining}",
+                    String(stepProgress.remaining),
+                  )}
+                </span>
+                <small>{it.updateStepsProgressNote}</small>
+              </>
             )}
           </div>
 
           {shouldShowDownloadProgress(trustedProgressStatus) && (
             <div className="download-progress">
               <div className="download-progress-heading">
-                <strong>{it.updateDownloading}</strong>
+                <strong>
+                  {downloadComplete
+                    ? it.updateStageDownloaded
+                    : it.updateDownloading}
+                </strong>
                 <span>
-                  {progressKnown ? `${percentage}%` : it.updateIndeterminate}
+                  {progressKnown
+                    ? `${downloadComplete ? 100 : percentage}%`
+                    : it.updateIndeterminate}
                 </span>
               </div>
               <div
@@ -656,32 +782,46 @@ export function SystemUpdate({
                 aria-label={it.updateDownloading}
                 aria-valuemin={progressKnown ? 0 : undefined}
                 aria-valuemax={progressKnown ? 100 : undefined}
-                aria-valuenow={progressKnown ? percentage : undefined}
+                aria-valuenow={
+                  progressKnown
+                    ? downloadComplete
+                      ? 100
+                      : percentage
+                    : undefined
+                }
               >
-                {progressKnown && <span style={{ width: `${percentage}%` }} />}
+                {progressKnown && (
+                  <span
+                    style={{
+                      width: `${downloadComplete ? 100 : percentage}%`,
+                    }}
+                  />
+                )}
               </div>
               <div className="download-progress-meta">
                 <span>
                   {formatBytes(downloaded)}
                   {total > 0 ? ` / ${formatBytes(total)}` : ""}
                 </span>
-                {Boolean(trustedProgressStatus.bytesPerSecond) && (
-                  <span>
-                    {it.updateSpeed}:{" "}
-                    {formatBytes(trustedProgressStatus.bytesPerSecond)}/s
-                  </span>
-                )}
-                {Boolean(trustedProgressStatus.etaSeconds) && (
-                  <span>
-                    {it.updateEta}:{" "}
-                    {formatEta(trustedProgressStatus.etaSeconds || 0, it)}
-                  </span>
-                )}
+                {!downloadComplete &&
+                  Boolean(trustedProgressStatus.bytesPerSecond) && (
+                    <span>
+                      {it.updateSpeed}:{" "}
+                      {formatBytes(trustedProgressStatus.bytesPerSecond)}/s
+                    </span>
+                  )}
+                {!downloadComplete &&
+                  Boolean(trustedProgressStatus.etaSeconds) && (
+                    <span>
+                      {it.updateEta}:{" "}
+                      {formatEta(trustedProgressStatus.etaSeconds || 0, it)}
+                    </span>
+                  )}
               </div>
             </div>
           )}
 
-          {renderStages(trustedProgressStatus)}
+          {renderStages(trustedProgressStatus, taskPhase === "reconnecting")}
 
           {taskPhase === "rolling-back" && (
             <div className="update-recovery active" role="status">
@@ -702,27 +842,57 @@ export function SystemUpdate({
             )}
             <div>
               <strong>{taskSummary(taskStatus, taskPhase, it)}</strong>
-              {taskStatus.currentVersion && (
-                <small>
-                  {it.currentVersion}: v{taskStatus.currentVersion}
-                </small>
+              {taskPhase === "succeeded" ? (
+                <>
+                  <small>{it.updateSuccessVerified}</small>
+                  {taskStatus.previousVersion &&
+                    (taskStatus.actualVersion || taskStatus.currentVersion) && (
+                      <small>
+                        {it.updateVersionTransition
+                          .replace("{from}", `v${taskStatus.previousVersion}`)
+                          .replace(
+                            "{to}",
+                            `v${taskStatus.actualVersion || taskStatus.currentVersion}`,
+                          )}
+                      </small>
+                    )}
+                  {formatTimestamp(taskStatus.updatedAt, locale) && (
+                    <small>
+                      {it.updateCompletedAt}:{" "}
+                      {formatTimestamp(taskStatus.updatedAt, locale)}
+                    </small>
+                  )}
+                  {taskStatus.buildCommit && (
+                    <small>
+                      {it.updateBuildCommit}: {taskStatus.buildCommit}
+                    </small>
+                  )}
+                </>
+              ) : (
+                <>
+                  {taskStatus.currentVersion && (
+                    <small>
+                      {it.currentVersion}: v{taskStatus.currentVersion}
+                    </small>
+                  )}
+                </>
               )}
             </div>
           </div>
-          <button
-            type="button"
-            className="update-diagnostics-toggle"
-            aria-expanded={diagnosticsOpen}
-            onClick={() => void loadDiagnostics()}
-          >
-            {it.updateLogDetails}
-          </button>
-          {diagnosticsOpen && (
+          {taskPhase !== "succeeded" && (
+            <button
+              type="button"
+              className="update-diagnostics-toggle"
+              aria-expanded={diagnosticsOpen}
+              onClick={() => void loadDiagnostics()}
+            >
+              {it.updateLogDetails}
+            </button>
+          )}
+          {taskPhase !== "succeeded" && diagnosticsOpen && (
             <div className="update-diagnostics">
               {taskStatus.executorConfirmed && renderStages(taskStatus)}
-              {taskStatus.message && taskPhase !== "succeeded" && (
-                <p>{taskStatus.message}</p>
-              )}
+              {taskStatus.message && <p>{taskStatus.message}</p>}
               {taskStatus.recoveryMessage && (
                 <p>{taskStatus.recoveryMessage}</p>
               )}

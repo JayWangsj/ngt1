@@ -67,6 +67,24 @@ try {
   }
   & (Join-Path $releaseRoot "scripts\verify-windows-studio-release.ps1") `
     -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$package.version) | Out-Null
+  $staticRoot = Join-Path $releaseRoot ".next\static"
+  $standaloneStaticRoot = Join-Path $releaseRoot ".next\standalone\.next\static"
+  $staticFiles = @(Get-ChildItem -LiteralPath $staticRoot -File -Recurse)
+  if ($staticFiles.Count -eq 0) {
+    throw "Studio package has no static build assets."
+  }
+  foreach ($staticFile in $staticFiles) {
+    $relativeStaticPath = $staticFile.FullName.Substring(($staticRoot.TrimEnd("\") + "\").Length)
+    $standaloneStaticFile = Join-Path $standaloneStaticRoot $relativeStaticPath
+    if (-not (Test-Path -LiteralPath $standaloneStaticFile -PathType Leaf)) {
+      throw "Studio standalone package is missing static asset: $relativeStaticPath"
+    }
+    $sourceHash = (Get-FileHash -LiteralPath $staticFile.FullName -Algorithm SHA256).Hash
+    $standaloneHash = (Get-FileHash -LiteralPath $standaloneStaticFile -Algorithm SHA256).Hash
+    if ($sourceHash -cne $standaloneHash) {
+      throw "Studio standalone static asset does not match its release copy: $relativeStaticPath"
+    }
+  }
   & (Join-Path $releaseRoot "scripts\test-windows-studio-update-safety.ps1")
   if (Test-Path -LiteralPath (Join-Path $releaseRoot ".next\standalone\node_modules\.pnpm")) {
     throw "Studio package contains the redundant standalone pnpm store."

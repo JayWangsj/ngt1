@@ -786,8 +786,17 @@ try {
         $apiDisconnectedObserved = $true
         $savedDuringDisconnect = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
         if ([string]$savedDuringDisconnect.updateId -ne $updateId -or
-            [string]$savedDuringDisconnect.stage -notin @("backing-up", "installing", "validating", "rolling-back")) {
-          throw "The independent update state was not recoverable while NGT was disconnected."
+            [string]$savedDuringDisconnect.stage -notin @(
+              "backing-up",
+              "preparing-release",
+              "verifying-backup",
+              "preparing-runtime",
+              "installing",
+              "validating",
+              "rolling-back"
+            )) {
+          throw ("The independent update state was not recoverable while NGT was disconnected (status='{0}', stage='{1}')." -f `
+            $savedDuringDisconnect.status, $savedDuringDisconnect.stage)
         }
       }
       if ($finalStatus.status -eq "complete") {
@@ -861,6 +870,9 @@ try {
     }
     Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
   }
+  $uiSmoke = Join-Path (Split-Path $PSScriptRoot -Parent) "tests\release\windows-studio-online-update-ui.mjs"
+  & (Get-Command node -ErrorAction Stop).Source $uiSmoke $activeReleaseRoot $targetVersion $ExpectedCommitSha
+  if ($LASTEXITCODE -ne 0) { throw "Installed Edge page, API, or static-resource acceptance failed." }
   $node = Join-Path $activeReleaseRoot "runtime\node.exe"
   $prisma = Join-Path $activeReleaseRoot "node_modules\prisma\build\index.js"
   Push-Location -LiteralPath $activeReleaseRoot

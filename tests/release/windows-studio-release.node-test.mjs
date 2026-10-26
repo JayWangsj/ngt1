@@ -802,6 +802,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
   assert.match(onlineAcceptanceWorkflow, /build-windows-studio-candidate/);
+  assert.ok(
+    onlineAcceptanceWorkflow.indexOf(
+      "- uses: ./.github/actions/build-windows-studio-candidate",
+    ) <
+      onlineAcceptanceWorkflow.indexOf(
+        "- name: Verify runtime gate rejects redirects and generic error pages",
+      ),
+    "runtime verifier fixtures require dependencies installed by the candidate build action",
+  );
   assert.match(
     candidateBuildAction,
     /Run Windows updater coordination and safety regressions[\s\S]*test-windows-studio-update-safety\.ps1/,
@@ -827,6 +836,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Invoke-GhDownload -Tag \$oldTag/);
   assert.match(online, /Assert-ReleaseChecksum \$oldAppArchive/);
   assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
+  assert.match(
+    online,
+    /\$savedDuringDisconnect\.stage -notin @\([\s\S]{0,250}"preparing-release"[\s\S]{0,100}"verifying-backup"[\s\S]{0,100}"preparing-runtime"/,
+  );
   assert.match(online, /Manual repair installer/);
   assert.match(release, /actions\/upload-artifact@v4/);
   assert.match(release, /name: ngt-updater-acceptance-\$\{\{ github\.sha \}\}/);
