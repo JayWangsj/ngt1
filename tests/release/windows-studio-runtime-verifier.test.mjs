@@ -112,6 +112,16 @@ const server = createServer((request, response) => {
     return;
   }
   if (url.pathname === "/_next/static/css/app.css") {
+    if (mode === "asset-redirect") {
+      response.writeHead(302, { Location: "/login" });
+      response.end("redirect");
+      return;
+    }
+    if (mode === "asset-error-page") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><title>Error</title>");
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/css" });
     response.end(css);
     return;
@@ -173,8 +183,28 @@ try {
     "A generic 200 error page must fail verification.",
   );
   assert.match(errorPage.output, /unexpected or error heading/);
+
+  mode = "asset-redirect";
+  const redirectedAsset = await runVerifier(resolve(fixtureRoot, "release"));
+  assert.notEqual(
+    redirectedAsset.code,
+    0,
+    "A redirected CSS asset must fail verification.",
+  );
+  assert.match(redirectedAsset.output, /HTTP 302 Found/);
+  assert.match(redirectedAsset.output, /Location '\/login'/);
+
+  mode = "asset-error-page";
+  const errorAsset = await runVerifier(resolve(fixtureRoot, "release"));
+  assert.notEqual(
+    errorAsset.code,
+    0,
+    "A CSS URL serving an HTML error page must fail verification.",
+  );
+  assert.match(errorAsset.output, /HTTP 200 OK, Content-Type 'text\/html'/);
+
   process.stdout.write(
-    "Runtime verifier fixtures passed: correct pages/assets accepted; redirect and generic 200 error rejected. Edge/Chrome installed UI smoke passed.\n",
+    "Runtime verifier fixtures passed: correct pages/assets accepted; page and asset redirects and generic error pages rejected. Edge/Chrome installed UI smoke passed.\n",
   );
 } finally {
   if (listening) {

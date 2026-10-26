@@ -32,6 +32,7 @@ $deadline = (Get-Date).AddMinutes(3)
 Add-Type -AssemblyName System.Net.Http
 $handler = [System.Net.Http.HttpClientHandler]::new()
 $handler.AllowAutoRedirect = $false
+$handler.UseProxy = $false
 $client = [System.Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(20)
 try {
@@ -97,10 +98,16 @@ try {
     try {
       $extension = [System.IO.Path]::GetExtension($relativePath)
       $contentType = [string]$assetResponse.Content.Headers.ContentType.MediaType
+      $location = if ($assetResponse.Headers.Location) {
+        [string]$assetResponse.Headers.Location
+      } else {
+        ""
+      }
       if ($assetResponse.StatusCode -ne [System.Net.HttpStatusCode]::OK -or
           ($extension -eq ".css" -and $contentType -ne "text/css") -or
           ($extension -eq ".js" -and $contentType -notmatch '^(application|text)/(x-)?(java|ecma)script$')) {
-        throw "A served static asset failed its HTTP or Content-Type check: $assetPath."
+        throw ("A served static asset failed its HTTP or Content-Type check: {0} (HTTP {1} {2}, Content-Type '{3}', Location '{4}')." -f `
+          $assetPath, [int]$assetResponse.StatusCode, $assetResponse.ReasonPhrase, $contentType, $location)
       }
       $body = $assetResponse.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
       if ($body.Length -eq 0) {
