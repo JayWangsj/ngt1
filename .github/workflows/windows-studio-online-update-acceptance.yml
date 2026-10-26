@@ -52,12 +52,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - name: Verify runtime gate rejects redirects and generic error pages
-        shell: powershell
-        run: node tests/release/windows-studio-runtime-verifier.test.mjs
       - uses: ./.github/actions/build-windows-studio-candidate
         env:
           NGT_RELEASE_READY: "true"
+      - name: Verify runtime gate rejects redirects and generic error pages
+        shell: powershell
+        run: node tests/release/windows-studio-runtime-verifier.test.mjs
       - name: Install the exact candidate as a disposable standard user
         shell: powershell
         env:
@@ -69,7 +69,7 @@ jobs:
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
           Get-ChildItem -LiteralPath $candidate -Force | Copy-Item -Destination $destination -Recurse -Force
           ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update
-      - name: Verify the published v2.0.19 baseline upgrades and repairs with the candidate installer
+      - name: Verify the latest published baseline upgrades and repairs with the candidate installer
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
