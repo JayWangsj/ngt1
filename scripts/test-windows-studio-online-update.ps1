@@ -786,8 +786,16 @@ try {
         $apiDisconnectedObserved = $true
         $savedDuringDisconnect = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
         if ([string]$savedDuringDisconnect.updateId -ne $updateId -or
-            [string]$savedDuringDisconnect.stage -notin @("backing-up", "installing", "validating", "rolling-back")) {
-          throw "The independent update state was not recoverable while NGT was disconnected."
+            [string]$savedDuringDisconnect.stage -notin @(
+              "backing-up",
+              "preparing-release",
+              "verifying-backup",
+              "installing",
+              "validating",
+              "rolling-back"
+            )) {
+          throw ("The independent update state was not recoverable while NGT was disconnected (status='{0}', stage='{1}')." -f `
+            $savedDuringDisconnect.status, $savedDuringDisconnect.stage)
         }
       }
       if ($finalStatus.status -eq "complete") {
