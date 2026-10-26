@@ -22,8 +22,18 @@ function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
   $script:NgtInstallStage = $Name
   if ($script:NgtOnlineUpdateId) {
     $onlineStage = switch ($Name) {
-      "database-backup" { "backing-up" }
+      "database-backup" {
+        $marker = Get-NgtInstallJson (Join-Path $InstallRoot ".local\update-maintenance.json")
+        if ($marker.backupVerified -and $marker.backupRoot) {
+          "verifying-backup"
+        } else {
+          "backing-up"
+        }
+      }
+      "release-deployment" { "preparing-release" }
+      "runtime-preparation" { "preparing-runtime" }
       "health-validation" { "validating" }
+      "install-state-validation" { "validating" }
       default { "installing" }
     }
     Set-NgtStudioOnlineUpdateStage -InstallRoot $InstallRoot `
@@ -349,7 +359,9 @@ if ($isRelease) {
   & (Join-Path $PSScriptRoot "verify-windows-studio-release.ps1") `
     -ReleaseRoot $script:NgtProjectRoot `
     -ExpectedVersion ([string](Get-Content -LiteralPath (Join-Path $script:NgtProjectRoot "studio-release.json") -Raw | ConvertFrom-Json).version) | Out-Null
-  Install-NgtSharedRuntime -ProjectRoot $script:NgtProjectRoot -InstallRoot $stableInstallRoot
+  Invoke-NgtInstallStage "runtime-preparation" {
+    Install-NgtSharedRuntime -ProjectRoot $script:NgtProjectRoot -InstallRoot $stableInstallRoot
+  }
   $nodeExecutable = Get-NgtNodeExecutable
   $prismaCli = Join-Path $script:NgtProjectRoot "node_modules\prisma\build\index.js"
   if (-not (Test-Path -LiteralPath $prismaCli)) {
@@ -385,6 +397,12 @@ Invoke-NgtInstallStage "application-start" {
 Invoke-NgtInstallStage "health-validation" {
   $expectedVersion = if ($isRelease) { [string]$release.version } else { "" }
   Wait-NgtStudioHealth -ExpectedVersion $expectedVersion
+  if ($isRelease) {
+    & (Join-Path $PSScriptRoot "verify-windows-studio-runtime.ps1") `
+      -ReleaseRoot $script:NgtProjectRoot `
+      -ExpectedVersion ([string]$release.version) `
+      -ExpectedCommit ([string]$release.commit) | Out-Null
+  }
 }
 if ($manualInstall) {
   Invoke-NgtInstallStage "install-state-validation" {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyUpdateCheck,
   classifyUpdateTask,
+  getUpdateStepProgress,
   isUpdateTaskMonitorable,
   shouldShowDownloadProgress,
   shouldShowUpdateProgress,
@@ -83,5 +84,39 @@ describe("system update state", () => {
     ).toBe("rollback-failed");
     expect(classifyUpdateTask({ status: "complete" })).toBe("succeeded");
     expect(classifyUpdateTask({ status: "superseded" })).toBe("superseded");
+  });
+
+  it("keeps the completed download visible while checksum verification starts", () => {
+    expect(
+      shouldShowDownloadProgress({
+        status: "running",
+        stage: "verifying",
+        bytesDownloaded: 100,
+        totalBytes: 100,
+        progressKnown: true,
+        completedStages: ["downloading"],
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowDownloadProgress({
+        status: "running",
+        stage: "verifying",
+        bytesDownloaded: 100,
+        totalBytes: 100,
+        progressKnown: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("excludes skipped steps from the denominator and remaining count", () => {
+    expect(
+      getUpdateStepProgress(
+        {
+          completedStages: ["reading-release", "downloading"],
+          skippedStages: ["preparing-runtime"],
+        },
+        ["reading-release", "downloading", "preparing-runtime", "installing"],
+      ),
+    ).toEqual({ completed: 2, total: 3, remaining: 1 });
   });
 });

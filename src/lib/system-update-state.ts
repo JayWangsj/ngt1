@@ -68,6 +68,7 @@ export type UpdateInfo = {
   latestVersion?: string;
   releaseName?: string;
   releaseNotes?: string;
+  releaseUrl?: string;
   publishedAt?: string;
   downloadSize?: number;
   installInstanceId?: string;
@@ -126,7 +127,29 @@ export function shouldShowUpdateProgress(phase: UpdateTaskPhase) {
 }
 
 export function shouldShowDownloadProgress(status?: UpdateStatus) {
-  return status?.stage === "downloading";
+  return (
+    status?.stage === "downloading" ||
+    (status?.stage === "verifying" &&
+      status.progressKnown === true &&
+      (status.totalBytes || 0) > 0 &&
+      (status.bytesDownloaded || 0) >= (status.totalBytes || 0) &&
+      status.completedStages?.includes("downloading") === true)
+  );
+}
+
+export function getUpdateStepProgress(status: UpdateStatus, stages: string[]) {
+  const skipped = new Set(status.skippedStages || []);
+  const completed = new Set(status.completedStages || []);
+  const requiredStages = stages.filter((stage) => !skipped.has(stage));
+  const completedCount = requiredStages.filter((stage) =>
+    completed.has(stage),
+  ).length;
+
+  return {
+    completed: completedCount,
+    total: requiredStages.length,
+    remaining: requiredStages.length - completedCount,
+  };
 }
 
 export function isUpdateTaskMonitorable(phase: UpdateTaskPhase) {

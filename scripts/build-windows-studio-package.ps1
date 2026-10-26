@@ -36,6 +36,41 @@ $updaterBinary = Join-Path $cargoTarget "release\NGTUpdater.exe"
 if (-not (Test-Path -LiteralPath $updaterBinary -PathType Leaf)) {
   throw "Rust updater executable is missing after the release build."
 }
+$dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty Source -First 1
+if (-not $dumpbin) {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (Test-Path -LiteralPath $vswhere) {
+    $installationPath = (& $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath | Out-String).Trim()
+    if ($installationPath) {
+      $msvcTools = Join-Path $installationPath "VC\Tools\MSVC"
+      $latestTools = Get-ChildItem -LiteralPath $msvcTools -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { [version]$_.Name } -Descending |
+        Select-Object -First 1
+      if ($latestTools) {
+        $candidateDumpbin = Join-Path $latestTools.FullName "bin\Hostx64\x64\dumpbin.exe"
+        if (Test-Path -LiteralPath $candidateDumpbin -PathType Leaf) {
+          $dumpbin = $candidateDumpbin
+        }
+      }
+    }
+  }
+}
+if (-not $dumpbin) {
+  throw "dumpbin.exe is required to verify the updater's Windows runtime imports."
+}
+$updaterDependencies = @(& $dumpbin /dependents $updaterBinary 2>&1)
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to inspect the production updater's DLL dependencies."
+}
+$dynamicCrtImports = @($updaterDependencies | Where-Object {
+  [string]$_ -match '(?i)^\s*(?:VCRUNTIME140(?:_1)?|MSVCP140(?:_[A-Z0-9]+)?|CONCRT140|VCOMP140)\.dll\s*$'
+})
+if ($dynamicCrtImports.Count -gt 0) {
+  throw "The production updater imports the Visual C++ runtime dynamically: $($dynamicCrtImports -join ', ')"
+}
 $stage = Join-Path $projectRoot ".local\studio-package"
 if (Test-Path -LiteralPath $stage) {
   Remove-Item -LiteralPath $stage -Recurse -Force
@@ -174,6 +209,7 @@ $runtimeScripts = @(
   "uninstall-windows-startup.ps1",
   "uninstall-windows-studio.ps1",
   "verify-windows-studio-release.ps1",
+  "verify-windows-studio-runtime.ps1",
   "windows-db.mjs",
   "windows-service.ps1",
   "windows-studio-launcher.vbs",

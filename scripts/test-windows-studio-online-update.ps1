@@ -861,6 +861,9 @@ try {
     }
     Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
   }
+  $uiSmoke = Join-Path (Split-Path $PSScriptRoot -Parent) "tests\release\windows-studio-online-update-ui.mjs"
+  & (Get-Command node -ErrorAction Stop).Source $uiSmoke $activeReleaseRoot $targetVersion $ExpectedCommitSha
+  if ($LASTEXITCODE -ne 0) { throw "Installed Edge page, API, or static-resource acceptance failed." }
   $node = Join-Path $activeReleaseRoot "runtime\node.exe"
   $prisma = Join-Path $activeReleaseRoot "node_modules\prisma\build\index.js"
   Push-Location -LiteralPath $activeReleaseRoot
