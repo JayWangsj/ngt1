@@ -106,8 +106,14 @@ try {
       if ($assetResponse.StatusCode -ne [System.Net.HttpStatusCode]::OK -or
           ($extension -eq ".css" -and $contentType -ne "text/css") -or
           ($extension -eq ".js" -and $contentType -notmatch '^(application|text)/(x-)?(java|ecma)script$')) {
-        throw ("A served static asset failed its HTTP or Content-Type check: {0} (HTTP {1} {2}, Content-Type '{3}', Location '{4}')." -f `
-          $assetPath, [int]$assetResponse.StatusCode, $assetResponse.ReasonPhrase, $contentType, $location)
+        $releaseAssetPath = Join-Path $releaseRoot ($manifestPath.Replace("/", "\"))
+        $standaloneAssetPath = Join-Path $releaseRoot `
+          (".next\standalone\.next\static\" + $relativePath.Replace("/", "\"))
+        $releaseAssetExists = Test-Path -LiteralPath $releaseAssetPath -PathType Leaf
+        $standaloneAssetExists = Test-Path -LiteralPath $standaloneAssetPath -PathType Leaf
+        throw ("A served static asset failed its HTTP or Content-Type check: {0} (HTTP {1} {2}, Content-Type '{3}', Location '{4}', release file exists={5}, standalone file exists={6})." -f `
+          $assetPath, [int]$assetResponse.StatusCode, $assetResponse.ReasonPhrase, $contentType, $location,
+          $releaseAssetExists, $standaloneAssetExists)
       }
       $body = $assetResponse.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
       if ($body.Length -eq 0) {
