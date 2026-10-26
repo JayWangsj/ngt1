@@ -17,26 +17,29 @@ if ([string]$manifest.version -ne $ExpectedVersion -or
 
 $baseUri = [uri]"http://127.0.0.1:3000"
 $routes = @(
-  "/",
-  "/orders",
-  "/retail",
-  "/retail/sales",
-  "/inventory",
-  "/customers",
-  "/prices",
-  "/settings"
+  [pscustomobject]@{ url = "/"; path = "/"; query = ""; heading = "Oggi in laboratorio" },
+  [pscustomobject]@{ url = "/orders"; path = "/orders"; query = ""; heading = "Schede di servizio" },
+  [pscustomobject]@{ url = "/retail"; path = "/retail"; query = ""; heading = "Vendita rapida" },
+  [pscustomobject]@{ url = "/retail?view=sales"; path = "/retail"; query = "?view=sales"; heading = "Vendita rapida" },
+  [pscustomobject]@{ url = "/inventory"; path = "/inventory"; query = ""; heading = "Magazzino" },
+  [pscustomobject]@{ url = "/customers"; path = "/customers"; query = ""; heading = "Clienti" },
+  [pscustomobject]@{ url = "/prices"; path = "/prices"; query = ""; heading = "Listino prezzi" },
+  [pscustomobject]@{ url = "/settings"; path = "/settings"; query = ""; heading = "Impostazioni" }
 )
 $assetPattern = '(?i)(?:href|src)\s*=\s*["''](?<asset>/_next/static/[^"''\s>]+\.(?:css|js)(?:\?[^"''\s>]*)?)["'']'
 $assetPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $deadline = (Get-Date).AddMinutes(3)
 Add-Type -AssemblyName System.Net.Http
-$client = [System.Net.Http.HttpClient]::new()
+$handler = [System.Net.Http.HttpClientHandler]::new()
+$handler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(20)
 try {
   $healthResponse = $client.GetAsync([uri]::new($baseUri, "/api/health")).GetAwaiter().GetResult()
   try {
     $health = $healthResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
     if ($healthResponse.StatusCode -ne [System.Net.HttpStatusCode]::OK -or
+        [string]$healthResponse.Content.Headers.ContentType.MediaType -ne "application/json" -or
         [string]$health.status -ne "ok" -or
         [string]$health.currentVersion -ne $ExpectedVersion -or
         [string]$health.buildCommit -ine $ExpectedCommit) {
@@ -50,15 +53,24 @@ try {
     if ((Get-Date) -gt $deadline) {
       throw "Local business-page and static-resource checks exceeded three minutes."
     }
-    $response = $client.GetAsync([uri]::new($baseUri, $route)).GetAwaiter().GetResult()
+    $response = $client.GetAsync([uri]::new($baseUri, $route.url)).GetAwaiter().GetResult()
     try {
       if ($response.StatusCode -ne [System.Net.HttpStatusCode]::OK -or
-          $response.RequestMessage.RequestUri.AbsolutePath -cne $route) {
-        throw "Business page failed its local response check: $route (HTTP $([int]$response.StatusCode))."
+          [string]$response.Content.Headers.ContentType.MediaType -ne "text/html" -or
+          $response.RequestMessage.RequestUri.AbsolutePath -cne $route.path -or
+          $response.RequestMessage.RequestUri.Query -cne $route.query) {
+        throw "Business page failed its local response check without redirects: $($route.url) (HTTP $([int]$response.StatusCode))."
       }
       $html = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-      if ($html -notmatch '<main\b' -or $html -notmatch '<h1\b') {
-        throw "Business page did not render its expected content: $route."
+      $headingMatch = [regex]::Match($html, '(?is)<h1\b[^>]*>(?<heading>.*?)</h1>')
+      if ($html -notmatch '<main\b' -or -not $headingMatch.Success) {
+        throw "Business page did not render its expected content: $($route.url)."
+      }
+      $actualHeading = [System.Net.WebUtility]::HtmlDecode(
+        [regex]::Replace($headingMatch.Groups["heading"].Value, '<[^>]+>', "")
+      ).Trim()
+      if ($actualHeading -cne $route.heading) {
+        throw "Business page rendered an unexpected or error heading for $($route.url): $actualHeading"
       }
       foreach ($match in [regex]::Matches($html, $assetPattern)) {
         $assetUri = [uri]::new($baseUri, [string]$match.Groups["asset"].Value)
@@ -116,4 +128,5 @@ try {
     $routes.Count, $assetPaths.Count)
 } finally {
   $client.Dispose()
+  $handler.Dispose()
 }

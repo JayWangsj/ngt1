@@ -41,145 +41,197 @@ if (
   );
 }
 
-const browser = await chromium.launch({ channel: "msedge", headless: true });
-try {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  const pageErrors = [];
-  const apiErrors = [];
-  const resourceErrors = [];
-  const checkedResources = new Set();
-  const resourceChecks = [];
+const routes = [
+  { url: "/", headings: ["Oggi in laboratorio", "今日工作台"] },
+  { url: "/orders", headings: ["Schede di servizio", "服务单"] },
+  {
+    url: "/retail",
+    headings: ["Vendita rapida", "零售工作台"],
+    openSalesDialog: true,
+  },
+  {
+    url: "/retail?view=sales",
+    headings: ["Vendita rapida", "零售工作台"],
+    dialogHeadings: ["Storico vendite", "销售记录"],
+  },
+  { url: "/inventory", headings: ["Magazzino", "库存"] },
+  { url: "/customers", headings: ["Clienti", "客户"] },
+  { url: "/prices", headings: ["Listino prezzi", "报价表"] },
+  { url: "/settings", headings: ["Impostazioni", "设置"] },
+];
 
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  page.on("requestfailed", (request) => {
-    const pathname = new URL(request.url()).pathname;
-    if (pathname.startsWith("/_next/static/")) {
-      resourceErrors.push(`${request.url()}: ${request.failure()?.errorText}`);
-    }
-  });
-  page.on("response", (response) => {
-    const url = new URL(response.url());
-    if (url.origin !== baseUrl) return;
+async function verifyInstalledBrowser(channel) {
+  const browser = await chromium.launch({ channel, headless: true });
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const pageErrors = [];
+    const apiErrors = [];
+    const resourceErrors = [];
+    const checkedResources = new Set();
+    const resourceChecks = [];
 
-    if (
-      url.pathname.startsWith("/api/") &&
-      !url.pathname.startsWith("/api/system-update/") &&
-      url.pathname !== "/api/system-update" &&
-      response.status() >= 400
-    ) {
-      apiErrors.push(`${url.pathname}: HTTP ${response.status()}`);
-    }
-
-    const extension = url.pathname
-      .toLowerCase()
-      .split("?")[0]
-      .slice(url.pathname.lastIndexOf("."));
-    if (
-      !url.pathname.startsWith("/_next/static/") ||
-      ![".css", ".js"].includes(extension)
-    ) {
-      return;
-    }
-    checkedResources.add(extension);
-    resourceChecks.push(
-      (async () => {
-        const relativePath = decodeURIComponent(
-          url.pathname.slice("/_next/static/".length),
-        ).replaceAll("\\", "/");
-        const manifestPath = `.next/static/${relativePath}`;
-        const expectedHash = manifest.files?.[manifestPath];
-        const contentType = response.headers()["content-type"] || "";
-        if (response.status() !== 200 || !expectedHash) {
-          resourceErrors.push(
-            `${url.pathname}: HTTP ${response.status()} or missing release manifest entry`,
-          );
-          return;
-        }
-        if (
-          (extension === ".css" &&
-            !contentType.toLowerCase().startsWith("text/css")) ||
-          (extension === ".js" &&
-            !/(?:application|text)\/(?:x-)?(?:java|ecma)script/i.test(
-              contentType,
-            ))
-        ) {
-          resourceErrors.push(
-            `${url.pathname}: unexpected Content-Type ${contentType}`,
-          );
-          return;
-        }
-        const body = await response.body();
-        if (body.length === 0) {
-          resourceErrors.push(`${url.pathname}: empty response body`);
-          return;
-        }
-        const actualHash = createHash("sha256").update(body).digest("hex");
-        if (actualHash !== String(expectedHash).toLowerCase()) {
-          resourceErrors.push(
-            `${url.pathname}: response SHA-256 differs from the active release manifest`,
-          );
-        }
-      })(),
-    );
-  });
-
-  const routes = [
-    "/",
-    "/orders",
-    "/retail",
-    "/retail/sales",
-    "/inventory",
-    "/customers",
-    "/prices",
-    "/settings",
-  ];
-  for (const route of routes) {
-    const response = await page.goto(`${baseUrl}${route}`, {
-      waitUntil: "load",
-      timeout: 30_000,
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("requestfailed", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/_next/static/")) {
+        resourceErrors.push(
+          `${request.url()}: ${request.failure()?.errorText}`,
+        );
+      }
     });
-    if (response?.status() !== 200 || new URL(page.url()).pathname !== route) {
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.origin !== baseUrl) return;
+
+      if (
+        url.pathname.startsWith("/api/") &&
+        !url.pathname.startsWith("/api/system-update/") &&
+        url.pathname !== "/api/system-update" &&
+        response.status() >= 400
+      ) {
+        apiErrors.push(`${url.pathname}: HTTP ${response.status()}`);
+      }
+
+      const extension = url.pathname
+        .toLowerCase()
+        .split("?")[0]
+        .slice(url.pathname.lastIndexOf("."));
+      if (
+        !url.pathname.startsWith("/_next/static/") ||
+        ![".css", ".js"].includes(extension)
+      ) {
+        return;
+      }
+      checkedResources.add(extension);
+      resourceChecks.push(
+        (async () => {
+          const relativePath = decodeURIComponent(
+            url.pathname.slice("/_next/static/".length),
+          ).replaceAll("\\", "/");
+          const manifestPath = `.next/static/${relativePath}`;
+          const expectedHash = manifest.files?.[manifestPath];
+          const contentType = response.headers()["content-type"] || "";
+          if (response.status() !== 200 || !expectedHash) {
+            resourceErrors.push(
+              `${url.pathname}: HTTP ${response.status()} or missing release manifest entry`,
+            );
+            return;
+          }
+          if (
+            (extension === ".css" &&
+              !contentType.toLowerCase().startsWith("text/css")) ||
+            (extension === ".js" &&
+              !/(?:application|text)\/(?:x-)?(?:java|ecma)script/i.test(
+                contentType,
+              ))
+          ) {
+            resourceErrors.push(
+              `${url.pathname}: unexpected Content-Type ${contentType}`,
+            );
+            return;
+          }
+          const body = await response.body();
+          if (body.length === 0) {
+            resourceErrors.push(`${url.pathname}: empty response body`);
+            return;
+          }
+          const actualHash = createHash("sha256").update(body).digest("hex");
+          if (actualHash !== String(expectedHash).toLowerCase()) {
+            resourceErrors.push(
+              `${url.pathname}: response SHA-256 differs from the active release manifest`,
+            );
+          }
+        })(),
+      );
+    });
+
+    for (const route of routes) {
+      const target = new URL(route.url, baseUrl);
+      const response = await page.goto(target.href, {
+        waitUntil: "load",
+        timeout: 30_000,
+      });
+      const actual = new URL(page.url());
+      if (
+        response?.status() !== 200 ||
+        actual.pathname !== target.pathname ||
+        actual.search !== target.search
+      ) {
+        throw new Error(
+          `${route.url} did not load directly from the active release (HTTP ${response?.status()}, final URL ${page.url()}).`,
+        );
+      }
+      const heading = page.locator("main h1").first();
+      await heading.waitFor({ state: "visible", timeout: 10_000 });
+      const actualHeading = (await heading.innerText()).trim();
+      if (!route.headings.includes(actualHeading)) {
+        throw new Error(
+          `${route.url} rendered an unexpected or error heading: ${actualHeading}`,
+        );
+      }
+      if (route.openSalesDialog || route.dialogHeadings) {
+        const dialog = page.getByRole("dialog");
+        if (route.openSalesDialog) {
+          await page
+            .getByRole("button", { name: /^(Vendite|销售记录)$/ })
+            .click();
+        }
+        await dialog.waitFor({ state: "visible", timeout: 10_000 });
+        const dialogHeading = await dialog.getByRole("heading").innerText();
+        const expectedDialogHeadings = route.dialogHeadings || [
+          "Storico vendite",
+          "销售记录",
+        ];
+        if (!expectedDialogHeadings.includes(dialogHeading.trim())) {
+          throw new Error(
+            `The retail sales dialog rendered unexpected content: ${dialogHeading}`,
+          );
+        }
+      }
+      const styles = await page.evaluate(() => ({
+        surface: getComputedStyle(document.documentElement)
+          .getPropertyValue("--surface-page")
+          .trim(),
+        background: getComputedStyle(document.body).backgroundColor,
+      }));
+      if (!styles.surface || styles.background === "rgba(0, 0, 0, 0)") {
+        throw new Error(
+          `${route.url} rendered without the release's page styling.`,
+        );
+      }
+    }
+
+    await page.reload({ waitUntil: "load", timeout: 30_000 });
+    await page.locator("main h1").first().waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await Promise.all(resourceChecks);
+
+    if (pageErrors.length || apiErrors.length || resourceErrors.length) {
       throw new Error(
-        `${route} did not load from the active release (HTTP ${response?.status()}).`,
+        JSON.stringify(
+          { channel, pageErrors, apiErrors, resourceErrors },
+          null,
+          2,
+        ),
       );
     }
-    await page
-      .locator("main h1")
-      .first()
-      .waitFor({ state: "visible", timeout: 10_000 });
-    const styles = await page.evaluate(() => ({
-      surface: getComputedStyle(document.documentElement)
-        .getPropertyValue("--surface-page")
-        .trim(),
-      background: getComputedStyle(document.body).backgroundColor,
-    }));
-    if (!styles.surface || styles.background === "rgba(0, 0, 0, 0)") {
-      throw new Error(`${route} rendered without the release's page styling.`);
+    if (!checkedResources.has(".css") || !checkedResources.has(".js")) {
+      throw new Error(
+        `${channel} did not load both CSS and JavaScript release assets.`,
+      );
     }
-  }
-
-  await page.reload({ waitUntil: "load", timeout: 30_000 });
-  await page
-    .locator("main h1")
-    .first()
-    .waitFor({ state: "visible", timeout: 10_000 });
-  await Promise.all(resourceChecks);
-
-  if (pageErrors.length || apiErrors.length || resourceErrors.length) {
-    throw new Error(
-      JSON.stringify({ pageErrors, apiErrors, resourceErrors }, null, 2),
+    await context.close();
+    process.stdout.write(
+      `${channel} installed-release smoke passed for ${routes.length} direct routes plus retail sales dialog and reload; checked candidate CSS/JS hashes and server identity ${expectedCommit}.\n`,
     );
+  } finally {
+    await browser.close();
   }
-  if (!checkedResources.has(".css") || !checkedResources.has(".js")) {
-    throw new Error(
-      "The browser did not load both CSS and JavaScript release assets.",
-    );
-  }
-  await context.close();
-  process.stdout.write(
-    `Installed Edge smoke passed for ${routes.length} pages plus reload; checked candidate CSS/JS hashes and server identity ${expectedCommit}.\n`,
-  );
-} finally {
-  await browser.close();
+}
+
+for (const channel of ["msedge", "chrome"]) {
+  await verifyInstalledBrowser(channel);
 }
