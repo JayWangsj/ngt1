@@ -838,7 +838,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
   assert.match(
     online,
-    /\$savedDuringDisconnect\.stage -notin @\([\s\S]{0,250}"preparing-release"[\s\S]{0,100}"verifying-backup"/,
+    /\$savedDuringDisconnect\.stage -notin @\([\s\S]{0,250}"preparing-release"[\s\S]{0,100}"verifying-backup"[\s\S]{0,100}"preparing-runtime"/,
   );
   assert.match(online, /Manual repair installer/);
   assert.match(release, /actions\/upload-artifact@v4/);

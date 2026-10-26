@@ -790,6 +790,7 @@ try {
               "backing-up",
               "preparing-release",
               "verifying-backup",
+              "preparing-runtime",
               "installing",
               "validating",
               "rolling-back"
