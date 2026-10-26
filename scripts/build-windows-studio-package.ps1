@@ -71,6 +71,11 @@ $dynamicCrtImports = @($updaterDependencies | Where-Object {
 if ($dynamicCrtImports.Count -gt 0) {
   throw "The production updater imports the Visual C++ runtime dynamically: $($dynamicCrtImports -join ', ')"
 }
+$updaterDllImports = @($updaterDependencies | Where-Object {
+  [string]$_ -match '(?i)\.dll\s*$'
+} | ForEach-Object { ([string]$_).Trim() })
+Write-Output ("Production NGTUpdater.exe DLL imports: {0}" -f ($updaterDllImports -join ", "))
+Write-Output "Production updater has no dynamic Visual C++ CRT imports."
 $stage = Join-Path $projectRoot ".local\studio-package"
 if (Test-Path -LiteralPath $stage) {
   Remove-Item -LiteralPath $stage -Recurse -Force
@@ -170,7 +175,13 @@ $standaloneUpdaterSource = Join-Path $standaloneDestination "tools\ngt-updater"
 if (Test-Path -LiteralPath $standaloneUpdaterSource) {
   throw "The standalone package retained Rust updater source or build output."
 }
-Copy-Item -LiteralPath (Join-Path $BuildDirectory "static") -Destination (Join-Path $stage ".next\static") -Recurse -Force
+$staticSource = Join-Path $BuildDirectory "static"
+Copy-Item -LiteralPath $staticSource -Destination (Join-Path $stage ".next\static") -Recurse -Force
+$standaloneStaticDestination = Join-Path $standaloneDestination (Join-Path $BuildDirectory "static")
+if (Test-Path -LiteralPath $standaloneStaticDestination) {
+  Remove-Item -LiteralPath $standaloneStaticDestination -Recurse -Force
+}
+Copy-Item -LiteralPath $staticSource -Destination $standaloneStaticDestination -Recurse -Force
 Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public") -Recurse -Force
 $nonWindowsSharpPackages = Get-ChildItem -LiteralPath $stage -Directory -Recurse -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '^sharp-libvips-(darwin|linux|freebsd|linuxmusl|win32-arm64)' }
