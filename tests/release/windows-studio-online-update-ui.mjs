@@ -268,4 +268,3 @@ async function verifyInstalledBrowser(channel) {
 for (const channel of ["msedge", "chrome"]) {
   await verifyInstalledBrowser(channel);
 }
-

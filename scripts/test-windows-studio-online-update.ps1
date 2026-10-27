@@ -1077,4 +1077,3 @@ try {
     throw "Windows update acceptance cleanup could not be verified."
   }
 }
-

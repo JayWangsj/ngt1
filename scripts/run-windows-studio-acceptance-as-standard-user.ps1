@@ -210,4 +210,3 @@ try {
     Remove-Item -LiteralPath $isolatedTemp -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
-

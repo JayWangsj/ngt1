@@ -66,4 +66,3 @@ runs:
         path: ${{ runner.temp }}/ngt-acceptance-diagnostics/
         if-no-files-found: warn
         retention-days: 7
-

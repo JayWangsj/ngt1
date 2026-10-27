@@ -212,4 +212,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/windows-studio-release-metrics.mjs
-

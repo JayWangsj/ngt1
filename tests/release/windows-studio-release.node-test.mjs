@@ -1065,4 +1065,3 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /MANUAL_V2020: \$\{\{ needs\.manual-v2020-acceptance\.result \}\}/,
   );
 });
-
