@@ -620,7 +620,12 @@ try {
     }
     $updateInfo = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
       -Headers $sameOriginHeaders -TimeoutSec 30
-    if (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
+    if ($ProductionUpdater) {
+      $publishedLatestVersion = $oldTag -replace "^v", ""
+      if ($updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $publishedLatestVersion) {
+        throw "The public latest release did not remain at the installed baseline version."
+      }
+    } elseif (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
       throw "The installed NGT API did not offer the exact candidate version."
     }
     $sessionEvidence = Get-NgtInteractiveSessionEvidence
