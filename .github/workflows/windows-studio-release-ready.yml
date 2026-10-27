@@ -105,6 +105,22 @@ jobs:
           mode: ready
           acceptance: manual-installer
 
+  manual-v2020-acceptance:
+    name: Release Ready v2.0.20 manual upgrade and repair acceptance
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      NGT_MANUAL_UPGRADE_BASELINE: v2.0.20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/windows-studio-acceptance
+        with:
+          mode: ready
+          acceptance: manual-installer
+
   release-ready:
     name: Release Ready
     needs:
@@ -114,6 +130,7 @@ jobs:
         installer-acceptance,
         online-update-acceptance,
         manual-installer-acceptance,
+        manual-v2020-acceptance,
       ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -126,8 +143,9 @@ jobs:
           INSTALLER: ${{ needs.installer-acceptance.result }}
           ONLINE: ${{ needs.online-update-acceptance.result }}
           MANUAL: ${{ needs.manual-installer-acceptance.result }}
+          MANUAL_V2020: ${{ needs.manual-v2020-acceptance.result }}
         run: |
-          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$MANUAL"; do
+          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$MANUAL" "$MANUAL_V2020"; do
             if [[ "$result" != success ]]; then
               echo "::error::Release Ready requires every candidate build and acceptance job to succeed."
               exit 1

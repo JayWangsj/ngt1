@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "@playwright/test";
 
-const [releaseArgument, expectedVersion, expectedCommit] =
+const [releaseArgument, expectedVersion, expectedCommit, acceptanceMode] =
   process.argv.slice(2);
 if (!releaseArgument || !expectedVersion || !expectedCommit) {
   throw new Error(
-    "Usage: node windows-studio-online-update-ui.mjs <release-root> <version> <commit>",
+    "Usage: node windows-studio-online-update-ui.mjs <release-root> <version> <commit> [acceptance-mode]",
   );
 }
 
@@ -198,6 +198,39 @@ async function verifyInstalledBrowser(channel) {
       if (!styles.surface || styles.background === "rgba(0, 0, 0, 0)") {
         throw new Error(
           `${route.url} rendered without the release's page styling.`,
+        );
+      }
+    }
+
+    if (
+      acceptanceMode === "online-update" ||
+      acceptanceMode === "production-update"
+    ) {
+      const updateResponse = await page.goto(
+        `${baseUrl}/settings/system-update`,
+        {
+          waitUntil: "load",
+          timeout: 30_000,
+        },
+      );
+      if (
+        updateResponse?.status() !== 200 ||
+        new URL(page.url()).pathname !== "/settings/system-update"
+      ) {
+        throw new Error(
+          `The completed update page did not load directly (HTTP ${updateResponse?.status()}, final URL ${page.url()}).`,
+        );
+      }
+      const success = page.locator(".update-result-card.succeeded");
+      await success.waitFor({ state: "visible", timeout: 15_000 });
+      const summary = await success.innerText();
+      if (
+        !summary.includes(`v${expectedVersion}`) ||
+        !summary.toLowerCase().includes(expectedCommit.toLowerCase()) ||
+        (await success.locator(".update-diagnostics-toggle").count()) !== 0
+      ) {
+        throw new Error(
+          "The verified update summary is missing its final version/commit or still exposes a diagnostics action.",
         );
       }
     }
