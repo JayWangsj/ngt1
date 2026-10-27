@@ -937,6 +937,18 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
   assert.match(
     online,
+    /if \(\$ProductionUpdater\) \{\s+\$publishedLatestVersion = \$oldTag -replace "\^v", ""\s+if \(\$updateInfo\.updateAvailable -or \$updateInfo\.latestVersion -ne \$publishedLatestVersion\)/,
+  );
+  assert.match(
+    online,
+    /elseif \(-not \$updateInfo\.updateAvailable -or \$updateInfo\.latestVersion -ne \$targetVersion\)/,
+  );
+  assert.match(
+    online,
+    /\$startResponse = Invoke-RestMethod[\s\S]{0,400}targetVersion = \$TargetTag/,
+  );
+  assert.match(
+    online,
     /Acceptance did not observe both the independent NGT outage state and automatic reconnection/,
   );
   assert.match(online, /Rust updater peak working set/);
