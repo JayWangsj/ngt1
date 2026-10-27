@@ -112,6 +112,7 @@ try {
   $workspaceAclPaths = @(
     @{ Path = $workspace; Recursive = $false },
     @{ Path = (Join-Path $workspace "scripts"); Recursive = $true },
+    @{ Path = (Join-Path $workspace "node_modules"); Recursive = $true },
     @{ Path = (Join-Path $workspace "release-assets"); Recursive = $true },
     @{ Path = (Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance"); Recursive = $true },
     @{ Path = (Join-Path $workspace "package.json"); Recursive = $false }
