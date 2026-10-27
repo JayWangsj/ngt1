@@ -982,10 +982,18 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /updated production NGTUpdater\.exe does not match the verified candidate release manifest/,
   );
   assert.match(standardUserAcceptance, /ProductionUpdater = \$true/);
-  assert.ok(standardUserAcceptance.includes('if ($Acceptance -eq "production-update")'));
-  assert.ok(standardUserAcceptance.includes('$ghConfigDirectory = Join-Path $isolatedTemp "gh-config"'));
+  assert.ok(
+    standardUserAcceptance.includes('if ($Acceptance -eq "production-update")'),
+  );
+  assert.ok(
+    standardUserAcceptance.includes(
+      '$ghConfigDirectory = Join-Path $isolatedTemp "gh-config"',
+    ),
+  );
   assert.ok(standardUserAcceptance.includes("oauth_token: $($env:GH_TOKEN)"));
-  assert.ok(standardUserAcceptance.includes("GH_CONFIG_DIR = $ghConfigDirectory"));
+  assert.ok(
+    standardUserAcceptance.includes("GH_CONFIG_DIR = $ghConfigDirectory"),
+  );
   assert.match(
     standardUserAcceptance,
     /NGT_MANUAL_UPGRADE_BASELINE = \$env:NGT_MANUAL_UPGRADE_BASELINE/,
