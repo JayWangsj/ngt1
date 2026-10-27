@@ -289,7 +289,18 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
 
   const baseline = await findPublishedUpdateBaseline(api, "v2.0.14");
   assert.equal(baseline.tag_name, "v2.0.13");
-  assert.equal(requests.length, 1);
+  const preferredBaseline = await findPublishedUpdateBaseline(
+    api,
+    "v2.0.14",
+    "v2.0.11",
+  );
+  assert.equal(preferredBaseline.tag_name, "v2.0.11");
+  assert.equal(
+    await findPublishedUpdateBaseline(api, "v2.0.14", "v2.0.12"),
+    null,
+    "an incomplete baseline must not be silently replaced by a newer release",
+  );
+  assert.equal(requests.length, 3);
   assert.match(requests[0], /\/releases\?per_page=100&page=1$/);
 });
 
@@ -545,6 +556,7 @@ test("Release Ready rejects missing, stale, and incomplete exact-SHA Windows run
     "Release Ready installer acceptance",
     "Release Ready online-update acceptance",
     "Release Ready manual upgrade and repair acceptance",
+    "Release Ready v2.0.20 manual upgrade and repair acceptance",
     "Release Ready",
   ];
   const run = {
@@ -727,6 +739,12 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
+  const onlineUi = (
+    await readText("tests/release/windows-studio-online-update-ui.mjs", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const releaseTool = (
+    await readText("scripts/windows-studio-release.mjs", "utf8")
+  ).replace(/\r\n/g, "\n");
   const updateSafety = (
     await readText("scripts/test-windows-studio-update-safety.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -783,7 +801,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     release,
-    /publish:[\s\S]*needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,?\s*\]/,
+    /publish:[\s\S]*needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*production-updater-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,\s*manual-v2020-acceptance,?\s*\]/,
   );
   assert.doesNotMatch(release, /continue-on-error:/);
   assert.doesNotMatch(release, /--clobber/);
@@ -926,7 +944,39 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.doesNotMatch(releaseVerifier, /download-public-release-asset\.ps1/);
   assert.match(
     online,
-    /node scripts\/windows-studio-release\.mjs find-update-baseline \$TargetTag/,
+    /\$baselineArguments = @\("scripts\/windows-studio-release\.mjs", "find-update-baseline", \$TargetTag\)/,
+  );
+  assert.match(
+    online,
+    /\$ProductionUpdater -and \$env:NGT_TEST_RELEASE_API_URL/,
+  );
+  assert.match(
+    online,
+    /Starting the real published \{0\} NGTUpdater\.exe SHA256/,
+  );
+  assert.match(online, /NGT_PRODUCTION_UPDATER_BASELINE/);
+  assert.match(
+    online,
+    /real GitHub asset download did not report full byte-accurate progress/,
+  );
+  assert.match(onlineUi, /\.update-result-card\.succeeded/);
+  assert.match(onlineUi, /still exposes a diagnostics action/);
+  assert.match(
+    releaseTool,
+    /findPublishedUpdateBaseline\(\s*api,\s*directoryArg,\s*process\.argv\[4\]/,
+  );
+  assert.match(
+    online,
+    /updated production NGTUpdater\.exe does not match the verified candidate release manifest/,
+  );
+  assert.match(standardUserAcceptance, /ProductionUpdater = \$true/);
+  assert.match(
+    standardUserAcceptance,
+    /NGT_MANUAL_UPGRADE_BASELINE = \$env:NGT_MANUAL_UPGRADE_BASELINE/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /NGT_PRODUCTION_UPDATER_BASELINE = \$env:NGT_PRODUCTION_UPDATER_BASELINE/,
   );
   assert.match(online, /\$installRoot = Join-Path \$env:LOCALAPPDATA "NGT"/);
   assert.match(
@@ -985,9 +1035,34 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /run-windows-studio-acceptance-as-standard-user\.ps1 -Acceptance/,
   );
   assert.match(release, /mode: draft\s+acceptance: online-update/);
+  assert.match(
+    release,
+    /production-updater-acceptance:[\s\S]*acceptance: production-update/,
+  );
+  assert.match(
+    release,
+    /production-updater-acceptance:[\s\S]*NGT_PRODUCTION_UPDATER_BASELINE: v2\.0\.21/,
+  );
   assert.match(release, /mode: draft\s+acceptance: installer/);
   assert.match(release, /mode: draft\s+acceptance: manual-installer/);
+  assert.match(
+    release,
+    /manual-v2020-acceptance:[\s\S]*NGT_MANUAL_UPGRADE_BASELINE: v2\.0\.20/,
+  );
+  assert.match(
+    release,
+    /publish:[\s\S]*production-updater-acceptance[\s\S]*manual-v2020-acceptance/,
+  );
   assert.match(ready, /mode: ready\s+acceptance: online-update/);
   assert.match(ready, /mode: ready\s+acceptance: installer/);
   assert.match(ready, /mode: ready\s+acceptance: manual-installer/);
+  assert.match(
+    ready,
+    /manual-v2020-acceptance:[\s\S]*NGT_MANUAL_UPGRADE_BASELINE: v2\.0\.20/,
+  );
+  assert.match(
+    ready,
+    /MANUAL_V2020: \$\{\{ needs\.manual-v2020-acceptance\.result \}\}/,
+  );
 });
+

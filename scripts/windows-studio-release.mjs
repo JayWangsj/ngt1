@@ -877,7 +877,11 @@ function compareReleaseVersions(left, right) {
   return 0;
 }
 
-export async function findPublishedUpdateBaseline(api, targetTag) {
+export async function findPublishedUpdateBaseline(
+  api,
+  targetTag,
+  preferredTag,
+) {
   const targetVersion = stableReleaseVersion(targetTag);
   if (!targetVersion)
     throw new Error("Online update target must be a stable release tag.");
@@ -900,6 +904,12 @@ export async function findPublishedUpdateBaseline(api, targetTag) {
       "ngt-studio-runtime-" + release.tag_name + ".zip.sha256",
     ].every((name) => names.has(name));
   });
+
+  if (preferredTag) {
+    return (
+      candidates.find((release) => release.tag_name === preferredTag) || null
+    );
+  }
 
   candidates.sort((left, right) =>
     compareReleaseVersions(
@@ -1027,6 +1037,7 @@ export async function requireReleaseReady(api, sha) {
     "Release Ready installer acceptance",
     "Release Ready online-update acceptance",
     "Release Ready manual upgrade and repair acceptance",
+    "Release Ready v2.0.20 manual upgrade and repair acceptance",
     "Release Ready",
   ];
   if (
@@ -1079,7 +1090,11 @@ async function main() {
     const api = new GitHubReleaseApi({
       token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
     });
-    const baseline = await findPublishedUpdateBaseline(api, directoryArg);
+    const baseline = await findPublishedUpdateBaseline(
+      api,
+      directoryArg,
+      process.argv[4],
+    );
     if (!baseline)
       throw new Error(
         "No published release with supported online-update assets was found.",
@@ -1254,3 +1269,4 @@ if (
     process.exitCode = 1;
   });
 }
+

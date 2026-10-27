@@ -78,6 +78,24 @@ jobs:
           mode: draft
           acceptance: online-update
 
+  production-updater-acceptance:
+    name: Disposable Windows production updater and GitHub Release acceptance
+    needs: [qualify, build]
+    runs-on: windows-2022
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      NGT_PRODUCTION_UPDATER_BASELINE: v2.0.21
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/windows-studio-acceptance
+        with:
+          mode: draft
+          acceptance: production-update
+
   installer-acceptance:
     name: Disposable Windows installer acceptance
     needs: [qualify, build]
@@ -112,6 +130,24 @@ jobs:
           mode: draft
           acceptance: manual-installer
 
+  manual-v2020-acceptance:
+    name: Disposable Windows v2.0.20 manual upgrade and repair acceptance
+    needs: [qualify, build]
+    runs-on: windows-2022
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      NGT_MANUAL_UPGRADE_BASELINE: v2.0.20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/windows-studio-acceptance
+        with:
+          mode: draft
+          acceptance: manual-installer
+
   publish:
     name: Publish verified Release
     needs:
@@ -119,8 +155,10 @@ jobs:
         qualify,
         build,
         online-update-acceptance,
+        production-updater-acceptance,
         installer-acceptance,
         manual-installer-acceptance,
+        manual-v2020-acceptance,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -150,8 +188,10 @@ jobs:
         qualify,
         build,
         online-update-acceptance,
+        production-updater-acceptance,
         installer-acceptance,
         manual-installer-acceptance,
+        manual-v2020-acceptance,
         publish,
       ]
     if: ${{ always() }}
@@ -172,3 +212,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/windows-studio-release-metrics.mjs
+

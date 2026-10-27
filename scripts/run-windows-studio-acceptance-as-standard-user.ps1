@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("online-update", "installer", "manual-installer")]
+  [ValidateSet("online-update", "installer", "manual-installer", "production-update")]
   [string]$Acceptance,
   [switch]$Child,
   [string]$RequestPath
@@ -46,6 +46,7 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hoste
 
 $scriptPath = switch ($Acceptance) {
   "online-update" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
+  "production-update" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
   "manual-installer" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
   "installer" { Join-Path $PSScriptRoot "test-windows-studio-installer.ps1" }
 }
@@ -59,6 +60,16 @@ $parameters = switch ($Acceptance) {
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
       CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
       AcceptanceUpdaterPath = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance\NGTUpdater.exe"
+    }
+  }
+  "production-update" {
+    @{
+      TargetTag = $targetTag
+      ExpectedCommitSha = $env:GITHUB_SHA
+      ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
+      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+      AcceptanceUpdaterPath = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance\NGTUpdater.exe"
+      ProductionUpdater = $true
     }
   }
   "manual-installer" {
@@ -139,6 +150,8 @@ try {
       GITHUB_WORKSPACE = $workspace
       RUNNER_TEMP = $isolatedTemp
       GH_TOKEN = $env:GH_TOKEN
+      NGT_MANUAL_UPGRADE_BASELINE = $env:NGT_MANUAL_UPGRADE_BASELINE
+      NGT_PRODUCTION_UPDATER_BASELINE = $env:NGT_PRODUCTION_UPDATER_BASELINE
       PATH = $env:PATH
     }
   }
@@ -197,3 +210,4 @@ try {
     Remove-Item -LiteralPath $isolatedTemp -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
+
