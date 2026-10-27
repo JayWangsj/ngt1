@@ -564,7 +564,7 @@ describe("Windows persistent startup", () => {
       "node scripts/windows-studio-release.mjs publish release-assets",
     );
     expect(workflow).toMatch(
-      /needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,?\s*\]/,
+      /needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*production-updater-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,\s*manual-v2020-acceptance,?\s*\]/,
     );
     expect(workflow).toContain(
       "./.github/actions/build-windows-studio-candidate",
