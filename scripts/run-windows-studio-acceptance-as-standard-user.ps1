@@ -119,6 +119,19 @@ try {
   $tempAcl.AddAccessRule($tempRule)
   Set-Acl -LiteralPath $isolatedTemp -AclObject $tempAcl
 
+  $ghConfigDirectory = $null
+  if ($Acceptance -eq "production-update") {
+    if (-not $env:GH_TOKEN) {
+      throw "Production updater acceptance requires a GitHub Actions token."
+    }
+    $ghConfigDirectory = Join-Path $isolatedTemp "gh-config"
+    New-Item -ItemType Directory -Path $ghConfigDirectory -Force | Out-Null
+    @(
+      "github.com:"
+      "  oauth_token: $($env:GH_TOKEN)"
+    ) | Set-Content -LiteralPath (Join-Path $ghConfigDirectory "hosts.yml") -Encoding ascii
+  }
+
   $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
   $workspaceAclPaths = @(
     @{ Path = $workspace; Recursive = $false },
@@ -150,6 +163,7 @@ try {
       GITHUB_WORKSPACE = $workspace
       RUNNER_TEMP = $isolatedTemp
       GH_TOKEN = $env:GH_TOKEN
+      GH_CONFIG_DIR = $ghConfigDirectory
       NGT_MANUAL_UPGRADE_BASELINE = $env:NGT_MANUAL_UPGRADE_BASELINE
       NGT_PRODUCTION_UPDATER_BASELINE = $env:NGT_PRODUCTION_UPDATER_BASELINE
       PATH = $env:PATH
