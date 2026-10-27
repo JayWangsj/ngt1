@@ -85,6 +85,27 @@ try {
       throw "Studio standalone static asset does not match its release copy: $relativeStaticPath"
     }
   }
+  $publicRoot = Join-Path $releaseRoot "public"
+  $standalonePublicRoot = Join-Path $releaseRoot ".next\standalone\public"
+  $publicFiles = @(Get-ChildItem -LiteralPath $publicRoot -File -Recurse)
+  $standalonePublicFiles = @(Get-ChildItem -LiteralPath $standalonePublicRoot -File -Recurse)
+  $publicRelativePaths = @($publicFiles | ForEach-Object {
+    $_.FullName.Substring(($publicRoot.TrimEnd("\") + "\").Length)
+  } | Sort-Object)
+  $standalonePublicRelativePaths = @($standalonePublicFiles | ForEach-Object {
+    $_.FullName.Substring(($standalonePublicRoot.TrimEnd("\") + "\").Length)
+  } | Sort-Object)
+  if ((Compare-Object -ReferenceObject $publicRelativePaths -DifferenceObject $standalonePublicRelativePaths).Count -gt 0) {
+    throw "Studio standalone package public file inventory does not match the release copy."
+  }
+  foreach ($publicFile in $publicFiles) {
+    $relativePath = $publicFile.FullName.Substring(($publicRoot.TrimEnd("\") + "\").Length)
+    $standalonePublicFile = Join-Path $standalonePublicRoot $relativePath
+    if ((Get-FileHash -LiteralPath $publicFile.FullName -Algorithm SHA256).Hash -cne
+        (Get-FileHash -LiteralPath $standalonePublicFile -Algorithm SHA256).Hash) {
+      throw "Studio standalone public asset does not match its release copy: $relativePath"
+    }
+  }
   & (Join-Path $releaseRoot "scripts\test-windows-studio-update-safety.ps1")
   if (Test-Path -LiteralPath (Join-Path $releaseRoot ".next\standalone\node_modules\.pnpm")) {
     throw "Studio package contains the redundant standalone pnpm store."

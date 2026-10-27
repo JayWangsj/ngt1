@@ -25,8 +25,8 @@ function New-NgtInstallFixture([string]$Root) {
   New-Item -ItemType Directory -Path (Join-Path $installRoot ".local") -Force | Out-Null
   New-Item -ItemType Directory -Path $oldRelease -Force | Out-Null
   New-Item -ItemType Directory -Path $newRelease -Force | Out-Null
-  Set-Content -LiteralPath (Join-Path $oldRelease "studio-release.json") -Value '{"version":"2.0.11"}' -Encoding utf8
-  Set-Content -LiteralPath (Join-Path $newRelease "studio-release.json") -Value '{"version":"2.0.15"}' -Encoding utf8
+  Set-Content -LiteralPath (Join-Path $oldRelease "studio-release.json") -Value ('{"version":"2.0.11","commit":"' + ("a" * 40) + '"}') -Encoding utf8
+  Set-Content -LiteralPath (Join-Path $newRelease "studio-release.json") -Value ('{"version":"2.0.15","commit":"' + ("b" * 40) + '"}') -Encoding utf8
   Write-NgtInstallJsonAtomic (Join-Path $installRoot ".local\studio.json") ([pscustomobject]@{
     installRoot = $installRoot
     dataRoot = Join-Path $installRoot "data-store"
@@ -532,11 +532,12 @@ try {
     Complete-NgtStudioManualInstallRollback -InstallRoot $rollback.installRoot `
       -PreviousReleaseRoot $rollback.oldRelease -VerifiedVersion "2.0.11" `
       -FailureMessage "simulated failed migration" -FailedStage "migrations"
-  } catch { $rollbackHealthRequired = $_.Exception.Message -like "A successful rollback health check*" }
-  if (-not $rollbackHealthRequired) { throw "The installer cleared maintenance without a verified rollback health check." }
+  } catch { $rollbackHealthRequired = $_.Exception.Message -like "A successful rollback runtime verification*" }
+  if (-not $rollbackHealthRequired) { throw "The installer cleared maintenance without a full runtime verification." }
   Complete-NgtStudioManualInstallRollback -InstallRoot $rollback.installRoot `
     -PreviousReleaseRoot $rollback.oldRelease -VerifiedVersion "2.0.11" `
-    -FailureMessage "simulated failed migration" -FailedStage "migrations" -HealthVerified
+    -VerifiedCommit ("a" * 40) -FailureMessage "simulated failed migration" `
+    -FailedStage "migrations" -RuntimeVerified
   $rollbackStatus = Get-NgtInstallJson (Join-Path $rollback.installRoot "update-status.json")
   if ($rollbackStatus.status -ne "failed" -or $rollbackStatus.recoveryStatus -ne "succeeded" -or
       $rollbackStatus.actualVersion -ne "2.0.11" -or $rollbackStatus.failedStage -ne "migrations" -or
@@ -580,7 +581,8 @@ try {
   }
   & $script:ProductionProtectNgtRepairInstallation -InstallRoot $repair.installRoot -Plan $repairPlan
   New-Item -ItemType Directory -Path $repair.oldRelease -Force | Out-Null
-  Set-Content -LiteralPath (Join-Path $repair.oldRelease "studio-release.json") -Value '{"version":"2.0.11"}'
+  Set-Content -LiteralPath (Join-Path $repair.oldRelease "studio-release.json") `
+    -Value ('{"version":"2.0.11","commit":"' + ("a" * 40) + '"}')
   Set-Content -LiteralPath (Join-Path $repair.oldRelease "candidate.txt") -Value "partially deployed repair"
   Restore-NgtStudioRepairReleaseBackup -InstallRoot $repair.installRoot `
     -ReleaseRoot $repair.oldRelease -UpdateId ([string]$repairMarker.updateId) | Out-Null
@@ -590,7 +592,8 @@ try {
   }
   Complete-NgtStudioManualInstallRollback -InstallRoot $repair.installRoot `
     -PreviousReleaseRoot $repair.oldRelease -VerifiedVersion "2.0.11" `
-    -FailureMessage "simulated repair failure" -FailedStage "release-deployment" -HealthVerified
+    -VerifiedCommit ("a" * 40) -FailureMessage "simulated repair failure" `
+    -FailedStage "release-deployment" -RuntimeVerified
 
   Write-Output "Windows Studio install coordination tests passed."
 } finally {

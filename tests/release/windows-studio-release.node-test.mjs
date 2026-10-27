@@ -60,10 +60,10 @@ function makeApi({
   let uploadCount = 0;
   const remoteContents = new Map();
   const uploads = [];
-  const deletions = [];
+  const updates = [];
   return {
-    deletions,
     uploads,
+    updates,
     remoteContents,
     current: () => state,
     resolveTagCommit: async () => tagCommit,
@@ -84,13 +84,9 @@ function makeApi({
       return state;
     },
     updateRelease: async (_id, patch) => {
+      updates.push(patch);
       state = { ...state, ...patch };
       return state;
-    },
-    deleteRelease: async (id) => {
-      assert.equal(state?.id, id);
-      deletions.push(id);
-      state = null;
     },
     uploadAsset: async (_draft, name, bytes) => {
       uploadCount++;
@@ -217,22 +213,6 @@ test("findRelease discovers Draft Releases through the paginated release list", 
   assert.match(requests[2], /\/releases\?per_page=100&page=2$/);
 });
 
-test("deleteRelease removes a stale Draft by release ID", async () => {
-  const requests = [];
-  const api = new GitHubReleaseApi({
-    token: "test-token",
-    repository: "JayWangsj/ngt1",
-    fetchImpl: async (url, options) => {
-      requests.push({ url: new URL(url).pathname, method: options.method });
-      return new Response(null, { status: 204 });
-    },
-  });
-  await api.deleteRelease(42);
-  assert.deepEqual(requests, [
-    { url: "/repos/JayWangsj/ngt1/releases/42", method: "DELETE" },
-  ]);
-});
-
 test("findPublishedUpdateBaseline selects the newest supported stable release below the target", async () => {
   const requests = [];
   const assetsFor = (tag) =>
@@ -323,7 +303,7 @@ test("Draft creation survives an ambiguous upload response without duplicating a
   });
 });
 
-test("a legacy partial Draft resumes only missing assets after content verification", async (t) => {
+test("an unmarked legacy Draft is preserved and requires controlled recovery", async (t) => {
   const { assets, manifest } = await makeFixture(t);
   const first = manifest.assets[0];
   const firstBytes = await readFile(path.join(assets, first.name));
@@ -344,14 +324,16 @@ test("a legacy partial Draft resumes only missing assets after content verificat
   };
   const api = makeApi({ release });
   api.remoteContents.set(existing.id, firstBytes);
-  const result = await prepareDraft(api, assets, manifest);
-  assert.equal(result.draft, true);
-  assert.equal(api.uploads.length, 5);
-  assert.equal(api.uploads.includes(first.name), false);
-  assert.equal(api.current().assets.length, 6);
+  await assert.rejects(
+    prepareDraft(api, assets, manifest),
+    /no trusted build identity; automatic recovery is disabled/,
+  );
+  assert.equal(api.uploads.length, 0);
+  assert.equal(api.updates.length, 0);
+  assert.equal(api.current().assets.length, 1);
 });
 
-test("a retry replaces only a stale marked Draft for the same tag", async (t) => {
+test("a retry fails closed when a marked Draft has a different build identity", async (t) => {
   const { assets, manifest } = await makeFixture(t);
   const staleManifest = { ...manifest, sha: "b".repeat(40) };
   staleManifest.buildIdentity = calculateBuildIdentity(staleManifest);
@@ -366,16 +348,13 @@ test("a retry replaces only a stale marked Draft for the same tag", async (t) =>
         "https://uploads.example.test/releases/43/assets{?name,label}",
     },
   });
-  const result = await prepareDraft(api, assets, manifest);
-  assert.deepEqual(api.deletions, [43]);
-  assert.equal(result.draft, true);
-  assert.deepEqual(parseReleaseMarker(result.body), {
-    tag,
-    sha: sourceSha,
-    version,
-    buildIdentity: manifest.buildIdentity,
-  });
-  assert.equal(api.uploads.length, 6);
+  await assert.rejects(
+    prepareDraft(api, assets, manifest),
+    /Draft Release build identity does not match/,
+  );
+  assert.equal(api.current().id, 43);
+  assert.equal(api.current().body, createReleaseMarker(staleManifest));
+  assert.equal(api.uploads.length, 0);
 });
 
 test("mismatched or already public Releases fail closed without overwriting", async (t) => {
@@ -391,7 +370,7 @@ test("mismatched or already public Releases fail closed without overwriting", as
       id: 8,
       tag_name: tag,
       draft: true,
-      body: "",
+      body: createReleaseMarker(manifest),
       assets: [badAsset],
     },
   });
@@ -706,6 +685,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const ready = (
     await readText(".github/workflows/windows-studio-release-ready.yml", "utf8")
   ).replace(/\r\n/g, "\n");
+  const updaterTestRelease = (
+    await readText(
+      "scripts/prepare-windows-studio-updater-test-release.mjs",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
+  const updaterTestRefs = (
+    await readText("scripts/push-windows-studio-updater-test-refs.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
   const onlineAcceptanceWorkflow = (
     await readText(
       ".github/workflows/windows-studio-online-update-acceptance.yml",
@@ -816,6 +804,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(ready, /workflow_dispatch:/);
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
+  assert.match(
+    ready,
+    /qualify:[\s\S]*Verify the isolated private updater repository before candidate build[\s\S]*prepare-windows-studio-updater-test-release\.mjs preflight/,
+  );
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
@@ -949,9 +941,17 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     online,
+    /\$startResponse = Invoke-RestMethod -Uri "http:\/\/127\.0\.0\.1:3000\/api\/system-update"[\s\S]{0,250}-Body \(@\{ targetVersion = \$TargetTag \}/,
+  );
+  assert.match(
+    online,
     /Acceptance did not observe both the independent NGT outage state and automatic reconnection/,
   );
   assert.match(online, /Rust updater peak working set/);
+  assert.match(
+    packageBuilder,
+    /"start\.mjs",\s*"verify-windows-studio-static-assets\.mjs",/,
+  );
   assert.doesNotMatch(packageBuilder, /update-windows-studio\.ps1/);
   assert.doesNotMatch(releaseVerifier, /download-public-release-asset\.ps1/);
   assert.match(
@@ -991,8 +991,21 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     ),
   );
   assert.ok(standardUserAcceptance.includes("oauth_token: $($env:GH_TOKEN)"));
+  assert.match(
+    standardUserAcceptance,
+    /SetEnvironmentVariable\("GH_CONFIG_DIR", \$expectedConfigDirectory, "User"\)/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /SetEnvironmentVariable\("GH_CONFIG_DIR", \$null, "User"\)/,
+  );
+  assert.match(standardUserAcceptance, /Registry::HKEY_USERS/);
+  assert.match(standardUserAcceptance, /processTerminationFailed/);
+  assert.match(standardUserAcceptance, /credentialCleanupFailed/);
   assert.ok(
-    standardUserAcceptance.includes("GH_CONFIG_DIR = $ghConfigDirectory"),
+    standardUserAcceptance.includes(
+      'GH_CONFIG_DIR = if ($Acceptance -eq "production-update") { $ghConfigDirectory } else { $null }',
+    ),
   );
   assert.match(
     standardUserAcceptance,
@@ -1080,6 +1093,65 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /mode: ready\s+acceptance: online-update/);
   assert.match(ready, /mode: ready\s+acceptance: installer/);
   assert.match(ready, /mode: ready\s+acceptance: manual-installer/);
+  assert.match(
+    ready,
+    /production-updater-acceptance:[\s\S]*Exercise the original v2\.0\.21 production updater as a standard user/,
+  );
+  assert.match(
+    ready,
+    /needs:\s*\[[\s\S]*production-updater-acceptance[\s\S]*\]/,
+  );
+  assert.match(
+    ready,
+    /PRODUCTION_UPDATER: \$\{\{ needs\.production-updater-acceptance\.result \}\}/,
+  );
+  assert.match(ready, /type: string\s+required: true/);
+  assert.match(ready, /secrets\.NGT_UPDATER_TEST_TOKEN/);
+  assert.match(
+    ready,
+    /scripts\/prepare-windows-studio-updater-test-release\.mjs/,
+  );
+  assert.match(ready, /scripts\/push-windows-studio-updater-test-refs\.ps1/);
+  assert.match(
+    ready,
+    /Verify the isolated repository before any Git writes[\s\S]*prepare-windows-studio-updater-test-release\.mjs preflight/,
+  );
+  assert.match(ready, /v2\.0\.21 production updater as a standard user/);
+  assert.ok(
+    ready.indexOf("prepare-windows-studio-updater-test-release.mjs preflight") <
+      ready.indexOf("-Stage baseline") &&
+      ready.indexOf("-Stage baseline") <
+        ready.indexOf(
+          "prepare-windows-studio-updater-test-release.mjs baseline",
+        ) &&
+      ready.indexOf(
+        "prepare-windows-studio-updater-test-release.mjs baseline",
+      ) < ready.indexOf("-Stage candidate") &&
+      ready.indexOf("-Stage candidate") <
+        ready.indexOf(
+          "prepare-windows-studio-updater-test-release.mjs candidate",
+        ),
+    "the test baseline must be published before main advances to the candidate SHA",
+  );
+  assert.match(updaterTestRelease, /repositoryInfo\?\.private !== true/);
+  assert.match(updaterTestRelease, /repositoryInfo\.default_branch !== "main"/);
+  assert.match(updaterTestRelease, /testDefaultBranchCommit\(testApi\)/);
+  assert.match(
+    updaterTestRelease,
+    /prepareDraft\(\s*testApi,\s*candidateDirectory,\s*manifest,/,
+  );
+  assert.match(updaterTestRelease, /resolveTagCommit\(manifest\.tag\)/);
+  assert.match(updaterTestRelease, /verifyChecksumSidecar/);
+  assert.match(updaterTestRelease, /NGT_UPDATER_TEST_TOKEN/);
+  assert.match(updaterTestRefs, /push --atomic/);
+  assert.match(updaterTestRefs, /refs\/heads\/main/);
+  assert.doesNotMatch(updaterTestRefs, /--force/);
+  assert.match(
+    online,
+    /production updater acceptance requires the isolated test repository/,
+  );
+  assert.match(online, /taskConfig\.repository = \$TestReleaseRepository/);
+  assert.match(online, /isolated private updater test repository/);
   assert.match(
     ready,
     /manual-v2020-acceptance:[\s\S]*NGT_MANUAL_UPGRADE_BASELINE: v2\.0\.20/,

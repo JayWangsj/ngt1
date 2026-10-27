@@ -1007,12 +1007,13 @@ function Complete-NgtStudioManualInstallRollback(
   [string]$InstallRoot,
   [string]$PreviousReleaseRoot,
   [string]$VerifiedVersion,
+  [string]$VerifiedCommit,
   [string]$FailureMessage,
   [string]$FailedStage,
   [switch]$OnlineUpdate,
-  [switch]$HealthVerified
+  [switch]$RuntimeVerified
 ) {
-  if (-not $HealthVerified) { throw "A successful rollback health check is required before maintenance can be cleared." }
+  if (-not $RuntimeVerified) { throw "A successful rollback runtime verification is required before maintenance can be cleared." }
   Invoke-NgtStudioInstallMutex $InstallRoot {
     $root = [System.IO.Path]::GetFullPath($InstallRoot)
     $reservation = Get-NgtManualInstallReservation $root
@@ -1031,8 +1032,10 @@ function Complete-NgtStudioManualInstallRollback(
     $activeRelease = [System.IO.Path]::GetFullPath([string]$configuration.activeRelease)
     $release = Get-NgtInstallJson (Join-Path $activeRelease "studio-release.json")
     if ($activeRelease -ine [System.IO.Path]::GetFullPath($PreviousReleaseRoot) -or
-        [string]$release.version -ne $VerifiedVersion) {
-      throw "The restored release does not match the health-verified rollback version."
+        [string]$release.version -ne $VerifiedVersion -or
+        [string]$release.commit -ine $VerifiedCommit -or
+        [string]$VerifiedCommit -notmatch '^[a-f0-9]{40}$') {
+      throw "The restored release does not match the runtime-verified rollback version and commit."
     }
     $status = [pscustomobject]@{
       status = "failed"

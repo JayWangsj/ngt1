@@ -1,6 +1,7 @@
-import { access, cp, readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join, resolve, sep } from "node:path";
+import { verifyWindowsStudioStaticAssets } from "./verify-windows-studio-static-assets.mjs";
 try {
   process.loadEnvFile(".env");
 } catch (e) {
@@ -32,15 +33,12 @@ if (
     "The standalone build directory must stay inside the project.",
   );
 }
-
-for (const [source, destination] of [
-  [join(buildDirectory, "static"), join(standaloneBuildDirectory, "static")],
-  [join(projectRoot, "public"), join(standaloneRoot, "public")],
-]) {
-  await access(source);
-  await rm(destination, { recursive: true, force: true });
-  await cp(source, destination, { recursive: true });
-}
+await verifyWindowsStudioStaticAssets({
+  projectRoot,
+  buildDirectory,
+  standaloneBuildDirectory,
+  standaloneRoot,
+});
 const child = spawn(process.execPath, [".next/standalone/server.js"], {
   stdio: "inherit",
   windowsHide: true,

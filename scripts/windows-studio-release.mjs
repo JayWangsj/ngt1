@@ -491,13 +491,15 @@ export async function prepareDraft(api, directory, manifest) {
       "A published Release already uses this tag; published versions are never overwritten.",
     );
   }
-  if (
-    release &&
-    parseReleaseMarker(release.body) &&
-    !markerMatches(release, manifest)
-  ) {
-    await api.deleteRelease(release.id);
-    release = null;
+  if (release && !parseReleaseMarker(release.body)) {
+    throw new Error(
+      "Draft Release has no trusted build identity; automatic recovery is disabled.",
+    );
+  }
+  if (release && !markerMatches(release, manifest)) {
+    throw new Error(
+      "Draft Release build identity does not match this tag, Commit SHA, version, and artifact.",
+    );
   }
   if (!release) {
     const marker = createReleaseMarker(manifest);
@@ -519,22 +521,12 @@ export async function prepareDraft(api, directory, manifest) {
     );
   }
 
-  const existingMarker = parseReleaseMarker(release.body);
-  if (existingMarker && !markerMatches(release, manifest)) {
+  if (!markerMatches(release, manifest)) {
     throw new Error(
       "Draft Release build identity does not match this tag, Commit SHA, version, and artifact.",
     );
   }
   await verifyRemoteAssets(api, release, manifest, false);
-
-  if (!existingMarker) {
-    const body =
-      createReleaseMarker(manifest) +
-      (release.body ? "\n\n" + release.body : "");
-    release = await api.updateRelease(release.id, { body });
-    if (!release.draft)
-      throw new Error("Draft Release changed state during safe recovery.");
-  }
 
   for (const asset of manifest.assets) {
     if ((release.assets || []).some((entry) => entry.name === asset.name))
@@ -794,14 +786,6 @@ export class GitHubReleaseApi {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-  }
-
-  async deleteRelease(id) {
-    await this.json(
-      this.repoPath("/releases/" + id),
-      { method: "DELETE" },
-      false,
-    );
   }
 
   async uploadAsset(release, name, bytes) {

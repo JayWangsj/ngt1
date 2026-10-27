@@ -97,8 +97,9 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
   }
   $previousRelease = [System.IO.Path]::GetFullPath([string]$previousConfig.activeRelease)
   $previousReleaseMetadata = Get-NgtInstallJson (Join-Path $previousRelease "studio-release.json")
-  if (-not $previousReleaseMetadata.version) {
-    throw "The previous application release is not available for rollback."
+  if (-not $previousReleaseMetadata.version -or
+      [string]$previousReleaseMetadata.commit -notmatch '^[a-f0-9]{40}$') {
+    throw "The previous application release is missing its version or commit identity for rollback."
   }
   $startupScript = Join-Path $previousRelease "scripts\install-windows-startup.ps1"
   if (-not (Test-Path -LiteralPath $startupScript -PathType Leaf)) {
@@ -150,13 +151,18 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
   $env:NGT_DATA_ROOT = [System.IO.Path]::GetFullPath([string]$previousConfig.dataRoot)
   & $startupScript -InstallRoot $InstallRoot
   Wait-NgtStudioHealth -ExpectedVersion ([string]$previousReleaseMetadata.version)
+  & (Join-Path $previousRelease "scripts\verify-windows-studio-runtime.ps1") `
+    -ReleaseRoot $previousRelease `
+    -ExpectedVersion ([string]$previousReleaseMetadata.version) `
+    -ExpectedCommit ([string]$previousReleaseMetadata.commit)
   Complete-NgtStudioManualInstallRollback -InstallRoot $InstallRoot `
     -PreviousReleaseRoot $previousRelease `
     -VerifiedVersion ([string]$previousReleaseMetadata.version) `
+    -VerifiedCommit ([string]$previousReleaseMetadata.commit) `
     -FailureMessage ("Manual installation failed and the previous release and database backup were restored and health-checked. " + $FailureMessage) `
     -FailedStage $FailedStage `
     -OnlineUpdate:($marker.operation -eq "online-update") `
-    -HealthVerified
+    -RuntimeVerified
   return $true
 }
 

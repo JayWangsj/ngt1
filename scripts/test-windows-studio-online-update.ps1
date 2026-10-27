@@ -7,6 +7,7 @@ param(
   [string]$ExpectedManifestPath,
   [string]$CandidateDirectory = "",
   [string]$AcceptanceUpdaterPath = "",
+  [string]$TestReleaseRepository = "",
   [switch]$ManualInstaller,
   [switch]$ProductionUpdater
 )
@@ -35,6 +36,11 @@ function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$
 }
 
 $repository = "JayWangsj/ngt1"
+if ($TestReleaseRepository -and
+    ($TestReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
+      $TestReleaseRepository -ieq $repository)) {
+  throw "Production updater acceptance requires a separate owner/name test repository."
+}
 $githubCli = Get-Command gh -ErrorAction Stop | Select-Object -ExpandProperty Source
 $authOutput = & $githubCli auth status --hostname github.com 2>&1
 if ($LASTEXITCODE -ne 0) { throw "GitHub release read authorization is unavailable." }
@@ -605,6 +611,19 @@ try {
   if ([System.IO.Path]::GetFullPath([string]$taskConfig.activeRelease) -ne [System.IO.Path]::GetFullPath($taskRoot)) {
     throw "The baseline release is not the configured active release."
   }
+  if ($ProductionUpdater -and -not $TestReleaseRepository -and $env:NGT_RELEASE_READY -eq "true") {
+    throw "Release Ready production updater acceptance requires the isolated test repository."
+  }
+  if ($ProductionUpdater -and $TestReleaseRepository) {
+    $studioConfigPath = Join-Path $installRoot ".local\studio.json"
+    $taskConfig.repository = $TestReleaseRepository
+    [System.IO.File]::WriteAllText(
+      $studioConfigPath,
+      ($taskConfig | ConvertTo-Json -Depth 20) + "`n",
+      [System.Text.UTF8Encoding]::new($false)
+    )
+    Write-Output "Pointed the disposable v2.0.21 installation at the isolated private updater test repository."
+  }
   $updateId = [guid]::NewGuid().ToString()
   if ($ManualInstaller) {
     $installerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-$TargetTag.exe"
@@ -623,7 +642,7 @@ try {
     if ($ProductionUpdater) {
       $publishedLatestVersion = $oldTag -replace "^v", ""
       if ($updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $publishedLatestVersion) {
-        throw "The public latest release did not remain at the installed baseline version."
+        throw "The isolated test repository's published latest release did not remain at the installed baseline version."
       }
     } elseif (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
       throw "The installed NGT API did not offer the exact candidate version."
@@ -943,7 +962,10 @@ try {
   $newOrders = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($newOrders.StatusCode -ne 200) { throw "The new release orders page did not load." }
   Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
-  if ($ManualInstaller) {
+  if ($ProductionUpdater -and $TestReleaseRepository) {
+    Write-Output ("Windows production updater GitHub Release acceptance passed: {0} -> {1} in {2}." -f `
+      $oldTag, $TargetTag, $TestReleaseRepository)
+  } elseif ($ManualInstaller) {
     $repairLog = Join-Path $testRoot "manual-repair-installer.log"
     $repair = Start-Process -FilePath $installerPath `
       -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$repairLog") `

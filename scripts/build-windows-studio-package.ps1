@@ -183,6 +183,7 @@ if (Test-Path -LiteralPath $standaloneStaticDestination) {
 }
 Copy-Item -LiteralPath $staticSource -Destination $standaloneStaticDestination -Recurse -Force
 Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public") -Recurse -Force
+Copy-Item -LiteralPath "public" -Destination (Join-Path $standaloneDestination "public") -Recurse -Force
 $nonWindowsSharpPackages = Get-ChildItem -LiteralPath $stage -Directory -Recurse -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '^sharp-libvips-(darwin|linux|freebsd|linuxmusl|win32-arm64)' }
 foreach ($nativePackage in $nonWindowsSharpPackages) {
@@ -217,6 +218,7 @@ $runtimeScripts = @(
   "retain-windows-studio-releases.ps1",
   "studio-runtime.ps1",
   "start.mjs",
+  "verify-windows-studio-static-assets.mjs",
   "uninstall-windows-startup.ps1",
   "uninstall-windows-studio.ps1",
   "verify-windows-studio-release.ps1",
