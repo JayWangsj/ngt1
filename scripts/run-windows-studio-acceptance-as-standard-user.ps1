@@ -3,7 +3,8 @@ param(
   [ValidateSet("online-update", "installer", "manual-installer", "production-update")]
   [string]$Acceptance,
   [switch]$Child,
-  [string]$RequestPath
+  [string]$RequestPath,
+  [switch]$AuthMatrixOnly
 )
 $ErrorActionPreference = "Stop"
 
@@ -14,6 +15,116 @@ function Get-NgtAcceptanceSha256([string]$Value) {
   } finally {
     $sha.Dispose()
   }
+}
+
+function Invoke-NgtGhAuthToken([string]$GhPath, [string]$ConfigDirectory, [string]$GhToken, [string]$GithubToken) {
+  $previousEnvironment = @{
+    GH_CONFIG_DIR = [Environment]::GetEnvironmentVariable("GH_CONFIG_DIR", "Process")
+    GH_TOKEN = [Environment]::GetEnvironmentVariable("GH_TOKEN", "Process")
+    GITHUB_TOKEN = [Environment]::GetEnvironmentVariable("GITHUB_TOKEN", "Process")
+  }
+  try {
+    if ($ConfigDirectory) { $env:GH_CONFIG_DIR = $ConfigDirectory }
+    else { Remove-Item Env:\GH_CONFIG_DIR -ErrorAction SilentlyContinue }
+    if ($null -ne $GhToken) { $env:GH_TOKEN = $GhToken }
+    else { Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue }
+    if ($null -ne $GithubToken) { $env:GITHUB_TOKEN = $GithubToken }
+    else { Remove-Item Env:\GITHUB_TOKEN -ErrorAction SilentlyContinue }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $GhPath
+    $startInfo.Arguments = "auth token --hostname github.com"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $childEnvironment = $startInfo.EnvironmentVariables
+    foreach ($name in @("GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")) {
+      $childEnvironment.Remove($name)
+    }
+    if ($ConfigDirectory) { $childEnvironment["GH_CONFIG_DIR"] = $ConfigDirectory }
+    if ($null -ne $GhToken) { $childEnvironment["GH_TOKEN"] = $GhToken }
+    if ($null -ne $GithubToken) { $childEnvironment["GITHUB_TOKEN"] = $GithubToken }
+    $ghProcess = [System.Diagnostics.Process]::new()
+    $ghProcess.StartInfo = $startInfo
+    [void]$ghProcess.Start()
+    $stdoutTask = $ghProcess.StandardOutput.ReadToEndAsync()
+    $stderrTask = $ghProcess.StandardError.ReadToEndAsync()
+    if (-not $ghProcess.WaitForExit(15000)) {
+      $ghProcess.Kill()
+      [void]$ghProcess.WaitForExit(5000)
+      throw "GitHub CLI authentication probe timed out."
+    }
+    $token = $stdoutTask.GetAwaiter().GetResult().Trim()
+    [void]$stderrTask.GetAwaiter().GetResult()
+    $exitCode = $ghProcess.ExitCode
+    return [pscustomobject]@{ ExitCode = $exitCode; Token = $token }
+  } finally {
+    foreach ($name in @("GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")) {
+      $value = $previousEnvironment[$name]
+      if ($null -eq $value) { Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue }
+      else { [Environment]::SetEnvironmentVariable($name, $value, "Process") }
+    }
+  }
+}
+
+function Assert-NgtGhAuthMode(
+  [string]$GhPath,
+  [string]$Mode,
+  [string]$ConfigDirectory,
+  [string]$GhToken,
+  [string]$GithubToken,
+  [string]$ExpectedTokenSha256,
+  [string]$ExpectedToken,
+  [switch]$ExpectUnauthenticated
+) {
+  $result = Invoke-NgtGhAuthToken $GhPath $ConfigDirectory $GhToken $GithubToken
+  if ($ExpectUnauthenticated) {
+    if ($result.ExitCode -eq 0 -or $result.Token) {
+      throw "GitHub CLI accepted credentials in the unauthenticated $Mode mode."
+    }
+  } elseif ($result.ExitCode -ne 0 -or
+      ($ExpectedTokenSha256 -and (Get-NgtAcceptanceSha256 $result.Token) -cne $ExpectedTokenSha256) -or
+      ($ExpectedToken -and $result.Token -cne $ExpectedToken)) {
+    throw "GitHub CLI did not honor the expected $Mode authentication source."
+  }
+  Write-Output "GitHub CLI authentication mode passed: $Mode."
+}
+
+function Test-NgtGhAuthMatrix([string]$GhPath, [string]$TestRoot, [string]$ConfigToken) {
+  $configDirectory = Join-Path $TestRoot "config"
+  $emptyDirectory = Join-Path $TestRoot "empty-config"
+  New-Item -ItemType Directory -Path $emptyDirectory -Force | Out-Null
+  $configTokenHash = Get-NgtAcceptanceSha256 $ConfigToken
+  $ghOnlyToken = "ngt-gh-token-only-probe"
+  $githubOnlyToken = "ngt-github-token-only-probe"
+  $bothGhToken = "ngt-gh-token-priority-probe"
+  $bothGithubToken = "ngt-github-token-lower-priority-probe"
+  Assert-NgtGhAuthMode $GhPath "GH_TOKEN only" $emptyDirectory $ghOnlyToken $null `
+    (Get-NgtAcceptanceSha256 $ghOnlyToken)
+  Assert-NgtGhAuthMode $GhPath "GITHUB_TOKEN only" $emptyDirectory $null $githubOnlyToken `
+    (Get-NgtAcceptanceSha256 $githubOnlyToken)
+  Assert-NgtGhAuthMode $GhPath "GH_CONFIG_DIR only" $configDirectory $null $null $configTokenHash
+  Assert-NgtGhAuthMode $GhPath "both tokens" $configDirectory $bothGhToken $bothGithubToken $null $bothGhToken
+  Assert-NgtGhAuthMode $GhPath "no credentials" $emptyDirectory $null $null $null $null -ExpectUnauthenticated
+}
+
+if ($AuthMatrixOnly) {
+  $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-gh-auth-" + [guid]::NewGuid().ToString("N"))
+  $configDirectory = Join-Path $testRoot "config"
+  $configToken = "ngt-config-only-probe"
+  try {
+    New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+    [System.IO.File]::WriteAllText(
+      (Join-Path $configDirectory "hosts.yml"),
+      "github.com:`r`n    oauth_token: $configToken`r`n    git_protocol: https`r`n",
+      [System.Text.Encoding]::UTF8
+    )
+    $ghPath = Get-Command gh.exe -ErrorAction Stop | Select-Object -ExpandProperty Source
+    Test-NgtGhAuthMatrix $ghPath $testRoot $configToken
+  } finally {
+    if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+  }
+  exit 0
 }
 
 if ($Child) {
@@ -32,23 +143,67 @@ if ($Child) {
       throw "The isolated GitHub CLI configuration was not available to the standard-user process."
     }
     [Environment]::SetEnvironmentVariable("GH_CONFIG_DIR", $expectedConfigDirectory, "User")
+    $userConfigDirectory = [Environment]::GetEnvironmentVariable("GH_CONFIG_DIR", "User")
+    if (-not $userConfigDirectory -or
+        [System.IO.Path]::GetFullPath($userConfigDirectory) -ine $expectedConfigDirectory) {
+      throw "The isolated GH_CONFIG_DIR was not persisted for the standard-user profile."
+    }
     $gh = Get-Command gh.exe -ErrorAction Stop
-    Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
-    $configToken = (& $gh.Source auth token --hostname github.com 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or
-        (Get-NgtAcceptanceSha256 $configToken) -cne [string]$request.expectedTokenSha256) {
+    $configTokenMatch = [regex]::Match(
+      (Get-Content -LiteralPath (Join-Path $expectedConfigDirectory "hosts.yml") -Raw),
+      '(?m)^\s+oauth_token:\s*(\S+)\s*$'
+    )
+    if (-not $configTokenMatch.Success -or
+        (Get-NgtAcceptanceSha256 $configTokenMatch.Groups[1].Value) -cne [string]$request.expectedTokenSha256) {
       throw "The standard-user child process could not read the expected token from GH_CONFIG_DIR."
     }
-    $env:GH_TOKEN = $configToken
-    $environmentToken = (& $gh.Source auth token --hostname github.com 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or
-        (Get-NgtAcceptanceSha256 $environmentToken) -cne [string]$request.expectedTokenSha256) {
-      throw "The standard-user child process could not read the expected GH_TOKEN value."
+    Test-NgtGhAuthMatrix $gh.Source ([string]$request.authProbeRoot) $configTokenMatch.Groups[1].Value
+    Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
+    Remove-Item Env:\GITHUB_TOKEN -ErrorAction SilentlyContinue
+    $env:GH_CONFIG_DIR = $expectedConfigDirectory
+
+    $repository = [string]$request.environment.NGT_UPDATER_TEST_REPOSITORY
+    $targetTag = [string]$request.parameters.TargetTag
+    $manifest = Get-Content -LiteralPath ([string]$request.parameters.ExpectedManifestPath) -Raw | ConvertFrom-Json
+    $releaseOutput = & $gh.Source release view $targetTag --repo $repository --json tagName,isDraft,assets 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "The private updater-test Draft is not readable through GH_CONFIG_DIR only." }
+    $release = ($releaseOutput | Out-String) | ConvertFrom-Json
+    $expectedNames = @($manifest.assets | ForEach-Object name | Sort-Object)
+    $releaseNames = @($release.assets | ForEach-Object name | Sort-Object)
+    if ($release.tagName -ne $targetTag -or -not $release.isDraft -or
+        (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $releaseNames)) {
+      throw "The authenticated updater-test Draft identity or asset inventory is incorrect."
     }
-    if ((Get-Content -LiteralPath $RequestPath -Raw).Contains($configToken)) {
-      throw "The acceptance request file contains the GitHub token."
+    $draftDownloadDirectory = Join-Path ([string]$request.authProbeRoot) "private-draft-assets"
+    New-Item -ItemType Directory -Path $draftDownloadDirectory -Force | Out-Null
+    try {
+      & $gh.Source release download $targetTag --repo $repository --dir $draftDownloadDirectory 2>$null
+      if ($LASTEXITCODE -ne 0) { throw "The private updater-test Draft assets could not be downloaded through GH_CONFIG_DIR only." }
+      $downloadedNames = @(Get-ChildItem -LiteralPath $draftDownloadDirectory -File | ForEach-Object Name | Sort-Object)
+      if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $downloadedNames) {
+        throw "The downloaded private Draft asset inventory is incorrect."
+      }
+      foreach ($asset in $manifest.assets) {
+        $assetPath = Join-Path $draftDownloadDirectory $asset.name
+        if ((Get-Item -LiteralPath $assetPath).Length -ne [long]$asset.size -or
+            (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$asset.sha256) {
+          throw "A downloaded private Draft asset does not match the candidate SHA256: $($asset.name)"
+        }
+      }
+    } finally {
+      if (Test-Path -LiteralPath $draftDownloadDirectory) {
+        Remove-Item -LiteralPath $draftDownloadDirectory -Recurse -Force
+      }
     }
-    Write-Output "GH_CONFIG_DIR and GH_TOKEN were verified through real gh child processes without placing the token in request.json."
+    [System.IO.File]::WriteAllText([string]$request.authProbeReadyPath, "READY", [System.Text.Encoding]::ASCII)
+    $taskProbeDeadline = (Get-Date).AddMinutes(3)
+    while (-not (Test-Path -LiteralPath ([string]$request.authProbeResultPath) -PathType Leaf) -and
+        (Get-Date) -lt $taskProbeDeadline) { Start-Sleep -Milliseconds 250 }
+    if (-not (Test-Path -LiteralPath ([string]$request.authProbeResultPath) -PathType Leaf) -or
+        (Get-Content -LiteralPath ([string]$request.authProbeResultPath) -Raw).Trim() -ne "PASS") {
+      throw "The scheduled-task GH_CONFIG_DIR restart probe failed or timed out."
+    }
+    Write-Output "GH_CONFIG_DIR-only private Draft view, full asset download, and scheduled-task restart passed."
   }
 
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
@@ -74,6 +229,7 @@ if ($Child) {
   } finally {
     if ($request.verifyGitHubAuth) {
       Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
+      Remove-Item Env:\GITHUB_TOKEN -ErrorAction SilentlyContinue
       Remove-Item Env:\GH_CONFIG_DIR -ErrorAction SilentlyContinue
       [Environment]::SetEnvironmentVariable("GH_CONFIG_DIR", $null, "User")
     }
@@ -135,11 +291,14 @@ $parameters = switch ($Acceptance) {
 $runId = [guid]::NewGuid().ToString("N")
 $userName = "ngtci" + $runId.Substring(0, 8)
 $account = "$env:COMPUTERNAME\$userName"
-$password = ConvertTo-SecureString ($runId + "Aa1!") -AsPlainText -Force
+$passwordPlain = $runId + "Aa1!"
+$password = ConvertTo-SecureString $passwordPlain -AsPlainText -Force
 $user = $null
 $process = $null
 $processTerminationFailed = $false
 $credentialCleanupFailed = $false
+$taskName = $null
+$taskRegistered = $false
 $workspaceAclPaths = @()
 $isolatedTemp = Join-Path $env:RUNNER_TEMP ("ngt-acceptance-" + $runId)
 $requestPath = Join-Path $isolatedTemp "request.json"
@@ -148,13 +307,18 @@ $stdoutPath = Join-Path $isolatedTemp "acceptance.stdout.log"
 $stderrPath = Join-Path $isolatedTemp "acceptance.stderr.log"
 $ghConfigDirectory = Join-Path $isolatedTemp "gh-config"
 $hostsPath = Join-Path $ghConfigDirectory "hosts.yml"
+$authProbeRoot = Join-Path $isolatedTemp "auth-probe"
+$authProbeReadyPath = Join-Path $isolatedTemp "auth-probe.ready"
+$authProbeResultPath = Join-Path $isolatedTemp "auth-probe.result"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$ghExecutablePath = $null
 $expectedTokenSha256 = $null
 
 try {
   if ($Acceptance -eq "production-update") {
     if (-not $env:GH_TOKEN) { throw "Production updater acceptance requires the scoped GitHub Actions token." }
     $expectedTokenSha256 = Get-NgtAcceptanceSha256 $env:GH_TOKEN
+    $ghExecutablePath = Get-Command gh.exe -ErrorAction Stop | Select-Object -ExpandProperty Source
   }
   $user = New-LocalUser -Name $userName -Password $password `
     -Description "NGT release acceptance standard account" -PasswordNeverExpires
@@ -191,6 +355,7 @@ try {
 
   if ($Acceptance -eq "production-update") {
     New-Item -ItemType Directory -Path $ghConfigDirectory -Force | Out-Null
+    New-Item -ItemType Directory -Path $authProbeRoot -Force | Out-Null
     $hostsConfiguration = "github.com:`r`n    oauth_token: $($env:GH_TOKEN)`r`n    git_protocol: https`r`n"
     [System.IO.File]::WriteAllText($hostsPath, $hostsConfiguration, [System.Text.Encoding]::UTF8)
     if ((Get-Acl -LiteralPath $hostsPath).AccessToString -match "Everyone|Authenticated Users|BUILTIN\\Users") {
@@ -237,6 +402,9 @@ try {
     verifyGitHubAuth = ($Acceptance -eq "production-update")
     ghConfigDirectory = if ($Acceptance -eq "production-update") { $ghConfigDirectory } else { $null }
     expectedTokenSha256 = $expectedTokenSha256
+    authProbeRoot = if ($Acceptance -eq "production-update") { $authProbeRoot } else { $null }
+    authProbeReadyPath = if ($Acceptance -eq "production-update") { $authProbeReadyPath } else { $null }
+    authProbeResultPath = if ($Acceptance -eq "production-update") { $authProbeResultPath } else { $null }
   }
   $requestText = $request | ConvertTo-Json -Depth 6
   if ($expectedTokenSha256 -and $requestText.Contains($env:GH_TOKEN)) {
@@ -252,7 +420,46 @@ try {
     -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
 
   $acceptanceDeadline = (Get-Date).AddMinutes(110)
-  while (-not $process.WaitForExit(60000)) {
+  $nextProgress = (Get-Date).AddMinutes(1)
+  $taskProbeCompleted = ($Acceptance -ne "production-update")
+  while (-not $process.WaitForExit(1000)) {
+    if (-not $taskProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
+      try {
+        $taskName = "NGT Release GH Config Probe " + $runId
+        $taskScript = Join-Path $workspace "scripts\test-windows-studio-gh-config-task.ps1"
+        $taskArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $taskScript + '" -GhPath "' + $ghExecutablePath + '" -ExpectedConfigDirectory "' + $ghConfigDirectory + '" -ExpectedTokenSha256 ' + $expectedTokenSha256 + ' -ResultPath "' + $authProbeResultPath + '"'
+        $taskAction = New-ScheduledTaskAction -Execute $powershellPath -Argument $taskArguments
+        $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger `
+          -User $account -Password $passwordPlain -RunLevel Limited -Force | Out-Null
+        $taskRegistered = $true
+        Start-ScheduledTask -TaskName $taskName
+        $taskDeadline = (Get-Date).AddSeconds(90)
+        while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
+            (Get-Date) -lt $taskDeadline) { Start-Sleep -Milliseconds 250 }
+        if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -or
+            (Get-Content -LiteralPath $authProbeResultPath -Raw).Trim() -ne "PASS") {
+          [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
+          throw "The scheduled task could not read GH_CONFIG_DIR after its user-profile restart."
+        }
+        $taskStopDeadline = (Get-Date).AddSeconds(10)
+        do {
+          $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
+          if ($taskState -eq "Ready") { break }
+          Start-Sleep -Milliseconds 250
+        } while ((Get-Date) -lt $taskStopDeadline)
+        if ($taskState -ne "Ready") { throw "The isolated credential probe task did not finish cleanly." }
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        $taskRegistered = $false
+        [System.IO.File]::WriteAllText($authProbeResultPath, "PASS", [System.Text.Encoding]::ASCII)
+        $taskProbeCompleted = $true
+      } catch {
+        if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
+          [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
+        }
+        throw
+      }
+    }
     if ((Get-Date) -ge $acceptanceDeadline) {
       & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
       [void]$process.WaitForExit(5000)
@@ -260,7 +467,10 @@ try {
       if (-not $process.HasExited) { $processTerminationFailed = $true }
       throw "The standard-user $Acceptance acceptance exceeded its 110-minute timeout."
     }
-    Write-Output "The standard-user acceptance is still running."
+    if ((Get-Date) -ge $nextProgress) {
+      Write-Output "The standard-user acceptance is still running."
+      $nextProgress = (Get-Date).AddMinutes(1)
+    }
   }
   $process.Refresh()
   if ($expectedTokenSha256) {
@@ -286,6 +496,19 @@ try {
     throw "The standard-user $Acceptance acceptance failed with child exit code $childExitCode and process exit code $processExitCode."
   }
 } finally {
+  if ($taskRegistered -and $taskName) {
+    try {
+      Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      $taskStopDeadline = (Get-Date).AddSeconds(5)
+      do {
+        $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
+        if ($taskState -eq "Ready") { break }
+        Start-Sleep -Milliseconds 250
+      } while ((Get-Date) -lt $taskStopDeadline)
+      if ($taskState -ne "Ready") { throw "The isolated credential probe task did not stop before cleanup." }
+      Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
+    } catch { $credentialCleanupFailed = $true }
+  }
   if ($process -and -not $process.HasExited) {
     & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
     [void]$process.WaitForExit(5000)
@@ -370,4 +593,6 @@ try {
   if ($processTerminationFailed -or $credentialCleanupFailed) {
     throw "The isolated GitHub credentials or standard-user process could not be fully cleaned up; discard this hosted runner."
   }
+  if ($password) { $password.Dispose() }
+  $passwordPlain = $null
 }

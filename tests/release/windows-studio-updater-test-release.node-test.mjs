@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -18,8 +18,12 @@ import {
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const baselineSha = "b".repeat(40);
 const candidateSha = "a".repeat(40);
+const candidateVersion = JSON.parse(
+  await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+).version;
+const candidateTag = "v" + candidateVersion;
 
-async function makeCandidate(root, tag = "v2.0.22") {
+async function makeCandidate(root, tag = candidateTag) {
   const directory = path.join(root, "candidate");
   await mkdir(directory, { recursive: true });
   for (const name of expectedAssetNames(tag).filter(
@@ -107,7 +111,7 @@ function makeApis({
         UPDATER_TEST_BASELINE_TAG,
         badBaselineTag ? "c".repeat(40) : baselineSha,
       ],
-      ["v2.0.22", candidateSha],
+      [candidateTag, candidateSha],
     ]),
     releases: new Map(),
     assets: new Map(),
@@ -201,6 +205,8 @@ test("prepares an exact-SHA private baseline mirror and candidate Draft idempote
         testApi,
         repository: "Owner/ngt-updater-test",
       });
+      assert.equal(manifest.tag, candidateTag);
+      assert.equal(manifest.version, candidateVersion);
       assert.equal(baseline.tag_name, UPDATER_TEST_BASELINE_TAG);
       assert.equal(baseline.draft, false);
       assert.equal(baseline.assets.length, 6);

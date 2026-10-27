@@ -261,6 +261,16 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
             draft: false,
             assets: assetsFor("v2.0.13"),
           },
+          {
+            tag_name: "v2.0.22",
+            draft: true,
+            assets: assetsFor("v2.0.22"),
+          },
+          {
+            tag_name: "v2.0.21",
+            draft: false,
+            assets: assetsFor("v2.0.21"),
+          },
         ]),
         { status: 200 },
       );
@@ -280,7 +290,13 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
     null,
     "an incomplete baseline must not be silently replaced by a newer release",
   );
-  assert.equal(requests.length, 3);
+  const v2023Baseline = await findPublishedUpdateBaseline(api, "v2.0.23");
+  assert.equal(
+    v2023Baseline.tag_name,
+    "v2.0.21",
+    "v2.0.23 must remain discoverable from v2.0.21 while the v2.0.22 Draft is ignored",
+  );
+  assert.equal(requests.length, 4);
   assert.match(requests[0], /\/releases\?per_page=100&page=1$/);
 });
 
@@ -745,6 +761,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
       "utf8",
     )
   ).replace(/\r\n/g, "\n");
+  const scheduledTaskAuthProbe = (
+    await readText("scripts/test-windows-studio-gh-config-task.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
   const diagnostics = (
     await readText("scripts/write-windows-studio-diagnostics.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -803,10 +822,37 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /ngt-updater-acceptance-\$\{\{ github\.sha \}\}/,
   );
   assert.match(ready, /workflow_dispatch:/);
+  assert.match(
+    releaseTool,
+    /process\.env\.GITHUB_REF !== "refs\/heads\/master"\s*\|\|\s*process\.env\.GITHUB_EVENT_NAME !== "workflow_dispatch"/,
+  );
+  assert.doesNotMatch(ready, /pull_request:/);
+  assert.match(
+    ready,
+    /production-updater-acceptance:[\s\S]*?needs: \[qualify, build\]/,
+  );
+  assert.ok(
+    ready.indexOf("Require master and exact-SHA Verify MVP") <
+      ready.indexOf("secrets.NGT_UPDATER_TEST_TOKEN"),
+    "the isolated test credential is unavailable until trusted-ref qualification succeeds",
+  );
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
   assert.match(
     ready,
-    /qualify:[\s\S]*Verify the isolated private updater repository before candidate build[\s\S]*prepare-windows-studio-updater-test-release\.mjs preflight/,
+    /production-updater-acceptance:[\s\S]*?environment: ngt-updater-test/,
+  );
+  assert.ok(
+    ready.indexOf("environment: ngt-updater-test") <
+      ready.indexOf("secrets.NGT_UPDATER_TEST_TOKEN"),
+    "the write credential is available only inside the protected updater-test environment",
+  );
+  const qualifyJob = ready.slice(
+    ready.indexOf("  qualify:"),
+    ready.indexOf("  build:"),
+  );
+  assert.doesNotMatch(
+    qualifyJob,
+    /NGT_UPDATER_TEST_TOKEN|NGT_UPDATER_TEST_REPOSITORY/,
   );
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
@@ -824,6 +870,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(
     candidateBuildAction,
     /Run Windows updater coordination and safety regressions[\s\S]*test-windows-studio-update-safety\.ps1/,
+  );
+  assert.match(
+    candidateBuildAction,
+    /Test GitHub CLI authentication source precedence[\s\S]*-AuthMatrixOnly/,
   );
   assert.match(
     onlineAcceptanceWorkflow,
@@ -1002,6 +1052,33 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /Registry::HKEY_USERS/);
   assert.match(standardUserAcceptance, /processTerminationFailed/);
   assert.match(standardUserAcceptance, /credentialCleanupFailed/);
+  assert.match(standardUserAcceptance, /Test-NgtGhAuthMatrix/);
+  assert.match(standardUserAcceptance, /GH_TOKEN only/);
+  assert.match(standardUserAcceptance, /GITHUB_TOKEN only/);
+  assert.match(standardUserAcceptance, /GH_CONFIG_DIR only/);
+  assert.match(standardUserAcceptance, /both tokens/);
+  assert.match(standardUserAcceptance, /no credentials/);
+  assert.match(standardUserAcceptance, /Remove-Item Env:\\GITHUB_TOKEN/);
+  assert.doesNotMatch(standardUserAcceptance, /\$env:GH_TOKEN = \$configToken/);
+  assert.match(
+    standardUserAcceptance,
+    /release view \$targetTag --repo \$repository/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /release download \$targetTag --repo \$repository/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /Get-FileHash -LiteralPath \$assetPath -Algorithm SHA256/,
+  );
+  assert.match(standardUserAcceptance, /authProbeReadyPath/);
+  assert.match(standardUserAcceptance, /Register-ScheduledTask/);
+  assert.match(standardUserAcceptance, /Unregister-ScheduledTask/);
+  assert.match(scheduledTaskAuthProbe, /GH_CONFIG_DIR/);
+  assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);
+  assert.match(scheduledTaskAuthProbe, /auth token --hostname github\.com/);
+  assert.match(scheduledTaskAuthProbe, /ExpectedTokenSha256/);
   assert.ok(
     standardUserAcceptance.includes(
       'GH_CONFIG_DIR = if ($Acceptance -eq "production-update") { $ghConfigDirectory } else { $null }',
