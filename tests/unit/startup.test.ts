@@ -264,6 +264,20 @@ describe("Windows persistent startup", () => {
     );
     expect(installer).toContain("Start-NgtStudioDatabase");
     expect(installer).toContain("Wait-NgtStudioHealth");
+    const standalonePublicDestination = packager.indexOf(
+      '$standalonePublicDestination = Join-Path $standaloneDestination "public"',
+    );
+    const removeStandalonePublic = packager.indexOf(
+      "Remove-Item -LiteralPath $standalonePublicDestination -Recurse -Force",
+      standalonePublicDestination,
+    );
+    const copyStandalonePublic = packager.indexOf(
+      'Copy-Item -LiteralPath "public" -Destination $standalonePublicDestination -Recurse -Force',
+      removeStandalonePublic,
+    );
+    expect(standalonePublicDestination).toBeGreaterThanOrEqual(0);
+    expect(removeStandalonePublic).toBeGreaterThan(standalonePublicDestination);
+    expect(copyStandalonePublic).toBeGreaterThan(removeStandalonePublic);
     const common = await readFile("scripts/windows-studio-common.ps1", "utf8");
     expect(common).toContain("$process.HasExited");
     expect(common).toContain(

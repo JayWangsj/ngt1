@@ -183,7 +183,11 @@ if (Test-Path -LiteralPath $standaloneStaticDestination) {
 }
 Copy-Item -LiteralPath $staticSource -Destination $standaloneStaticDestination -Recurse -Force
 Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public") -Recurse -Force
-Copy-Item -LiteralPath "public" -Destination (Join-Path $standaloneDestination "public") -Recurse -Force
+$standalonePublicDestination = Join-Path $standaloneDestination "public"
+if (Test-Path -LiteralPath $standalonePublicDestination) {
+  Remove-Item -LiteralPath $standalonePublicDestination -Recurse -Force
+}
+Copy-Item -LiteralPath "public" -Destination $standalonePublicDestination -Recurse -Force
 $nonWindowsSharpPackages = Get-ChildItem -LiteralPath $stage -Directory -Recurse -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '^sharp-libvips-(darwin|linux|freebsd|linuxmusl|win32-arm64)' }
 foreach ($nativePackage in $nonWindowsSharpPackages) {
