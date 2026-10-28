@@ -1004,6 +1004,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(onlineAuthTest, /Remove-Item Env:\\GH_TOKEN/);
   assert.match(onlineAuthTest, /Remove-Item Env:\\GITHUB_TOKEN/);
+  assert.match(onlineAuthTest, /\$global:LASTEXITCODE = 0/);
   assert.match(
     onlineAuthTest,
     /Local candidate mode continued without GitHub credentials\./,
