@@ -6,3 +6,19 @@ function Set-NgtReadyBaselineGhShim([string]$ScriptContent) {
   }
   return $ScriptContent.Replace($cliFunction, "$cliFunction`r`n  if (`$env:NGT_READY_GH_SHIM) { return `$env:NGT_READY_GH_SHIM }")
 }
+
+function Write-NgtStudioReleaseMetadataNoBom {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [object]$Metadata
+  )
+
+  $json = $Metadata | ConvertTo-Json -Depth 100
+  [System.IO.File]::WriteAllText(
+    $Path,
+    $json + [System.Environment]::NewLine,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+}

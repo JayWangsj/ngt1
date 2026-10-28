@@ -14,6 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
 . (Join-Path $PSScriptRoot "windows-studio-online-update-auth.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
@@ -525,7 +526,7 @@ try {
     if (-not $updaterEntry) { throw "Candidate package is missing the updater integrity entry." }
     Copy-Item -LiteralPath $AcceptanceUpdaterPath -Destination $updaterPath -Force
     $updaterEntry.Value = (Get-FileHash -LiteralPath $updaterPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+    Write-NgtStudioReleaseMetadataNoBom -Path $baselineMetadataPath -Metadata $baselineMetadata
   }
 
   # GitHub's disposable standard user has no interactive Task Scheduler session.
@@ -547,7 +548,7 @@ try {
     $baselineStartupScript = $baselineStartupScript.Replace($scheduledTaskStart, $directLauncherStart)
     Set-Content -LiteralPath $baselineStartupScriptPath -Value $baselineStartupScript -Encoding utf8
     $startupManifestEntry.Value = (Get-FileHash -LiteralPath $baselineStartupScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+    Write-NgtStudioReleaseMetadataNoBom -Path $baselineMetadataPath -Metadata $baselineMetadata
     Write-Output "Adapted the legacy baseline launch for the non-interactive hosted acceptance."
   } elseif (-not $baselineStartupScript.Contains($directLauncherStart)) {
     throw "Baseline startup script has no supported immediate launcher command."
@@ -576,7 +577,6 @@ try {
       Write-Output "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1: $relativePath ($replaceCount calls)."
     }
     if ($CandidateDirectory -and -not $ProductionUpdater -and $relativePath -eq "scripts/windows-studio-common.ps1") {
-      . (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
       $scriptContent = Set-NgtReadyBaselineGhShim $scriptContent
       Write-Output "Adapted the verified legacy baseline to use the local candidate release adapter."
     }
@@ -585,7 +585,7 @@ try {
       $manifestEntry.Value = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
   }
-  $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+  Write-NgtStudioReleaseMetadataNoBom -Path $baselineMetadataPath -Metadata $baselineMetadata
 
   $installationAttempted = $true
   & (Join-Path $baselineRoot "scripts\install-windows-studio.ps1") `
