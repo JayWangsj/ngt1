@@ -274,10 +274,7 @@ try {
   [System.IO.Compression.ZipFile]::CreateFromDirectory($packageRoot, $packageZipPath)
   $extractedPackageRoot = Join-Path $tempRootFullPath "extracted-package"
   New-Item -ItemType Directory -Path $extractedPackageRoot | Out-Null
-  & tar.exe -xf $packageZipPath -C $extractedPackageRoot
-  if ($LASTEXITCODE -ne 0) {
-    throw "The manifest regression ZIP could not be extracted."
-  }
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($packageZipPath, $extractedPackageRoot)
   $extractedManifestPath = Join-Path $extractedPackageRoot "studio-release.json"
   Test-NgtStudioReleaseMetadata `
     -Path $extractedManifestPath `

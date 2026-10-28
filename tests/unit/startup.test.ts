@@ -131,9 +131,42 @@ describe("Windows persistent startup", () => {
     expect(acceptance).toContain(
       "Baseline script failed integrity validation before runner adaptation",
     );
-    expect(acceptance).toContain("ConvertTo-Json -Depth 100");
     expect(acceptance).toContain(
       "Baseline startup script has no supported immediate launcher command.",
+    );
+  });
+
+  it("writes baseline manifests through the shared BOM-free metadata helper", async () => {
+    const acceptance = await readFile(
+      "scripts/test-windows-studio-online-update.ps1",
+      "utf8",
+    );
+    const metadataHelper = await readFile(
+      "scripts/windows-studio-release-metadata.ps1",
+      "utf8",
+    );
+    const packageBuilder = await readFile(
+      "scripts/build-windows-studio-package.ps1",
+      "utf8",
+    );
+
+    expect(acceptance).toContain(
+      '. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")',
+    );
+    expect(
+      acceptance.match(
+        /Write-NgtStudioReleaseMetadataNoBom\s+-Path \$baselineMetadataPath\s+-Metadata \$baselineMetadata/g,
+      ),
+    ).toHaveLength(3);
+    expect(metadataHelper).toContain(
+      "function Write-NgtStudioReleaseMetadataNoBom",
+    );
+    expect(metadataHelper).toMatch(/\[int\]\$Depth = 100/);
+    expect(metadataHelper).toContain(
+      "ConvertTo-Json -InputObject $Metadata -Depth $Depth",
+    );
+    expect(packageBuilder).toMatch(
+      /Write-NgtStudioReleaseMetadataNoBom\s+`\s*-Path \(Join-Path \$stage "studio-release\.json"\)\s+`\s*-Metadata \$releaseMetadata\s+`\s*-Depth 5/,
     );
   });
 
