@@ -10,7 +10,7 @@ on:
         default: none
         options: [none, installer]
       test_repository:
-        description: Fresh private repository on main; use an App token or fine-grained token with Contents write only on this repository.
+        description: "Fresh disposable private repo on main. Creates baseline and candidate Releases/refs; retained for audit, not auto-deleted. Manually delete only this test repo after results. Token: Contents write only here."
         type: string
         required: true
 

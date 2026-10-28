@@ -839,6 +839,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
   assert.match(
     ready,
+    /test_repository:[\s\S]*retained for audit, not auto-deleted[\s\S]*Manually delete only this test repo after results/,
+  );
+  assert.match(
+    ready,
     /production-updater-acceptance:[\s\S]*?environment: ngt-updater-test/,
   );
   assert.ok(
@@ -1058,6 +1062,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /GH_CONFIG_DIR only/);
   assert.match(standardUserAcceptance, /both tokens/);
   assert.match(standardUserAcceptance, /no credentials/);
+  assert.match(standardUserAcceptance, /ngt-noauth\.invalid/);
   assert.match(standardUserAcceptance, /Remove-Item Env:\\GITHUB_TOKEN/);
   assert.doesNotMatch(standardUserAcceptance, /\$env:GH_TOKEN = \$configToken/);
   assert.match(

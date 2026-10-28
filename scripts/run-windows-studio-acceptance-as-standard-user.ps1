@@ -17,7 +17,7 @@ function Get-NgtAcceptanceSha256([string]$Value) {
   }
 }
 
-function Invoke-NgtGhAuthToken([string]$GhPath, [string]$ConfigDirectory, [string]$GhToken, [string]$GithubToken) {
+function Invoke-NgtGhAuthToken([string]$GhPath, [string]$ConfigDirectory, [string]$GhToken, [string]$GithubToken, [string]$Hostname) {
   $previousEnvironment = @{
     GH_CONFIG_DIR = [Environment]::GetEnvironmentVariable("GH_CONFIG_DIR", "Process")
     GH_TOKEN = [Environment]::GetEnvironmentVariable("GH_TOKEN", "Process")
@@ -32,7 +32,7 @@ function Invoke-NgtGhAuthToken([string]$GhPath, [string]$ConfigDirectory, [strin
     else { Remove-Item Env:\GITHUB_TOKEN -ErrorAction SilentlyContinue }
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $GhPath
-    $startInfo.Arguments = "auth token --hostname github.com"
+    $startInfo.Arguments = "auth token --hostname $Hostname"
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
@@ -77,7 +77,9 @@ function Assert-NgtGhAuthMode(
   [string]$ExpectedToken,
   [switch]$ExpectUnauthenticated
 ) {
-  $result = Invoke-NgtGhAuthToken $GhPath $ConfigDirectory $GhToken $GithubToken
+  # A dedicated host keeps the current Windows user's persisted github.com login out of this negative probe.
+  $hostname = if ($ExpectUnauthenticated) { "ngt-noauth.invalid" } else { "github.com" }
+  $result = Invoke-NgtGhAuthToken $GhPath $ConfigDirectory $GhToken $GithubToken $hostname
   if ($ExpectUnauthenticated) {
     if ($result.ExitCode -eq 0 -or $result.Token) {
       throw "GitHub CLI accepted credentials in the unauthenticated $Mode mode."

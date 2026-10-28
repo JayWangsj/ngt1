@@ -782,7 +782,8 @@ describe("Production updater GitHub authentication", () => {
       "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
       "utf8",
     );
-    expect(runner).toContain("auth token --hostname github.com");
+    expect(runner).toContain("auth token --hostname $Hostname");
+    expect(runner).toContain("ngt-noauth.invalid");
     expect(runner).toContain("SetAccessRuleProtection($true, $false)");
     expect(runner).toContain("expectedTokenSha256");
     expect(runner).toContain('Join-Path $ghConfigDirectory "hosts.yml"');
