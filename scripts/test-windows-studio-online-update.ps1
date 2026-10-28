@@ -42,8 +42,10 @@ if ($TestReleaseRepository -and
   throw "Production updater acceptance requires a separate owner/name test repository."
 }
 $githubCli = Get-Command gh -ErrorAction Stop | Select-Object -ExpandProperty Source
-$authOutput = & $githubCli auth status --hostname github.com 2>&1
-if ($LASTEXITCODE -ne 0) { throw "GitHub release read authorization is unavailable." }
+if (-not $CandidateDirectory -or $ManualInstaller -or $ProductionUpdater) {
+  $authOutput = & $githubCli auth status --hostname github.com 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "GitHub release read authorization is unavailable." }
+}
 
 $manifest = Get-Content -LiteralPath $ExpectedManifestPath -Raw | ConvertFrom-Json
 $targetVersion = $TargetTag -replace "^v", ""

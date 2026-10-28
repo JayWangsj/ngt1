@@ -983,6 +983,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
   assert.match(
     online,
+    /if \(-not \$CandidateDirectory -or \$ManualInstaller -or \$ProductionUpdater\) \{\s+\$authOutput = & \$githubCli auth status --hostname github\.com 2>&1\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "GitHub release read authorization is unavailable\." \}\s+\}/,
+  );
+  assert.match(
+    online,
     /if \(\$ProductionUpdater\) \{\s+\$publishedLatestVersion = \$oldTag -replace "\^v", ""\s+if \(\$updateInfo\.updateAvailable -or \$updateInfo\.latestVersion -ne \$publishedLatestVersion\)/,
   );
   assert.match(
