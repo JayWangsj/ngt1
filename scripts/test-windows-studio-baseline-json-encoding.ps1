@@ -12,7 +12,10 @@ try {
   foreach ($scriptPath in @(
       $PSCommandPath,
       (Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1"),
-      (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
+      (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1"),
+      (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1"),
+      (Join-Path $PSScriptRoot "build-windows-studio-package.ps1"),
+      (Join-Path $PSScriptRoot "test-windows-studio-package.ps1")
     )) {
     $tokens = $null
     $parseErrors = $null
@@ -27,6 +30,7 @@ try {
   }
 
   . (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
+  . (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
 
   $nodePath = (Get-Command "node.exe" -ErrorAction Stop).Source
   $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-baseline-json-" + [guid]::NewGuid().ToString("N"))
@@ -133,6 +137,11 @@ try {
     if ($nodeExitCode -ne 0) {
       throw "Node JSON.parse failed after $Stage with exit code $nodeExitCode."
     }
+    Test-NgtStudioReleaseMetadata `
+      -Path $ManifestPath `
+      -ExpectedVersion $ExpectedVersion `
+      -ExpectedCommit $ExpectedCommit `
+      -NodeExecutable $NodePath
 
     $actual = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
     if ($actual.version -cne $ExpectedVersion) { throw "$Stage changed release version unexpectedly." }
@@ -206,7 +215,131 @@ try {
     -ManifestPath $manifestPath -BaselineRoot $baselineRoot -NodePath $nodePath `
     -NodeProbePath $nodeProbePath -LabelPath $labelPath
 
-  Write-Output "Windows PowerShell 5.1 baseline JSON encoding regression passed after all four manifest writes."
+  $packageRoot = Join-Path $tempRootFullPath "package"
+  $packageRuntimeRoot = Join-Path $packageRoot "runtime"
+  $packageAssetRoot = Join-Path $packageRoot "assets"
+  New-Item -ItemType Directory -Path $packageRuntimeRoot, $packageAssetRoot | Out-Null
+  $packageUpdaterPath = Join-Path $packageRuntimeRoot "NGTUpdater.exe"
+  $packageAssetPath = Join-Path $packageAssetRoot "application.txt"
+  $unicodeAssetName = [string]([char]0x7BA1) + [string]([char]0x7406) + "-system.txt"
+  $unicodeAssetRelativePath = "assets/" + $unicodeAssetName
+  $unicodeAssetPath = Join-Path $packageAssetRoot $unicodeAssetName
+  [System.IO.File]::WriteAllBytes($packageUpdaterPath, [byte[]]@(2, 4, 6, 8))
+  [System.IO.File]::WriteAllText($packageAssetPath, $nonAsciiText, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($unicodeAssetPath, "release asset", [System.Text.UTF8Encoding]::new($false))
+  $packageFiles = @{
+    "runtime/NGTUpdater.exe" = (Get-FileHash -LiteralPath $packageUpdaterPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    "assets/application.txt" = (Get-FileHash -LiteralPath $packageAssetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $unicodeAssetRelativePath = (Get-FileHash -LiteralPath $unicodeAssetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+  $packageMetadata = @{
+    version = "2.0.23"
+    commit = $commit
+    runtimeHash = (Get-FileHash -LiteralPath $packageUpdaterPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    files = $packageFiles
+    createdAt = "2026-10-28T00:00:00.0000000Z"
+  }
+  $packageManifestPath = Join-Path $packageRoot "studio-release.json"
+  Write-NgtStudioReleaseMetadataNoBom -Path $packageManifestPath -Metadata $packageMetadata -Depth 5
+  Test-NgtStudioReleaseMetadata `
+    -Path $packageManifestPath `
+    -ExpectedVersion "2.0.23" `
+    -ExpectedCommit $commit `
+    -NodeExecutable $nodePath
+  $writtenPackageMetadata = [System.IO.File]::ReadAllText(
+    $packageManifestPath,
+    [System.Text.Encoding]::UTF8
+  ) | ConvertFrom-Json
+  if ($writtenPackageMetadata.runtimeHash -cne $packageMetadata.runtimeHash) {
+    throw "Formal package manifest generation changed runtimeHash."
+  }
+  if (([DateTime]$writtenPackageMetadata.createdAt).ToUniversalTime().ToString("o") -cne
+      ([DateTime]$packageMetadata.createdAt).ToUniversalTime().ToString("o")) {
+    throw "Formal package manifest generation changed createdAt."
+  }
+  $writtenPackagePaths = @($writtenPackageMetadata.files.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object)
+  $expectedPackagePaths = @($packageFiles.Keys | Sort-Object)
+  if (Compare-Object -ReferenceObject $expectedPackagePaths -DifferenceObject $writtenPackagePaths) {
+    throw "Formal package manifest generation changed the file inventory or non-ASCII paths."
+  }
+  foreach ($relativePath in $expectedPackagePaths) {
+    $entry = $writtenPackageMetadata.files.PSObject.Properties[$relativePath]
+    if (-not $entry -or ([string]$entry.Value).ToLowerInvariant() -cne $packageFiles[$relativePath]) {
+      throw "Formal package manifest generation changed SHA-256: $relativePath"
+    }
+  }
+
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $packageZipPath = Join-Path $tempRootFullPath "package.zip"
+  [System.IO.Compression.ZipFile]::CreateFromDirectory($packageRoot, $packageZipPath)
+  $extractedPackageRoot = Join-Path $tempRootFullPath "extracted-package"
+  New-Item -ItemType Directory -Path $extractedPackageRoot | Out-Null
+  & tar.exe -xf $packageZipPath -C $extractedPackageRoot
+  if ($LASTEXITCODE -ne 0) {
+    throw "The manifest regression ZIP could not be extracted."
+  }
+  $extractedManifestPath = Join-Path $extractedPackageRoot "studio-release.json"
+  Test-NgtStudioReleaseMetadata `
+    -Path $extractedManifestPath `
+    -ExpectedVersion "2.0.23" `
+    -ExpectedCommit $commit `
+    -NodeExecutable $nodePath
+  foreach ($relativePath in @($packageFiles.Keys)) {
+    $extractedFilePath = Join-Path $extractedPackageRoot ($relativePath -replace "/", "\")
+    $extractedHash = (Get-FileHash -LiteralPath $extractedFilePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($extractedHash -cne $packageFiles[$relativePath]) {
+      throw "ZIP extraction changed a file covered by the manifest: $relativePath"
+    }
+  }
+
+  $extractedManifestBytes = [System.IO.File]::ReadAllBytes($extractedManifestPath)
+  $bomManifestBytes = New-Object byte[] ($extractedManifestBytes.Length + 3)
+  [Array]::Copy([byte[]]@(0xEF, 0xBB, 0xBF), 0, $bomManifestBytes, 0, 3)
+  [Array]::Copy($extractedManifestBytes, 0, $bomManifestBytes, 3, $extractedManifestBytes.Length)
+  [System.IO.File]::WriteAllBytes($extractedManifestPath, $bomManifestBytes)
+  $bomRejected = $false
+  try {
+    Test-NgtStudioReleaseMetadata `
+      -Path $extractedManifestPath `
+      -ExpectedVersion "2.0.23" `
+      -ExpectedCommit $commit `
+      -NodeExecutable $nodePath
+  } catch {
+    $bomRejected = $true
+  }
+  if (-not $bomRejected) {
+    throw "The extracted ZIP manifest validator accepted a UTF-8 BOM."
+  }
+
+  $missingFileRejected = $false
+  try {
+    Test-NgtStudioReleaseMetadata `
+      -Path (Join-Path $extractedPackageRoot "missing-studio-release.json") `
+      -ExpectedVersion "2.0.23" `
+      -ExpectedCommit $commit `
+      -NodeExecutable $nodePath
+  } catch {
+    $missingFileRejected = $true
+  }
+  if (-not $missingFileRejected) {
+    throw "The extracted ZIP manifest validator accepted a missing manifest."
+  }
+
+  $missingNodeRejected = $false
+  try {
+    Test-NgtStudioReleaseMetadata `
+      -Path $packageManifestPath `
+      -ExpectedVersion "2.0.23" `
+      -ExpectedCommit $commit `
+      -NodeExecutable (Join-Path $tempRootFullPath "missing-node.exe")
+  } catch {
+    $missingNodeRejected = $true
+  }
+  if (-not $missingNodeRejected) {
+    throw "The extracted ZIP manifest validator accepted a missing Node.js executable."
+  }
+
+  Write-Output "Windows PowerShell 5.1 manifest regressions passed: baseline rewrites, package generation, ZIP extraction, BOM rejection, and missing dependencies."
 } catch {
   [Console]::Error.WriteLine("Baseline JSON encoding regression failed: " + [string]$_)
   $failure = $_

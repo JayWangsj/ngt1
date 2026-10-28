@@ -149,6 +149,8 @@ try {
   server.listen(3000, "127.0.0.1");
   await serverReady;
   listening = true;
+  // Let the Windows PowerShell child observe the newly bound loopback listener.
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
   const valid = await runVerifier(resolve(fixtureRoot, "release"));
   assert.equal(valid.code, 0, valid.output);
   assert.match(valid.output, /checks passed for 8 pages and 2 assets/);

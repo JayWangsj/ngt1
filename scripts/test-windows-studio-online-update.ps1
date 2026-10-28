@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
 . (Join-Path $PSScriptRoot "windows-studio-online-update-auth.ps1")
 . (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."

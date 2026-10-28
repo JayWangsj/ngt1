@@ -18,10 +18,12 @@ on:
       - "scripts/test-windows-studio-backup.ps1"
       - "scripts/test-windows-studio-install-coordination.ps1"
       - "scripts/test-windows-studio-baseline-json-encoding.ps1"
+      - "scripts/test-windows-studio-package.ps1"
       - "scripts/test-windows-studio-online-update.ps1"
       - "scripts/test-windows-studio-online-update-auth.ps1"
       - "scripts/windows-studio-online-update-auth.ps1"
       - "scripts/windows-studio-ready-baseline.ps1"
+      - "scripts/windows-studio-release-metadata.ps1"
       - "scripts/verify-windows-studio-runtime.ps1"
       - "scripts/test-windows-studio-update-safety.ps1"
       - "tests/release/windows-studio-online-update-ui.mjs"
@@ -62,9 +64,6 @@ jobs:
       - uses: ./.github/actions/build-windows-studio-candidate
         env:
           NGT_RELEASE_READY: "true"
-      - name: Test Windows PowerShell 5.1 baseline JSON encoding
-        shell: powershell
-        run: ./scripts/test-windows-studio-baseline-json-encoding.ps1
       - name: Verify runtime gate rejects redirects and generic error pages
         shell: powershell
         run: node tests/release/windows-studio-runtime-verifier.test.mjs

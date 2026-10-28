@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 . (Join-Path $PSScriptRoot "studio-runtime.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
 $standaloneBuild = Join-Path $BuildDirectory "standalone"
 if (-not (Test-Path -LiteralPath (Join-Path $standaloneBuild "server.js"))) {
   throw "Production build is missing. Run pnpm build first."
@@ -336,13 +337,17 @@ $stageFiles | ForEach-Object {
   $fileManifest[$relativePath] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-@{
+$releaseMetadata = @{
   version = $version
   commit = $commit
   runtimeHash = $runtimeHash
   files = $fileManifest
   createdAt = (Get-Date).ToUniversalTime().ToString("o")
-} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage "studio-release.json") -Encoding utf8
+}
+Write-NgtStudioReleaseMetadataNoBom `
+  -Path (Join-Path $stage "studio-release.json") `
+  -Metadata $releaseMetadata `
+  -Depth 5
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $archive = Join-Path $outputRoot ("ngt-studio-windows-v" + $version + ".zip")
