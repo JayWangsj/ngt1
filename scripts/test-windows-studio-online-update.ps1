@@ -13,6 +13,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-online-update-auth.ps1")
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
@@ -42,10 +43,10 @@ if ($TestReleaseRepository -and
   throw "Production updater acceptance requires a separate owner/name test repository."
 }
 $githubCli = Get-Command gh -ErrorAction Stop | Select-Object -ExpandProperty Source
-if (-not $CandidateDirectory -or $ManualInstaller -or $ProductionUpdater) {
-  $authOutput = & $githubCli auth status --hostname github.com 2>&1
-  if ($LASTEXITCODE -ne 0) { throw "GitHub release read authorization is unavailable." }
-}
+Assert-NgtOnlineUpdateGitHubAuth -GhPath $githubCli `
+  -CandidateDirectory $CandidateDirectory `
+  -ManualInstaller:$ManualInstaller `
+  -ProductionUpdater:$ProductionUpdater
 
 $manifest = Get-Content -LiteralPath $ExpectedManifestPath -Raw | ConvertFrom-Json
 $targetVersion = $TargetTag -replace "^v", ""

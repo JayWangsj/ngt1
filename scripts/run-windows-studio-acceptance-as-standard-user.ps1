@@ -131,26 +131,22 @@ if ($AuthMatrixOnly) {
 
 if ($Child) {
   $request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
+  foreach ($name in @("GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")) {
+    Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
+  }
   foreach ($entry in $request.environment.PSObject.Properties) {
     if ($null -ne $entry.Value) {
       [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, "Process")
     }
   }
 
-  if ($request.verifyGitHubAuth) {
+  if ($request.ghConfigDirectory) {
     $expectedConfigDirectory = [System.IO.Path]::GetFullPath([string]$request.ghConfigDirectory)
     if (-not $env:GH_CONFIG_DIR -or
         [System.IO.Path]::GetFullPath($env:GH_CONFIG_DIR) -ine $expectedConfigDirectory -or
         -not (Test-Path -LiteralPath (Join-Path $expectedConfigDirectory "hosts.yml") -PathType Leaf)) {
       throw "The isolated GitHub CLI configuration was not available to the standard-user process."
     }
-    [Environment]::SetEnvironmentVariable("GH_CONFIG_DIR", $expectedConfigDirectory, "User")
-    $userConfigDirectory = [Environment]::GetEnvironmentVariable("GH_CONFIG_DIR", "User")
-    if (-not $userConfigDirectory -or
-        [System.IO.Path]::GetFullPath($userConfigDirectory) -ine $expectedConfigDirectory) {
-      throw "The isolated GH_CONFIG_DIR was not persisted for the standard-user profile."
-    }
-    $gh = Get-Command gh.exe -ErrorAction Stop
     $configTokenMatch = [regex]::Match(
       (Get-Content -LiteralPath (Join-Path $expectedConfigDirectory "hosts.yml") -Raw),
       '(?m)^\s+oauth_token:\s*(\S+)\s*$'
@@ -159,10 +155,20 @@ if ($Child) {
         (Get-NgtAcceptanceSha256 $configTokenMatch.Groups[1].Value) -cne [string]$request.expectedTokenSha256) {
       throw "The standard-user child process could not read the expected token from GH_CONFIG_DIR."
     }
-    Test-NgtGhAuthMatrix $gh.Source ([string]$request.authProbeRoot) $configTokenMatch.Groups[1].Value
     Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
     Remove-Item Env:\GITHUB_TOKEN -ErrorAction SilentlyContinue
     $env:GH_CONFIG_DIR = $expectedConfigDirectory
+  }
+
+  if ($request.verifyGitHubAuth) {
+    [Environment]::SetEnvironmentVariable("GH_CONFIG_DIR", $expectedConfigDirectory, "User")
+    $userConfigDirectory = [Environment]::GetEnvironmentVariable("GH_CONFIG_DIR", "User")
+    if (-not $userConfigDirectory -or
+        [System.IO.Path]::GetFullPath($userConfigDirectory) -ine $expectedConfigDirectory) {
+      throw "The isolated GH_CONFIG_DIR was not persisted for the standard-user profile."
+    }
+    $gh = Get-Command gh.exe -ErrorAction Stop
+    Test-NgtGhAuthMatrix $gh.Source ([string]$request.authProbeRoot) $configTokenMatch.Groups[1].Value
 
     $repository = [string]$request.environment.NGT_UPDATER_TEST_REPOSITORY
     $targetTag = [string]$request.parameters.TargetTag
@@ -229,10 +235,10 @@ if ($Child) {
     [Console]::Error.WriteLine($_.Exception.Message)
     $childExitCode = 1
   } finally {
+    foreach ($name in @("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR")) {
+      Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
+    }
     if ($request.verifyGitHubAuth) {
-      Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
-      Remove-Item Env:\GITHUB_TOKEN -ErrorAction SilentlyContinue
-      Remove-Item Env:\GH_CONFIG_DIR -ErrorAction SilentlyContinue
       [Environment]::SetEnvironmentVariable("GH_CONFIG_DIR", $null, "User")
     }
   }
@@ -289,6 +295,8 @@ $parameters = switch ($Acceptance) {
     }
   }
 }
+$requiresGitHubAuth = ($Acceptance -in @("manual-installer", "production-update")) -or
+  ($Acceptance -eq "online-update" -and -not $parameters.CandidateDirectory)
 
 $runId = [guid]::NewGuid().ToString("N")
 $userName = "ngtci" + $runId.Substring(0, 8)
@@ -317,10 +325,12 @@ $ghExecutablePath = $null
 $expectedTokenSha256 = $null
 
 try {
-  if ($Acceptance -eq "production-update") {
-    if (-not $env:GH_TOKEN) { throw "Production updater acceptance requires the scoped GitHub Actions token." }
+  if ($requiresGitHubAuth) {
+    if (-not $env:GH_TOKEN) { throw "GitHub release acceptance requires the scoped GitHub Actions token." }
     $expectedTokenSha256 = Get-NgtAcceptanceSha256 $env:GH_TOKEN
-    $ghExecutablePath = Get-Command gh.exe -ErrorAction Stop | Select-Object -ExpandProperty Source
+    if ($Acceptance -eq "production-update") {
+      $ghExecutablePath = Get-Command gh.exe -ErrorAction Stop | Select-Object -ExpandProperty Source
+    }
   }
   $user = New-LocalUser -Name $userName -Password $password `
     -Description "NGT release acceptance standard account" -PasswordNeverExpires
@@ -355,9 +365,11 @@ try {
     throw "The acceptance temp directory still inherits access from the shared runner temp directory."
   }
 
-  if ($Acceptance -eq "production-update") {
+  if ($requiresGitHubAuth) {
     New-Item -ItemType Directory -Path $ghConfigDirectory -Force | Out-Null
-    New-Item -ItemType Directory -Path $authProbeRoot -Force | Out-Null
+    if ($Acceptance -eq "production-update") {
+      New-Item -ItemType Directory -Path $authProbeRoot -Force | Out-Null
+    }
     $hostsConfiguration = "github.com:`r`n    oauth_token: $($env:GH_TOKEN)`r`n    git_protocol: https`r`n"
     [System.IO.File]::WriteAllText($hostsPath, $hostsConfiguration, [System.Text.Encoding]::UTF8)
     if ((Get-Acl -LiteralPath $hostsPath).AccessToString -match "Everyone|Authenticated Users|BUILTIN\\Users") {
@@ -395,14 +407,14 @@ try {
       NGT_RELEASE_READY = $env:NGT_RELEASE_READY
       GITHUB_WORKSPACE = $workspace
       RUNNER_TEMP = $isolatedTemp
-      GH_CONFIG_DIR = if ($Acceptance -eq "production-update") { $ghConfigDirectory } else { $null }
+      GH_CONFIG_DIR = if ($requiresGitHubAuth) { $ghConfigDirectory } else { $null }
       NGT_MANUAL_UPGRADE_BASELINE = $env:NGT_MANUAL_UPGRADE_BASELINE
       NGT_PRODUCTION_UPDATER_BASELINE = $env:NGT_PRODUCTION_UPDATER_BASELINE
       NGT_UPDATER_TEST_REPOSITORY = $env:NGT_UPDATER_TEST_REPOSITORY
       PATH = $env:PATH
     }
     verifyGitHubAuth = ($Acceptance -eq "production-update")
-    ghConfigDirectory = if ($Acceptance -eq "production-update") { $ghConfigDirectory } else { $null }
+    ghConfigDirectory = if ($requiresGitHubAuth) { $ghConfigDirectory } else { $null }
     expectedTokenSha256 = $expectedTokenSha256
     authProbeRoot = if ($Acceptance -eq "production-update") { $authProbeRoot } else { $null }
     authProbeReadyPath = if ($Acceptance -eq "production-update") { $authProbeReadyPath } else { $null }
@@ -589,7 +601,7 @@ try {
     Remove-Item -LiteralPath $isolatedTemp -Recurse -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $isolatedTemp) { $credentialCleanupFailed = $true }
   }
-  if ($Acceptance -eq "production-update") {
+  if ($requiresGitHubAuth) {
     Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
   }
   if ($processTerminationFailed -or $credentialCleanupFailed) {

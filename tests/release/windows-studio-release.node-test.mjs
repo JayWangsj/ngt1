@@ -743,6 +743,18 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
+  const onlineAuth = (
+    await readText("scripts/windows-studio-online-update-auth.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const onlineAuthTest = (
+    await readText("scripts/test-windows-studio-online-update-auth.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const onlineWorkflow = (
+    await readText(
+      ".github/workflows/windows-studio-online-update-acceptance.yml",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
   const onlineUi = (
     await readText("tests/release/windows-studio-online-update-ui.mjs", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -981,9 +993,39 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /OnScreen/);
   assert.match(innoInstaller, /DisableStartupPrompt=yes/);
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
+  assert.match(online, /Assert-NgtOnlineUpdateGitHubAuth -GhPath \$githubCli/);
   assert.match(
-    online,
-    /if \(-not \$CandidateDirectory -or \$ManualInstaller -or \$ProductionUpdater\) \{\s+\$authOutput = & \$githubCli auth status --hostname github\.com 2>&1\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "GitHub release read authorization is unavailable\." \}\s+\}/,
+    onlineAuth,
+    /return \(-not \$CandidateDirectory\) -or \$ManualInstaller -or \$ProductionUpdater/,
+  );
+  assert.match(
+    onlineAuth,
+    /GitHub release read authorization is unavailable\./,
+  );
+  assert.match(onlineAuthTest, /Remove-Item Env:\\GH_TOKEN/);
+  assert.match(onlineAuthTest, /Remove-Item Env:\\GITHUB_TOKEN/);
+  assert.match(
+    onlineAuthTest,
+    /Local candidate mode continued without GitHub credentials\./,
+  );
+  assert.match(onlineAuthTest, /Name = "remote candidate"/);
+  assert.match(onlineAuthTest, /Name = "manual upgrade"/);
+  assert.match(onlineAuthTest, /Name = "production updater"/);
+  assert.match(
+    onlineWorkflow,
+    /Verify local and remote online-update authentication modes/,
+  );
+  assert.match(
+    onlineWorkflow,
+    /run: \.\/scripts\/test-windows-studio-online-update-auth\.ps1/,
+  );
+  assert.match(
+    onlineWorkflow,
+    /"scripts\/test-windows-studio-online-update-auth\.ps1"/,
+  );
+  assert.match(
+    onlineWorkflow,
+    /"scripts\/windows-studio-online-update-auth\.ps1"/,
   );
   assert.match(
     online,
@@ -1040,8 +1082,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /updated production NGTUpdater\.exe does not match the verified candidate release manifest/,
   );
   assert.match(standardUserAcceptance, /ProductionUpdater = \$true/);
-  assert.ok(
-    standardUserAcceptance.includes('if ($Acceptance -eq "production-update")'),
+  assert.match(
+    standardUserAcceptance,
+    /\$requiresGitHubAuth = \(\$Acceptance -in @\("manual-installer", "production-update"\)\)/,
   );
   assert.ok(
     standardUserAcceptance.includes(
@@ -1088,10 +1131,17 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);
   assert.match(scheduledTaskAuthProbe, /auth token --hostname github\.com/);
   assert.match(scheduledTaskAuthProbe, /ExpectedTokenSha256/);
-  assert.ok(
-    standardUserAcceptance.includes(
-      'GH_CONFIG_DIR = if ($Acceptance -eq "production-update") { $ghConfigDirectory } else { $null }',
-    ),
+  assert.match(
+    standardUserAcceptance,
+    /GH_CONFIG_DIR = if \(\$requiresGitHubAuth\) \{ \$ghConfigDirectory \} else \{ \$null \}/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /ghConfigDirectory = if \(\$requiresGitHubAuth\) \{ \$ghConfigDirectory \} else \{ \$null \}/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /verifyGitHubAuth = \(\$Acceptance -eq "production-update"\)/,
   );
   assert.match(
     standardUserAcceptance,
