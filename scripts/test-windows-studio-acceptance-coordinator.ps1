@@ -3,6 +3,7 @@ if ($PSVersionTable.PSEdition -ne "Desktop" -or $PSVersionTable.PSVersion.Major 
   throw "This regression must run in Windows PowerShell 5.1."
 }
 . (Join-Path $PSScriptRoot "windows-studio-acceptance-coordinator.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-online-update-reconnect.ps1")
 
 function Assert-NgtAcceptanceTest([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
@@ -80,6 +81,51 @@ function Invoke-NgtAcceptanceTestChild {
   }
 }
 
+function New-NgtOnlineUpdateTestStatus {
+  param(
+    [string]$Status,
+    [string]$Stage,
+    [string]$UpdateId = "test-update-id",
+    [string]$ActualVersion = "",
+    [string]$TargetVersion = "2.0.23"
+  )
+  return [pscustomobject]@{
+    status = $Status
+    stage = $Stage
+    updateId = $UpdateId
+    targetVersion = $TargetVersion
+    actualVersion = $ActualVersion
+  }
+}
+
+function Invoke-NgtOnlineUpdateTestSequence {
+  param(
+    [object[]]$Events,
+    [string]$StatusPath
+  )
+  $disconnected = $false
+  $reconnected = $false
+  $eventCount = 0
+  foreach ($event in $Events) {
+    $json = ConvertTo-Json -InputObject $event.Persisted -Depth 10
+    [System.IO.File]::WriteAllText($StatusPath, $json, [System.Text.UTF8Encoding]::new($false))
+    $persisted = Read-NgtOnlineUpdateStatusFile -Path $StatusPath `
+      -ExpectedUpdateId "test-update-id" -TargetVersion "2.0.23"
+    $decision = Get-NgtOnlineUpdateReconnectDecision -PersistedStatus $persisted `
+      -ApiAvailable $event.ApiAvailable -LiveStatus $event.LiveStatus `
+      -UpdateId "test-update-id" -TargetVersion "2.0.23" `
+      -ApiDisconnectedObserved $disconnected -ApiReconnectedAfterDisconnect $reconnected `
+      -UpdaterHasExited $event.UpdaterHasExited -UpdaterExitCode $event.UpdaterExitCode
+    $disconnected = $decision.ApiDisconnectedObserved
+    $reconnected = $decision.ApiReconnectedAfterDisconnect
+    $eventCount++
+    if ($decision.ShouldComplete) {
+      return [pscustomobject]@{ Passed = $true; EventCount = $eventCount }
+    }
+  }
+  throw "Simulated online update polling timed out before verified reconnection and exit."
+}
+
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-acceptance-coordinator-" + [guid]::NewGuid().ToString("N"))
 $powerShellPath = Join-Path $PSHOME "powershell.exe"
 $childScript = Join-Path $testRoot "child.ps1"
@@ -89,6 +135,127 @@ $passwordPlain = "fake-password"
 $diagnosticPath = Join-Path $testRoot "diagnostics\acceptance-failure.json"
 try {
   New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+  $statusPath = Join-Path $testRoot "online-update-status.json"
+  $progress = New-NgtOnlineUpdateTestStatus -Status "running" -Stage "checking"
+  $complete = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "complete" -ActualVersion "2.0.23"
+  $progressApi = New-NgtOnlineUpdateTestStatus -Status "running" -Stage "checking"
+  $verifyingApi = New-NgtOnlineUpdateTestStatus -Status "verifying-task" -Stage "complete" -ActualVersion "2.0.23"
+  $allowedProgress = @(
+    (New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "backing-up"),
+    (New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "preparing-release"),
+    (New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "verifying-backup"),
+    (New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "preparing-runtime"),
+    (New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "installing"),
+    (New-NgtOnlineUpdateTestStatus -Status "validating" -Stage "validating"),
+    (New-NgtOnlineUpdateTestStatus -Status "rolling-back" -Stage "rolling-back")
+  )
+  foreach ($progressState in $allowedProgress) {
+    $progressJson = ConvertTo-Json -InputObject $progressState -Depth 10
+    [System.IO.File]::WriteAllText($statusPath, $progressJson, [System.Text.UTF8Encoding]::new($false))
+    $readProgress = Read-NgtOnlineUpdateStatusFile -Path $statusPath `
+      -ExpectedUpdateId "test-update-id" -TargetVersion "2.0.23"
+    Assert-NgtAcceptanceTest ([string]$readProgress.stage -ceq [string]$progressState.stage) `
+      "A previously allowed in-progress update stage was rejected."
+  }
+  $completeEvents = @(
+    @{ Persisted = $progress; ApiAvailable = $true; LiveStatus = $progressApi; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $complete; ApiAvailable = $false; LiveStatus = $null; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $complete; ApiAvailable = $true; LiveStatus = $complete; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $complete; ApiAvailable = $true; LiveStatus = $complete; UpdaterHasExited = $true; UpdaterExitCode = 0 }
+  )
+  $normalSequence = Invoke-NgtOnlineUpdateTestSequence -Events $completeEvents -StatusPath $statusPath
+  Assert-NgtAcceptanceTest ($normalSequence.Passed -and $normalSequence.EventCount -eq 4) `
+    "A valid completed state did not wait for API reconnection and updater exit."
+
+  $disconnectedEvents = @(
+    @{ Persisted = $complete; ApiAvailable = $false; LiveStatus = $null; UpdaterHasExited = $true; UpdaterExitCode = 0 },
+    @{ Persisted = $complete; ApiAvailable = $false; LiveStatus = $null; UpdaterHasExited = $true; UpdaterExitCode = 0 }
+  )
+  Assert-NgtAcceptanceFailure {
+    Invoke-NgtOnlineUpdateTestSequence -Events $disconnectedEvents -StatusPath $statusPath
+  } "timed out"
+
+  $stillRunningEvents = @(
+    @{ Persisted = $complete; ApiAvailable = $false; LiveStatus = $null; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $complete; ApiAvailable = $true; LiveStatus = $verifyingApi; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $complete; ApiAvailable = $true; LiveStatus = $complete; UpdaterHasExited = $true; UpdaterExitCode = 0 }
+  )
+  $stillRunningSequence = Invoke-NgtOnlineUpdateTestSequence -Events $stillRunningEvents -StatusPath $statusPath
+  Assert-NgtAcceptanceTest ($stillRunningSequence.Passed -and $stillRunningSequence.EventCount -eq 3) `
+    "The completed state passed before the updater exited or failed to pass after exit."
+
+  $nonzeroExitEvents = @(
+    @{ Persisted = $complete; ApiAvailable = $false; LiveStatus = $null; UpdaterHasExited = $true; UpdaterExitCode = 17 }
+  )
+  Assert-NgtAcceptanceFailure {
+    Invoke-NgtOnlineUpdateTestSequence -Events $nonzeroExitEvents -StatusPath $statusPath
+  } "exited with code 17"
+  $missingExitCodeEvents = @(
+    @{ Persisted = $complete; ApiAvailable = $true; LiveStatus = $complete; UpdaterHasExited = $true; UpdaterExitCode = $null }
+  )
+  Assert-NgtAcceptanceFailure {
+    Invoke-NgtOnlineUpdateTestSequence -Events $missingExitCodeEvents -StatusPath $statusPath
+  } "without an operating-system exit code"
+
+  $wrongVersion = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "complete" -ActualVersion "2.0.22"
+  $wrongUpdateId = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "complete" `
+    -UpdateId "Test-update-id" -ActualVersion "2.0.23"
+  foreach ($invalidState in @(
+      @{ State = $wrongVersion; Expected = "invalid completed" },
+      @{ State = $wrongUpdateId; Expected = "different update task" },
+      @{ State = (New-NgtOnlineUpdateTestStatus -Status "failed" -Stage "rolling-back"); Expected = "reports failure" },
+      @{ State = (New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "complete"); Expected = "completed stage without completed status" },
+      @{ State = (New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "validating" -ActualVersion "2.0.23"); Expected = "invalid completed" },
+      @{ State = (New-NgtOnlineUpdateTestStatus -Status "superseded" -Stage "unknown"); Expected = "unknown or inconsistent" },
+      @{ State = (New-NgtOnlineUpdateTestStatus -Status "running" -Stage "unknown"); Expected = "unknown or inconsistent" }
+    )) {
+    $invalidJson = ConvertTo-Json -InputObject $invalidState.State -Depth 10
+    [System.IO.File]::WriteAllText($statusPath, $invalidJson, [System.Text.UTF8Encoding]::new($false))
+    Assert-NgtAcceptanceFailure {
+      Read-NgtOnlineUpdateStatusFile -Path $statusPath -ExpectedUpdateId "test-update-id" -TargetVersion "2.0.23"
+    } $invalidState.Expected
+  }
+
+  Assert-NgtAcceptanceFailure {
+    Read-NgtOnlineUpdateStatusFile -Path (Join-Path $testRoot "missing-status.json") `
+      -ExpectedUpdateId "test-update-id" -TargetVersion "2.0.23"
+  } "file is missing"
+  [System.IO.File]::WriteAllText($statusPath, "", [System.Text.UTF8Encoding]::new($false))
+  Assert-NgtAcceptanceFailure {
+    Read-NgtOnlineUpdateStatusFile -Path $statusPath -ExpectedUpdateId "test-update-id" -TargetVersion "2.0.23"
+  } "file is empty"
+  [System.IO.File]::WriteAllText($statusPath, "{not-json", [System.Text.UTF8Encoding]::new($false))
+  Assert-NgtAcceptanceFailure {
+    Read-NgtOnlineUpdateStatusFile -Path $statusPath -ExpectedUpdateId "test-update-id" -TargetVersion "2.0.23"
+  } "not valid JSON"
+
+  $wrongLiveVersion = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "complete" -ActualVersion "2.0.22"
+  $wrongLiveId = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "complete" `
+    -UpdateId "Test-update-id" -ActualVersion "2.0.23"
+  $wrongLiveStatus = New-NgtOnlineUpdateTestStatus -Status "failed" -Stage "validating"
+  $wrongLiveTransition = New-NgtOnlineUpdateTestStatus -Status "installing" -Stage "installing"
+  $wrongLiveStage = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "validating" -ActualVersion "2.0.23"
+  foreach ($liveCase in @(
+      @{ Status = $wrongLiveVersion; Expected = "invalid completed" },
+      @{ Status = $wrongLiveId; Expected = "different update task" },
+      @{ Status = $wrongLiveStatus; Expected = "reports failure" },
+      @{ Status = $wrongLiveTransition; Expected = "did not report complete" },
+      @{ Status = $wrongLiveStage; Expected = "invalid completed" }
+    )) {
+    Assert-NgtAcceptanceFailure {
+      Get-NgtOnlineUpdateReconnectDecision -PersistedStatus $complete -ApiAvailable $true `
+        -LiveStatus $liveCase.Status -UpdateId "test-update-id" -TargetVersion "2.0.23" `
+        -ApiDisconnectedObserved $true -ApiReconnectedAfterDisconnect $false `
+        -UpdaterHasExited $true -UpdaterExitCode 0
+    } $liveCase.Expected
+  }
+  $noOutageDecision = Get-NgtOnlineUpdateReconnectDecision -PersistedStatus $complete -ApiAvailable $true `
+    -LiveStatus $complete -UpdateId "test-update-id" -TargetVersion "2.0.23" `
+    -ApiDisconnectedObserved $false -ApiReconnectedAfterDisconnect $false `
+    -UpdaterHasExited $true -UpdaterExitCode 0
+  Assert-NgtAcceptanceTest (-not $noOutageDecision.ShouldComplete) `
+    "The update passed without observing an API disconnect and recovery."
+
   $secretCases = @(
     @{ Name = "GH_TOKEN only"; GhToken = $ghToken; GithubToken = $null; Expected = @($ghToken, $passwordPlain) },
     @{ Name = "GITHUB_TOKEN only"; GhToken = $null; GithubToken = $githubToken; Expected = @($githubToken, $passwordPlain) },

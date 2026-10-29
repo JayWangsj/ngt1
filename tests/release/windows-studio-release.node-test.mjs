@@ -743,6 +743,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
+  const onlineReconnect = (
+    await readText("scripts/windows-studio-online-update-reconnect.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
   const onlineAuth = (
     await readText("scripts/windows-studio-online-update-auth.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -933,9 +936,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Invoke-GhDownload -Tag \$oldTag/);
   assert.match(online, /Assert-ReleaseChecksum \$oldAppArchive/);
   assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
+  assert.match(online, /windows-studio-online-update-reconnect\.ps1/);
+  assert.match(online, /Read-NgtOnlineUpdateStatusFile -Path \$updateStatus/);
   assert.match(
-    online,
-    /\$savedDuringDisconnect\.stage -notin @\([\s\S]{0,250}"preparing-release"[\s\S]{0,100}"verifying-backup"[\s\S]{0,100}"preparing-runtime"/,
+    onlineReconnect,
+    /\$status -ceq "complete"[\s\S]{0,320}\$stage -cne "complete"[\s\S]{0,150}\$State\.actualVersion/,
+  );
+  assert.match(
+    onlineReconnect,
+    /\$persistedComplete -and \$apiComplete -and \$UpdaterHasExited -and[\s\S]{0,100}\$disconnected -and \$reconnected/,
   );
   assert.match(online, /Manual repair installer/);
   assert.match(release, /actions\/upload-artifact@v4/);
@@ -990,16 +999,12 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Get-NgtScreenVisibleWindows/);
   assert.ok(
     online.indexOf("$windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics") <
-      online.indexOf(
-        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
-      ),
+      online.indexOf("if ($stateReadFailure) { throw $stateReadFailure }"),
     "window evidence must be collected before a failed update ends acceptance",
   );
   assert.ok(
     online.indexOf('Write-Output ("Window evidence:') <
-      online.indexOf(
-        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
-      ),
+      online.indexOf("if ($stateReadFailure) { throw $stateReadFailure }"),
     "window evidence must be logged before a failed update ends acceptance",
   );
   assert.match(online, /silent online update displayed a visible installer/);

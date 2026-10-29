@@ -24,6 +24,7 @@ on:
       - "scripts/test-windows-studio-online-update.ps1"
       - "scripts/test-windows-studio-online-update-auth.ps1"
       - "scripts/windows-studio-online-update-auth.ps1"
+      - "scripts/windows-studio-online-update-reconnect.ps1"
       - "scripts/windows-studio-ready-baseline.ps1"
       - "scripts/windows-studio-release-metadata.ps1"
       - "scripts/verify-windows-studio-runtime.ps1"
