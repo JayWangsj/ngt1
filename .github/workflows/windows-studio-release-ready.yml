@@ -179,7 +179,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-production-updater-diagnostics-${{ github.sha }}
+          name: windows-production-updater-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: warn
           retention-days: 7
