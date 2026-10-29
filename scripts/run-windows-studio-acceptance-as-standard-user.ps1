@@ -469,6 +469,7 @@ try {
   $process = Start-Process -FilePath $powershellPath -ArgumentList $childArguments `
     -Credential $credential -LoadUserProfile -WorkingDirectory $workspace `
     -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+  $processHandle = Get-NgtAcceptanceProcessHandle -Process $process
 
   $acceptanceDeadline = (Get-Date).AddMinutes(110)
   $nextProgress = (Get-Date).AddMinutes(1)
@@ -518,9 +519,7 @@ try {
       try {
         & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
         [void]$process.WaitForExit(5000)
-        $process.Refresh()
-        if (-not $process.HasExited) { throw "The standard-user acceptance process remained active after timeout termination." }
-        $processExitCode = $process.ExitCode
+        $processExitCode = Get-NgtAcceptanceProcessExitCode -Process $process
       } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Timed-out acceptance process termination" -ErrorRecord $_ }
       $timeoutOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
         -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
@@ -534,8 +533,7 @@ try {
       $nextProgress = (Get-Date).AddMinutes(1)
     }
   }
-  $process.Refresh()
-  $processExitCode = $process.ExitCode
+  $processExitCode = Get-NgtAcceptanceProcessExitCode -Process $process
   Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath) -Secrets $diagnosticSecrets
   $outcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
     -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
@@ -574,7 +572,9 @@ try {
         $process.Refresh()
         if (-not $process.HasExited) { throw "The standard-user acceptance process is still running." }
       }
-      if ($null -eq $processExitCode -and $process.HasExited) { $processExitCode = $process.ExitCode }
+      if ($null -eq $processExitCode -and $process.HasExited) {
+        $processExitCode = Get-NgtAcceptanceProcessExitCode -Process $process
+      }
     } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Acceptance process termination" -ErrorRecord $_ }
   }
   if ($user -and $Acceptance -eq "production-update") {

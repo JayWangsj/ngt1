@@ -46,7 +46,8 @@ function Invoke-NgtAcceptanceTestChild {
     [string]$Stdout,
     [string]$Stderr,
     [int]$ExitCode,
-    [string]$FailureMessage = ""
+    [string]$FailureMessage = "",
+    [int]$ResultExitCode = -1
   )
   $caseRoot = Join-Path $Root $Name
   New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
@@ -59,6 +60,7 @@ function Invoke-NgtAcceptanceTestChild {
     stdout = $Stdout
     stderr = $Stderr
     exitCode = $ExitCode
+    resultExitCode = if ($ResultExitCode -lt 0) { $ExitCode } else { $ResultExitCode }
     resultPath = $resultPath
     failurePath = $failurePath
     failureMessage = $FailureMessage
@@ -66,13 +68,15 @@ function Invoke-NgtAcceptanceTestChild {
   [System.IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 3), [System.Text.UTF8Encoding]::new($false))
   $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $ChildScript + '" -ConfigPath "' + $configPath + '"'
   $process = Start-Process -FilePath $PowerShellPath -ArgumentList $arguments `
-    -NoNewWindow -PassThru -Wait -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+  $processHandle = Get-NgtAcceptanceProcessHandle -Process $process
+  while (-not $process.WaitForExit(1000)) { }
   return [pscustomobject]@{
     StdoutPath = $stdoutPath
     StderrPath = $stderrPath
     ResultPath = $resultPath
     FailurePath = $failurePath
-    ProcessExitCode = $process.ExitCode
+    ProcessExitCode = Get-NgtAcceptanceProcessExitCode -Process $process
   }
 }
 
@@ -111,6 +115,16 @@ try {
     $diagnosticSecrets[2] -ceq $passwordPlain) `
     "The coordinator's two-token-plus-password array construction did not preserve separate entries."
 
+  $invalidHandleProcess = [pscustomobject]@{ Handle = [IntPtr]::Zero }
+  Assert-NgtAcceptanceFailure { Get-NgtAcceptanceProcessHandle -Process $invalidHandleProcess } "handle is unavailable"
+  Assert-NgtAcceptanceFailure { Get-NgtAcceptanceProcessHandle -Process $null } "did not return a process object"
+  $missingExitCodeProcess = [pscustomobject]@{ HasExited = $true; ExitCode = $null }
+  Add-Member -InputObject $missingExitCodeProcess -MemberType ScriptMethod -Name Refresh -Value { }
+  Assert-NgtAcceptanceFailure { Get-NgtAcceptanceProcessExitCode -Process $missingExitCodeProcess } "exit code is unavailable"
+  $runningProcess = [pscustomobject]@{ HasExited = $false; ExitCode = 0 }
+  Add-Member -InputObject $runningProcess -MemberType ScriptMethod -Name Refresh -Value { }
+  Assert-NgtAcceptanceFailure { Get-NgtAcceptanceProcessExitCode -Process $runningProcess } "has not exited"
+
   $childSource = @'
 param([Parameter(Mandatory = $true)][string]$ConfigPath)
 $ErrorActionPreference = "Stop"
@@ -132,13 +146,13 @@ if (-not [string]::IsNullOrEmpty([string]$config.failureMessage)) {
     }
     [System.IO.File]::WriteAllText([string]$config.failurePath, ($failureReport | ConvertTo-Json -Depth 4), [System.Text.UTF8Encoding]::new($false))
     [Console]::Error.WriteLine("The standard-user child failed; structured details are stored for parent-side sanitization.")
-    [System.IO.File]::WriteAllText([string]$config.resultPath, ([string]$config.exitCode + "`r`n"), [System.Text.Encoding]::ASCII)
+    [System.IO.File]::WriteAllText([string]$config.resultPath, ([string]$config.resultExitCode + "`r`n"), [System.Text.Encoding]::ASCII)
     exit [int]$config.exitCode
   }
 }
 if (-not [string]::IsNullOrEmpty([string]$config.stdout)) { [Console]::Out.Write([string]$config.stdout) }
 if (-not [string]::IsNullOrEmpty([string]$config.stderr)) { [Console]::Error.Write([string]$config.stderr) }
-[System.IO.File]::WriteAllText([string]$config.resultPath, ([string]$config.exitCode + "`r`n"), [System.Text.Encoding]::ASCII)
+[System.IO.File]::WriteAllText([string]$config.resultPath, ([string]$config.resultExitCode + "`r`n"), [System.Text.Encoding]::ASCII)
 exit [int]$config.exitCode
 '@
   [System.IO.File]::WriteAllText($childScript, $childSource, [System.Text.Encoding]::UTF8)
@@ -184,13 +198,22 @@ exit [int]$config.exitCode
   [System.IO.File]::WriteAllText($emptyResult, "not-an-exit-code", [System.Text.Encoding]::ASCII)
   Assert-NgtAcceptanceFailure { Get-NgtAcceptanceChildExitCode -Path $emptyResult } "invalid exit result"
 
-  $nonzero = Invoke-NgtAcceptanceTestChild $powerShellPath $childScript $testRoot "nonzero-child" "" "" 19
+  $nonzero = Invoke-NgtAcceptanceTestChild $powerShellPath $childScript $testRoot "nonzero-child" "" "" 17
   $nonzeroOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance "test" `
     -StdoutPath $nonzero.StdoutPath -StderrPath $nonzero.StderrPath `
     -ResultPath $nonzero.ResultPath -ProcessExitCode $nonzero.ProcessExitCode
-  Assert-NgtAcceptanceTest (-not $nonzeroOutcome.Succeeded -and $nonzeroOutcome.ChildExitCode -eq 19 -and $nonzeroOutcome.ProcessExitCode -eq 19) `
+  Assert-NgtAcceptanceTest (-not $nonzeroOutcome.Succeeded -and $nonzeroOutcome.ChildExitCode -eq 17 -and $nonzeroOutcome.ProcessExitCode -eq 17) `
     "A nonzero child exit did not fail with the real child and process exit codes."
-  Assert-NgtAcceptanceFailure { Assert-NgtAcceptanceProcessSucceeded -Outcome $nonzeroOutcome } "child exit code 19"
+  Assert-NgtAcceptanceFailure { Assert-NgtAcceptanceProcessSucceeded -Outcome $nonzeroOutcome } "child exit code 17"
+  $mismatched = Invoke-NgtAcceptanceTestChild $powerShellPath $childScript $testRoot `
+    "mismatched-exit-codes" "" "" 0 -ResultExitCode 17
+  $mismatchedOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance "test" `
+    -StdoutPath $mismatched.StdoutPath -StderrPath $mismatched.StderrPath `
+    -ResultPath $mismatched.ResultPath -ProcessExitCode $mismatched.ProcessExitCode
+  Assert-NgtAcceptanceTest (-not $mismatchedOutcome.Succeeded -and
+    $mismatchedOutcome.ChildExitCode -eq 17 -and $mismatchedOutcome.ProcessExitCode -eq 0 -and
+    $mismatchedOutcome.FailureMessage -match "disagrees") `
+    "Mismatched result-file and operating-system exit codes did not fail explicitly."
   $zero = Invoke-NgtAcceptanceTestChild $powerShellPath $childScript $testRoot "zero-child" "" "" 0
   $zeroOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance "test" `
     -StdoutPath $zero.StdoutPath -StderrPath $zero.StderrPath `
@@ -324,7 +347,7 @@ exit [int]$config.exitCode
     -ResultPath $nonzero.ResultPath -ProcessExitCode $nonzero.ProcessExitCode -TimedOut
   Assert-NgtAcceptanceTest (-not $timeout.Succeeded -and $timeout.FailureMessage -match "timeout") `
     "A timed-out acceptance did not fail explicitly."
-  Assert-NgtAcceptanceTest ($timeout.ChildExitCode -eq 19 -and $timeout.ProcessExitCode -eq 19) `
+  Assert-NgtAcceptanceTest ($timeout.ChildExitCode -eq 17 -and $timeout.ProcessExitCode -eq 17) `
     "The timeout diagnostic discarded available child or process exit codes."
   Assert-NgtAcceptanceFailure { Assert-NgtAcceptanceProcessSucceeded -Outcome $timeout } "timeout"
   $missingTimeout = Get-NgtAcceptanceProcessOutcome -Acceptance "test" `

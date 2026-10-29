@@ -66,6 +66,44 @@ function Assert-NgtAcceptanceTokenNotExposed {
   }
 }
 
+function Get-NgtAcceptanceProcessHandle {
+  param([Parameter(Mandatory = $true)][AllowNull()][object]$Process)
+
+  if ($null -eq $Process) {
+    throw "Standard-user acceptance did not return a process object."
+  }
+  try {
+    $processHandle = $Process.Handle
+  } catch {
+    throw "Standard-user acceptance process handle is unavailable."
+  }
+  if ($null -eq $processHandle -or $processHandle -eq [IntPtr]::Zero) {
+    throw "Standard-user acceptance process handle is unavailable."
+  }
+  return $processHandle
+}
+
+function Get-NgtAcceptanceProcessExitCode {
+  param([Parameter(Mandatory = $true)][AllowNull()][object]$Process)
+
+  if ($null -eq $Process) {
+    throw "Standard-user acceptance process object is unavailable."
+  }
+  try {
+    $Process.Refresh()
+    $hasExited = $Process.HasExited
+  } catch {
+    throw "Standard-user acceptance process exit code is unavailable."
+  }
+  if (-not $hasExited) { throw "Standard-user acceptance process has not exited." }
+  try { $processExitCode = $Process.ExitCode }
+  catch { throw "Standard-user acceptance process exit code is unavailable." }
+  if ($null -eq $processExitCode) {
+    throw "Standard-user acceptance process exit code is unavailable."
+  }
+  return [int]$processExitCode
+}
+
 function Get-NgtAcceptanceProcessOutcome {
   param(
     [Parameter(Mandatory = $true)][string]$Acceptance,
@@ -92,7 +130,11 @@ function Get-NgtAcceptanceProcessOutcome {
   if ($TimedOut) {
     $failureMessage = "The standard-user $Acceptance acceptance exceeded its 110-minute timeout."
     if ($resultFailure) { $failureMessage += " Exit result: $resultFailure" }
-  } elseif ($childExitCode -ne 0 -or $null -eq $ProcessExitCode -or $ProcessExitCode -ne 0) {
+  } elseif ($null -eq $ProcessExitCode) {
+    $failureMessage = "The standard-user $Acceptance acceptance process exit code is unavailable."
+  } elseif ($childExitCode -ne $ProcessExitCode) {
+    $failureMessage = "The standard-user $Acceptance acceptance result exit code $childExitCode disagrees with process exit code $ProcessExitCode."
+  } elseif ($childExitCode -ne 0 -or $ProcessExitCode -ne 0) {
     $failureMessage = "The standard-user $Acceptance acceptance failed with child exit code $childExitCode and process exit code $ProcessExitCode."
   }
   return [pscustomobject]@{
