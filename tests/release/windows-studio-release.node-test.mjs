@@ -1132,7 +1132,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceCleanupSucceeded/);
   assert.match(acceptanceCoordinator, /Write-NgtAcceptanceFailureDiagnostic/);
   assert.match(acceptanceCoordinatorTest, /empty-stdout-error-stderr/);
-  assert.match(acceptanceCoordinatorTest, /token-in-log/);
+  assert.match(acceptanceCoordinatorTest, /credentials-in-stdout/);
+  assert.match(acceptanceCoordinatorTest, /password-in-stderr/);
+  assert.match(acceptanceCoordinatorTest, /sensitive-child-exception/);
+  assert.match(acceptanceCoordinatorTest, /failure artifact generation/);
   assert.match(acceptanceCoordinatorTest, /-TimedOut/);
   assert.match(standardUserAcceptance, /Test-NgtGhAuthMatrix/);
   assert.match(standardUserAcceptance, /GH_TOKEN only/);

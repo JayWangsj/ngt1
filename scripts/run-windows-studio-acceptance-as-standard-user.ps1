@@ -232,10 +232,6 @@ if ($Child) {
     }
   } catch {
     $childFailure = $_
-    [Console]::Error.WriteLine(("{0}: {1}`r`n{2}" -f
-      $childFailure.Exception.GetType().FullName,
-      $childFailure.Exception.Message,
-      $childFailure.ScriptStackTrace))
     try {
       $invocation = $childFailure.InvocationInfo
       $childFailureReport = [ordered]@{
@@ -252,8 +248,9 @@ if ($Child) {
         ($childFailureReport | ConvertTo-Json -Depth 4),
         [System.Text.UTF8Encoding]::new($false)
       )
+      [Console]::Error.WriteLine("The standard-user child failed; structured details are stored for parent-side sanitization.")
     } catch {
-      [Console]::Error.WriteLine("Could not retain structured child failure details.")
+      [Console]::Error.WriteLine("The standard-user child failed and structured detail capture was unavailable.")
     }
     $childExitCode = 1
   } finally {
@@ -357,7 +354,9 @@ $protectedTokens = @(
   $env:GH_TOKEN,
   $env:GITHUB_TOKEN
 ) | Where-Object { -not [string]::IsNullOrEmpty($_) }
-$diagnosticSecrets = @($protectedTokens + @($passwordPlain))
+$diagnosticSecrets = @(
+  @($protectedTokens) + @($passwordPlain)
+)
 
 try {
   if ($requiresGitHubAuth) {
@@ -457,9 +456,9 @@ try {
     authProbeResultPath = if ($Acceptance -eq "production-update") { $authProbeResultPath } else { $null }
   }
   $requestText = $request | ConvertTo-Json -Depth 6
-  foreach ($protectedToken in $protectedTokens) {
-    if ($requestText.IndexOf($protectedToken, [System.StringComparison]::Ordinal) -ge 0) {
-      throw "The GitHub token must not be written to request.json."
+  foreach ($sensitiveValue in $diagnosticSecrets) {
+    if ($requestText.IndexOf($sensitiveValue, [System.StringComparison]::Ordinal) -ge 0) {
+      throw "A protected credential must not be written to request.json."
     }
   }
   [System.IO.File]::WriteAllText($requestPath, $requestText, [System.Text.Encoding]::UTF8)
@@ -525,7 +524,7 @@ try {
       } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Timed-out acceptance process termination" -ErrorRecord $_ }
       $timeoutOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
         -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
-        -ProcessExitCode $processExitCode -Tokens $protectedTokens -TimedOut
+        -ProcessExitCode $processExitCode -Secrets $diagnosticSecrets -TimedOut
       $capturedStdout = $timeoutOutcome.Stdout
       $capturedStderr = $timeoutOutcome.Stderr
       throw $timeoutOutcome.FailureMessage
@@ -537,10 +536,10 @@ try {
   }
   $process.Refresh()
   $processExitCode = $process.ExitCode
-  Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath) -Tokens $protectedTokens
+  Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath) -Secrets $diagnosticSecrets
   $outcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
     -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
-    -ProcessExitCode $processExitCode -Tokens $protectedTokens
+    -ProcessExitCode $processExitCode -Secrets $diagnosticSecrets
   $childExitCode = $outcome.ChildExitCode
   $capturedStdout = $outcome.Stdout
   $capturedStderr = $outcome.Stderr
@@ -633,7 +632,7 @@ try {
     Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Acceptance log collection" -ErrorRecord $_
   }
   try {
-    Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath, $resultPath) -Tokens $protectedTokens
+    Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath, $resultPath) -Secrets $diagnosticSecrets
   } catch {
     Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "GitHub credential exposure check" -ErrorRecord $_
   }
@@ -641,10 +640,10 @@ try {
     if (Test-Path -LiteralPath $childFailurePath -PathType Leaf) {
       try {
         $childFailureText = [System.IO.File]::ReadAllText($childFailurePath)
-        Assert-NgtAcceptanceTokenNotExposed -Paths @($childFailurePath) -Tokens $protectedTokens
+        Assert-NgtAcceptanceTokenNotExposed -Paths @($childFailurePath) -Secrets $diagnosticSecrets
         $childFailureDetails = $childFailureText | ConvertFrom-Json
       } catch {
-        if ($_.Exception.Message -match "token was exposed") {
+        if ($_.Exception.Message -match "protected credential was exposed") {
           try { throw "A child failure detail contained a protected GitHub credential." }
           catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Child failure credential exposure check" -ErrorRecord $_ }
           try { $childFailureDetails = $childFailureText | ConvertFrom-Json } catch { }
@@ -665,16 +664,16 @@ try {
           if ($file.Name -in @("request.json", "hosts.yml", "child-failure.json", "acceptance.exit-code")) { continue }
           $text = [System.IO.File]::ReadAllText($file.FullName)
           $containsToken = $false
-          foreach ($protectedToken in $protectedTokens) {
-            if ($text.IndexOf($protectedToken, [System.StringComparison]::Ordinal) -ge 0) {
+          foreach ($sensitiveValue in $diagnosticSecrets) {
+            if ($text.IndexOf($sensitiveValue, [System.StringComparison]::Ordinal) -ge 0) {
               $containsToken = $true
             }
           }
           if ($containsToken) {
-            try { throw "A child diagnostic contained a protected GitHub credential." }
+            try { throw "A child diagnostic contained a protected credential." }
             catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Child diagnostic credential exposure check" -ErrorRecord $_ }
           }
-          $safeText = Protect-NgtAcceptanceDiagnosticText -Text $text -Secrets @($protectedTokens + @($passwordPlain))
+          $safeText = Protect-NgtAcceptanceDiagnosticText -Text $text -Secrets $diagnosticSecrets
           $additionalDiagnostics.Add(("{0}/{1}`r`n{2}" -f $directory.Name, $file.Name, $safeText))
         }
       }
@@ -723,6 +722,10 @@ if ($failureRecord -or $cleanupFailures.Count -gt 0) {
   } catch {
     Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Failure artifact generation" -ErrorRecord $_
   }
-  if ($failureRecord) { throw $failureRecord }
+  if ($failureRecord) {
+    $safeFailureMessage = Get-NgtAcceptanceSafeFailureMessage -Acceptance $Acceptance `
+      -Message $failureRecord.Exception.Message -Secrets $diagnosticSecrets
+    throw $safeFailureMessage
+  }
   Assert-NgtAcceptanceCleanupSucceeded -Failures $cleanupFailures
 }

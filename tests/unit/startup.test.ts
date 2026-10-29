@@ -97,6 +97,10 @@ describe("Windows persistent startup", () => {
     expect(coordinator).toContain("Required acceptance file is missing");
     expect(coordinator).toContain("Required acceptance file is empty");
     expect(coordinator).toContain("$childExitCode -ne 0");
+    expect(runner).toContain("@($protectedTokens) + @($passwordPlain)");
+    expect(runner).toContain("foreach ($sensitiveValue in $diagnosticSecrets)");
+    expect(runner).toContain("throw $safeFailureMessage");
+    expect(runner).not.toContain("throw $failureRecord");
     expect(runner).toContain("Remove-LocalUser -Name $userName");
     expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
     expect(workflow).toContain("acceptance: online-update");
@@ -105,6 +109,10 @@ describe("Windows persistent startup", () => {
       "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}",
     );
     expect(acceptanceAction).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(acceptanceAction).toContain("if: failure()");
+    expect(acceptanceAction).toContain(
+      "ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/",
+    );
   });
 
   it("adapts only legacy baseline startup for the non-interactive hosted runner", async () => {

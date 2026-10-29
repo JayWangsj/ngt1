@@ -52,15 +52,15 @@ function Assert-NgtAcceptanceFileContent {
 function Assert-NgtAcceptanceTokenNotExposed {
   param(
     [Parameter(Mandatory = $true)][string[]]$Paths,
-    [string[]]$Tokens = @()
+    [string[]]$Secrets = @()
   )
 
-  foreach ($token in $Tokens) {
-    if ([string]::IsNullOrEmpty($token)) { continue }
+  foreach ($secret in $Secrets) {
+    if ([string]::IsNullOrEmpty($secret)) { continue }
     foreach ($path in $Paths) {
       $file = Read-NgtAcceptanceTextFile -Path $path
-      if ($file.Exists -and $file.Text.IndexOf($token, [System.StringComparison]::Ordinal) -ge 0) {
-        throw "The GitHub token was exposed in standard-user acceptance diagnostics."
+      if ($file.Exists -and $file.Text.IndexOf($secret, [System.StringComparison]::Ordinal) -ge 0) {
+        throw "A protected credential was exposed in standard-user acceptance diagnostics."
       }
     }
   }
@@ -73,13 +73,13 @@ function Get-NgtAcceptanceProcessOutcome {
     [Parameter(Mandatory = $true)][string]$StderrPath,
     [Parameter(Mandatory = $true)][string]$ResultPath,
     [Parameter(Mandatory = $true)][AllowNull()][object]$ProcessExitCode,
-    [string[]]$Tokens = @(),
+    [string[]]$Secrets = @(),
     [switch]$TimedOut
   )
 
   $stdout = Read-NgtAcceptanceTextFile -Path $StdoutPath
   $stderr = Read-NgtAcceptanceTextFile -Path $StderrPath
-  Assert-NgtAcceptanceTokenNotExposed -Paths @($StdoutPath, $StderrPath, $ResultPath) -Tokens $Tokens
+  Assert-NgtAcceptanceTokenNotExposed -Paths @($StdoutPath, $StderrPath, $ResultPath) -Secrets $Secrets
   $childExitCode = $null
   $resultFailure = $null
   if ($TimedOut) {
@@ -150,6 +150,27 @@ function Protect-NgtAcceptanceDiagnosticText {
   $safe = [regex]::Replace($safe, 'github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]{20,}', '[REDACTED TOKEN]')
   if ($safe.Length -gt 100000) { $safe = $safe.Substring($safe.Length - 100000) }
   return $safe
+}
+
+function Get-NgtAcceptanceSafeFailureMessage {
+  param(
+    [Parameter(Mandatory = $true)][string]$Acceptance,
+    [AllowNull()][string]$Message,
+    [string[]]$Secrets = @()
+  )
+
+  try {
+    $safeMessage = Protect-NgtAcceptanceDiagnosticText -Text $Message -Secrets $Secrets
+    foreach ($secret in $Secrets) {
+      if (-not [string]::IsNullOrEmpty($secret) -and
+          $safeMessage.IndexOf($secret, [System.StringComparison]::Ordinal) -ge 0) {
+        throw "Sensitive text remained after sanitization."
+      }
+    }
+    return "The standard-user $Acceptance acceptance failed: $safeMessage"
+  } catch {
+    return "The standard-user $Acceptance acceptance failed; the error details were withheld because they could not be safely sanitized."
+  }
 }
 
 function Write-NgtAcceptanceFailureDiagnostic {
