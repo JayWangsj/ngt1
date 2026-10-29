@@ -7,6 +7,7 @@ param(
   [switch]$AuthMatrixOnly
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-studio-acceptance-coordinator.ps1")
 
 function Get-NgtAcceptanceSha256([string]$Value) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -207,10 +208,8 @@ if ($Child) {
     $taskProbeDeadline = (Get-Date).AddMinutes(3)
     while (-not (Test-Path -LiteralPath ([string]$request.authProbeResultPath) -PathType Leaf) -and
         (Get-Date) -lt $taskProbeDeadline) { Start-Sleep -Milliseconds 250 }
-    if (-not (Test-Path -LiteralPath ([string]$request.authProbeResultPath) -PathType Leaf) -or
-        (Get-Content -LiteralPath ([string]$request.authProbeResultPath) -Raw).Trim() -ne "PASS") {
-      throw "The scheduled-task GH_CONFIG_DIR restart probe failed or timed out."
-    }
+    Assert-NgtAcceptanceFileContent -Path ([string]$request.authProbeResultPath) `
+      -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
     Write-Output "GH_CONFIG_DIR-only private Draft view, full asset download, and scheduled-task restart passed."
   }
 
@@ -232,7 +231,30 @@ if ($Child) {
       $childExitCode = [int]$LASTEXITCODE
     }
   } catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
+    $childFailure = $_
+    [Console]::Error.WriteLine(("{0}: {1}`r`n{2}" -f
+      $childFailure.Exception.GetType().FullName,
+      $childFailure.Exception.Message,
+      $childFailure.ScriptStackTrace))
+    try {
+      $invocation = $childFailure.InvocationInfo
+      $childFailureReport = [ordered]@{
+        type = $childFailure.Exception.GetType().FullName
+        message = $childFailure.Exception.Message
+        script = $invocation.ScriptName
+        line = $invocation.ScriptLineNumber
+        sourceLine = $invocation.Line
+        position = $invocation.PositionMessage
+        scriptStackTrace = $childFailure.ScriptStackTrace
+      }
+      [System.IO.File]::WriteAllText(
+        [string]$request.failurePath,
+        ($childFailureReport | ConvertTo-Json -Depth 4),
+        [System.Text.UTF8Encoding]::new($false)
+      )
+    } catch {
+      [Console]::Error.WriteLine("Could not retain structured child failure details.")
+    }
     $childExitCode = 1
   } finally {
     foreach ($name in @("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR")) {
@@ -305,13 +327,21 @@ $passwordPlain = $runId + "Aa1!"
 $password = ConvertTo-SecureString $passwordPlain -AsPlainText -Force
 $user = $null
 $process = $null
-$processTerminationFailed = $false
-$credentialCleanupFailed = $false
+$cleanupFailures = New-Object 'System.Collections.Generic.List[object]'
+$failureRecord = $null
+$acceptanceTimedOut = $false
+$childExitCode = $null
+$processExitCode = $null
+$capturedStdout = ""
+$capturedStderr = ""
+$childFailureDetails = $null
+$additionalDiagnostics = New-Object 'System.Collections.Generic.List[string]'
 $taskName = $null
 $taskRegistered = $false
 $workspaceAclPaths = @()
 $isolatedTemp = Join-Path $env:RUNNER_TEMP ("ngt-acceptance-" + $runId)
 $requestPath = Join-Path $isolatedTemp "request.json"
+$childFailurePath = Join-Path $isolatedTemp "child-failure.json"
 $resultPath = Join-Path $isolatedTemp "acceptance.exit-code"
 $stdoutPath = Join-Path $isolatedTemp "acceptance.stdout.log"
 $stderrPath = Join-Path $isolatedTemp "acceptance.stderr.log"
@@ -323,6 +353,11 @@ $authProbeResultPath = Join-Path $isolatedTemp "auth-probe.result"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $ghExecutablePath = $null
 $expectedTokenSha256 = $null
+$protectedTokens = @(
+  $env:GH_TOKEN,
+  $env:GITHUB_TOKEN
+) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+$diagnosticSecrets = @($protectedTokens + @($passwordPlain))
 
 try {
   if ($requiresGitHubAuth) {
@@ -398,6 +433,7 @@ try {
     scriptPath = $scriptPath
     parameters = $parameters
     resultPath = $resultPath
+    failurePath = $childFailurePath
     environment = @{
       GITHUB_ACTIONS = $env:GITHUB_ACTIONS
       RUNNER_ENVIRONMENT = $env:RUNNER_ENVIRONMENT
@@ -421,8 +457,10 @@ try {
     authProbeResultPath = if ($Acceptance -eq "production-update") { $authProbeResultPath } else { $null }
   }
   $requestText = $request | ConvertTo-Json -Depth 6
-  if ($expectedTokenSha256 -and $requestText.Contains($env:GH_TOKEN)) {
-    throw "The GitHub token must not be written to request.json."
+  foreach ($protectedToken in $protectedTokens) {
+    if ($requestText.IndexOf($protectedToken, [System.StringComparison]::Ordinal) -ge 0) {
+      throw "The GitHub token must not be written to request.json."
+    }
   }
   [System.IO.File]::WriteAllText($requestPath, $requestText, [System.Text.Encoding]::UTF8)
 
@@ -451,10 +489,12 @@ try {
         $taskDeadline = (Get-Date).AddSeconds(90)
         while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
             (Get-Date) -lt $taskDeadline) { Start-Sleep -Milliseconds 250 }
-        if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -or
-            (Get-Content -LiteralPath $authProbeResultPath -Raw).Trim() -ne "PASS") {
+        try {
+          Assert-NgtAcceptanceFileContent -Path $authProbeResultPath `
+            -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
+        } catch {
           [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
-          throw "The scheduled task could not read GH_CONFIG_DIR after its user-profile restart."
+          throw
         }
         $taskStopDeadline = (Get-Date).AddSeconds(10)
         do {
@@ -475,11 +515,20 @@ try {
       }
     }
     if ((Get-Date) -ge $acceptanceDeadline) {
-      & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
-      [void]$process.WaitForExit(5000)
-      $process.Refresh()
-      if (-not $process.HasExited) { $processTerminationFailed = $true }
-      throw "The standard-user $Acceptance acceptance exceeded its 110-minute timeout."
+      $acceptanceTimedOut = $true
+      try {
+        & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
+        [void]$process.WaitForExit(5000)
+        $process.Refresh()
+        if (-not $process.HasExited) { throw "The standard-user acceptance process remained active after timeout termination." }
+        $processExitCode = $process.ExitCode
+      } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Timed-out acceptance process termination" -ErrorRecord $_ }
+      $timeoutOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
+        -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
+        -ProcessExitCode $processExitCode -Tokens $protectedTokens -TimedOut
+      $capturedStdout = $timeoutOutcome.Stdout
+      $capturedStderr = $timeoutOutcome.Stderr
+      throw $timeoutOutcome.FailureMessage
     }
     if ((Get-Date) -ge $nextProgress) {
       Write-Output "The standard-user acceptance is still running."
@@ -487,32 +536,25 @@ try {
     }
   }
   $process.Refresh()
-  if ($expectedTokenSha256) {
-    foreach ($outputPath in @($stdoutPath, $stderrPath, $requestPath)) {
-      if ((Test-Path -LiteralPath $outputPath) -and
-          (Get-Content -LiteralPath $outputPath -Raw).Contains($env:GH_TOKEN)) {
-        throw "The GitHub token was exposed in standard-user acceptance diagnostics."
-      }
-    }
-  }
-  if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath }
-  if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath | ForEach-Object { Write-Output ("Acceptance stderr: " + $_) } }
-  if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
-    throw "The standard-user $Acceptance acceptance did not write its exit result."
-  }
-  $resultText = (Get-Content -LiteralPath $resultPath -Raw).Trim()
-  [int]$childExitCode = 0
-  if (-not [int]::TryParse($resultText, [ref]$childExitCode)) {
-    throw "The standard-user $Acceptance acceptance wrote an invalid exit result."
-  }
   $processExitCode = $process.ExitCode
-  if ($childExitCode -ne 0 -or ($null -ne $processExitCode -and $processExitCode -ne 0)) {
-    throw "The standard-user $Acceptance acceptance failed with child exit code $childExitCode and process exit code $processExitCode."
+  Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath) -Tokens $protectedTokens
+  $outcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
+    -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
+    -ProcessExitCode $processExitCode -Tokens $protectedTokens
+  $childExitCode = $outcome.ChildExitCode
+  $capturedStdout = $outcome.Stdout
+  $capturedStderr = $outcome.Stderr
+  Assert-NgtAcceptanceProcessSucceeded -Outcome $outcome
+  if (-not [string]::IsNullOrEmpty($capturedStdout)) { Write-Output $capturedStdout }
+  if (-not [string]::IsNullOrEmpty($capturedStderr)) {
+    Write-Output ("Acceptance stderr:`r`n" + $capturedStderr)
   }
+} catch {
+  $failureRecord = $_
 } finally {
   if ($taskRegistered -and $taskName) {
     try {
-      Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
       $taskStopDeadline = (Get-Date).AddSeconds(5)
       do {
         $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
@@ -521,13 +563,20 @@ try {
       } while ((Get-Date) -lt $taskStopDeadline)
       if ($taskState -ne "Ready") { throw "The isolated credential probe task did not stop before cleanup." }
       Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
-    } catch { $credentialCleanupFailed = $true }
+    } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Scheduled authentication task" -ErrorRecord $_ }
   }
-  if ($process -and -not $process.HasExited) {
-    & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
-    [void]$process.WaitForExit(5000)
-    $process.Refresh()
-    if (-not $process.HasExited) { $processTerminationFailed = $true }
+  if ($process) {
+    try {
+      $process.Refresh()
+      if (-not $process.HasExited) {
+        & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "taskkill returned exit code $LASTEXITCODE." }
+        [void]$process.WaitForExit(5000)
+        $process.Refresh()
+        if (-not $process.HasExited) { throw "The standard-user acceptance process is still running." }
+      }
+      if ($null -eq $processExitCode -and $process.HasExited) { $processExitCode = $process.ExitCode }
+    } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Acceptance process termination" -ErrorRecord $_ }
   }
   if ($user -and $Acceptance -eq "production-update") {
     try {
@@ -539,7 +588,13 @@ try {
       }
       $loadedEnvironment = "Registry::HKEY_USERS\$userSid\Environment"
       if (Test-Path -LiteralPath $loadedEnvironment) {
-        Remove-ItemProperty -LiteralPath $loadedEnvironment -Name "GH_CONFIG_DIR" -ErrorAction SilentlyContinue
+        $loadedConfig = Get-ItemProperty -LiteralPath $loadedEnvironment -Name "GH_CONFIG_DIR" -ErrorAction SilentlyContinue
+        if ($loadedConfig) {
+          Remove-ItemProperty -LiteralPath $loadedEnvironment -Name "GH_CONFIG_DIR" -ErrorAction Stop
+          if ((Get-ItemProperty -LiteralPath $loadedEnvironment -Name "GH_CONFIG_DIR" -ErrorAction SilentlyContinue).GH_CONFIG_DIR) {
+            throw "The isolated GH_CONFIG_DIR remained in the disposable user's loaded environment."
+          }
+        }
       } else {
         $hiveFile = Join-Path ([string]$profile.LocalPath) "NTUSER.DAT"
         if (-not (Test-Path -LiteralPath $hiveFile -PathType Leaf)) {
@@ -551,62 +606,123 @@ try {
         try {
           $environmentKey = "Registry::HKEY_USERS\$temporaryHive\Environment"
           if (Test-Path -LiteralPath $environmentKey) {
-            Remove-ItemProperty -LiteralPath $environmentKey -Name "GH_CONFIG_DIR" -ErrorAction SilentlyContinue
+            $hiveConfig = Get-ItemProperty -LiteralPath $environmentKey -Name "GH_CONFIG_DIR" -ErrorAction SilentlyContinue
+            if ($hiveConfig) {
+              Remove-ItemProperty -LiteralPath $environmentKey -Name "GH_CONFIG_DIR" -ErrorAction Stop
+              if ((Get-ItemProperty -LiteralPath $environmentKey -Name "GH_CONFIG_DIR" -ErrorAction SilentlyContinue).GH_CONFIG_DIR) {
+                throw "The isolated GH_CONFIG_DIR remained in the disposable user's environment hive."
+              }
+            }
           }
         } finally {
           & (Join-Path $env:SystemRoot "System32\reg.exe") unload "HKU\$temporaryHive" | Out-Null
-          if ($LASTEXITCODE -ne 0) { $credentialCleanupFailed = $true }
+          if ($LASTEXITCODE -ne 0) { throw "Could not unload the disposable user environment hive after credential cleanup." }
         }
       }
     } catch {
-      $credentialCleanupFailed = $true
+      Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Disposable GitHub credential cleanup" -ErrorRecord $_
     }
   }
   try {
-    $sanitizedDiagnostics = Get-ChildItem -LiteralPath $isolatedTemp -Directory -Filter "ngt-*-diagnostics" -ErrorAction SilentlyContinue
-    if ($sanitizedDiagnostics) {
-      $containsToken = $false
-      if ($expectedTokenSha256 -and $env:GH_TOKEN) {
-        foreach ($directory in $sanitizedDiagnostics) {
-          foreach ($file in Get-ChildItem -LiteralPath $directory.FullName -File -Force -Recurse) {
-            if ([System.IO.File]::ReadAllText($file.FullName).Contains($env:GH_TOKEN)) {
-              $containsToken = $true
-              break
-            }
-          }
-          if ($containsToken) { break }
-        }
-      }
-      if ($containsToken) {
-        Write-Warning "Acceptance diagnostics contained the GitHub token and were discarded."
-      } else {
-        $retainedDiagnostics = Join-Path $env:RUNNER_TEMP "ngt-acceptance-diagnostics"
-        New-Item -ItemType Directory -Path $retainedDiagnostics -Force | Out-Null
-        foreach ($directory in $sanitizedDiagnostics) {
-          Copy-Item -LiteralPath $directory.FullName -Destination $retainedDiagnostics -Recurse -Force
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+      $log = Read-NgtAcceptanceTextFile -Path $path
+      if ($path -eq $stdoutPath) { $capturedStdout = $log.Text }
+      else { $capturedStderr = $log.Text }
+    }
+  } catch {
+    Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Acceptance log collection" -ErrorRecord $_
+  }
+  try {
+    Assert-NgtAcceptanceTokenNotExposed -Paths @($stdoutPath, $stderrPath, $requestPath, $resultPath) -Tokens $protectedTokens
+  } catch {
+    Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "GitHub credential exposure check" -ErrorRecord $_
+  }
+  try {
+    if (Test-Path -LiteralPath $childFailurePath -PathType Leaf) {
+      try {
+        $childFailureText = [System.IO.File]::ReadAllText($childFailurePath)
+        Assert-NgtAcceptanceTokenNotExposed -Paths @($childFailurePath) -Tokens $protectedTokens
+        $childFailureDetails = $childFailureText | ConvertFrom-Json
+      } catch {
+        if ($_.Exception.Message -match "token was exposed") {
+          try { throw "A child failure detail contained a protected GitHub credential." }
+          catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Child failure credential exposure check" -ErrorRecord $_ }
+          try { $childFailureDetails = $childFailureText | ConvertFrom-Json } catch { }
+        } else {
+          Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Structured child failure collection" -ErrorRecord $_
         }
       }
     }
   } catch {
-    Write-Warning ("Sanitized acceptance diagnostics could not be retained: " + $_.Exception.Message)
+    Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Structured child failure collection" -ErrorRecord $_
+  }
+  try {
+    if (Test-Path -LiteralPath $isolatedTemp -PathType Container) {
+      $sanitizedDiagnostics = Get-ChildItem -LiteralPath $isolatedTemp -Directory -Filter "ngt-*-diagnostics" -ErrorAction Stop
+      foreach ($directory in $sanitizedDiagnostics) {
+        foreach ($file in Get-ChildItem -LiteralPath $directory.FullName -File -Force -Recurse -ErrorAction Stop) {
+          if ($file.Extension -notin @(".log", ".json")) { continue }
+          if ($file.Name -in @("request.json", "hosts.yml", "child-failure.json", "acceptance.exit-code")) { continue }
+          $text = [System.IO.File]::ReadAllText($file.FullName)
+          $containsToken = $false
+          foreach ($protectedToken in $protectedTokens) {
+            if ($text.IndexOf($protectedToken, [System.StringComparison]::Ordinal) -ge 0) {
+              $containsToken = $true
+            }
+          }
+          if ($containsToken) {
+            try { throw "A child diagnostic contained a protected GitHub credential." }
+            catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Child diagnostic credential exposure check" -ErrorRecord $_ }
+          }
+          $safeText = Protect-NgtAcceptanceDiagnosticText -Text $text -Secrets @($protectedTokens + @($passwordPlain))
+          $additionalDiagnostics.Add(("{0}/{1}`r`n{2}" -f $directory.Name, $file.Name, $safeText))
+        }
+      }
+    }
+  } catch {
+    Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Sanitized diagnostic collection" -ErrorRecord $_
   }
   foreach ($entry in $workspaceAclPaths) {
-    $icaclsArguments = @($entry.Path, "/remove", $account)
-    if ($entry.Recursive) { $icaclsArguments += @("/T", "/C") }
-    $icaclsArguments += "/Q"
-    & (Join-Path $env:SystemRoot "System32\icacls.exe") @icaclsArguments | Out-Null
+    try {
+      $icaclsArguments = @($entry.Path, "/remove", $account)
+      if ($entry.Recursive) { $icaclsArguments += @("/T", "/C") }
+      $icaclsArguments += "/Q"
+      & (Join-Path $env:SystemRoot "System32\icacls.exe") @icaclsArguments | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "icacls returned exit code $LASTEXITCODE while removing the acceptance user ACL." }
+    } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Workspace ACL cleanup" -ErrorRecord $_ }
   }
-  if ($user) { Remove-LocalUser -Name $userName -ErrorAction SilentlyContinue }
-  if (Test-Path -LiteralPath $isolatedTemp) {
-    Remove-Item -LiteralPath $isolatedTemp -Recurse -Force -ErrorAction SilentlyContinue
-    if (Test-Path -LiteralPath $isolatedTemp) { $credentialCleanupFailed = $true }
+  if ($user) {
+    try { Remove-LocalUser -Name $userName -ErrorAction Stop }
+    catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Disposable standard-user removal" -ErrorRecord $_ }
   }
+  try {
+    if (Test-Path -LiteralPath $isolatedTemp) {
+      Remove-Item -LiteralPath $isolatedTemp -Recurse -Force -ErrorAction Stop
+      if (Test-Path -LiteralPath $isolatedTemp) { throw "The isolated acceptance credential directory remains after cleanup." }
+    }
+  } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Isolated credential and work directory cleanup" -ErrorRecord $_ }
   if ($requiresGitHubAuth) {
     Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
   }
-  if ($processTerminationFailed -or $credentialCleanupFailed) {
-    throw "The isolated GitHub credentials or standard-user process could not be fully cleaned up; discard this hosted runner."
+  if ($password) {
+    try { $password.Dispose() }
+    catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Credential object disposal" -ErrorRecord $_ }
   }
-  if ($password) { $password.Dispose() }
   $passwordPlain = $null
+}
+
+if ($failureRecord -or $cleanupFailures.Count -gt 0) {
+  $diagnosticDirectoryName = "ngt-acceptance-diagnostics-{0}-{1}" -f $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT
+  $diagnosticPath = Join-Path (Join-Path $env:RUNNER_TEMP $diagnosticDirectoryName) "acceptance-failure.json"
+  try {
+    Write-NgtAcceptanceFailureDiagnostic -Path $diagnosticPath -Acceptance $Acceptance `
+      -FailureRecord $failureRecord -ChildFailure $childFailureDetails -CleanupFailures $cleanupFailures.ToArray() `
+      -Stdout $capturedStdout -Stderr $capturedStderr -ChildExitCode $childExitCode `
+      -ProcessExitCode $processExitCode -TimedOut:$acceptanceTimedOut `
+      -Secrets $diagnosticSecrets -AdditionalDiagnostics $additionalDiagnostics.ToArray()
+  } catch {
+    Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Failure artifact generation" -ErrorRecord $_
+  }
+  if ($failureRecord) { throw $failureRecord }
+  Assert-NgtAcceptanceCleanupSucceeded -Failures $cleanupFailures
 }

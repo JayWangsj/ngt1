@@ -70,6 +70,10 @@ describe("Windows persistent startup", () => {
       "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
       "utf8",
     );
+    const coordinator = await readFile(
+      "scripts/windows-studio-acceptance-coordinator.ps1",
+      "utf8",
+    );
     const workflow = await readFile(
       ".github/workflows/windows-studio-release.yml",
       "utf8",
@@ -88,12 +92,11 @@ describe("Windows persistent startup", () => {
     expect(runner).toContain(
       "Set-Content -LiteralPath $request.resultPath -Value $childExitCode -Encoding ascii",
     );
-    expect(runner).toContain(
-      "if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf))",
-    );
-    expect(runner).toContain(
-      "$childExitCode -ne 0 -or ($null -ne $processExitCode -and $processExitCode -ne 0)",
-    );
+    expect(runner).toContain("windows-studio-acceptance-coordinator.ps1");
+    expect(runner).toContain("Get-NgtAcceptanceProcessOutcome");
+    expect(coordinator).toContain("Required acceptance file is missing");
+    expect(coordinator).toContain("Required acceptance file is empty");
+    expect(coordinator).toContain("$childExitCode -ne 0");
     expect(runner).toContain("Remove-LocalUser -Name $userName");
     expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
     expect(workflow).toContain("acceptance: online-update");
@@ -836,9 +839,9 @@ describe("Production updater GitHub authentication", () => {
     expect(runner).toContain('Join-Path $ghConfigDirectory "hosts.yml"');
     expect(runner).toContain("must not be written to request.json");
     expect(runner).toContain("AddMinutes(110)");
-    expect(runner).toContain(
-      "diagnostics contained the GitHub token and were discarded",
-    );
+    expect(runner).toContain("windows-studio-acceptance-coordinator.ps1");
+    expect(runner).toContain("Assert-NgtAcceptanceTokenNotExposed");
+    expect(runner).toContain("childFailurePath");
     expect(runner).not.toContain("GH_TOKEN = $env:GH_TOKEN");
   });
 });

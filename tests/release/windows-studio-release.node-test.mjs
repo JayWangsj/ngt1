@@ -773,6 +773,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
       "utf8",
     )
   ).replace(/\r\n/g, "\n");
+  const acceptanceCoordinator = (
+    await readText("scripts/windows-studio-acceptance-coordinator.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const acceptanceCoordinatorTest = (
+    await readText(
+      "scripts/test-windows-studio-acceptance-coordinator.ps1",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
   const scheduledTaskAuthProbe = (
     await readText("scripts/test-windows-studio-gh-config-task.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -873,6 +882,18 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
+  assert.match(
+    candidateBuildAction,
+    /test-windows-studio-acceptance-coordinator\.ps1/,
+  );
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /Upload sanitized Windows acceptance failure diagnostics[\s\S]*?if: failure\(\)[\s\S]*?actions\/upload-artifact@v4[\s\S]*?ngt-acceptance-diagnostics/,
+  );
+  assert.match(
+    ready,
+    /ngt-acceptance-diagnostics-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/,
+  );
   assert.match(onlineAcceptanceWorkflow, /build-windows-studio-candidate/);
   assert.ok(
     onlineAcceptanceWorkflow.indexOf(
@@ -1102,8 +1123,17 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /SetEnvironmentVariable\("GH_CONFIG_DIR", \$null, "User"\)/,
   );
   assert.match(standardUserAcceptance, /Registry::HKEY_USERS/);
-  assert.match(standardUserAcceptance, /processTerminationFailed/);
-  assert.match(standardUserAcceptance, /credentialCleanupFailed/);
+  assert.match(standardUserAcceptance, /Add-NgtAcceptanceCleanupFailure/);
+  assert.match(standardUserAcceptance, /-ChildFailure \$childFailureDetails/);
+  assert.match(acceptanceCoordinator, /ReadAllText\(\$Path\)/);
+  assert.match(acceptanceCoordinator, /invalid exit result/);
+  assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceFileContent/);
+  assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceProcessSucceeded/);
+  assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceCleanupSucceeded/);
+  assert.match(acceptanceCoordinator, /Write-NgtAcceptanceFailureDiagnostic/);
+  assert.match(acceptanceCoordinatorTest, /empty-stdout-error-stderr/);
+  assert.match(acceptanceCoordinatorTest, /token-in-log/);
+  assert.match(acceptanceCoordinatorTest, /-TimedOut/);
   assert.match(standardUserAcceptance, /Test-NgtGhAuthMatrix/);
   assert.match(standardUserAcceptance, /GH_TOKEN only/);
   assert.match(standardUserAcceptance, /GITHUB_TOKEN only/);
