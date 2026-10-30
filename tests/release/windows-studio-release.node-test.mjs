@@ -13,11 +13,13 @@ import {
   createWindowsPackageManifest,
   expectedAssetNames,
   findPublishedUpdateBaseline,
+  findUpdateBaselineWithConfiguredAuth,
   GitHubReleaseApi,
   parseReleaseMarker,
   prepareDraft,
   publishRelease,
   qualifyRelease,
+  readUpdateBaselineToken,
   requireReleaseReady,
   verifyArtifact,
   verifyWindowsPackageArtifact,
@@ -298,6 +300,234 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
   );
   assert.equal(requests.length, 4);
   assert.match(requests[0], /\/releases\?per_page=100&page=1$/);
+});
+
+test("find-update-baseline reads GH_CONFIG_DIR-only credentials without exposing them", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ngt-baseline-auth-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const isolatedConfig = path.join(root, "isolated-gh-config");
+  const otherUserHome = path.join(root, "other-user-home");
+  const otherUserConfig = path.join(otherUserHome, ".config", "gh");
+  await mkdir(isolatedConfig, { recursive: true });
+  await mkdir(otherUserConfig, { recursive: true });
+  await writeFile(
+    path.join(isolatedConfig, "hosts.yml"),
+    "fake isolated config\n",
+  );
+  await writeFile(
+    path.join(otherUserConfig, "hosts.yml"),
+    "fake other-user credential must not be used\n",
+  );
+
+  const isolatedToken = "ngt-fake-isolated-cli-token";
+  const calls = [];
+  const releaseAssets = [
+    "ngt-studio-windows-v2.0.21.zip",
+    "ngt-studio-windows-v2.0.21.zip.sha256",
+    "ngt-studio-runtime-v2.0.21.zip",
+    "ngt-studio-runtime-v2.0.21.zip.sha256",
+  ].map((name) => ({ name }));
+  const baseline = await findUpdateBaselineWithConfiguredAuth(
+    "v2.0.23",
+    undefined,
+    {
+      env: {
+        GH_CONFIG_DIR: isolatedConfig,
+        HOME: otherUserHome,
+        USERPROFILE: otherUserHome,
+        GITHUB_REPOSITORY: "JayWangsj/ngt1",
+      },
+      ghPath: "fake-gh",
+      execFileSyncImpl: (command, args, options) => {
+        calls.push({ command, args, options });
+        return isolatedToken + "\n";
+      },
+      fetchImpl: async (url, options) => {
+        assert.equal(new URL(url).pathname, "/repos/JayWangsj/ngt1/releases");
+        assert.equal(options.headers.Authorization, "Bearer " + isolatedToken);
+        return new Response(
+          JSON.stringify([
+            {
+              tag_name: "v2.0.21",
+              draft: false,
+              prerelease: false,
+              assets: releaseAssets,
+            },
+          ]),
+          { status: 200 },
+        );
+      },
+    },
+  );
+
+  assert.equal(baseline.tag_name, "v2.0.21");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "fake-gh");
+  assert.deepEqual(calls[0].args, [
+    "auth",
+    "token",
+    "--hostname",
+    "github.com",
+  ]);
+  assert.equal(calls[0].options.env.GH_CONFIG_DIR, isolatedConfig);
+  assert.equal(Object.hasOwn(calls[0].options.env, "GH_TOKEN"), false);
+  assert.equal(Object.hasOwn(calls[0].options.env, "GITHUB_TOKEN"), false);
+  assert.equal(calls[0].options.timeout, 10_000);
+  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+});
+
+test("find-update-baseline preserves explicit token sources and GitHubReleaseApi rejects empty tokens", async () => {
+  const tokens = [
+    { GITHUB_TOKEN: "ngt-explicit-github-token" },
+    { GH_TOKEN: "ngt-explicit-gh-token" },
+  ];
+  for (const env of tokens) {
+    const token = Object.values(env)[0];
+    let cliCalled = false;
+    const baseline = await findUpdateBaselineWithConfiguredAuth(
+      "v2.0.23",
+      undefined,
+      {
+        env,
+        execFileSyncImpl: () => {
+          cliCalled = true;
+          throw new Error("The explicit-token path must not invoke gh.");
+        },
+        fetchImpl: async (_url, options) => {
+          assert.equal(options.headers.Authorization, "Bearer " + token);
+          return new Response("[]", { status: 200 });
+        },
+      },
+    );
+    assert.equal(baseline, null);
+    assert.equal(cliCalled, false);
+  }
+  assert.throws(
+    () => new GitHubReleaseApi({ token: "" }),
+    /GitHub token is required for release API access\./,
+  );
+});
+
+test("find-update-baseline fails closed on missing, empty, nonzero, and timed-out isolated CLI credentials", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "ngt-baseline-auth-errors-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const missingHosts = path.join(root, "missing-hosts");
+  const isolatedConfig = path.join(root, "isolated-gh-config");
+  const otherUserHome = path.join(root, "other-user-home");
+  await mkdir(missingHosts, { recursive: true });
+  await mkdir(isolatedConfig, { recursive: true });
+  await mkdir(path.join(otherUserHome, ".config", "gh"), { recursive: true });
+  await writeFile(
+    path.join(otherUserHome, ".config", "gh", "hosts.yml"),
+    "ngt-fake-other-user-token\n",
+  );
+
+  const otherUserEnv = {
+    HOME: otherUserHome,
+    USERPROFILE: otherUserHome,
+  };
+  let cliCalled = false;
+  assert.throws(
+    () =>
+      readUpdateBaselineToken({
+        env: otherUserEnv,
+        execFileSyncImpl: () => {
+          cliCalled = true;
+          return "ngt-fake-other-user-token";
+        },
+      }),
+    /explicit isolated GH_CONFIG_DIR/,
+  );
+  assert.equal(cliCalled, false);
+
+  assert.throws(
+    () =>
+      readUpdateBaselineToken({
+        env: { GH_CONFIG_DIR: missingHosts },
+        execFileSyncImpl: () => {
+          cliCalled = true;
+          return "ngt-fake-other-user-token";
+        },
+      }),
+    /isolated GitHub CLI hosts\.yml/,
+  );
+  assert.equal(cliCalled, false);
+
+  await writeFile(
+    path.join(isolatedConfig, "hosts.yml"),
+    "fake isolated config\n",
+  );
+  const fakeSecret = "ngt-fake-secret-that-must-not-leak";
+  for (const failure of [
+    Object.assign(new Error("child failure: " + fakeSecret), {
+      status: 1,
+      stderr: Buffer.from("stderr: " + fakeSecret),
+    }),
+    Object.assign(new Error("spawnSync fake-gh ETIMEDOUT " + fakeSecret), {
+      code: "ETIMEDOUT",
+      stderr: Buffer.from("timeout stderr: " + fakeSecret),
+    }),
+  ]) {
+    assert.throws(
+      () =>
+        readUpdateBaselineToken({
+          env: { GH_CONFIG_DIR: isolatedConfig },
+          execFileSyncImpl: () => {
+            throw failure;
+          },
+        }),
+      (error) => {
+        assert.match(
+          error.message,
+          /could not read a token from the isolated GH_CONFIG_DIR/,
+        );
+        assert.equal(error.message.includes(fakeSecret), false);
+        return true;
+      },
+    );
+  }
+
+  assert.throws(
+    () =>
+      readUpdateBaselineToken({
+        env: { GH_CONFIG_DIR: isolatedConfig },
+        execFileSyncImpl: () => " \r\n",
+      }),
+    /empty or invalid token from GH_CONFIG_DIR/,
+  );
+});
+
+test("find-update-baseline reports API permission failures without credential details", async (t) => {
+  const fakeToken = "ngt-fake-api-token";
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "ngt-baseline-api-permission-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const configDirectory = path.join(root, "isolated-gh-config");
+  await mkdir(configDirectory, { recursive: true });
+  await writeFile(
+    path.join(configDirectory, "hosts.yml"),
+    "fake test config\n",
+  );
+  for (const status of [401, 403, 404]) {
+    await assert.rejects(
+      findUpdateBaselineWithConfiguredAuth("v2.0.23", undefined, {
+        env: { GH_CONFIG_DIR: configDirectory },
+        execFileSyncImpl: () => fakeToken,
+        fetchImpl: async () => new Response(fakeToken, { status }),
+      }),
+      (error) => {
+        assert.equal(
+          error.message,
+          `GitHub API GET request failed with HTTP ${status}.`,
+        );
+        assert.equal(error.message.includes(fakeToken), false);
+        return true;
+      },
+    );
+  }
 });
 
 test("Draft creation survives an ambiguous upload response without duplicating assets", async (t) => {
@@ -1021,23 +1251,35 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
   assert.match(online, /Assert-NgtOnlineUpdateGitHubAuth -GhPath \$githubCli/);
   assert.match(
+    online,
+    /Resolve-NgtOnlineUpdateAuthRepository -MainRepository \$repository[\s\S]{0,120}-TestReleaseRepository \$TestReleaseRepository -ProductionUpdater:\$ProductionUpdater/,
+  );
+  assert.match(
     onlineAuth,
     /return \(-not \$CandidateDirectory\) -or \$ManualInstaller -or \$ProductionUpdater/,
   );
   assert.match(
     onlineAuth,
-    /GitHub release read authorization is unavailable\./,
+    /api "repos\/\$Repository\/releases\?per_page=1"[\s\S]{0,100}--hostname github\.com --method GET/,
   );
-  assert.match(onlineAuthTest, /Remove-Item Env:\\GH_TOKEN/);
-  assert.match(onlineAuthTest, /Remove-Item Env:\\GITHUB_TOKEN/);
+  assert.match(onlineAuth, /isolated GitHub CLI hosts\.yml is unavailable/);
+  assert.doesNotMatch(onlineAuth, /auth status/);
+  assert.match(onlineAuthTest, /HTTP \$status/);
+  assert.match(onlineAuthTest, /hash-mismatch-child/);
+  assert.match(onlineAuthTest, /ngt-isolated-auth-fixture-token/);
   assert.match(onlineAuthTest, /\$global:LASTEXITCODE = 0/);
   assert.match(
     onlineAuthTest,
     /Local candidate mode continued without GitHub credentials\./,
   );
-  assert.match(onlineAuthTest, /Name = "remote candidate"/);
-  assert.match(onlineAuthTest, /Name = "manual upgrade"/);
-  assert.match(onlineAuthTest, /Name = "production updater"/);
+  assert.match(onlineAuthTest, /"remote candidate"/);
+  assert.match(onlineAuthTest, /"manual upgrade"/);
+  assert.match(onlineAuthTest, /"production updater"/);
+  assert.match(releaseTool, /readUpdateBaselineToken\(/);
+  assert.match(releaseTool, /GH_CONFIG_DIR: configDirectory/);
+  assert.match(releaseTool, /\["auth", "token", "--hostname", "github\.com"\]/);
+  assert.match(releaseTool, /timeout: 10_000/);
+  assert.match(releaseTool, /findUpdateBaselineWithConfiguredAuth\(/);
   assert.match(
     onlineWorkflow,
     /Verify local and remote online-update authentication modes/,
@@ -1102,7 +1344,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(onlineUi, /still exposes a diagnostics action/);
   assert.match(
     releaseTool,
-    /findPublishedUpdateBaseline\(\s*api,\s*directoryArg,\s*process\.argv\[4\]/,
+    /findUpdateBaselineWithConfiguredAuth\(\s*directoryArg,\s*process\.argv\[4\]/,
   );
   assert.match(
     online,

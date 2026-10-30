@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -904,6 +906,80 @@ export async function findPublishedUpdateBaseline(
   return candidates[0] || null;
 }
 
+export function readUpdateBaselineToken({
+  env = process.env,
+  ghPath = "gh",
+  execFileSyncImpl = execFileSync,
+} = {}) {
+  const explicitToken = env.GITHUB_TOKEN || env.GH_TOKEN;
+  if (explicitToken) return explicitToken;
+
+  const configDirectory = String(env.GH_CONFIG_DIR || "").trim();
+  if (!configDirectory) {
+    throw new Error(
+      "find-update-baseline requires an explicit isolated GH_CONFIG_DIR.",
+    );
+  }
+  try {
+    if (!statSync(path.join(configDirectory, "hosts.yml")).isFile()) {
+      throw new Error("missing hosts file");
+    }
+  } catch {
+    throw new Error(
+      "find-update-baseline requires an isolated GitHub CLI hosts.yml.",
+    );
+  }
+
+  const ghEnvironment = { ...env, GH_CONFIG_DIR: configDirectory };
+  delete ghEnvironment.GH_TOKEN;
+  delete ghEnvironment.GITHUB_TOKEN;
+
+  let output;
+  try {
+    output = execFileSyncImpl(
+      ghPath,
+      ["auth", "token", "--hostname", "github.com"],
+      {
+        encoding: "utf8",
+        env: ghEnvironment,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000,
+        maxBuffer: 16 * 1024,
+        windowsHide: true,
+      },
+    );
+  } catch {
+    throw new Error(
+      "GitHub CLI could not read a token from the isolated GH_CONFIG_DIR.",
+    );
+  }
+
+  const token = String(output || "").trim();
+  if (!token || /\s/.test(token)) {
+    throw new Error(
+      "GitHub CLI returned an empty or invalid token from GH_CONFIG_DIR.",
+    );
+  }
+  return token;
+}
+
+export async function findUpdateBaselineWithConfiguredAuth(
+  targetTag,
+  preferredTag,
+  {
+    env = process.env,
+    ghPath = "gh",
+    execFileSyncImpl = execFileSync,
+    fetchImpl = fetch,
+  } = {},
+) {
+  const api = new GitHubReleaseApi({
+    token: readUpdateBaselineToken({ env, ghPath, execFileSyncImpl }),
+    fetchImpl,
+  });
+  return findPublishedUpdateBaseline(api, targetTag, preferredTag);
+}
+
 export async function qualifyRelease({
   api,
   tag,
@@ -1071,11 +1147,7 @@ async function main() {
   if (command === "find-update-baseline") {
     if (!directoryArg)
       throw new Error("find-update-baseline requires the target release tag.");
-    const api = new GitHubReleaseApi({
-      token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
-    });
-    const baseline = await findPublishedUpdateBaseline(
-      api,
+    const baseline = await findUpdateBaselineWithConfiguredAuth(
       directoryArg,
       process.argv[4],
     );

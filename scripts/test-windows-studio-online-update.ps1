@@ -46,7 +46,10 @@ if ($TestReleaseRepository -and
   throw "Production updater acceptance requires a separate owner/name test repository."
 }
 $githubCli = Get-Command gh -ErrorAction Stop | Select-Object -ExpandProperty Source
+$githubAuthRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $repository `
+  -TestReleaseRepository $TestReleaseRepository -ProductionUpdater:$ProductionUpdater
 Assert-NgtOnlineUpdateGitHubAuth -GhPath $githubCli `
+  -Repository $githubAuthRepository `
   -CandidateDirectory $CandidateDirectory `
   -ManualInstaller:$ManualInstaller `
   -ProductionUpdater:$ProductionUpdater
