@@ -6,10 +6,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repository = $env:NGT_UPDATER_TEST_REPOSITORY
+$requestedRepository = $env:NGT_UPDATER_TEST_REPOSITORY_INPUT
 $token = $env:NGT_UPDATER_TEST_TOKEN
 $candidateSha = $env:GITHUB_SHA
 $candidateVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\package.json") -Raw | ConvertFrom-Json).version
 $candidateTag = "v$candidateVersion"
+if ($requestedRepository -cne $repository) {
+  throw "The requested updater test repository does not match the approved Environment repository."
+}
 if ($repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
     $repository -ieq "JayWangsj/ngt1" -or
     -not $token -or
@@ -50,7 +54,7 @@ try {
   }
   $branchSha = if ($headEntries.Count -eq 1) { $headEntries[0].Sha } else { $null }
   if ($branchSha -and $branchSha -notin @($baselineSha, $candidateSha.ToLowerInvariant())) {
-    throw "The isolated updater test main branch contains unexpected source code. Use a fresh private repository."
+    throw "The isolated updater test main branch contains unexpected source code. Use a fresh dedicated public repository."
   }
   $remoteTags = & git -c http.https://github.com/.extraheader= -c credential.helper= ls-remote --tags --refs $remote 2>&1 | Out-String
   $tagsExitCode = $LASTEXITCODE
@@ -63,11 +67,11 @@ try {
     $tagMap[$fields[1]] = $fields[0].ToLowerInvariant()
   }
   if (@($tagMap.Keys | Where-Object { $_ -notin $allowedTags }).Count -gt 0) {
-    throw "The isolated updater test repository contains unrelated tags. Use a fresh private repository."
+    throw "The isolated updater test repository contains unrelated tags. Use a fresh dedicated public repository."
   }
   if (($tagMap.ContainsKey("refs/tags/v2.0.21") -and $tagMap["refs/tags/v2.0.21"] -ne $baselineSha) -or
       ($tagMap.ContainsKey("refs/tags/$candidateTag") -and $tagMap["refs/tags/$candidateTag"] -ne $candidateSha.ToLowerInvariant())) {
-    throw "An isolated updater test tag already points to a different source SHA. Use a fresh private repository."
+    throw "An isolated updater test tag already points to a different source SHA. Use a fresh dedicated public repository."
   }
 
   $references = @()

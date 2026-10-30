@@ -630,7 +630,7 @@ try {
       ($taskConfig | ConvertTo-Json -Depth 20) + "`n",
       [System.Text.UTF8Encoding]::new($false)
     )
-    Write-Output "Pointed the disposable v2.0.21 installation at the isolated private updater test repository."
+    Write-Output "Pointed the disposable v2.0.21 installation at the dedicated public updater test repository."
   }
   $updateId = [guid]::NewGuid().ToString()
   if ($ManualInstaller) {

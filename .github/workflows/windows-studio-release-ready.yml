@@ -10,7 +10,7 @@ on:
         default: none
         options: [none, installer]
       test_repository:
-        description: "Fresh disposable private repo on main. Creates baseline and candidate Releases/refs; retained for audit, not auto-deleted. Manually delete only this test repo after results. Token: Contents write only here."
+        description: "Exact dedicated public test repository approved by ngt-updater-test Environment. Uses main, creates a published v2.0.21 baseline and a v2.0.23 candidate Draft; retained for audit. Token is scoped only to this repository."
         type: string
         required: true
 
@@ -104,7 +104,8 @@ jobs:
       contents: read
     env:
       NGT_PRODUCTION_UPDATER_BASELINE: v2.0.21
-      NGT_UPDATER_TEST_REPOSITORY: ${{ inputs.test_repository }}
+      NGT_UPDATER_TEST_REPOSITORY: ${{ vars.NGT_UPDATER_TEST_REPOSITORY }}
+      NGT_UPDATER_TEST_REPOSITORY_INPUT: ${{ inputs.test_repository }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -135,13 +136,15 @@ jobs:
         env:
           NGT_RELEASE_READY: "true"
         run: node scripts/windows-studio-release.mjs verify-artifact release-assets
-      - name: Require the isolated private repository and scoped credential
+      - name: Require the approved public repository and scoped credential
         shell: powershell
         env:
           NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
         run: |
-          if (-not $env:NGT_UPDATER_TEST_TOKEN) { throw "Configure NGT_UPDATER_TEST_TOKEN with access to only the isolated private test repository." }
-          if ($env:NGT_UPDATER_TEST_REPOSITORY -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or $env:NGT_UPDATER_TEST_REPOSITORY -ieq $env:GITHUB_REPOSITORY) { throw "Release Ready requires a separate isolated repository owner/name." }
+          $approvedRepository = [string]$env:NGT_UPDATER_TEST_REPOSITORY
+          $requestedRepository = [string]$env:NGT_UPDATER_TEST_REPOSITORY_INPUT
+          if (-not $env:NGT_UPDATER_TEST_TOKEN) { throw "Configure NGT_UPDATER_TEST_TOKEN with Contents write access to only the approved public test repository." }
+          if ($approvedRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or $approvedRepository -ieq $env:GITHUB_REPOSITORY -or $requestedRepository -cne $approvedRepository) { throw "Release Ready requires the exact approved public repository configured in the ngt-updater-test Environment." }
       - name: Verify the isolated repository before any Git writes
         shell: powershell
         env:
@@ -152,7 +155,7 @@ jobs:
         env:
           NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
         run: ./scripts/push-windows-studio-updater-test-refs.ps1 -Stage baseline
-      - name: Mirror and publish the v2.0.21 baseline Release
+      - name: Mirror and publish the v2.0.21 public baseline Release
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ github.token }}

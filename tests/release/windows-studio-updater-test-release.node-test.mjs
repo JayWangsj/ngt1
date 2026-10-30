@@ -5,10 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  calculateBuildIdentity,
   createLocalManifest,
   expectedAssetNames,
+  GitHubReleaseApi,
 } from "../../scripts/windows-studio-release.mjs";
 import {
+  assertApprovedUpdaterTestRepository,
   preflightUpdaterTestRepository,
   prepareUpdaterTestBaseline,
   prepareUpdaterTestCandidate,
@@ -81,10 +84,14 @@ function makeBaseline() {
 }
 
 function makeApis({
-  publicRepository = false,
+  privateRepository = false,
+  visibility = "public",
+  repositoryName = "Owner/ngt-updater-test",
+  defaultBranch = "main",
   badBaselineTag = false,
   badSourceChecksum = false,
   badDefaultBranch = false,
+  unrelatedRelease = false,
 } = {}) {
   const baseline = makeBaseline();
   if (badSourceChecksum) {
@@ -118,7 +125,19 @@ function makeApis({
     uploads: 0,
     defaultBranchSha: badDefaultBranch ? "c".repeat(40) : baselineSha,
   };
+  if (unrelatedRelease) {
+    state.releases.set("v9.9.9", {
+      tag_name: "v9.9.9",
+      draft: false,
+    });
+  }
   let nextAssetId = 1;
+  const repositoryInfo = {
+    default_branch: defaultBranch,
+    full_name: repositoryName,
+    private: privateRepository,
+  };
+  if (visibility !== null) repositoryInfo.visibility = visibility;
   const testApi = {
     state,
     repoPath: (suffix) => "repo:test" + suffix,
@@ -126,12 +145,9 @@ function makeApis({
       if (url === "repo:test/git/ref/heads/main") {
         return { object: { sha: state.defaultBranchSha } };
       }
-      return {
-        default_branch: "main",
-        full_name: "Owner/ngt-updater-test",
-        private: !publicRepository,
-      };
+      return repositoryInfo;
     },
+    listReleases: async () => [...state.releases.values()],
     resolveTagCommit: async (tag) => {
       const commit = state.tags.get(tag);
       if (!commit) throw new Error("Missing tag: " + tag);
@@ -196,7 +212,7 @@ async function withCandidate(t, callback, options) {
   }
 }
 
-test("prepares an exact-SHA private baseline mirror and candidate Draft idempotently", async (t) => {
+test("prepares an exact-SHA public baseline mirror and candidate Draft idempotently", async (t) => {
   await withCandidate(
     t,
     async ({ directory, manifest, sourceApi, testApi, state }) => {
@@ -211,6 +227,7 @@ test("prepares an exact-SHA private baseline mirror and candidate Draft idempote
       assert.equal(baseline.draft, false);
       assert.equal(baseline.assets.length, 6);
       assert.match(baseline.body, /ngt-updater-test-baseline:v1/);
+      assert.match(baseline.body, /Dedicated public baseline mirror/);
       state.defaultBranchSha = candidateSha;
       const candidate = await prepareUpdaterTestCandidate({
         sourceApi,
@@ -242,34 +259,148 @@ test("prepares an exact-SHA private baseline mirror and candidate Draft idempote
   );
 });
 
-test("refuses a public or production repository before any remote writes", async (t) => {
+test("accepts a public repository with public visibility or no visibility field", async (t) => {
+  await withCandidate(t, async ({ testApi }) => {
+    await preflightUpdaterTestRepository(testApi, "Owner/ngt-updater-test");
+  });
   await withCandidate(
     t,
-    async ({ sourceApi, testApi, state }) => {
+    async ({ testApi }) => {
+      await preflightUpdaterTestRepository(testApi, "Owner/ngt-updater-test");
+    },
+    { visibility: null },
+  );
+});
+
+test("requires the manual repository input to match the Environment allowlist exactly", () => {
+  assert.equal(
+    assertApprovedUpdaterTestRepository(
+      "Owner/ngt-updater-test",
+      "Owner/ngt-updater-test",
+    ),
+    "Owner/ngt-updater-test",
+  );
+  for (const requestedRepository of [
+    "Owner/other-test-repository",
+    "owner/ngt-updater-test",
+    "JayWangsj/ngt1",
+    "",
+  ]) {
+    assert.throws(
+      () =>
+        assertApprovedUpdaterTestRepository(
+          "Owner/ngt-updater-test",
+          requestedRepository,
+        ),
+      /does not match the approved Environment repository/,
+    );
+  }
+  assert.throws(
+    () => assertApprovedUpdaterTestRepository("", "Owner/ngt-updater-test"),
+    /does not match the approved Environment repository/,
+  );
+});
+
+test("rejects private, non-public, wrong-name, and non-main repositories before writes", async (t) => {
+  const invalidRepositories = [
+    {
+      name: "private",
+      options: { privateRepository: true, visibility: "private" },
+    },
+    { name: "inconsistent visibility", options: { visibility: "private" } },
+    {
+      name: "wrong API full name",
+      options: { repositoryName: "Other/ngt-updater-test" },
+    },
+    { name: "wrong default branch", options: { defaultBranch: "trunk" } },
+  ];
+  for (const invalid of invalidRepositories) {
+    await withCandidate(
+      t,
+      async ({ testApi, state }) => {
+        await assert.rejects(
+          preflightUpdaterTestRepository(testApi, "Owner/ngt-updater-test"),
+          /exact approved public GitHub repository/,
+          invalid.name,
+        );
+        assert.equal(state.releases.size, 0, invalid.name);
+        assert.equal(state.uploads, 0, invalid.name);
+      },
+      invalid.options,
+    );
+  }
+  await withCandidate(t, async ({ sourceApi, testApi, state }) => {
+    await assert.rejects(
+      prepareUpdaterTestBaseline({
+        sourceApi,
+        testApi,
+        repository: "Owner/other-test-repository",
+      }),
+      /exact approved public GitHub repository/,
+    );
+    await assert.rejects(
+      prepareUpdaterTestBaseline({
+        sourceApi,
+        testApi,
+        repository: "JayWangsj/ngt1",
+      }),
+      /production repository cannot be used/,
+    );
+    assert.equal(state.releases.size, 0);
+    assert.equal(state.uploads, 0);
+  });
+});
+
+test("rejects unrelated Releases and an already-published candidate", async (t) => {
+  await withCandidate(
+    t,
+    async ({ testApi }) => {
       await assert.rejects(
         preflightUpdaterTestRepository(testApi, "Owner/ngt-updater-test"),
-        /private GitHub repository named exactly/,
+        /unrelated Release/,
       );
-      await assert.rejects(
-        prepareUpdaterTestBaseline({
-          sourceApi,
-          testApi,
-          repository: "Owner/ngt-updater-test",
-        }),
-        /private GitHub repository named exactly/,
-      );
-      await assert.rejects(
-        prepareUpdaterTestBaseline({
-          sourceApi,
-          testApi,
-          repository: "JayWangsj/ngt1",
-        }),
-        /production repository cannot be used/,
-      );
-      assert.equal(state.releases.size, 0);
-      assert.equal(state.uploads, 0);
     },
-    { publicRepository: true },
+    { unrelatedRelease: true },
+  );
+  await withCandidate(t, async ({ testApi, state }) => {
+    state.releases.set(candidateTag, {
+      tag_name: candidateTag,
+      draft: false,
+    });
+    await assert.rejects(
+      preflightUpdaterTestRepository(testApi, "Owner/ngt-updater-test"),
+      /must remain a Draft/,
+    );
+  });
+});
+
+test("GitHub API authorization failures reject without exposing the token", async () => {
+  const token = "fixture-public-test-token";
+  for (const status of [401, 403, 404]) {
+    const api = new GitHubReleaseApi({
+      token,
+      repository: "Owner/ngt-updater-test",
+      fetchImpl: async (url) =>
+        String(url).endsWith("/releases?per_page=100&page=1")
+          ? new Response("denied " + token, { status })
+          : new Response(
+              JSON.stringify({
+                private: false,
+                visibility: "public",
+                full_name: "Owner/ngt-updater-test",
+                default_branch: "main",
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            ),
+    });
+    await assert.rejects(
+      preflightUpdaterTestRepository(api, "Owner/ngt-updater-test"),
+      (error) => error.status === status && !error.message.includes(token),
+    );
+  }
+  assert.throws(
+    () => new GitHubReleaseApi({ token: "" }),
+    /GitHub token is required/,
   );
 });
 
@@ -323,5 +454,51 @@ test("refuses a baseline tag mismatch and a corrupt published checksum", async (
       assert.equal(state.releases.size, 0);
     },
     { badSourceChecksum: true },
+  );
+});
+
+test("requires the candidate manifest and tag to match the exact workflow SHA", async (t) => {
+  await withCandidate(
+    t,
+    async ({ sourceApi, testApi, state, directory, manifest }) => {
+      const invalidManifest = { ...manifest, sha: "c".repeat(40) };
+      invalidManifest.buildIdentity = calculateBuildIdentity(invalidManifest);
+      await assert.rejects(
+        prepareUpdaterTestCandidate({
+          sourceApi,
+          testApi,
+          repository: "Owner/ngt-updater-test",
+          candidateDirectory: directory,
+          manifest: invalidManifest,
+        }),
+        /match this exact workflow SHA/,
+      );
+      assert.equal(state.releases.size, 0);
+      assert.equal(state.uploads, 0);
+    },
+  );
+
+  await withCandidate(
+    t,
+    async ({ sourceApi, testApi, state, directory, manifest }) => {
+      await prepareUpdaterTestBaseline({
+        sourceApi,
+        testApi,
+        repository: "Owner/ngt-updater-test",
+      });
+      state.defaultBranchSha = candidateSha;
+      state.tags.set(candidateTag, "c".repeat(40));
+      await assert.rejects(
+        prepareUpdaterTestCandidate({
+          sourceApi,
+          testApi,
+          repository: "Owner/ngt-updater-test",
+          candidateDirectory: directory,
+          manifest,
+        }),
+        /candidate tag does not resolve to the exact workflow SHA/,
+      );
+      assert.equal(state.releases.has(candidateTag), false);
+    },
   );
 });
