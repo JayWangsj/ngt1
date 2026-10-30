@@ -8,16 +8,23 @@ describe("Windows persistent startup", () => {
       'Join-Path $projectRoot "scripts\\windows-db.mjs"',
     );
     expect(service).toContain('Join-Path $projectRoot "scripts\\start.mjs"');
-    expect(service).toContain(
-      "Get-NetTCPConnection -LocalPort $Port -State Listen",
-    );
+    expect(service).toContain("Get-NgtStudioPortConnections -Port $Port");
+    expect(service).toContain("Test-NgtPortOwnership");
+    expect(service).toContain("Test-NgtStudioProcessTree");
+    expect(service).toContain("Test-NgtStudioApplicationProcess");
+    expect(service).toContain("Test-NgtStudioPostgresProcess");
+    expect(service).toContain("unverified PID");
+    expect(service).toContain("$expectedCommit");
+    expect(service).toContain("$health.buildCommit");
     expect(service).toContain("$process.HasExited");
     expect(service).toContain("$PSScriptRoot");
     expect(service).not.toContain("D:\\NGT");
   });
 
   it("waits for database initialization before starting the application", async () => {
-    const service = await readFile("scripts/windows-service.ps1", "utf8");
+    const service = (
+      await readFile("scripts/windows-service.ps1", "utf8")
+    ).replace(/\r\n/g, "\n");
     expect(service).toContain(
       'Join-Path $projectRoot ".local\\database-ready.pid"',
     );
@@ -63,6 +70,10 @@ describe("Windows persistent startup", () => {
       "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
       "utf8",
     );
+    const coordinator = await readFile(
+      "scripts/windows-studio-acceptance-coordinator.ps1",
+      "utf8",
+    );
     const workflow = await readFile(
       ".github/workflows/windows-studio-release.yml",
       "utf8",
@@ -81,12 +92,15 @@ describe("Windows persistent startup", () => {
     expect(runner).toContain(
       "Set-Content -LiteralPath $request.resultPath -Value $childExitCode -Encoding ascii",
     );
-    expect(runner).toContain(
-      "if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf))",
-    );
-    expect(runner).toContain(
-      "$childExitCode -ne 0 -or ($null -ne $processExitCode -and $processExitCode -ne 0)",
-    );
+    expect(runner).toContain("windows-studio-acceptance-coordinator.ps1");
+    expect(runner).toContain("Get-NgtAcceptanceProcessOutcome");
+    expect(coordinator).toContain("Required acceptance file is missing");
+    expect(coordinator).toContain("Required acceptance file is empty");
+    expect(coordinator).toContain("$childExitCode -ne 0");
+    expect(runner).toContain("@($protectedTokens) + @($passwordPlain)");
+    expect(runner).toContain("foreach ($sensitiveValue in $diagnosticSecrets)");
+    expect(runner).toContain("throw $safeFailureMessage");
+    expect(runner).not.toContain("throw $failureRecord");
     expect(runner).toContain("Remove-LocalUser -Name $userName");
     expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
     expect(workflow).toContain("acceptance: online-update");
@@ -95,6 +109,10 @@ describe("Windows persistent startup", () => {
       "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}",
     );
     expect(acceptanceAction).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(acceptanceAction).toContain("if: failure()");
+    expect(acceptanceAction).toContain(
+      "ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/",
+    );
   });
 
   it("adapts only legacy baseline startup for the non-interactive hosted runner", async () => {
@@ -124,9 +142,42 @@ describe("Windows persistent startup", () => {
     expect(acceptance).toContain(
       "Baseline script failed integrity validation before runner adaptation",
     );
-    expect(acceptance).toContain("ConvertTo-Json -Depth 100");
     expect(acceptance).toContain(
       "Baseline startup script has no supported immediate launcher command.",
+    );
+  });
+
+  it("writes baseline manifests through the shared BOM-free metadata helper", async () => {
+    const acceptance = await readFile(
+      "scripts/test-windows-studio-online-update.ps1",
+      "utf8",
+    );
+    const metadataHelper = await readFile(
+      "scripts/windows-studio-release-metadata.ps1",
+      "utf8",
+    );
+    const packageBuilder = await readFile(
+      "scripts/build-windows-studio-package.ps1",
+      "utf8",
+    );
+
+    expect(acceptance).toContain(
+      '. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")',
+    );
+    expect(
+      acceptance.match(
+        /Write-NgtStudioReleaseMetadataNoBom\s+-Path \$baselineMetadataPath\s+-Metadata \$baselineMetadata/g,
+      ),
+    ).toHaveLength(3);
+    expect(metadataHelper).toContain(
+      "function Write-NgtStudioReleaseMetadataNoBom",
+    );
+    expect(metadataHelper).toMatch(/\[int\]\$Depth = 100/);
+    expect(metadataHelper).toContain(
+      "ConvertTo-Json -InputObject $Metadata -Depth $Depth",
+    );
+    expect(packageBuilder).toMatch(
+      /Write-NgtStudioReleaseMetadataNoBom\s+`\s*-Path \(Join-Path \$stage "studio-release\.json"\)\s+`\s*-Metadata \$releaseMetadata\s+`\s*-Depth 5/,
     );
   });
 
@@ -257,6 +308,20 @@ describe("Windows persistent startup", () => {
     );
     expect(installer).toContain("Start-NgtStudioDatabase");
     expect(installer).toContain("Wait-NgtStudioHealth");
+    const standalonePublicDestination = packager.indexOf(
+      '$standalonePublicDestination = Join-Path $standaloneDestination "public"',
+    );
+    const removeStandalonePublic = packager.indexOf(
+      "Remove-Item -LiteralPath $standalonePublicDestination -Recurse -Force",
+      standalonePublicDestination,
+    );
+    const copyStandalonePublic = packager.indexOf(
+      'Copy-Item -LiteralPath "public" -Destination $standalonePublicDestination -Recurse -Force',
+      removeStandalonePublic,
+    );
+    expect(standalonePublicDestination).toBeGreaterThanOrEqual(0);
+    expect(removeStandalonePublic).toBeGreaterThan(standalonePublicDestination);
+    expect(copyStandalonePublic).toBeGreaterThan(removeStandalonePublic);
     const common = await readFile("scripts/windows-studio-common.ps1", "utf8");
     expect(common).toContain("$process.HasExited");
     expect(common).toContain(
@@ -356,13 +421,10 @@ describe("Windows persistent startup", () => {
       'Get-ChildItem -LiteralPath $stage -File -Recurse -Filter "*.map"',
     );
     expect(start).toContain('nextConfig.distDir ?? ".next"');
-    expect(start).toContain("await access(source)");
-    expect(start).toContain(
-      "await rm(destination, { recursive: true, force: true })",
-    );
-    expect(start).toContain(
-      "await cp(source, destination, { recursive: true })",
-    );
+    expect(start).toContain("verifyWindowsStudioStaticAssets");
+    expect(start).not.toContain("await rm(");
+    expect(start).not.toContain("await cp(");
+    expect(packager).toContain('Join-Path $standaloneDestination "public"');
     expect(packager).toContain('$env:GITHUB_REF_TYPE -eq "tag"');
   });
 
@@ -753,6 +815,42 @@ describe("Windows persistent startup", () => {
     expect(iconSizes).toEqual([16, 24, 32, 48, 64, 128, 256]);
     const firstImageOffset = icon.readUInt32LE(6 + 12);
     expect(icon.readUInt32LE(firstImageOffset)).toBe(40);
+  });
+});
+
+describe("Windows installer acceptance boundaries", () => {
+  it("checks the installed candidate locally without querying GitHub updates", async () => {
+    const installerAcceptance = await readFile(
+      "scripts/test-windows-studio-installer.ps1",
+      "utf8",
+    );
+    expect(installerAcceptance).toContain(
+      "[string]$health.buildCommit -ieq $env:GITHUB_SHA",
+    );
+    expect(installerAcceptance).toContain(
+      "scripts\\verify-windows-studio-runtime.ps1",
+    );
+    expect(installerAcceptance).not.toContain("/api/system-update");
+  });
+});
+
+describe("Production updater GitHub authentication", () => {
+  it("proves isolated CLI and GH_TOKEN access in the real standard-user child", async () => {
+    const runner = await readFile(
+      "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
+      "utf8",
+    );
+    expect(runner).toContain("auth token --hostname $Hostname");
+    expect(runner).toContain("ngt-noauth.invalid");
+    expect(runner).toContain("SetAccessRuleProtection($true, $false)");
+    expect(runner).toContain("expectedTokenSha256");
+    expect(runner).toContain('Join-Path $ghConfigDirectory "hosts.yml"');
+    expect(runner).toContain("must not be written to request.json");
+    expect(runner).toContain("AddMinutes(110)");
+    expect(runner).toContain("windows-studio-acceptance-coordinator.ps1");
+    expect(runner).toContain("Assert-NgtAcceptanceTokenNotExposed");
+    expect(runner).toContain("childFailurePath");
+    expect(runner).not.toContain("GH_TOKEN = $env:GH_TOKEN");
   });
 });
 

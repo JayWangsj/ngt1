@@ -62,7 +62,7 @@ runs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: windows-${{ inputs.mode }}-${{ inputs.acceptance }}-diagnostics-${{ github.sha }}
-        path: ${{ runner.temp }}/ngt-acceptance-diagnostics/
+        name: windows-${{ inputs.mode }}-${{ inputs.acceptance }}-diagnostics-${{ github.sha }}-${{ github.run_attempt }}-${{ github.job }}
+        path: ${{ runner.temp }}/ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/
         if-no-files-found: warn
         retention-days: 7

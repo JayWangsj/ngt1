@@ -13,11 +13,13 @@ import {
   createWindowsPackageManifest,
   expectedAssetNames,
   findPublishedUpdateBaseline,
+  findUpdateBaselineWithConfiguredAuth,
   GitHubReleaseApi,
   parseReleaseMarker,
   prepareDraft,
   publishRelease,
   qualifyRelease,
+  readUpdateBaselineToken,
   requireReleaseReady,
   verifyArtifact,
   verifyWindowsPackageArtifact,
@@ -60,10 +62,10 @@ function makeApi({
   let uploadCount = 0;
   const remoteContents = new Map();
   const uploads = [];
-  const deletions = [];
+  const updates = [];
   return {
-    deletions,
     uploads,
+    updates,
     remoteContents,
     current: () => state,
     resolveTagCommit: async () => tagCommit,
@@ -84,13 +86,9 @@ function makeApi({
       return state;
     },
     updateRelease: async (_id, patch) => {
+      updates.push(patch);
       state = { ...state, ...patch };
       return state;
-    },
-    deleteRelease: async (id) => {
-      assert.equal(state?.id, id);
-      deletions.push(id);
-      state = null;
     },
     uploadAsset: async (_draft, name, bytes) => {
       uploadCount++;
@@ -217,22 +215,6 @@ test("findRelease discovers Draft Releases through the paginated release list", 
   assert.match(requests[2], /\/releases\?per_page=100&page=2$/);
 });
 
-test("deleteRelease removes a stale Draft by release ID", async () => {
-  const requests = [];
-  const api = new GitHubReleaseApi({
-    token: "test-token",
-    repository: "JayWangsj/ngt1",
-    fetchImpl: async (url, options) => {
-      requests.push({ url: new URL(url).pathname, method: options.method });
-      return new Response(null, { status: 204 });
-    },
-  });
-  await api.deleteRelease(42);
-  assert.deepEqual(requests, [
-    { url: "/repos/JayWangsj/ngt1/releases/42", method: "DELETE" },
-  ]);
-});
-
 test("findPublishedUpdateBaseline selects the newest supported stable release below the target", async () => {
   const requests = [];
   const assetsFor = (tag) =>
@@ -281,6 +263,16 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
             draft: false,
             assets: assetsFor("v2.0.13"),
           },
+          {
+            tag_name: "v2.0.22",
+            draft: true,
+            assets: assetsFor("v2.0.22"),
+          },
+          {
+            tag_name: "v2.0.21",
+            draft: false,
+            assets: assetsFor("v2.0.21"),
+          },
         ]),
         { status: 200 },
       );
@@ -300,8 +292,242 @@ test("findPublishedUpdateBaseline selects the newest supported stable release be
     null,
     "an incomplete baseline must not be silently replaced by a newer release",
   );
-  assert.equal(requests.length, 3);
+  const v2023Baseline = await findPublishedUpdateBaseline(api, "v2.0.23");
+  assert.equal(
+    v2023Baseline.tag_name,
+    "v2.0.21",
+    "v2.0.23 must remain discoverable from v2.0.21 while the v2.0.22 Draft is ignored",
+  );
+  assert.equal(requests.length, 4);
   assert.match(requests[0], /\/releases\?per_page=100&page=1$/);
+});
+
+test("find-update-baseline reads GH_CONFIG_DIR-only credentials without exposing them", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ngt-baseline-auth-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const isolatedConfig = path.join(root, "isolated-gh-config");
+  const otherUserHome = path.join(root, "other-user-home");
+  const otherUserConfig = path.join(otherUserHome, ".config", "gh");
+  await mkdir(isolatedConfig, { recursive: true });
+  await mkdir(otherUserConfig, { recursive: true });
+  await writeFile(
+    path.join(isolatedConfig, "hosts.yml"),
+    "fake isolated config\n",
+  );
+  await writeFile(
+    path.join(otherUserConfig, "hosts.yml"),
+    "fake other-user credential must not be used\n",
+  );
+
+  const isolatedToken = "ngt-fake-isolated-cli-token";
+  const calls = [];
+  const releaseAssets = [
+    "ngt-studio-windows-v2.0.21.zip",
+    "ngt-studio-windows-v2.0.21.zip.sha256",
+    "ngt-studio-runtime-v2.0.21.zip",
+    "ngt-studio-runtime-v2.0.21.zip.sha256",
+  ].map((name) => ({ name }));
+  const baseline = await findUpdateBaselineWithConfiguredAuth(
+    "v2.0.23",
+    undefined,
+    {
+      env: {
+        GH_CONFIG_DIR: isolatedConfig,
+        HOME: otherUserHome,
+        USERPROFILE: otherUserHome,
+        GITHUB_REPOSITORY: "JayWangsj/ngt1",
+      },
+      ghPath: "fake-gh",
+      execFileSyncImpl: (command, args, options) => {
+        calls.push({ command, args, options });
+        return isolatedToken + "\n";
+      },
+      fetchImpl: async (url, options) => {
+        assert.equal(new URL(url).pathname, "/repos/JayWangsj/ngt1/releases");
+        assert.equal(options.headers.Authorization, "Bearer " + isolatedToken);
+        return new Response(
+          JSON.stringify([
+            {
+              tag_name: "v2.0.21",
+              draft: false,
+              prerelease: false,
+              assets: releaseAssets,
+            },
+          ]),
+          { status: 200 },
+        );
+      },
+    },
+  );
+
+  assert.equal(baseline.tag_name, "v2.0.21");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "fake-gh");
+  assert.deepEqual(calls[0].args, [
+    "auth",
+    "token",
+    "--hostname",
+    "github.com",
+  ]);
+  assert.equal(calls[0].options.env.GH_CONFIG_DIR, isolatedConfig);
+  assert.equal(Object.hasOwn(calls[0].options.env, "GH_TOKEN"), false);
+  assert.equal(Object.hasOwn(calls[0].options.env, "GITHUB_TOKEN"), false);
+  assert.equal(calls[0].options.timeout, 10_000);
+  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+});
+
+test("find-update-baseline preserves explicit token sources and GitHubReleaseApi rejects empty tokens", async () => {
+  const tokens = [
+    { GITHUB_TOKEN: "ngt-explicit-github-token" },
+    { GH_TOKEN: "ngt-explicit-gh-token" },
+  ];
+  for (const env of tokens) {
+    const token = Object.values(env)[0];
+    let cliCalled = false;
+    const baseline = await findUpdateBaselineWithConfiguredAuth(
+      "v2.0.23",
+      undefined,
+      {
+        env,
+        execFileSyncImpl: () => {
+          cliCalled = true;
+          throw new Error("The explicit-token path must not invoke gh.");
+        },
+        fetchImpl: async (_url, options) => {
+          assert.equal(options.headers.Authorization, "Bearer " + token);
+          return new Response("[]", { status: 200 });
+        },
+      },
+    );
+    assert.equal(baseline, null);
+    assert.equal(cliCalled, false);
+  }
+  assert.throws(
+    () => new GitHubReleaseApi({ token: "" }),
+    /GitHub token is required for release API access\./,
+  );
+});
+
+test("find-update-baseline fails closed on missing, empty, nonzero, and timed-out isolated CLI credentials", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "ngt-baseline-auth-errors-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const missingHosts = path.join(root, "missing-hosts");
+  const isolatedConfig = path.join(root, "isolated-gh-config");
+  const otherUserHome = path.join(root, "other-user-home");
+  await mkdir(missingHosts, { recursive: true });
+  await mkdir(isolatedConfig, { recursive: true });
+  await mkdir(path.join(otherUserHome, ".config", "gh"), { recursive: true });
+  await writeFile(
+    path.join(otherUserHome, ".config", "gh", "hosts.yml"),
+    "ngt-fake-other-user-token\n",
+  );
+
+  const otherUserEnv = {
+    HOME: otherUserHome,
+    USERPROFILE: otherUserHome,
+  };
+  let cliCalled = false;
+  assert.throws(
+    () =>
+      readUpdateBaselineToken({
+        env: otherUserEnv,
+        execFileSyncImpl: () => {
+          cliCalled = true;
+          return "ngt-fake-other-user-token";
+        },
+      }),
+    /explicit isolated GH_CONFIG_DIR/,
+  );
+  assert.equal(cliCalled, false);
+
+  assert.throws(
+    () =>
+      readUpdateBaselineToken({
+        env: { GH_CONFIG_DIR: missingHosts },
+        execFileSyncImpl: () => {
+          cliCalled = true;
+          return "ngt-fake-other-user-token";
+        },
+      }),
+    /isolated GitHub CLI hosts\.yml/,
+  );
+  assert.equal(cliCalled, false);
+
+  await writeFile(
+    path.join(isolatedConfig, "hosts.yml"),
+    "fake isolated config\n",
+  );
+  const fakeSecret = "ngt-fake-secret-that-must-not-leak";
+  for (const failure of [
+    Object.assign(new Error("child failure: " + fakeSecret), {
+      status: 1,
+      stderr: Buffer.from("stderr: " + fakeSecret),
+    }),
+    Object.assign(new Error("spawnSync fake-gh ETIMEDOUT " + fakeSecret), {
+      code: "ETIMEDOUT",
+      stderr: Buffer.from("timeout stderr: " + fakeSecret),
+    }),
+  ]) {
+    assert.throws(
+      () =>
+        readUpdateBaselineToken({
+          env: { GH_CONFIG_DIR: isolatedConfig },
+          execFileSyncImpl: () => {
+            throw failure;
+          },
+        }),
+      (error) => {
+        assert.match(
+          error.message,
+          /could not read a token from the isolated GH_CONFIG_DIR/,
+        );
+        assert.equal(error.message.includes(fakeSecret), false);
+        return true;
+      },
+    );
+  }
+
+  assert.throws(
+    () =>
+      readUpdateBaselineToken({
+        env: { GH_CONFIG_DIR: isolatedConfig },
+        execFileSyncImpl: () => " \r\n",
+      }),
+    /empty or invalid token from GH_CONFIG_DIR/,
+  );
+});
+
+test("find-update-baseline reports API permission failures without credential details", async (t) => {
+  const fakeToken = "ngt-fake-api-token";
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "ngt-baseline-api-permission-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const configDirectory = path.join(root, "isolated-gh-config");
+  await mkdir(configDirectory, { recursive: true });
+  await writeFile(
+    path.join(configDirectory, "hosts.yml"),
+    "fake test config\n",
+  );
+  for (const status of [401, 403, 404]) {
+    await assert.rejects(
+      findUpdateBaselineWithConfiguredAuth("v2.0.23", undefined, {
+        env: { GH_CONFIG_DIR: configDirectory },
+        execFileSyncImpl: () => fakeToken,
+        fetchImpl: async () => new Response(fakeToken, { status }),
+      }),
+      (error) => {
+        assert.equal(
+          error.message,
+          `GitHub API GET request failed with HTTP ${status}.`,
+        );
+        assert.equal(error.message.includes(fakeToken), false);
+        return true;
+      },
+    );
+  }
 });
 
 test("Draft creation survives an ambiguous upload response without duplicating assets", async (t) => {
@@ -323,7 +549,7 @@ test("Draft creation survives an ambiguous upload response without duplicating a
   });
 });
 
-test("a legacy partial Draft resumes only missing assets after content verification", async (t) => {
+test("an unmarked legacy Draft is preserved and requires controlled recovery", async (t) => {
   const { assets, manifest } = await makeFixture(t);
   const first = manifest.assets[0];
   const firstBytes = await readFile(path.join(assets, first.name));
@@ -344,14 +570,16 @@ test("a legacy partial Draft resumes only missing assets after content verificat
   };
   const api = makeApi({ release });
   api.remoteContents.set(existing.id, firstBytes);
-  const result = await prepareDraft(api, assets, manifest);
-  assert.equal(result.draft, true);
-  assert.equal(api.uploads.length, 5);
-  assert.equal(api.uploads.includes(first.name), false);
-  assert.equal(api.current().assets.length, 6);
+  await assert.rejects(
+    prepareDraft(api, assets, manifest),
+    /no trusted build identity; automatic recovery is disabled/,
+  );
+  assert.equal(api.uploads.length, 0);
+  assert.equal(api.updates.length, 0);
+  assert.equal(api.current().assets.length, 1);
 });
 
-test("a retry replaces only a stale marked Draft for the same tag", async (t) => {
+test("a retry fails closed when a marked Draft has a different build identity", async (t) => {
   const { assets, manifest } = await makeFixture(t);
   const staleManifest = { ...manifest, sha: "b".repeat(40) };
   staleManifest.buildIdentity = calculateBuildIdentity(staleManifest);
@@ -366,16 +594,13 @@ test("a retry replaces only a stale marked Draft for the same tag", async (t) =>
         "https://uploads.example.test/releases/43/assets{?name,label}",
     },
   });
-  const result = await prepareDraft(api, assets, manifest);
-  assert.deepEqual(api.deletions, [43]);
-  assert.equal(result.draft, true);
-  assert.deepEqual(parseReleaseMarker(result.body), {
-    tag,
-    sha: sourceSha,
-    version,
-    buildIdentity: manifest.buildIdentity,
-  });
-  assert.equal(api.uploads.length, 6);
+  await assert.rejects(
+    prepareDraft(api, assets, manifest),
+    /Draft Release build identity does not match/,
+  );
+  assert.equal(api.current().id, 43);
+  assert.equal(api.current().body, createReleaseMarker(staleManifest));
+  assert.equal(api.uploads.length, 0);
 });
 
 test("mismatched or already public Releases fail closed without overwriting", async (t) => {
@@ -391,7 +616,7 @@ test("mismatched or already public Releases fail closed without overwriting", as
       id: 8,
       tag_name: tag,
       draft: true,
-      body: "",
+      body: createReleaseMarker(manifest),
       assets: [badAsset],
     },
   });
@@ -706,6 +931,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const ready = (
     await readText(".github/workflows/windows-studio-release-ready.yml", "utf8")
   ).replace(/\r\n/g, "\n");
+  const updaterTestRelease = (
+    await readText(
+      "scripts/prepare-windows-studio-updater-test-release.mjs",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
+  const updaterTestRefs = (
+    await readText("scripts/push-windows-studio-updater-test-refs.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
   const onlineAcceptanceWorkflow = (
     await readText(
       ".github/workflows/windows-studio-online-update-acceptance.yml",
@@ -739,6 +973,21 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const online = (
     await readText("scripts/test-windows-studio-online-update.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
+  const onlineReconnect = (
+    await readText("scripts/windows-studio-online-update-reconnect.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const onlineAuth = (
+    await readText("scripts/windows-studio-online-update-auth.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const onlineAuthTest = (
+    await readText("scripts/test-windows-studio-online-update-auth.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const onlineWorkflow = (
+    await readText(
+      ".github/workflows/windows-studio-online-update-acceptance.yml",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
   const onlineUi = (
     await readText("tests/release/windows-studio-online-update-ui.mjs", "utf8")
   ).replace(/\r\n/g, "\n");
@@ -756,6 +1005,18 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
       "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
       "utf8",
     )
+  ).replace(/\r\n/g, "\n");
+  const acceptanceCoordinator = (
+    await readText("scripts/windows-studio-acceptance-coordinator.ps1", "utf8")
+  ).replace(/\r\n/g, "\n");
+  const acceptanceCoordinatorTest = (
+    await readText(
+      "scripts/test-windows-studio-acceptance-coordinator.ps1",
+      "utf8",
+    )
+  ).replace(/\r\n/g, "\n");
+  const scheduledTaskAuthProbe = (
+    await readText("scripts/test-windows-studio-gh-config-task.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
   const diagnostics = (
     await readText("scripts/write-windows-studio-diagnostics.ps1", "utf8")
@@ -815,10 +1076,57 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /ngt-updater-acceptance-\$\{\{ github\.sha \}\}/,
   );
   assert.match(ready, /workflow_dispatch:/);
+  assert.match(
+    releaseTool,
+    /process\.env\.GITHUB_REF !== "refs\/heads\/master"\s*\|\|\s*process\.env\.GITHUB_EVENT_NAME !== "workflow_dispatch"/,
+  );
+  assert.doesNotMatch(ready, /pull_request:/);
+  assert.match(
+    ready,
+    /production-updater-acceptance:[\s\S]*?needs: \[qualify, build\]/,
+  );
+  assert.ok(
+    ready.indexOf("Require master and exact-SHA Verify MVP") <
+      ready.indexOf("secrets.NGT_UPDATER_TEST_TOKEN"),
+    "the isolated test credential is unavailable until trusted-ref qualification succeeds",
+  );
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
+  assert.match(
+    ready,
+    /test_repository:[\s\S]*retained for audit, not auto-deleted[\s\S]*Manually delete only this test repo after results/,
+  );
+  assert.match(
+    ready,
+    /production-updater-acceptance:[\s\S]*?environment: ngt-updater-test/,
+  );
+  assert.ok(
+    ready.indexOf("environment: ngt-updater-test") <
+      ready.indexOf("secrets.NGT_UPDATER_TEST_TOKEN"),
+    "the write credential is available only inside the protected updater-test environment",
+  );
+  const qualifyJob = ready.slice(
+    ready.indexOf("  qualify:"),
+    ready.indexOf("  build:"),
+  );
+  assert.doesNotMatch(
+    qualifyJob,
+    /NGT_UPDATER_TEST_TOKEN|NGT_UPDATER_TEST_REPOSITORY/,
+  );
   assert.match(ready, /manual-installer-acceptance:[\s\S]*needs: build/);
   assert.match(ready, /release-ready:[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.match(onlineAcceptanceWorkflow, /runs-on: windows-2022/);
+  assert.match(
+    candidateBuildAction,
+    /test-windows-studio-acceptance-coordinator\.ps1/,
+  );
+  assert.match(
+    onlineAcceptanceWorkflow,
+    /Upload sanitized Windows acceptance failure diagnostics[\s\S]*?if: failure\(\)[\s\S]*?actions\/upload-artifact@v4[\s\S]*?ngt-acceptance-diagnostics/,
+  );
+  assert.match(
+    ready,
+    /ngt-acceptance-diagnostics-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/,
+  );
   assert.match(onlineAcceptanceWorkflow, /build-windows-studio-candidate/);
   assert.ok(
     onlineAcceptanceWorkflow.indexOf(
@@ -832,6 +1140,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(
     candidateBuildAction,
     /Run Windows updater coordination and safety regressions[\s\S]*test-windows-studio-update-safety\.ps1/,
+  );
+  assert.match(
+    candidateBuildAction,
+    /Test GitHub CLI authentication source precedence[\s\S]*-AuthMatrixOnly/,
   );
   assert.match(
     onlineAcceptanceWorkflow,
@@ -854,9 +1166,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Invoke-GhDownload -Tag \$oldTag/);
   assert.match(online, /Assert-ReleaseChecksum \$oldAppArchive/);
   assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
+  assert.match(online, /windows-studio-online-update-reconnect\.ps1/);
+  assert.match(online, /Read-NgtOnlineUpdateStatusFile -Path \$updateStatus/);
   assert.match(
-    online,
-    /\$savedDuringDisconnect\.stage -notin @\([\s\S]{0,250}"preparing-release"[\s\S]{0,100}"verifying-backup"[\s\S]{0,100}"preparing-runtime"/,
+    onlineReconnect,
+    /\$status -ceq "complete"[\s\S]{0,320}\$stage -cne "complete"[\s\S]{0,150}\$State\.actualVersion/,
+  );
+  assert.match(
+    onlineReconnect,
+    /\$persistedComplete -and \$apiComplete -and \$UpdaterHasExited -and[\s\S]{0,100}\$disconnected -and \$reconnected/,
   );
   assert.match(online, /Manual repair installer/);
   assert.match(release, /actions\/upload-artifact@v4/);
@@ -911,16 +1229,12 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Get-NgtScreenVisibleWindows/);
   assert.ok(
     online.indexOf("$windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics") <
-      online.indexOf(
-        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
-      ),
+      online.indexOf("if ($stateReadFailure) { throw $stateReadFailure }"),
     "window evidence must be collected before a failed update ends acceptance",
   );
   assert.ok(
     online.indexOf('Write-Output ("Window evidence:') <
-      online.indexOf(
-        "if ($failedUpdateMessage) { throw $failedUpdateMessage }",
-      ),
+      online.indexOf("if ($stateReadFailure) { throw $stateReadFailure }"),
     "window evidence must be logged before a failed update ends acceptance",
   );
   assert.match(online, /silent online update displayed a visible installer/);
@@ -935,6 +1249,53 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /OnScreen/);
   assert.match(innoInstaller, /DisableStartupPrompt=yes/);
   assert.match(online, /NGT_TEST_RELEASE_API_URL/);
+  assert.match(online, /Assert-NgtOnlineUpdateGitHubAuth -GhPath \$githubCli/);
+  assert.match(
+    online,
+    /Resolve-NgtOnlineUpdateAuthRepository -MainRepository \$repository[\s\S]{0,120}-TestReleaseRepository \$TestReleaseRepository -ProductionUpdater:\$ProductionUpdater/,
+  );
+  assert.match(
+    onlineAuth,
+    /return \(-not \$CandidateDirectory\) -or \$ManualInstaller -or \$ProductionUpdater/,
+  );
+  assert.match(
+    onlineAuth,
+    /api "repos\/\$Repository\/releases\?per_page=1"[\s\S]{0,100}--hostname github\.com --method GET/,
+  );
+  assert.match(onlineAuth, /isolated GitHub CLI hosts\.yml is unavailable/);
+  assert.doesNotMatch(onlineAuth, /auth status/);
+  assert.match(onlineAuthTest, /HTTP \$status/);
+  assert.match(onlineAuthTest, /hash-mismatch-child/);
+  assert.match(onlineAuthTest, /ngt-isolated-auth-fixture-token/);
+  assert.match(onlineAuthTest, /\$global:LASTEXITCODE = 0/);
+  assert.match(
+    onlineAuthTest,
+    /Local candidate mode continued without GitHub credentials\./,
+  );
+  assert.match(onlineAuthTest, /"remote candidate"/);
+  assert.match(onlineAuthTest, /"manual upgrade"/);
+  assert.match(onlineAuthTest, /"production updater"/);
+  assert.match(releaseTool, /readUpdateBaselineToken\(/);
+  assert.match(releaseTool, /GH_CONFIG_DIR: configDirectory/);
+  assert.match(releaseTool, /\["auth", "token", "--hostname", "github\.com"\]/);
+  assert.match(releaseTool, /timeout: 10_000/);
+  assert.match(releaseTool, /findUpdateBaselineWithConfiguredAuth\(/);
+  assert.match(
+    onlineWorkflow,
+    /Verify local and remote online-update authentication modes/,
+  );
+  assert.match(
+    onlineWorkflow,
+    /run: \.\/scripts\/test-windows-studio-online-update-auth\.ps1/,
+  );
+  assert.match(
+    onlineWorkflow,
+    /"scripts\/test-windows-studio-online-update-auth\.ps1"/,
+  );
+  assert.match(
+    onlineWorkflow,
+    /"scripts\/windows-studio-online-update-auth\.ps1"/,
+  );
   assert.match(
     online,
     /if \(\$ProductionUpdater\) \{\s+\$publishedLatestVersion = \$oldTag -replace "\^v", ""\s+if \(\$updateInfo\.updateAvailable -or \$updateInfo\.latestVersion -ne \$publishedLatestVersion\)/,
@@ -949,9 +1310,17 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     online,
+    /\$startResponse = Invoke-RestMethod -Uri "http:\/\/127\.0\.0\.1:3000\/api\/system-update"[\s\S]{0,250}-Body \(@\{ targetVersion = \$TargetTag \}/,
+  );
+  assert.match(
+    online,
     /Acceptance did not observe both the independent NGT outage state and automatic reconnection/,
   );
   assert.match(online, /Rust updater peak working set/);
+  assert.match(
+    packageBuilder,
+    /"start\.mjs",\s*"verify-windows-studio-static-assets\.mjs",/,
+  );
   assert.doesNotMatch(packageBuilder, /update-windows-studio\.ps1/);
   assert.doesNotMatch(releaseVerifier, /download-public-release-asset\.ps1/);
   assert.match(
@@ -975,13 +1344,86 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(onlineUi, /still exposes a diagnostics action/);
   assert.match(
     releaseTool,
-    /findPublishedUpdateBaseline\(\s*api,\s*directoryArg,\s*process\.argv\[4\]/,
+    /findUpdateBaselineWithConfiguredAuth\(\s*directoryArg,\s*process\.argv\[4\]/,
   );
   assert.match(
     online,
     /updated production NGTUpdater\.exe does not match the verified candidate release manifest/,
   );
   assert.match(standardUserAcceptance, /ProductionUpdater = \$true/);
+  assert.match(
+    standardUserAcceptance,
+    /\$requiresGitHubAuth = \(\$Acceptance -in @\("manual-installer", "production-update"\)\)/,
+  );
+  assert.ok(
+    standardUserAcceptance.includes(
+      '$ghConfigDirectory = Join-Path $isolatedTemp "gh-config"',
+    ),
+  );
+  assert.ok(standardUserAcceptance.includes("oauth_token: $($env:GH_TOKEN)"));
+  assert.match(
+    standardUserAcceptance,
+    /SetEnvironmentVariable\("GH_CONFIG_DIR", \$expectedConfigDirectory, "User"\)/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /SetEnvironmentVariable\("GH_CONFIG_DIR", \$null, "User"\)/,
+  );
+  assert.match(standardUserAcceptance, /Registry::HKEY_USERS/);
+  assert.match(standardUserAcceptance, /Add-NgtAcceptanceCleanupFailure/);
+  assert.match(standardUserAcceptance, /-ChildFailure \$childFailureDetails/);
+  assert.match(acceptanceCoordinator, /ReadAllText\(\$Path\)/);
+  assert.match(acceptanceCoordinator, /invalid exit result/);
+  assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceFileContent/);
+  assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceProcessSucceeded/);
+  assert.match(acceptanceCoordinator, /Assert-NgtAcceptanceCleanupSucceeded/);
+  assert.match(acceptanceCoordinator, /Write-NgtAcceptanceFailureDiagnostic/);
+  assert.match(acceptanceCoordinatorTest, /empty-stdout-error-stderr/);
+  assert.match(acceptanceCoordinatorTest, /credentials-in-stdout/);
+  assert.match(acceptanceCoordinatorTest, /password-in-stderr/);
+  assert.match(acceptanceCoordinatorTest, /sensitive-child-exception/);
+  assert.match(acceptanceCoordinatorTest, /failure artifact generation/);
+  assert.match(acceptanceCoordinatorTest, /-TimedOut/);
+  assert.match(standardUserAcceptance, /Test-NgtGhAuthMatrix/);
+  assert.match(standardUserAcceptance, /GH_TOKEN only/);
+  assert.match(standardUserAcceptance, /GITHUB_TOKEN only/);
+  assert.match(standardUserAcceptance, /GH_CONFIG_DIR only/);
+  assert.match(standardUserAcceptance, /both tokens/);
+  assert.match(standardUserAcceptance, /no credentials/);
+  assert.match(standardUserAcceptance, /ngt-noauth\.invalid/);
+  assert.match(standardUserAcceptance, /Remove-Item Env:\\GITHUB_TOKEN/);
+  assert.doesNotMatch(standardUserAcceptance, /\$env:GH_TOKEN = \$configToken/);
+  assert.match(
+    standardUserAcceptance,
+    /release view \$targetTag --repo \$repository/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /release download \$targetTag --repo \$repository/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /Get-FileHash -LiteralPath \$assetPath -Algorithm SHA256/,
+  );
+  assert.match(standardUserAcceptance, /authProbeReadyPath/);
+  assert.match(standardUserAcceptance, /Register-ScheduledTask/);
+  assert.match(standardUserAcceptance, /Unregister-ScheduledTask/);
+  assert.match(scheduledTaskAuthProbe, /GH_CONFIG_DIR/);
+  assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);
+  assert.match(scheduledTaskAuthProbe, /auth token --hostname github\.com/);
+  assert.match(scheduledTaskAuthProbe, /ExpectedTokenSha256/);
+  assert.match(
+    standardUserAcceptance,
+    /GH_CONFIG_DIR = if \(\$requiresGitHubAuth\) \{ \$ghConfigDirectory \} else \{ \$null \}/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /ghConfigDirectory = if \(\$requiresGitHubAuth\) \{ \$ghConfigDirectory \} else \{ \$null \}/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /verifyGitHubAuth = \(\$Acceptance -eq "production-update"\)/,
+  );
   assert.match(
     standardUserAcceptance,
     /NGT_MANUAL_UPGRADE_BASELINE = \$env:NGT_MANUAL_UPGRADE_BASELINE/,
@@ -1068,6 +1510,65 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /mode: ready\s+acceptance: online-update/);
   assert.match(ready, /mode: ready\s+acceptance: installer/);
   assert.match(ready, /mode: ready\s+acceptance: manual-installer/);
+  assert.match(
+    ready,
+    /production-updater-acceptance:[\s\S]*Exercise the original v2\.0\.21 production updater as a standard user/,
+  );
+  assert.match(
+    ready,
+    /needs:\s*\[[\s\S]*production-updater-acceptance[\s\S]*\]/,
+  );
+  assert.match(
+    ready,
+    /PRODUCTION_UPDATER: \$\{\{ needs\.production-updater-acceptance\.result \}\}/,
+  );
+  assert.match(ready, /type: string\s+required: true/);
+  assert.match(ready, /secrets\.NGT_UPDATER_TEST_TOKEN/);
+  assert.match(
+    ready,
+    /scripts\/prepare-windows-studio-updater-test-release\.mjs/,
+  );
+  assert.match(ready, /scripts\/push-windows-studio-updater-test-refs\.ps1/);
+  assert.match(
+    ready,
+    /Verify the isolated repository before any Git writes[\s\S]*prepare-windows-studio-updater-test-release\.mjs preflight/,
+  );
+  assert.match(ready, /v2\.0\.21 production updater as a standard user/);
+  assert.ok(
+    ready.indexOf("prepare-windows-studio-updater-test-release.mjs preflight") <
+      ready.indexOf("-Stage baseline") &&
+      ready.indexOf("-Stage baseline") <
+        ready.indexOf(
+          "prepare-windows-studio-updater-test-release.mjs baseline",
+        ) &&
+      ready.indexOf(
+        "prepare-windows-studio-updater-test-release.mjs baseline",
+      ) < ready.indexOf("-Stage candidate") &&
+      ready.indexOf("-Stage candidate") <
+        ready.indexOf(
+          "prepare-windows-studio-updater-test-release.mjs candidate",
+        ),
+    "the test baseline must be published before main advances to the candidate SHA",
+  );
+  assert.match(updaterTestRelease, /repositoryInfo\?\.private !== true/);
+  assert.match(updaterTestRelease, /repositoryInfo\.default_branch !== "main"/);
+  assert.match(updaterTestRelease, /testDefaultBranchCommit\(testApi\)/);
+  assert.match(
+    updaterTestRelease,
+    /prepareDraft\(\s*testApi,\s*candidateDirectory,\s*manifest,/,
+  );
+  assert.match(updaterTestRelease, /resolveTagCommit\(manifest\.tag\)/);
+  assert.match(updaterTestRelease, /verifyChecksumSidecar/);
+  assert.match(updaterTestRelease, /NGT_UPDATER_TEST_TOKEN/);
+  assert.match(updaterTestRefs, /push --atomic/);
+  assert.match(updaterTestRefs, /refs\/heads\/main/);
+  assert.doesNotMatch(updaterTestRefs, /--force/);
+  assert.match(
+    online,
+    /production updater acceptance requires the isolated test repository/,
+  );
+  assert.match(online, /taskConfig\.repository = \$TestReleaseRepository/);
+  assert.match(online, /isolated private updater test repository/);
   assert.match(
     ready,
     /manual-v2020-acceptance:[\s\S]*NGT_MANUAL_UPGRADE_BASELINE: v2\.0\.20/,

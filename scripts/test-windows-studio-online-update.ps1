@@ -7,11 +7,16 @@ param(
   [string]$ExpectedManifestPath,
   [string]$CandidateDirectory = "",
   [string]$AcceptanceUpdaterPath = "",
+  [string]$TestReleaseRepository = "",
   [switch]$ManualInstaller,
   [switch]$ProductionUpdater
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-studio-install-coordination.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-online-update-auth.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-online-update-reconnect.ps1")
 
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
   throw "Online update acceptance is restricted to a disposable GitHub-hosted Windows runner."
@@ -35,9 +40,19 @@ function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$
 }
 
 $repository = "JayWangsj/ngt1"
+if ($TestReleaseRepository -and
+    ($TestReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
+      $TestReleaseRepository -ieq $repository)) {
+  throw "Production updater acceptance requires a separate owner/name test repository."
+}
 $githubCli = Get-Command gh -ErrorAction Stop | Select-Object -ExpandProperty Source
-$authOutput = & $githubCli auth status --hostname github.com 2>&1
-if ($LASTEXITCODE -ne 0) { throw "GitHub release read authorization is unavailable." }
+$githubAuthRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $repository `
+  -TestReleaseRepository $TestReleaseRepository -ProductionUpdater:$ProductionUpdater
+Assert-NgtOnlineUpdateGitHubAuth -GhPath $githubCli `
+  -Repository $githubAuthRepository `
+  -CandidateDirectory $CandidateDirectory `
+  -ManualInstaller:$ManualInstaller `
+  -ProductionUpdater:$ProductionUpdater
 
 $manifest = Get-Content -LiteralPath $ExpectedManifestPath -Raw | ConvertFrom-Json
 $targetVersion = $TargetTag -replace "^v", ""
@@ -516,7 +531,7 @@ try {
     if (-not $updaterEntry) { throw "Candidate package is missing the updater integrity entry." }
     Copy-Item -LiteralPath $AcceptanceUpdaterPath -Destination $updaterPath -Force
     $updaterEntry.Value = (Get-FileHash -LiteralPath $updaterPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+    Write-NgtStudioReleaseMetadataNoBom -Path $baselineMetadataPath -Metadata $baselineMetadata
   }
 
   # GitHub's disposable standard user has no interactive Task Scheduler session.
@@ -538,7 +553,7 @@ try {
     $baselineStartupScript = $baselineStartupScript.Replace($scheduledTaskStart, $directLauncherStart)
     Set-Content -LiteralPath $baselineStartupScriptPath -Value $baselineStartupScript -Encoding utf8
     $startupManifestEntry.Value = (Get-FileHash -LiteralPath $baselineStartupScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+    Write-NgtStudioReleaseMetadataNoBom -Path $baselineMetadataPath -Metadata $baselineMetadata
     Write-Output "Adapted the legacy baseline launch for the non-interactive hosted acceptance."
   } elseif (-not $baselineStartupScript.Contains($directLauncherStart)) {
     throw "Baseline startup script has no supported immediate launcher command."
@@ -567,7 +582,6 @@ try {
       Write-Output "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1: $relativePath ($replaceCount calls)."
     }
     if ($CandidateDirectory -and -not $ProductionUpdater -and $relativePath -eq "scripts/windows-studio-common.ps1") {
-      . (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1")
       $scriptContent = Set-NgtReadyBaselineGhShim $scriptContent
       Write-Output "Adapted the verified legacy baseline to use the local candidate release adapter."
     }
@@ -576,7 +590,7 @@ try {
       $manifestEntry.Value = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
   }
-  $baselineMetadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $baselineMetadataPath -Encoding utf8
+  Write-NgtStudioReleaseMetadataNoBom -Path $baselineMetadataPath -Metadata $baselineMetadata
 
   $installationAttempted = $true
   & (Join-Path $baselineRoot "scripts\install-windows-studio.ps1") `
@@ -605,6 +619,19 @@ try {
   if ([System.IO.Path]::GetFullPath([string]$taskConfig.activeRelease) -ne [System.IO.Path]::GetFullPath($taskRoot)) {
     throw "The baseline release is not the configured active release."
   }
+  if ($ProductionUpdater -and -not $TestReleaseRepository -and $env:NGT_RELEASE_READY -eq "true") {
+    throw "Release Ready production updater acceptance requires the isolated test repository."
+  }
+  if ($ProductionUpdater -and $TestReleaseRepository) {
+    $studioConfigPath = Join-Path $installRoot ".local\studio.json"
+    $taskConfig.repository = $TestReleaseRepository
+    [System.IO.File]::WriteAllText(
+      $studioConfigPath,
+      ($taskConfig | ConvertTo-Json -Depth 20) + "`n",
+      [System.Text.UTF8Encoding]::new($false)
+    )
+    Write-Output "Pointed the disposable v2.0.21 installation at the isolated private updater test repository."
+  }
   $updateId = [guid]::NewGuid().ToString()
   if ($ManualInstaller) {
     $installerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-$TargetTag.exe"
@@ -623,7 +650,7 @@ try {
     if ($ProductionUpdater) {
       $publishedLatestVersion = $oldTag -replace "^v", ""
       if ($updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $publishedLatestVersion) {
-        throw "The public latest release did not remain at the installed baseline version."
+        throw "The isolated test repository's published latest release did not remain at the installed baseline version."
       }
     } elseif (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
       throw "The installed NGT API did not offer the exact candidate version."
@@ -770,23 +797,21 @@ try {
     $observedWindowEvidence = @{}
     $deadline = (Get-Date).AddMinutes(50)
     $finalStatus = $null
+    $pollDecision = $null
     do {
-      $failedUpdateMessage = $null
-      if (Test-Path -LiteralPath $updateStatus) {
-        $finalStatus = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-        if ([string]$finalStatus.updateId -ne $updateId) {
-          throw "The persisted update state changed ownership during online update."
-        }
-        if ($ProductionUpdater -and $finalStatus.stage -eq "downloading") {
-          $downloadStageObserved = $true
-          if ([long]$finalStatus.totalBytes -le 0 -or
-              [long]$finalStatus.bytesDownloaded -lt 0 -or
-              [long]$finalStatus.bytesDownloaded -gt [long]$finalStatus.totalBytes) {
-            throw "The production updater reported invalid live download byte progress."
-          }
-        }
-        if ($finalStatus.status -eq "failed") {
-          $failedUpdateMessage = "Rust online update failed at $($finalStatus.failedStage): $($finalStatus.message)"
+      $stateReadFailure = $null
+      try {
+        $finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus `
+          -ExpectedUpdateId $updateId -TargetVersion $targetVersion
+      } catch {
+        $stateReadFailure = $_.Exception.Message
+      }
+      if ($ProductionUpdater -and $finalStatus -and $finalStatus.stage -eq "downloading") {
+        $downloadStageObserved = $true
+        if ([long]$finalStatus.totalBytes -le 0 -or
+            [long]$finalStatus.bytesDownloaded -lt 0 -or
+            [long]$finalStatus.bytesDownloaded -gt [long]$finalStatus.totalBytes) {
+          throw "The production updater reported invalid live download byte progress."
         }
       }
       $windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics -UpdaterPid $updaterPid)
@@ -821,42 +846,42 @@ try {
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
-      if ($failedUpdateMessage) { throw $failedUpdateMessage }
+      if ($stateReadFailure) { throw $stateReadFailure }
       try {
         $updateProcess.Refresh()
         $peakUpdaterWorkingSet = [Math]::Max($peakUpdaterWorkingSet, [long]$updateProcess.PeakWorkingSet64)
       } catch { }
+      $apiAvailable = $false
+      $liveStatus = $null
       try {
         $liveStatus = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update/status" `
           -Headers $sameOriginHeaders -TimeoutSec 1
-        if ($apiDisconnectedObserved) { $apiReconnectedAfterDisconnect = $true }
+        $apiAvailable = $true
         if ($liveStatus.status -eq "failed") {
           throw "NGT reported an online update failure at $($liveStatus.failedStage): $($liveStatus.message)"
         }
       } catch {
         if ($_.Exception.Message -like "NGT reported an online update failure*") { throw }
-        $apiDisconnectedObserved = $true
-        $savedDuringDisconnect = Get-Content -LiteralPath $updateStatus -Raw | ConvertFrom-Json
-        if ([string]$savedDuringDisconnect.updateId -ne $updateId -or
-            [string]$savedDuringDisconnect.stage -notin @(
-              "backing-up",
-              "preparing-release",
-              "verifying-backup",
-              "preparing-runtime",
-              "installing",
-              "validating",
-              "rolling-back"
-            )) {
-          throw ("The independent update state was not recoverable while NGT was disconnected (status='{0}', stage='{1}')." -f `
-            $savedDuringDisconnect.status, $savedDuringDisconnect.stage)
-        }
       }
-      if ($finalStatus.status -eq "complete") {
-        $updateProcess.Refresh()
-        if ($updateProcess.HasExited) { break }
+      $updateProcess.Refresh()
+      $processHasExited = [bool]$updateProcess.HasExited
+      $processExitCode = $null
+      if ($processHasExited) { $processExitCode = $updateProcess.ExitCode }
+      $pollDecision = Get-NgtOnlineUpdateReconnectDecision -PersistedStatus $finalStatus `
+        -ApiAvailable $apiAvailable -LiveStatus $liveStatus -UpdateId $updateId `
+        -TargetVersion $targetVersion -ApiDisconnectedObserved $apiDisconnectedObserved `
+        -ApiReconnectedAfterDisconnect $apiReconnectedAfterDisconnect `
+        -UpdaterHasExited $processHasExited -UpdaterExitCode $processExitCode
+      $apiDisconnectedObserved = $pollDecision.ApiDisconnectedObserved
+      $apiReconnectedAfterDisconnect = $pollDecision.ApiReconnectedAfterDisconnect
+      if ($pollDecision.ShouldComplete) {
+        break
       }
       Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
+    if (-not $pollDecision -or -not $pollDecision.ShouldComplete) {
+      throw "Online update did not observe a verified API reconnection and updater completion before its 50-minute limit."
+    }
     $updateProcess.Refresh()
     if (-not $updateProcess.HasExited) { throw "The Rust updater exceeded its 50-minute limit." }
     $updateProcess.WaitForExit()
@@ -864,8 +889,10 @@ try {
       $sessionEvidence.sessionId, $observedWindowEvidence.Count)
     Write-Output ("Rust updater process exit code: {0}." -f $updateProcess.ExitCode)
     if ($updateProcess.ExitCode -ne 0) { throw "Rust updater exited with code $($updateProcess.ExitCode)." }
-    if (-not $finalStatus -or $finalStatus.status -ne "complete" -or
-        $finalStatus.actualVersion -ne $targetVersion) {
+    $finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus `
+      -ExpectedUpdateId $updateId -TargetVersion $targetVersion
+    if ($finalStatus.status -cne "complete" -or $finalStatus.stage -cne "complete" -or
+        $finalStatus.actualVersion -cne $targetVersion) {
       throw "Rust online update did not reach a verified complete state for $TargetTag."
     }
     if ($ProductionUpdater -and
@@ -880,7 +907,9 @@ try {
     }
     $statusResult = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update/status" `
       -Headers $sameOriginHeaders -TimeoutSec 15
-    if ($statusResult.status -ne "complete" -or $statusResult.actualVersion -ne $targetVersion) {
+    $apiFinalComplete = Assert-NgtOnlineUpdateState -State $statusResult -ExpectedUpdateId $updateId `
+      -TargetVersion $targetVersion -Source "Final API"
+    if (-not $apiFinalComplete) {
       throw "The restarted NGT API did not report the verified installed version."
     }
     if (Test-Path -LiteralPath $updateLock) { throw "The updater left its task lock after exiting." }
@@ -943,7 +972,10 @@ try {
   $newOrders = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($newOrders.StatusCode -ne 200) { throw "The new release orders page did not load." }
   Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
-  if ($ManualInstaller) {
+  if ($ProductionUpdater -and $TestReleaseRepository) {
+    Write-Output ("Windows production updater GitHub Release acceptance passed: {0} -> {1} in {2}." -f `
+      $oldTag, $TargetTag, $TestReleaseRepository)
+  } elseif ($ManualInstaller) {
     $repairLog = Join-Path $testRoot "manual-repair-installer.log"
     $repair = Start-Process -FilePath $installerPath `
       -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$repairLog") `

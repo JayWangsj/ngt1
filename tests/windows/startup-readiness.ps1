@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $root "scripts\windows-studio-common.ps1")
 $servicePath = Join-Path $root "scripts\windows-service.ps1"
 $tokens = $null
 $parseErrors = $null
@@ -13,6 +14,7 @@ foreach ($name in @("Test-NgtDatabaseReady", "Wait-NgtDatabaseReady")) {
 
 $testRoot = Join-Path $root (".local\startup-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 $projectRoot = Join-Path $testRoot "release"
+$installRoot = Join-Path $testRoot "install"
 $stateDirectory = Join-Path $testRoot "state"
 $readyFile = Join-Path $projectRoot ".local\database-ready.pid"
 $pidFile = Join-Path $stateDirectory "database.pid"
@@ -20,9 +22,22 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $readyFile), $stateDirect
 try {
   Set-Content -LiteralPath $pidFile -Value $PID -Encoding ascii
   $script:PortListening = $true
-  function Test-ListeningPort([int]$Port) {
+  function Test-NgtPortOwnership([int]$Port) {
     if ($Port -ne 55432) { throw "Unexpected port: $Port" }
     return $script:PortListening
+  }
+  function Get-NgtStudioProcess([int]$ProcessId) {
+    if ($ProcessId -eq $PID) { return [pscustomobject]@{ ProcessId = $PID } }
+    return $null
+  }
+  function Test-NgtStudioDatabaseLauncherProcess(
+    [object]$Process,
+    [string]$ReleaseRoot,
+    [string[]]$AllowedNodePaths,
+    [string]$ActiveRelease,
+    [int]$SupervisorId
+  ) {
+    return $null -ne $Process -and [int]$Process.ProcessId -eq $PID
   }
   if (Test-NgtDatabaseReady) { throw "An open port alone passed database readiness." }
   Set-Content -LiteralPath $readyFile -Value 2147483647 -Encoding ascii

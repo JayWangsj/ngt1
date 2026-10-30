@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 . (Join-Path $PSScriptRoot "studio-runtime.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
 $standaloneBuild = Join-Path $BuildDirectory "standalone"
 if (-not (Test-Path -LiteralPath (Join-Path $standaloneBuild "server.js"))) {
   throw "Production build is missing. Run pnpm build first."
@@ -183,6 +184,11 @@ if (Test-Path -LiteralPath $standaloneStaticDestination) {
 }
 Copy-Item -LiteralPath $staticSource -Destination $standaloneStaticDestination -Recurse -Force
 Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public") -Recurse -Force
+$standalonePublicDestination = Join-Path $standaloneDestination "public"
+if (Test-Path -LiteralPath $standalonePublicDestination) {
+  Remove-Item -LiteralPath $standalonePublicDestination -Recurse -Force
+}
+Copy-Item -LiteralPath "public" -Destination $standalonePublicDestination -Recurse -Force
 $nonWindowsSharpPackages = Get-ChildItem -LiteralPath $stage -Directory -Recurse -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '^sharp-libvips-(darwin|linux|freebsd|linuxmusl|win32-arm64)' }
 foreach ($nativePackage in $nonWindowsSharpPackages) {
@@ -217,6 +223,7 @@ $runtimeScripts = @(
   "retain-windows-studio-releases.ps1",
   "studio-runtime.ps1",
   "start.mjs",
+  "verify-windows-studio-static-assets.mjs",
   "uninstall-windows-startup.ps1",
   "uninstall-windows-studio.ps1",
   "verify-windows-studio-release.ps1",
@@ -330,13 +337,17 @@ $stageFiles | ForEach-Object {
   $fileManifest[$relativePath] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-@{
+$releaseMetadata = @{
   version = $version
   commit = $commit
   runtimeHash = $runtimeHash
   files = $fileManifest
   createdAt = (Get-Date).ToUniversalTime().ToString("o")
-} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage "studio-release.json") -Encoding utf8
+}
+Write-NgtStudioReleaseMetadataNoBom `
+  -Path (Join-Path $stage "studio-release.json") `
+  -Metadata $releaseMetadata `
+  -Depth 5
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $archive = Join-Path $outputRoot ("ngt-studio-windows-v" + $version + ".zip")

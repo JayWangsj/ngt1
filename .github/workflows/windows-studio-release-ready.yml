@@ -9,6 +9,10 @@ on:
         required: true
         default: none
         options: [none, installer]
+      test_repository:
+        description: "Fresh disposable private repo on main. Creates baseline and candidate Releases/refs; retained for audit, not auto-deleted. Manually delete only this test repo after results. Token: Contents write only here."
+        type: string
+        required: true
 
 permissions:
   actions: read
@@ -36,7 +40,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           NGT_RELEASE_READY: "true"
         run: node scripts/windows-studio-release.mjs qualify-candidate
-
   build:
     name: Release Ready candidate build
     needs: qualify
@@ -91,6 +94,96 @@ jobs:
           mode: ready
           acceptance: online-update
 
+  production-updater-acceptance:
+    name: Release Ready production updater against isolated GitHub Releases
+    needs: [qualify, build]
+    environment: ngt-updater-test
+    runs-on: windows-2022
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      NGT_PRODUCTION_UPDATER_BASELINE: v2.0.21
+      NGT_UPDATER_TEST_REPOSITORY: ${{ inputs.test_repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install pinned acceptance dependencies
+        shell: powershell
+        run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy
+      - name: Download exact-SHA Release Ready candidate assets
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-candidate-${{ github.sha }}
+          path: release-assets
+      - name: Download original-updater acceptance artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ngt-updater-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/ngt-updater-acceptance
+      - name: Verify exact-SHA candidate assets
+        shell: powershell
+        env:
+          NGT_RELEASE_READY: "true"
+        run: node scripts/windows-studio-release.mjs verify-artifact release-assets
+      - name: Require the isolated private repository and scoped credential
+        shell: powershell
+        env:
+          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+        run: |
+          if (-not $env:NGT_UPDATER_TEST_TOKEN) { throw "Configure NGT_UPDATER_TEST_TOKEN with access to only the isolated private test repository." }
+          if ($env:NGT_UPDATER_TEST_REPOSITORY -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or $env:NGT_UPDATER_TEST_REPOSITORY -ieq $env:GITHUB_REPOSITORY) { throw "Release Ready requires a separate isolated repository owner/name." }
+      - name: Verify the isolated repository before any Git writes
+        shell: powershell
+        env:
+          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+        run: node scripts/prepare-windows-studio-updater-test-release.mjs preflight
+      - name: Add the published baseline source to the isolated repository
+        shell: powershell
+        env:
+          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+        run: ./scripts/push-windows-studio-updater-test-refs.ps1 -Stage baseline
+      - name: Mirror and publish the v2.0.21 baseline Release
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+        run: node scripts/prepare-windows-studio-updater-test-release.mjs baseline
+      - name: Advance isolated main and add the exact candidate tag
+        shell: powershell
+        env:
+          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+        run: ./scripts/push-windows-studio-updater-test-refs.ps1 -Stage candidate
+      - name: Prepare the exact-SHA candidate Draft Release
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+        run: node scripts/prepare-windows-studio-updater-test-release.mjs candidate release-assets
+      - name: Exercise the original v2.0.21 production updater as a standard user
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
+          NGT_RELEASE_READY: "true"
+        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance production-update
+      - name: Keep sanitized failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-production-updater-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 7
+
   manual-installer-acceptance:
     name: Release Ready manual upgrade and repair acceptance
     needs: build
@@ -129,6 +222,7 @@ jobs:
         build,
         installer-acceptance,
         online-update-acceptance,
+        production-updater-acceptance,
         manual-installer-acceptance,
         manual-v2020-acceptance,
       ]
@@ -142,10 +236,11 @@ jobs:
           BUILD: ${{ needs.build.result }}
           INSTALLER: ${{ needs.installer-acceptance.result }}
           ONLINE: ${{ needs.online-update-acceptance.result }}
+          PRODUCTION_UPDATER: ${{ needs.production-updater-acceptance.result }}
           MANUAL: ${{ needs.manual-installer-acceptance.result }}
           MANUAL_V2020: ${{ needs.manual-v2020-acceptance.result }}
         run: |
-          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$MANUAL" "$MANUAL_V2020"; do
+          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$PRODUCTION_UPDATER" "$MANUAL" "$MANUAL_V2020"; do
             if [[ "$result" != success ]]; then
               echo "::error::Release Ready requires every candidate build and acceptance job to succeed."
               exit 1

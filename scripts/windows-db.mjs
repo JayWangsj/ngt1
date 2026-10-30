@@ -107,6 +107,8 @@ function run(exe, args) {
 const dataDir = configuredDataRoot
   ? join(persistentRoot, "data")
   : join(cache, "data");
+await writeFile(join(workspace, "database-location.txt"), dataDir);
+await writeFile(join(workspace, "database-runtime-location.txt"), runtime);
 let initialized = false;
 try {
   await access(join(dataDir, "PG_VERSION"));
@@ -197,8 +199,6 @@ try {
 } catch (e) {
   if (e.code !== "EEXIST") throw e;
 }
-await writeFile(join(workspace, "database-location.txt"), dataDir);
-await writeFile(join(workspace, "database-runtime-location.txt"), runtime);
 await writeFile(readyFile, String(process.pid));
 console.log("Business PostgreSQL ready on 127.0.0.1:55432.");
 async function stop() {

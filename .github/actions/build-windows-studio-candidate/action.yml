@@ -3,6 +3,9 @@ description: Build the exact commit and verify the Windows installer and update 
 runs:
   using: composite
   steps:
+    - name: Test standard-user acceptance coordinator failure handling
+      shell: powershell
+      run: ./scripts/test-windows-studio-acceptance-coordinator.ps1
     - uses: pnpm/action-setup@v4
       with:
         version: 11.19.0
@@ -17,6 +20,9 @@ runs:
         target: x86_64-pc-windows-msvc
         components: clippy, rustfmt
         rust-src-dir: tools/ngt-updater
+    - name: Test GitHub CLI authentication source precedence
+      shell: powershell
+      run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance production-update -AuthMatrixOnly
     - name: Test and format-check the native updater
       shell: powershell
       run: |
