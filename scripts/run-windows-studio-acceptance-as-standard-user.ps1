@@ -175,7 +175,7 @@ if ($Child) {
     $targetTag = [string]$request.parameters.TargetTag
     $manifest = Get-Content -LiteralPath ([string]$request.parameters.ExpectedManifestPath) -Raw | ConvertFrom-Json
     $releaseOutput = & $gh.Source release view $targetTag --repo $repository --json tagName,isDraft,assets 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "The private updater-test Draft is not readable through GH_CONFIG_DIR only." }
+    if ($LASTEXITCODE -ne 0) { throw "The public updater-test Draft is not readable through GH_CONFIG_DIR only." }
     $release = ($releaseOutput | Out-String) | ConvertFrom-Json
     $expectedNames = @($manifest.assets | ForEach-Object name | Sort-Object)
     $releaseNames = @($release.assets | ForEach-Object name | Sort-Object)
@@ -183,20 +183,20 @@ if ($Child) {
         (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $releaseNames)) {
       throw "The authenticated updater-test Draft identity or asset inventory is incorrect."
     }
-    $draftDownloadDirectory = Join-Path ([string]$request.authProbeRoot) "private-draft-assets"
+    $draftDownloadDirectory = Join-Path ([string]$request.authProbeRoot) "public-draft-assets"
     New-Item -ItemType Directory -Path $draftDownloadDirectory -Force | Out-Null
     try {
       & $gh.Source release download $targetTag --repo $repository --dir $draftDownloadDirectory 2>$null
-      if ($LASTEXITCODE -ne 0) { throw "The private updater-test Draft assets could not be downloaded through GH_CONFIG_DIR only." }
+      if ($LASTEXITCODE -ne 0) { throw "The public updater-test Draft assets could not be downloaded through GH_CONFIG_DIR only." }
       $downloadedNames = @(Get-ChildItem -LiteralPath $draftDownloadDirectory -File | ForEach-Object Name | Sort-Object)
       if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $downloadedNames) {
-        throw "The downloaded private Draft asset inventory is incorrect."
+        throw "The downloaded public Draft asset inventory is incorrect."
       }
       foreach ($asset in $manifest.assets) {
         $assetPath = Join-Path $draftDownloadDirectory $asset.name
         if ((Get-Item -LiteralPath $assetPath).Length -ne [long]$asset.size -or
             (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$asset.sha256) {
-          throw "A downloaded private Draft asset does not match the candidate SHA256: $($asset.name)"
+          throw "A downloaded public Draft asset does not match the candidate SHA256: $($asset.name)"
         }
       }
     } finally {
@@ -210,7 +210,7 @@ if ($Child) {
         (Get-Date) -lt $taskProbeDeadline) { Start-Sleep -Milliseconds 250 }
     Assert-NgtAcceptanceFileContent -Path ([string]$request.authProbeResultPath) `
       -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
-    Write-Output "GH_CONFIG_DIR-only private Draft view, full asset download, and scheduled-task restart passed."
+    Write-Output "GH_CONFIG_DIR-only public Draft view, full asset download, and scheduled-task restart passed."
   }
 
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()

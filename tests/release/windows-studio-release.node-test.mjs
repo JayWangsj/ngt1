@@ -931,6 +931,9 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   const ready = (
     await readText(".github/workflows/windows-studio-release-ready.yml", "utf8")
   ).replace(/\r\n/g, "\n");
+  const releaseReadyDoc = (
+    await readText("docs/windows-studio-release-ready.md", "utf8")
+  ).replace(/\r\n/g, "\n");
   const updaterTestRelease = (
     await readText(
       "scripts/prepare-windows-studio-updater-test-release.mjs",
@@ -1038,6 +1041,10 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ci, /queue: max/);
   assert.match(
     ci,
+    /node --test[^\n]*windows-studio-updater-test-release\.node-test\.mjs/,
+  );
+  assert.match(
+    ci,
     /full-verification:[\s\S]*needs: \[verify, windows-studio-smoke\]/,
   );
   assert.match(
@@ -1093,7 +1100,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /failure_probe:[\s\S]*options: \[none, installer\]/);
   assert.match(
     ready,
-    /test_repository:[\s\S]*retained for audit, not auto-deleted[\s\S]*Manually delete only this test repo after results/,
+    /test_repository:[\s\S]*dedicated public test repository[\s\S]*candidate Draft/,
   );
   assert.match(
     ready,
@@ -1119,6 +1126,23 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     candidateBuildAction,
     /test-windows-studio-acceptance-coordinator\.ps1/,
   );
+  assert.match(
+    candidateBuildAction,
+    /test-windows-studio-updater-test-refs\.ps1/,
+  );
+  for (const changedPath of [
+    ".github/workflows/windows-studio-release-ready.yml",
+    "scripts/prepare-windows-studio-updater-test-release.mjs",
+    "scripts/push-windows-studio-updater-test-refs.ps1",
+    "scripts/test-windows-studio-updater-test-refs.ps1",
+    "tests/release/windows-studio-updater-test-release.node-test.mjs",
+    "tests/release/windows-studio-release.node-test.mjs",
+  ]) {
+    assert.ok(
+      onlineAcceptanceWorkflow.includes(`      - "${changedPath}"`),
+      `the Windows online-acceptance path filter omits ${changedPath}`,
+    );
+  }
   assert.match(
     onlineAcceptanceWorkflow,
     /Upload sanitized Windows acceptance failure diagnostics[\s\S]*?if: failure\(\)[\s\S]*?actions\/upload-artifact@v4[\s\S]*?ngt-acceptance-diagnostics/,
@@ -1526,6 +1550,19 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(ready, /secrets\.NGT_UPDATER_TEST_TOKEN/);
   assert.match(
     ready,
+    /NGT_UPDATER_TEST_REPOSITORY: \$\{\{ vars\.NGT_UPDATER_TEST_REPOSITORY \}\}/,
+  );
+  assert.match(
+    ready,
+    /NGT_UPDATER_TEST_REPOSITORY_INPUT: \$\{\{ inputs\.test_repository \}\}/,
+  );
+  assert.match(ready, /requestedRepository -cne \$approvedRepository/);
+  assert.doesNotMatch(
+    ready,
+    /NGT_UPDATER_TEST_REPOSITORY: \$\{\{ inputs\.test_repository \}\}/,
+  );
+  assert.match(
+    ready,
     /scripts\/prepare-windows-studio-updater-test-release\.mjs/,
   );
   assert.match(ready, /scripts\/push-windows-studio-updater-test-refs\.ps1/);
@@ -1550,8 +1587,16 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
         ),
     "the test baseline must be published before main advances to the candidate SHA",
   );
-  assert.match(updaterTestRelease, /repositoryInfo\?\.private !== true/);
+  assert.match(updaterTestRelease, /repositoryInfo\?\.private !== false/);
+  assert.match(updaterTestRelease, /assertApprovedUpdaterTestRepository/);
+  assert.match(updaterTestRelease, /repositoryInfo\.visibility !== "public"/);
+  assert.match(updaterTestRelease, /repositoryInfo\.full_name !== repository/);
   assert.match(updaterTestRelease, /repositoryInfo\.default_branch !== "main"/);
+  assert.match(updaterTestRelease, /testApi\.listReleases\(\)/);
+  assert.match(
+    updaterTestRelease,
+    /release\.tag_name === candidateTag && !release\.draft/,
+  );
   assert.match(updaterTestRelease, /testDefaultBranchCommit\(testApi\)/);
   assert.match(
     updaterTestRelease,
@@ -1562,13 +1607,21 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updaterTestRelease, /NGT_UPDATER_TEST_TOKEN/);
   assert.match(updaterTestRefs, /push --atomic/);
   assert.match(updaterTestRefs, /refs\/heads\/main/);
+  assert.match(updaterTestRefs, /requestedRepository -cne \$repository/);
+  assert.match(updaterTestRefs, /ls-remote --heads/);
+  assert.match(updaterTestRefs, /ls-remote --tags --refs/);
+  assert.match(updaterTestRefs, /candidateSha\.ToLowerInvariant\(\)/);
   assert.doesNotMatch(updaterTestRefs, /--force/);
   assert.match(
     online,
     /production updater acceptance requires the isolated test repository/,
   );
   assert.match(online, /taskConfig\.repository = \$TestReleaseRepository/);
-  assert.match(online, /isolated private updater test repository/);
+  assert.match(online, /dedicated public updater test repository/);
+  assert.match(releaseReadyDoc, /dedicated \*\*public\*\* test repository/);
+  assert.match(releaseReadyDoc, /NGT_UPDATER_TEST_REPOSITORY/);
+  assert.match(releaseReadyDoc, /Contents: Read and write/);
+  assert.match(releaseReadyDoc, /must remain\s+a Draft/);
   assert.match(
     ready,
     /manual-v2020-acceptance:[\s\S]*NGT_MANUAL_UPGRADE_BASELINE: v2\.0\.20/,

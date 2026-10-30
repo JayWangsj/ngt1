@@ -14,6 +14,32 @@ export const UPDATER_TEST_BASELINE_TAG = "v2.0.21";
 const SOURCE_REPOSITORY = "JayWangsj/ngt1";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
+export function assertApprovedUpdaterTestRepository(
+  approvedRepository,
+  requestedRepository,
+) {
+  if (
+    !approvedRepository ||
+    !requestedRepository ||
+    requestedRepository !== approvedRepository
+  ) {
+    throw new Error(
+      "The requested updater test repository does not match the approved Environment repository.",
+    );
+  }
+  return approvedRepository;
+}
+
+async function currentCandidateTag() {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  if (!/^\d+\.\d+\.\d+$/.test(packageJson.version || "")) {
+    throw new Error("The updater test candidate package version is invalid.");
+  }
+  return "v" + packageJson.version;
+}
+
 function baselineMarker(tag, commit, assets) {
   const identity = sha256(
     Buffer.from(
@@ -127,6 +153,23 @@ async function verifyTestAssets(api, release, expectedFiles) {
   }
 }
 
+async function verifyTestReleaseInventory(testApi) {
+  const candidateTag = await currentCandidateTag();
+  const allowedTags = new Set([UPDATER_TEST_BASELINE_TAG, candidateTag]);
+  for (const release of await testApi.listReleases()) {
+    if (!allowedTags.has(release.tag_name)) {
+      throw new Error(
+        "The public updater test repository contains an unrelated Release.",
+      );
+    }
+    if (release.tag_name === candidateTag && !release.draft) {
+      throw new Error(
+        "The exact-SHA updater candidate Release must remain a Draft.",
+      );
+    }
+  }
+}
+
 async function preparePublishedBaseline(testApi, baseline) {
   const tag = UPDATER_TEST_BASELINE_TAG;
   const marker = baselineMarker(tag, baseline.commit, baseline.metadata);
@@ -143,7 +186,7 @@ async function preparePublishedBaseline(testApi, baseline) {
         sha: baseline.commit,
         body:
           marker +
-          "\n\nPrivate baseline mirror for production updater acceptance.",
+          "\n\nDedicated public baseline mirror for production updater acceptance.",
       });
     } catch (error) {
       release = await testApi.findRelease(tag);
@@ -211,15 +254,17 @@ export async function preflightUpdaterTestRepository(testApi, repository) {
   }
   const repositoryInfo = await testApi.json(testApi.repoPath(""));
   if (
-    repositoryInfo?.private !== true ||
-    String(repositoryInfo.full_name).toLowerCase() !==
-      repository.toLowerCase() ||
+    repositoryInfo?.private !== false ||
+    (repositoryInfo.visibility !== undefined &&
+      repositoryInfo.visibility !== "public") ||
+    repositoryInfo.full_name !== repository ||
     repositoryInfo.default_branch !== "main"
   ) {
     throw new Error(
-      "The updater test repository must be a private GitHub repository named exactly and using main as its default branch.",
+      "The updater test repository must be the exact approved public GitHub repository using main as its default branch.",
     );
   }
+  await verifyTestReleaseInventory(testApi);
 }
 
 async function testDefaultBranchCommit(testApi) {
@@ -353,7 +398,10 @@ export async function prepareUpdaterTestCandidate({
 
 async function main() {
   const [stage, directory] = process.argv.slice(2);
-  const repository = process.env.NGT_UPDATER_TEST_REPOSITORY;
+  const repository = assertApprovedUpdaterTestRepository(
+    process.env.NGT_UPDATER_TEST_REPOSITORY,
+    process.env.NGT_UPDATER_TEST_REPOSITORY_INPUT,
+  );
   const token = process.env.NGT_UPDATER_TEST_TOKEN;
   const sourceToken = process.env.GITHUB_TOKEN;
   if (
@@ -371,7 +419,7 @@ async function main() {
   if (stage === "preflight") {
     await preflightUpdaterTestRepository(testApi, repository);
     console.log(
-      "Verified the isolated private updater test repository before Git writes.",
+      "Verified the dedicated public updater test repository before Git writes.",
     );
     return;
   }

@@ -49,7 +49,7 @@ $fakeToken = "ngt-isolated-auth-fixture-token"
 $decoyGhToken = "ngt-env-gh-token-decoy"
 $decoyGithubToken = "ngt-env-github-token-decoy"
 $mainRepository = "JayWangsj/ngt1"
-$testRepository = "ngt-fixture-owner/private-updater-test"
+$testRepository = "ngt-fixture-owner/public-updater-test"
 $fakeGhPath = Join-Path $testRoot "gh.cmd"
 
 try {
@@ -100,7 +100,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   try {
     Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
       -TestReleaseRepository $mainRepository -ProductionUpdater | Out-Null
-    throw "Production updater accepted the main repository as its private test repository."
+    throw "Production updater accepted the main repository as its public test repository."
   } catch {
     if ($_.Exception.Message -notlike "*separate test Release repository*") { throw }
   }
