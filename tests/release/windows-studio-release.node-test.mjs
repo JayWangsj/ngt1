@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import {
   calculateBuildIdentity,
@@ -1629,5 +1630,291 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(
     ready,
     /MANUAL_V2020: \$\{\{ needs\.manual-v2020-acceptance\.result \}\}/,
+  );
+});
+
+test("production updater checkout pins the candidate SHA and complete history", async () => {
+  const workflow = (
+    await readFile(".github/workflows/windows-studio-release-ready.yml", "utf8")
+  ).replace(/\r\n/g, "\n");
+
+  const findJob = (source, jobName) => {
+    const lines = source.split("\n");
+    const start = lines.findIndex((line) => line === "  " + jobName + ":");
+    if (start === -1) return null;
+    const nextJob = lines.findIndex(
+      (line, index) => index > start && /^  [A-Za-z0-9_-]+:\s*$/.test(line),
+    );
+    return {
+      lines,
+      start,
+      end: nextJob === -1 ? lines.length : nextJob,
+    };
+  };
+
+  const findCheckout = (job) => {
+    if (!job) return null;
+    const start = job.lines.findIndex(
+      (line, index) =>
+        index >= job.start &&
+        index < job.end &&
+        line === "      - uses: actions/checkout@v5",
+    );
+    if (start === -1) return null;
+    const nextStep = job.lines.findIndex(
+      (line, index) =>
+        index > start && index < job.end && /^      - /.test(line),
+    );
+    const end = nextStep === -1 ? job.end : nextStep;
+    return {
+      start,
+      end,
+      text: job.lines.slice(start, end).join("\n"),
+    };
+  };
+
+  const assertProductionUpdaterCheckout = (source) => {
+    const job = findJob(source, "production-updater-acceptance");
+    assert.ok(job, "Release Ready must define production-updater-acceptance");
+    const checkout = findCheckout(job);
+    assert.ok(
+      checkout,
+      "production-updater-acceptance must checkout its candidate",
+    );
+    assert.ok(
+      checkout.text.includes("          ref: $" + "{{ github.sha }}"),
+      "production-updater checkout must remain pinned to github.sha",
+    );
+    assert.ok(
+      checkout.text.includes("          fetch-depth: 0"),
+      "production-updater checkout must set fetch-depth: 0",
+    );
+  };
+
+  const replaceJobCheckout = (source, jobName, update) => {
+    const lines = source.split("\n");
+    const job = findJob(source, jobName);
+    assert.ok(job, "fixture mutation requires job " + jobName);
+    const checkout = findCheckout(job);
+    assert.ok(checkout, "fixture mutation requires the checkout in " + jobName);
+    const updatedCheckout = update(checkout.text);
+    assert.notEqual(
+      updatedCheckout,
+      checkout.text,
+      "fixture mutation must change the checkout",
+    );
+    const updatedJob = lines.slice(job.start, job.end);
+    updatedJob.splice(
+      checkout.start - job.start,
+      checkout.end - checkout.start,
+      ...updatedCheckout.split("\n"),
+    );
+    lines.splice(job.start, job.end - job.start, ...updatedJob);
+    return lines.join("\n");
+  };
+
+  assertProductionUpdaterCheckout(workflow);
+
+  const withoutTargetDepth = replaceJobCheckout(
+    workflow,
+    "production-updater-acceptance",
+    (checkout) => checkout.replace("\n          fetch-depth: 0", ""),
+  );
+  assert.throws(
+    () => assertProductionUpdaterCheckout(withoutTargetDepth),
+    /fetch-depth: 0/,
+  );
+
+  const depthOne = replaceJobCheckout(
+    workflow,
+    "production-updater-acceptance",
+    (checkout) => checkout.replace("fetch-depth: 0", "fetch-depth: 1"),
+  );
+  assert.throws(
+    () => assertProductionUpdaterCheckout(depthOne),
+    /fetch-depth: 0/,
+  );
+
+  const onlyOtherJobHasFullHistory = replaceJobCheckout(
+    withoutTargetDepth,
+    "build",
+    (checkout) =>
+      checkout.replace(
+        "          ref: $" + "{{ github.sha }}",
+        "          ref: $" + "{{ github.sha }}" + "\n          fetch-depth: 0",
+      ),
+  );
+  const buildCheckout = findCheckout(
+    findJob(onlyOtherJobHasFullHistory, "build"),
+  );
+  assert.ok(buildCheckout?.text.includes("          fetch-depth: 0"));
+  assert.throws(
+    () => assertProductionUpdaterCheckout(onlyOtherJobHasFullHistory),
+    /fetch-depth: 0/,
+  );
+});
+
+test("real Git ancestry check reproduces the shallow-clone false negative", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "ngt release ready ancestry-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const sourceRepository = path.join(root, "source repository with spaces");
+  const shallowClone = path.join(root, "shallow clone with spaces");
+  const fullClone = path.join(root, "complete history clone with spaces");
+  const emptyGlobalConfig = path.join(root, "empty global config");
+  const emptyHooks = path.join(root, "empty hooks");
+  await mkdir(sourceRepository, { recursive: true });
+  await mkdir(emptyHooks, { recursive: true });
+  await writeFile(emptyGlobalConfig, "");
+
+  const gitEnv = {
+    PATH: process.env.PATH,
+    SystemRoot: process.env.SystemRoot,
+    WINDIR: process.env.WINDIR,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+    HOME: root,
+    USERPROFILE: root,
+    GIT_CONFIG_GLOBAL: emptyGlobalConfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_AUTHOR_NAME: "NGT Release Ready regression",
+    GIT_AUTHOR_EMAIL: "ngt-release-ready-regression@example.invalid",
+    GIT_COMMITTER_NAME: "NGT Release Ready regression",
+    GIT_COMMITTER_EMAIL: "ngt-release-ready-regression@example.invalid",
+  };
+
+  const runGit = (cwd, args, expectedExitCode = 0) => {
+    const result = spawnSync(
+      "git",
+      [
+        "-c",
+        "user.name=NGT Release Ready regression",
+        "-c",
+        "user.email=ngt-release-ready-regression@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=" + emptyHooks.replace(/\\/g, "/"),
+        ...args,
+      ],
+      {
+        cwd,
+        env: gitEnv,
+        encoding: "utf8",
+        windowsHide: true,
+      },
+    );
+    assert.equal(
+      result.error,
+      undefined,
+      "Git must be executable for this offline regression: " +
+        (result.error?.message ?? "unknown spawn error"),
+    );
+    assert.equal(
+      result.signal,
+      null,
+      "Git must exit normally: " + args.join(" "),
+    );
+    assert.equal(
+      result.status,
+      expectedExitCode,
+      "git " +
+        args.join(" ") +
+        " exited " +
+        result.status +
+        " instead of " +
+        expectedExitCode +
+        ": " +
+        result.stderr,
+    );
+    return result.stdout.trim();
+  };
+
+  runGit(root, ["init", "--quiet", sourceRepository]);
+  runGit(sourceRepository, ["checkout", "-b", "main"]);
+
+  const commitFile = async (contents, message) => {
+    await writeFile(path.join(sourceRepository, "history.txt"), contents);
+    runGit(sourceRepository, ["add", "--all"]);
+    runGit(sourceRepository, ["commit", "-m", message]);
+    return runGit(sourceRepository, ["rev-parse", "HEAD^{commit}"]);
+  };
+
+  const baselineSha = await commitFile("baseline\n", "baseline");
+  runGit(sourceRepository, ["tag", "v2.0.21", baselineSha]);
+  await commitFile("intermediate\n", "intermediate");
+  const candidateSha = await commitFile("candidate\n", "candidate");
+  const sourceUrl = pathToFileURL(sourceRepository).href;
+  assert.ok(sourceUrl.startsWith("file:///"));
+  assert.ok(sourceUrl.includes("%20"), "the local file URL must encode spaces");
+
+  runGit(root, [
+    "clone",
+    "--quiet",
+    "--depth=1",
+    "--no-tags",
+    sourceUrl,
+    shallowClone,
+  ]);
+  assert.equal(
+    runGit(shallowClone, ["rev-parse", "--is-shallow-repository"]),
+    "true",
+  );
+  runGit(shallowClone, ["fetch", "--no-tags", "origin", "refs/tags/v2.0.21"]);
+  const shallowBaselineSha = runGit(shallowClone, [
+    "rev-parse",
+    "FETCH_HEAD^{commit}",
+  ]);
+  const shallowCandidateSha = runGit(shallowClone, [
+    "rev-parse",
+    "HEAD^{commit}",
+  ]);
+  assert.equal(shallowBaselineSha, baselineSha);
+  assert.equal(shallowCandidateSha, candidateSha);
+  assert.match(shallowBaselineSha, /^[a-f0-9]{40}$/);
+  assert.match(shallowCandidateSha, /^[a-f0-9]{40}$/);
+  runGit(
+    shallowClone,
+    ["merge-base", "--is-ancestor", shallowBaselineSha, shallowCandidateSha],
+    1,
+  );
+
+  runGit(root, ["clone", "--quiet", "--no-tags", sourceUrl, fullClone]);
+  assert.equal(
+    runGit(fullClone, ["rev-parse", "--is-shallow-repository"]),
+    "false",
+  );
+  runGit(fullClone, ["fetch", "--no-tags", "origin", "refs/tags/v2.0.21"]);
+  const fullBaselineSha = runGit(fullClone, [
+    "rev-parse",
+    "FETCH_HEAD^{commit}",
+  ]);
+  const fullCandidateSha = runGit(fullClone, ["rev-parse", "HEAD^{commit}"]);
+  assert.equal(fullBaselineSha, baselineSha);
+  assert.equal(fullCandidateSha, candidateSha);
+  runGit(
+    fullClone,
+    ["merge-base", "--is-ancestor", fullBaselineSha, fullCandidateSha],
+    0,
+  );
+
+  runGit(fullClone, ["checkout", "--orphan", "unrelated-root"]);
+  runGit(fullClone, ["rm", "-r", "-f", "--", "."]);
+  await writeFile(path.join(fullClone, "unrelated.txt"), "unrelated\n");
+  runGit(fullClone, ["add", "--all"]);
+  runGit(fullClone, ["commit", "-m", "unrelated orphan"]);
+  const unrelatedSha = runGit(fullClone, ["rev-parse", "HEAD^{commit}"]);
+  assert.match(unrelatedSha, /^[a-f0-9]{40}$/);
+  assert.equal(
+    runGit(fullClone, ["rev-parse", "--is-shallow-repository"]),
+    "false",
+  );
+  runGit(
+    fullClone,
+    ["merge-base", "--is-ancestor", fullBaselineSha, unrelatedSha],
+    1,
   );
 });
