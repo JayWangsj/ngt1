@@ -24,6 +24,140 @@ function Invoke-NgtGit([string[]]$Arguments) {
   return [pscustomobject]@{ Output = ($output -join [Environment]::NewLine); ExitCode = $exitCode }
 }
 
+function Protect-NgtUpdaterTestGitOutput([string]$Output, [string]$Credential) {
+  try {
+    $safeOutput = [string]$Output
+    $credentialDetected = $false
+    if (-not [string]::IsNullOrEmpty($Credential)) {
+      $redactedOutput = $safeOutput.Replace($Credential, "<redacted>")
+      if ($redactedOutput -cne $safeOutput) { $credentialDetected = $true }
+      $safeOutput = $redactedOutput
+      foreach ($encodedCredential in @(
+          [System.Uri]::EscapeDataString($Credential),
+          [System.Net.WebUtility]::UrlEncode($Credential)
+        )) {
+        if (-not [string]::IsNullOrEmpty($encodedCredential)) {
+          $redactedOutput = [regex]::Replace(
+            $safeOutput,
+            [regex]::Escape($encodedCredential),
+            "<redacted>",
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+          )
+          if ($redactedOutput -cne $safeOutput) { $credentialDetected = $true }
+          $safeOutput = $redactedOutput
+        }
+      }
+    }
+
+    $redactedOutput = [regex]::Replace($safeOutput, '(?i)(https?://)[^/\s?#@]*@', '$1<redacted>@')
+    if ($redactedOutput -cne $safeOutput) { $credentialDetected = $true }
+    $safeOutput = $redactedOutput
+    $redactedOutput = [regex]::Replace($safeOutput, '(?i)(authorization\s*[:=]\s*(?:basic|bearer)\s+)\S+', '$1<redacted>')
+    if ($redactedOutput -cne $safeOutput) { $credentialDetected = $true }
+    $safeOutput = $redactedOutput
+    $redactedOutput = [regex]::Replace(
+      $safeOutput,
+      '(?i)([?&](?:token|access_token|oauth_token|gh_token|client_secret|password)=)[^&#\s""''<>]+',
+      '$1<redacted>'
+    )
+    if ($redactedOutput -cne $safeOutput) { $credentialDetected = $true }
+    return [pscustomobject]@{ Output = $redactedOutput; CredentialDetected = $credentialDetected }
+  } catch {
+    throw "Git combined output sanitization failed; output suppressed."
+  }
+}
+
+function New-NgtUpdaterTestPushDiagnostic(
+  [string]$Stage,
+  [int]$ExitCode,
+  [string]$Repository,
+  [string]$GitOutput,
+  [string]$Credential
+) {
+  $sanitizationFailed = $false
+  try {
+    $protectedOutput = Protect-NgtUpdaterTestGitOutput $GitOutput $Credential
+    $safeGitOutput = [string]$protectedOutput.Output
+  } catch {
+    $safeGitOutput = ""
+    $sanitizationFailed = $true
+  }
+
+  if ($sanitizationFailed) {
+    $safeGitOutput = "Git combined output omitted because sanitization failed."
+  } elseif ([string]::IsNullOrWhiteSpace($safeGitOutput)) {
+    $safeGitOutput = "No Git output was returned."
+  } else {
+    $maxGitOutputLength = 8192
+    if ($safeGitOutput.Length -gt $maxGitOutputLength) {
+      $safeGitOutput = $safeGitOutput.Substring(0, $maxGitOutputLength) +
+        ([Environment]::NewLine + "[Git combined output truncated after sanitization at $maxGitOutputLength characters.]")
+    }
+  }
+
+  $result = if ($ExitCode -ne 0) {
+    "git push --atomic failed."
+  } elseif ($sanitizationFailed) {
+    "Git combined output could not be sanitized; the script failed closed."
+  } else {
+    "git push --atomic output contained credential material; the script failed closed."
+  }
+  $diagnosticLines = @(
+    "Operation: git push --atomic"
+    "Stage: $Stage"
+    "Git exit code: $ExitCode"
+    "Test repository: $Repository"
+    "Result: $result"
+    "Git combined output:"
+    $safeGitOutput
+  )
+  return [pscustomobject]@{
+    Text = ($diagnosticLines -join [Environment]::NewLine)
+    CredentialDetected = [bool]($protectedOutput -and $protectedOutput.CredentialDetected)
+    SanitizationFailed = $sanitizationFailed
+  }
+}
+
+function Save-NgtUpdaterTestPushDiagnostic([string]$Diagnostic, [string]$Stage) {
+  $runnerTemp = [string]$env:RUNNER_TEMP
+  $runId = [string]$env:GITHUB_RUN_ID
+  $runAttempt = [string]$env:GITHUB_RUN_ATTEMPT
+  if (-not [System.IO.Path]::IsPathRooted($runnerTemp) -or
+      $runId -notmatch '^\d+$' -or
+      $runAttempt -notmatch '^\d+$') {
+    return $false
+  }
+
+  try {
+    $tempRoot = [System.IO.Path]::GetFullPath($runnerTemp)
+    $trimCharacters = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $normalizedTempRoot = $tempRoot.TrimEnd($trimCharacters)
+    if ([string]::IsNullOrEmpty($normalizedTempRoot)) { $normalizedTempRoot = $tempRoot }
+    $directoryName = "ngt-acceptance-diagnostics-$runId-$runAttempt"
+    $diagnosticDirectory = [System.IO.Path]::GetFullPath((Join-Path $normalizedTempRoot $directoryName))
+    $directoryPrefix = $normalizedTempRoot + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $diagnosticDirectory.StartsWith($directoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $false
+    }
+
+    $fileName = "updater-test-refs-push-$Stage.txt"
+    $diagnosticPath = [System.IO.Path]::GetFullPath((Join-Path $diagnosticDirectory $fileName))
+    if (-not [string]::Equals(
+        [System.IO.Path]::GetDirectoryName($diagnosticPath),
+        $diagnosticDirectory,
+        [System.StringComparison]::OrdinalIgnoreCase
+      )) {
+      return $false
+    }
+
+    [System.IO.Directory]::CreateDirectory($diagnosticDirectory) | Out-Null
+    [System.IO.File]::WriteAllText($diagnosticPath, $Diagnostic, [System.Text.Encoding]::UTF8)
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 if ($requestedRepository -cne $repository) {
   throw "The requested updater test repository does not match the approved Environment repository."
 }
@@ -103,9 +237,26 @@ try {
   }
   $pushArguments = @("-c", "http.https://github.com/.extraheader=", "-c", "credential.helper=", "push", "--atomic", $remote) + $references
   $pushResult = Invoke-NgtGit $pushArguments
-  $pushOutput = $pushResult.Output
-  if ($pushOutput.Contains($token)) { throw "GitHub test repository credentials were exposed by Git output." }
-  if ($pushResult.ExitCode -ne 0) { throw "Could not add immutable exact-SHA tags to the isolated updater test repository." }
+  $pushOutput = [string]$pushResult.Output
+  $diagnosticArguments = @{
+    Stage = $Stage
+    ExitCode = $pushResult.ExitCode
+    Repository = $repository
+    GitOutput = $pushOutput
+    Credential = $token
+  }
+  $diagnosticResult = New-NgtUpdaterTestPushDiagnostic @diagnosticArguments
+  if ($pushResult.ExitCode -ne 0 -or $diagnosticResult.CredentialDetected -or $diagnosticResult.SanitizationFailed) {
+    $diagnostic = [string]$diagnosticResult.Text
+    if ($diagnosticResult.CredentialDetected) {
+      $diagnostic += [Environment]::NewLine + "Credential material was detected in Git combined output and redacted."
+    }
+    if (-not (Save-NgtUpdaterTestPushDiagnostic -Diagnostic $diagnostic -Stage $Stage)) {
+      $diagnostic += [Environment]::NewLine + "Sanitized diagnostic file could not be saved."
+    }
+    Write-Output $diagnostic
+    throw $diagnostic
+  }
   Write-Output "Verified isolated updater $Stage refs at their exact source commits."
 } finally {
   Remove-Item Env:\NGT_UPDATER_GIT_ASKPASS_RESPONSE -ErrorAction SilentlyContinue
