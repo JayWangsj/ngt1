@@ -1605,11 +1605,11 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updaterTestRelease, /resolveTagCommit\(manifest\.tag\)/);
   assert.match(updaterTestRelease, /verifyChecksumSidecar/);
   assert.match(updaterTestRelease, /NGT_UPDATER_TEST_TOKEN/);
-  assert.match(updaterTestRefs, /push --atomic/);
+  assert.match(updaterTestRefs, /"push",\s*"--atomic"/);
   assert.match(updaterTestRefs, /refs\/heads\/main/);
   assert.match(updaterTestRefs, /requestedRepository -cne \$repository/);
-  assert.match(updaterTestRefs, /ls-remote --heads/);
-  assert.match(updaterTestRefs, /ls-remote --tags --refs/);
+  assert.match(updaterTestRefs, /"ls-remote",\s*"--heads"/);
+  assert.match(updaterTestRefs, /"ls-remote",\s*"--tags",\s*"--refs"/);
   assert.match(updaterTestRefs, /candidateSha\.ToLowerInvariant\(\)/);
   assert.doesNotMatch(updaterTestRefs, /--force/);
   assert.match(

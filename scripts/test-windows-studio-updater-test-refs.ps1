@@ -27,7 +27,10 @@ function git {
   $arguments = @($args | ForEach-Object { [string]$_ })
   $script:FakeGit.Calls += ,($arguments -join " ")
   if ($arguments -contains "fetch") {
-    $global:LASTEXITCODE = 0
+    if ($script:FakeGit.EmitNativeProgress) {
+      & $env:ComSpec /d /s /c "echo From native git fetch 1>&2"
+    }
+    $global:LASTEXITCODE = $script:FakeGit.FetchExitCode
     return
   }
   if ($arguments -contains "rev-parse") {
@@ -48,22 +51,27 @@ function git {
   if ($arguments -contains "push") {
     $script:FakeGit.Pushes++
     $script:FakeGit.PushArguments = $arguments
+    if ($script:FakeGit.EmitNativeProgress) {
+      & $env:ComSpec /d /s /c "echo To native git push 1>&2"
+    }
     $global:LASTEXITCODE = $script:FakeGit.PushExitCode
     return $script:FakeGit.PushOutput
   }
   throw "Unexpected fake git invocation."
 }
 
-function Invoke-NgtUpdaterTestRefs([string]$Stage, [string]$Heads = "", [string]$Tags = "", [string]$LeakOutput = "", [string]$Token = $script:FixtureToken, [int]$PushExitCode = 0, [string]$RequestedRepository = "Owner/public-updater-test") {
+function Invoke-NgtUpdaterTestRefs([string]$Stage, [string]$Heads = "", [string]$Tags = "", [string]$LeakOutput = "", [string]$Token = $script:FixtureToken, [int]$FetchExitCode = 0, [int]$PushExitCode = 0, [string]$RequestedRepository = "Owner/public-updater-test") {
   $script:FakeGit = @{
     Calls = @()
     Heads = $Heads
     Tags = $Tags
     LeakOutput = $LeakOutput
+    FetchExitCode = $FetchExitCode
     Pushes = 0
     PushArguments = @()
     PushExitCode = $PushExitCode
     PushOutput = ""
+    EmitNativeProgress = $true
   }
   $env:NGT_UPDATER_TEST_REPOSITORY = "Owner/public-updater-test"
   $env:NGT_UPDATER_TEST_REPOSITORY_INPUT = $RequestedRepository
@@ -118,6 +126,10 @@ try {
   $failedPush = Invoke-NgtUpdaterTestRefs -Stage baseline -PushExitCode 17
   Assert-NgtUpdaterTestRefs (-not $failedPush.Passed -and $failedPush.Git.Pushes -eq 1) `
     "A nonzero atomic push exit code was incorrectly accepted."
+
+  $failedFetch = Invoke-NgtUpdaterTestRefs -Stage baseline -FetchExitCode 19
+  Assert-NgtUpdaterTestRefs (-not $failedFetch.Passed -and $failedFetch.Git.Pushes -eq 0) `
+    "A nonzero baseline fetch exit code was incorrectly accepted."
 
   $wrongCandidateTag = Invoke-NgtUpdaterTestRefs -Stage candidate `
     -Heads ("{0}`trefs/heads/main" -f $script:BaselineSha) `
