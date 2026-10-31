@@ -11,6 +11,19 @@ $token = $env:NGT_UPDATER_TEST_TOKEN
 $candidateSha = $env:GITHUB_SHA
 $candidateVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\package.json") -Raw | ConvertFrom-Json).version
 $candidateTag = "v$candidateVersion"
+
+function Invoke-NgtGit([string[]]$Arguments) {
+  $savedErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = @(& git @Arguments 2>&1 | ForEach-Object { [string]$_ })
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+  }
+  return [pscustomobject]@{ Output = ($output -join [Environment]::NewLine); ExitCode = $exitCode }
+}
+
 if ($requestedRepository -cne $repository) {
   throw "The requested updater test repository does not match the approved Environment repository."
 }
@@ -23,15 +36,20 @@ if ($repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
   throw "Isolated updater test repository identity or scoped credential is invalid."
 }
 
-$fetchOutput = & git fetch --no-tags origin refs/tags/v2.0.21 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Could not fetch the pinned v2.0.21 source tag." }
-$baselineSha = (& git rev-parse "FETCH_HEAD^{commit}").Trim().ToLowerInvariant()
-$localCandidateSha = (& git rev-parse "$candidateSha^{commit}").Trim().ToLowerInvariant()
+$fetchResult = Invoke-NgtGit @("fetch", "--no-tags", "origin", "refs/tags/v2.0.21")
+if ($fetchResult.ExitCode -ne 0) { throw "Could not fetch the pinned v2.0.21 source tag." }
+$baselineResult = Invoke-NgtGit @("rev-parse", "FETCH_HEAD^{commit}")
+$candidateResult = Invoke-NgtGit @("rev-parse", "$candidateSha^{commit}")
+if ($baselineResult.ExitCode -ne 0 -or $candidateResult.ExitCode -ne 0) {
+  throw "The updater test Git refs could not be resolved to exact source commits."
+}
+$baselineSha = $baselineResult.Output.Trim().ToLowerInvariant()
+$localCandidateSha = $candidateResult.Output.Trim().ToLowerInvariant()
 if ($baselineSha -notmatch '^[a-f0-9]{40}$' -or $localCandidateSha -ne $candidateSha.ToLowerInvariant()) {
   throw "The updater test Git refs could not be resolved to exact source commits."
 }
-& git merge-base --is-ancestor $baselineSha $candidateSha
-if ($LASTEXITCODE -ne 0) { throw "The Release Ready candidate is not based on published v2.0.21." }
+$mergeBaseResult = Invoke-NgtGit @("merge-base", "--is-ancestor", $baselineSha, $candidateSha)
+if ($mergeBaseResult.ExitCode -ne 0) { throw "The Release Ready candidate is not based on published v2.0.21." }
 
 $askPass = Join-Path $env:RUNNER_TEMP ("ngt-updater-test-askpass-" + [guid]::NewGuid().ToString("N") + ".cmd")
 try {
@@ -41,10 +59,10 @@ try {
   $env:GIT_TERMINAL_PROMPT = "0"
   $env:NGT_UPDATER_GIT_ASKPASS_RESPONSE = $token
   $remote = "https://x-access-token@github.com/$repository.git"
-  $remoteHeads = & git -c http.https://github.com/.extraheader= -c credential.helper= ls-remote --heads $remote 2>&1 | Out-String
-  $headsExitCode = $LASTEXITCODE
+  $headsResult = Invoke-NgtGit @("-c", "http.https://github.com/.extraheader=", "-c", "credential.helper=", "ls-remote", "--heads", $remote)
+  $remoteHeads = $headsResult.Output
   if ($remoteHeads.Contains($token)) { throw "GitHub test repository credentials were exposed by Git output." }
-  if ($headsExitCode -ne 0) { throw "The isolated updater test repository could not be inspected." }
+  if ($headsResult.ExitCode -ne 0) { throw "The isolated updater test repository could not be inspected." }
   $headEntries = @($remoteHeads -split "`r?`n" | Where-Object { $_.Trim() } | ForEach-Object {
     $fields = $_ -split "\s+"
     [pscustomobject]@{ Sha = $fields[0].ToLowerInvariant(); Ref = $fields[1] }
@@ -56,10 +74,10 @@ try {
   if ($branchSha -and $branchSha -notin @($baselineSha, $candidateSha.ToLowerInvariant())) {
     throw "The isolated updater test main branch contains unexpected source code. Use a fresh dedicated public repository."
   }
-  $remoteTags = & git -c http.https://github.com/.extraheader= -c credential.helper= ls-remote --tags --refs $remote 2>&1 | Out-String
-  $tagsExitCode = $LASTEXITCODE
+  $tagsResult = Invoke-NgtGit @("-c", "http.https://github.com/.extraheader=", "-c", "credential.helper=", "ls-remote", "--tags", "--refs", $remote)
+  $remoteTags = $tagsResult.Output
   if ($remoteTags.Contains($token)) { throw "GitHub test repository credentials were exposed by Git output." }
-  if ($tagsExitCode -ne 0) { throw "The isolated updater test repository tags could not be inspected." }
+  if ($tagsResult.ExitCode -ne 0) { throw "The isolated updater test repository tags could not be inspected." }
   $allowedTags = @("refs/tags/v2.0.21", "refs/tags/$candidateTag")
   $tagMap = @{}
   foreach ($line in @($remoteTags -split "`r?`n" | Where-Object { $_.Trim() })) {
@@ -83,10 +101,11 @@ try {
     if ($branchSha -eq $baselineSha) { $references += "$candidateSha`:refs/heads/main" }
     $references += "$candidateSha`:refs/tags/$candidateTag"
   }
-  $pushOutput = & git -c http.https://github.com/.extraheader= -c credential.helper= push --atomic $remote @references 2>&1 | Out-String
-  $pushExitCode = $LASTEXITCODE
+  $pushArguments = @("-c", "http.https://github.com/.extraheader=", "-c", "credential.helper=", "push", "--atomic", $remote) + $references
+  $pushResult = Invoke-NgtGit $pushArguments
+  $pushOutput = $pushResult.Output
   if ($pushOutput.Contains($token)) { throw "GitHub test repository credentials were exposed by Git output." }
-  if ($pushExitCode -ne 0) { throw "Could not add immutable exact-SHA tags to the isolated updater test repository." }
+  if ($pushResult.ExitCode -ne 0) { throw "Could not add immutable exact-SHA tags to the isolated updater test repository." }
   Write-Output "Verified isolated updater $Stage refs at their exact source commits."
 } finally {
   Remove-Item Env:\NGT_UPDATER_GIT_ASKPASS_RESPONSE -ErrorAction SilentlyContinue
