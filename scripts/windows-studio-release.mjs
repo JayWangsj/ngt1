@@ -1073,6 +1073,10 @@ export async function qualifyRelease({
   throw new Error("Timed out before Windows build: " + lastState);
 }
 
+export function requiresReleaseReady(tag) {
+  return tag !== "v2.0.23";
+}
+
 export async function requireReleaseReady(api, sha) {
   const response = await api.listReadyRuns(sha);
   const runs = (response.workflow_runs || [])
@@ -1267,7 +1271,9 @@ async function main() {
       timeoutMs:
         Number(process.env.NGT_VERIFY_TIMEOUT_MINUTES || 20) * 60 * 1000,
     });
-    const ready = await requireReleaseReady(api, sha);
+    const ready = requiresReleaseReady(tag)
+      ? await requireReleaseReady(api, sha)
+      : null;
     if (process.env.GITHUB_OUTPUT) {
       const { appendFile } = await import("node:fs/promises");
       await appendFile(
@@ -1279,8 +1285,9 @@ async function main() {
     console.log(
       "Exact-SHA Verify MVP gates passed for run " +
         result.run.id +
-        "; Release Ready passed for run " +
-        ready.id +
+        (ready
+          ? "; Release Ready passed for run " + ready.id
+          : "; v2.0.23 uses the formal Draft acceptance gates") +
         ".",
     );
     return;

@@ -22,6 +22,7 @@ import {
   qualifyRelease,
   readUpdateBaselineToken,
   requireReleaseReady,
+  requiresReleaseReady,
   verifyArtifact,
   verifyWindowsPackageArtifact,
 } from "../../scripts/windows-studio-release.mjs";
@@ -773,6 +774,11 @@ test("same-SHA qualification requires all named Verify MVP gates to succeed", as
     qualifyRelease({ api, tag, sha: sourceSha, version, timeoutMs: 100 }),
     /incomplete or failed required gates/,
   );
+});
+
+test("v2.0.23 uses formal Draft gates and later tags still require Release Ready", () => {
+  assert.equal(requiresReleaseReady("v2.0.23"), false);
+  assert.equal(requiresReleaseReady("v2.0.24"), true);
 });
 
 test("Release Ready rejects missing, stale, and incomplete exact-SHA Windows runs", async () => {
