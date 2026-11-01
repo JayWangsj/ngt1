@@ -487,19 +487,28 @@ try {
         $taskArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $taskScript + '" -GhPath "' + $ghExecutablePath + '" -ExpectedConfigDirectory "' + $ghConfigDirectory + '" -ExpectedTokenSha256 ' + $expectedTokenSha256 + ' -ResultPath "' + $authProbeResultPath + '"'
         $taskAction = New-ScheduledTaskAction -Execute $powershellPath -Argument $taskArguments
         $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)
-        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger `
+        $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings `
           -User $account -Password $passwordPlain -RunLevel Limited -Force | Out-Null
         $taskRegistered = $true
-        Start-ScheduledTask -TaskName $taskName
+        $taskRunner = Join-Path $env:SystemRoot "System32\schtasks.exe"
+        $taskStartOutput = @(& $taskRunner /Run /TN $taskName 2>&1)
+        $taskStartExitCode = $LASTEXITCODE
+        $taskStartText = ($taskStartOutput | Out-String).Trim()
+        if ($taskStartExitCode -ne 0) {
+          throw ("The isolated credential probe task could not be started (exit code={0}; output={1})." -f `
+            $taskStartExitCode, $taskStartText)
+        }
         $taskDeadline = (Get-Date).AddSeconds(210)
         while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
             (Get-Date) -lt $taskDeadline) { Start-Sleep -Milliseconds 250 }
         if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
           $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
           $scheduledTaskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
-          throw ("The isolated credential probe task did not write a result within 210 seconds (state={0}; last result={1}; last run={2:o}; next run={3:o})." -f `
+          throw ("The isolated credential probe task did not write a result within 210 seconds (state={0}; last result={1}; last run={2:o}; next run={3:o}; start exit={4}; start output={5})." -f `
             $scheduledTask.State, $scheduledTaskInfo.LastTaskResult, `
-            $scheduledTaskInfo.LastRunTime, $scheduledTaskInfo.NextRunTime)
+            $scheduledTaskInfo.LastRunTime, $scheduledTaskInfo.NextRunTime, `
+            $taskStartExitCode, $taskStartText)
         }
         try {
           Assert-NgtAcceptanceFileContent -Path $authProbeResultPath `

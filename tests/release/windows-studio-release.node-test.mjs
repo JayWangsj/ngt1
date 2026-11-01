@@ -1473,6 +1473,13 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /Unregister-ScheduledTask/);
   assert.match(
     standardUserAcceptance,
+    /New-ScheduledTaskSettingsSet -StartWhenAvailable/,
+  );
+  assert.match(standardUserAcceptance, /System32\\schtasks\.exe/);
+  assert.match(standardUserAcceptance, /\/Run \/TN \$taskName/);
+  assert.match(standardUserAcceptance, /\$taskStartExitCode = \$LASTEXITCODE/);
+  assert.match(
+    standardUserAcceptance,
     /New-ScheduledTaskTrigger -Once -At \(Get-Date\)\.AddMinutes\(2\)/,
   );
   assert.match(
@@ -1481,7 +1488,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     standardUserAcceptance,
-    /Get-ScheduledTaskInfo -TaskName \$taskName[\s\S]{0,300}last result=\{1\}; last run=\{2:o\}; next run=\{3:o\}/,
+    /Get-ScheduledTaskInfo -TaskName \$taskName[\s\S]{0,400}last result=\{1\}; last run=\{2:o\}; next run=\{3:o\}; start exit=\{4\}; start output=\{5\}/,
   );
   assert.match(scheduledTaskAuthProbe, /GH_CONFIG_DIR/);
   assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);
