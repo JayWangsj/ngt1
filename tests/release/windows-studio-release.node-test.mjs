@@ -1199,6 +1199,26 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
   assert.match(online, /windows-studio-online-update-reconnect\.ps1/);
   assert.match(online, /Read-NgtOnlineUpdateStatusFile -Path \$updateStatus/);
+  const exitPollStart = online.indexOf(
+    "$processHasExited = [bool]$updateProcess.HasExited",
+  );
+  const exitPollEnd = online.indexOf(
+    "$apiDisconnectedObserved = $pollDecision.ApiDisconnectedObserved",
+    exitPollStart,
+  );
+  const exitPoll = online.slice(exitPollStart, exitPollEnd);
+  assert.ok(
+    exitPoll.indexOf(
+      "$finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus",
+    ) > exitPoll.indexOf("$processExitCode = $updateProcess.ExitCode") &&
+      exitPoll.indexOf(
+        "$finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus",
+      ) <
+        exitPoll.indexOf(
+          "$pollDecision = Get-NgtOnlineUpdateReconnectDecision",
+        ),
+    "the exited updater must be checked against a fresh persisted state",
+  );
   assert.match(
     onlineReconnect,
     /\$status -ceq "complete"[\s\S]{0,320}\$stage -cne "complete"[\s\S]{0,150}\$State\.actualVersion/,

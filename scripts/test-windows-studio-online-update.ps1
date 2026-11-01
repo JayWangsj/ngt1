@@ -866,7 +866,11 @@ try {
       $updateProcess.Refresh()
       $processHasExited = [bool]$updateProcess.HasExited
       $processExitCode = $null
-      if ($processHasExited) { $processExitCode = $updateProcess.ExitCode }
+      if ($processHasExited) {
+        $processExitCode = $updateProcess.ExitCode
+        $finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus `
+          -ExpectedUpdateId $updateId -TargetVersion $targetVersion
+      }
       $pollDecision = Get-NgtOnlineUpdateReconnectDecision -PersistedStatus $finalStatus `
         -ApiAvailable $apiAvailable -LiveStatus $liveStatus -UpdateId $updateId `
         -TargetVersion $targetVersion -ApiDisconnectedObserved $apiDisconnectedObserved `
