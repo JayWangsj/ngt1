@@ -1473,15 +1473,15 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /Unregister-ScheduledTask/);
   assert.match(
     standardUserAcceptance,
-    /New-ScheduledTaskTrigger -Once -At \(Get-Date\)\.AddSeconds\(30\)/,
+    /New-ScheduledTaskTrigger -Once -At \(Get-Date\)\.AddMinutes\(2\)/,
   );
   assert.match(
     standardUserAcceptance,
-    /\$taskDeadline = \(Get-Date\)\.AddSeconds\(120\)/,
+    /\$taskDeadline = \(Get-Date\)\.AddSeconds\(210\)/,
   );
   assert.match(
     standardUserAcceptance,
-    /Get-ScheduledTaskInfo -TaskName \$taskName[\s\S]{0,240}last result=\{1\}/,
+    /Get-ScheduledTaskInfo -TaskName \$taskName[\s\S]{0,300}last result=\{1\}; last run=\{2:o\}; next run=\{3:o\}/,
   );
   assert.match(scheduledTaskAuthProbe, /GH_CONFIG_DIR/);
   assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);
