@@ -1303,7 +1303,11 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Assert-NgtOnlineUpdateGitHubAuth -GhPath \$githubCli/);
   assert.match(
     online,
-    /Resolve-NgtOnlineUpdateAuthRepository -MainRepository \$repository[\s\S]{0,120}-TestReleaseRepository \$TestReleaseRepository -ProductionUpdater:\$ProductionUpdater/,
+    /Resolve-NgtOnlineUpdateAuthRepository -MainRepository \$repository[\s\S]{0,180}-TargetTag \$TargetTag[\s\S]{0,100}-ReleaseReady:\(\$env:NGT_RELEASE_READY -eq "true"\) -ProductionUpdater:\$ProductionUpdater/,
+  );
+  assert.match(
+    onlineAuth,
+    /if \(\$TargetTag -ceq "v2\.0\.23" -and -not \$ReleaseReady\) \{ return \$MainRepository \}/,
   );
   assert.match(
     onlineAuth,
@@ -1402,6 +1406,14 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /updated production NGTUpdater\.exe does not match the verified candidate release manifest/,
   );
   assert.match(standardUserAcceptance, /ProductionUpdater = \$true/);
+  assert.match(
+    standardUserAcceptance,
+    /function Test-NgtGhAuthMatrix[\s\S]{0,460}WriteAllText\([\s\S]{0,160}hosts\.yml[\s\S]{0,100}\$ConfigToken/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /Resolve-NgtOnlineUpdateAuthRepository[\s\S]{0,180}-TargetTag \$targetTag[\s\S]{0,120}-ReleaseReady:/,
+  );
   assert.match(
     standardUserAcceptance,
     /\$requiresGitHubAuth = \(\$Acceptance -in @\("manual-installer", "production-update"\)\)/,
@@ -1639,12 +1651,20 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(updaterTestRefs, /"ls-remote",\s*"--tags",\s*"--refs"/);
   assert.match(updaterTestRefs, /candidateSha\.ToLowerInvariant\(\)/);
   assert.doesNotMatch(updaterTestRefs, /--force/);
-  assert.match(
+  assert.doesNotMatch(
     online,
     /production updater acceptance requires the isolated test repository/,
   );
-  assert.match(online, /taskConfig\.repository = \$TestReleaseRepository/);
-  assert.match(online, /dedicated public updater test repository/);
+  assert.match(online, /taskConfig\.repository = \$githubAuthRepository/);
+  assert.match(
+    online,
+    /GitHub Release acceptance passed: \{0\} -> \{1\} in \{2\}/,
+  );
+  assert.match(
+    onlineAuthTest,
+    /v2\.0\.23 production updater did not target the production repository/,
+  );
+  assert.match(onlineAuthTest, /v2\.0\.24/);
   assert.match(releaseReadyDoc, /dedicated \*\*public\*\* test repository/);
   assert.match(releaseReadyDoc, /NGT_UPDATER_TEST_REPOSITORY/);
   assert.match(releaseReadyDoc, /Contents: Read and write/);

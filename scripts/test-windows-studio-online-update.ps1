@@ -40,14 +40,10 @@ function Wait-NgtManualInstaller([System.Diagnostics.Process]$Process, [string]$
 }
 
 $repository = "JayWangsj/ngt1"
-if ($TestReleaseRepository -and
-    ($TestReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
-      $TestReleaseRepository -ieq $repository)) {
-  throw "Production updater acceptance requires a separate owner/name test repository."
-}
 $githubCli = Get-Command gh -ErrorAction Stop | Select-Object -ExpandProperty Source
 $githubAuthRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $repository `
-  -TestReleaseRepository $TestReleaseRepository -ProductionUpdater:$ProductionUpdater
+  -TestReleaseRepository $TestReleaseRepository -TargetTag $TargetTag `
+  -ReleaseReady:($env:NGT_RELEASE_READY -eq "true") -ProductionUpdater:$ProductionUpdater
 Assert-NgtOnlineUpdateGitHubAuth -GhPath $githubCli `
   -Repository $githubAuthRepository `
   -CandidateDirectory $CandidateDirectory `
@@ -619,12 +615,9 @@ try {
   if ([System.IO.Path]::GetFullPath([string]$taskConfig.activeRelease) -ne [System.IO.Path]::GetFullPath($taskRoot)) {
     throw "The baseline release is not the configured active release."
   }
-  if ($ProductionUpdater -and -not $TestReleaseRepository -and $env:NGT_RELEASE_READY -eq "true") {
-    throw "Release Ready production updater acceptance requires the isolated test repository."
-  }
-  if ($ProductionUpdater -and $TestReleaseRepository) {
+  if ($ProductionUpdater -and $githubAuthRepository -ine $repository) {
     $studioConfigPath = Join-Path $installRoot ".local\studio.json"
-    $taskConfig.repository = $TestReleaseRepository
+    $taskConfig.repository = $githubAuthRepository
     [System.IO.File]::WriteAllText(
       $studioConfigPath,
       ($taskConfig | ConvertTo-Json -Depth 20) + "`n",
@@ -650,7 +643,7 @@ try {
     if ($ProductionUpdater) {
       $publishedLatestVersion = $oldTag -replace "^v", ""
       if ($updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $publishedLatestVersion) {
-        throw "The isolated test repository's published latest release did not remain at the installed baseline version."
+        throw "The production updater's configured repository did not remain at the installed baseline version."
       }
     } elseif (-not $updateInfo.updateAvailable -or $updateInfo.latestVersion -ne $targetVersion) {
       throw "The installed NGT API did not offer the exact candidate version."
@@ -976,9 +969,9 @@ try {
   $newOrders = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
   if ($newOrders.StatusCode -ne 200) { throw "The new release orders page did not load." }
   Invoke-BusinessDataProbe -ReleaseRoot $activeReleaseRoot -Action "verify-and-write" -Code $businessCode -SnapshotPath $businessSnapshotPath
-  if ($ProductionUpdater -and $TestReleaseRepository) {
+  if ($ProductionUpdater) {
     Write-Output ("Windows production updater GitHub Release acceptance passed: {0} -> {1} in {2}." -f `
-      $oldTag, $TargetTag, $TestReleaseRepository)
+      $oldTag, $TargetTag, $githubAuthRepository)
   } elseif ($ManualInstaller) {
     $repairLog = Join-Path $testRoot "manual-repair-installer.log"
     $repair = Start-Process -FilePath $installerPath `
