@@ -22,6 +22,7 @@ import {
   qualifyRelease,
   readUpdateBaselineToken,
   requireReleaseReady,
+  requiresReleaseReady,
   verifyArtifact,
   verifyWindowsPackageArtifact,
 } from "../../scripts/windows-studio-release.mjs";
@@ -775,6 +776,11 @@ test("same-SHA qualification requires all named Verify MVP gates to succeed", as
   );
 });
 
+test("v2.0.23 uses formal Draft gates and later tags still require Release Ready", () => {
+  assert.equal(requiresReleaseReady("v2.0.23"), false);
+  assert.equal(requiresReleaseReady("v2.0.24"), true);
+});
+
 test("Release Ready rejects missing, stale, and incomplete exact-SHA Windows runs", async () => {
   const required = [
     "Release Ready qualification",
@@ -1193,6 +1199,26 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Assert-ReleaseChecksum \$oldRuntimeArchive/);
   assert.match(online, /windows-studio-online-update-reconnect\.ps1/);
   assert.match(online, /Read-NgtOnlineUpdateStatusFile -Path \$updateStatus/);
+  const exitPollStart = online.indexOf(
+    "$processHasExited = [bool]$updateProcess.HasExited",
+  );
+  const exitPollEnd = online.indexOf(
+    "$apiDisconnectedObserved = $pollDecision.ApiDisconnectedObserved",
+    exitPollStart,
+  );
+  const exitPoll = online.slice(exitPollStart, exitPollEnd);
+  assert.ok(
+    exitPoll.indexOf(
+      "$finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus",
+    ) > exitPoll.indexOf("$processExitCode = $updateProcess.ExitCode") &&
+      exitPoll.indexOf(
+        "$finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus",
+      ) <
+        exitPoll.indexOf(
+          "$pollDecision = Get-NgtOnlineUpdateReconnectDecision",
+        ),
+    "the exited updater must be checked against a fresh persisted state",
+  );
   assert.match(
     onlineReconnect,
     /\$status -ceq "complete"[\s\S]{0,320}\$stage -cne "complete"[\s\S]{0,150}\$State\.actualVersion/,
