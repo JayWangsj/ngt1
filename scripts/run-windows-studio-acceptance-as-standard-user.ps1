@@ -486,14 +486,20 @@ try {
         $taskScript = Join-Path $workspace "scripts\test-windows-studio-gh-config-task.ps1"
         $taskArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $taskScript + '" -GhPath "' + $ghExecutablePath + '" -ExpectedConfigDirectory "' + $ghConfigDirectory + '" -ExpectedTokenSha256 ' + $expectedTokenSha256 + ' -ResultPath "' + $authProbeResultPath + '"'
         $taskAction = New-ScheduledTaskAction -Execute $powershellPath -Argument $taskArguments
-        $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)
+        $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(30)
         Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger `
           -User $account -Password $passwordPlain -RunLevel Limited -Force | Out-Null
         $taskRegistered = $true
         Start-ScheduledTask -TaskName $taskName
-        $taskDeadline = (Get-Date).AddSeconds(90)
+        $taskDeadline = (Get-Date).AddSeconds(120)
         while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
             (Get-Date) -lt $taskDeadline) { Start-Sleep -Milliseconds 250 }
+        if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
+          $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          $scheduledTaskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+          throw ("The isolated credential probe task did not write a result within 120 seconds (state={0}; last result={1})." -f `
+            $scheduledTask.State, $scheduledTaskInfo.LastTaskResult)
+        }
         try {
           Assert-NgtAcceptanceFileContent -Path $authProbeResultPath `
             -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
