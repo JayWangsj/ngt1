@@ -1488,7 +1488,39 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   );
   assert.match(
     standardUserAcceptance,
-    /Get-ScheduledTaskInfo -TaskName \$taskName[\s\S]{0,400}last result=\{1\}; last run=\{2:o\}; next run=\{3:o\}; start exit=\{4\}; start output=\{5\}/,
+    /Get-ScheduledTaskInfo -TaskName \$taskName/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /\$taskInfoSummary = "last result=\{0\}; last run=\{1:o\}; next run=\{2:o\}"/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /\$scheduledTask\.Settings\.StartWhenAvailable/,
+  );
+  assert.match(standardUserAcceptance, /\$scheduledTask\.Principal\.LogonType/);
+  assert.match(standardUserAcceptance, /\$scheduledTask\.Triggers/);
+  assert.match(
+    standardUserAcceptance,
+    /Microsoft-Windows-TaskScheduler\/Operational/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /Get-WinEvent -FilterHashtable @\{ LogName = \$taskSchedulerLog; StartTime = \$taskRegisteredAt \}/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /IndexOf\(\$taskName, \[System\.StringComparison\]::OrdinalIgnoreCase\)/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /"\{0:o\} id=\{1\} level=\{2\} code=\{3\}" -f[\s\S]{0,180}\$eventRecord\.LevelDisplayName, \$eventCodeSummary/,
+  );
+  assert.match(standardUserAcceptance, /Task Scheduler events=\{5\}/);
+  assert.match(standardUserAcceptance, /NoMatchingEventsFound,\*/);
+  assert.doesNotMatch(
+    standardUserAcceptance,
+    /Write-(?:Output|Host)\s+.*\$eventMessage/,
   );
   assert.match(scheduledTaskAuthProbe, /GH_CONFIG_DIR/);
   assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);

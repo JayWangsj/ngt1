@@ -488,6 +488,7 @@ try {
         $taskAction = New-ScheduledTaskAction -Execute $powershellPath -Argument $taskArguments
         $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)
         $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+        $taskRegisteredAt = Get-Date
         Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings `
           -User $account -Password $passwordPlain -RunLevel Limited -Force | Out-Null
         $taskRegistered = $true
@@ -503,12 +504,70 @@ try {
         while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
             (Get-Date) -lt $taskDeadline) { Start-Sleep -Milliseconds 250 }
         if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
-          $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-          $scheduledTaskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
-          throw ("The isolated credential probe task did not write a result within 210 seconds (state={0}; last result={1}; last run={2:o}; next run={3:o}; start exit={4}; start output={5})." -f `
-            $scheduledTask.State, $scheduledTaskInfo.LastTaskResult, `
-            $scheduledTaskInfo.LastRunTime, $scheduledTaskInfo.NextRunTime, `
-            $taskStartExitCode, $taskStartText)
+          $taskState = "unavailable"
+          $taskInfoSummary = "unavailable"
+          $taskSettingsSummary = "unavailable"
+          try {
+            $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            $taskState = [string]$scheduledTask.State
+            $taskTriggers = @($scheduledTask.Triggers | ForEach-Object {
+                "enabled={0},start={1}" -f [bool]$_.Enabled, [string]$_.StartBoundary
+              })
+            if ($taskTriggers.Count -eq 0) { $taskTriggers = @("none") }
+            $taskSettingsSummary = "StartWhenAvailable={0}; LogonType={1}; Triggers=[{2}]" -f `
+              [string]$scheduledTask.Settings.StartWhenAvailable, [string]$scheduledTask.Principal.LogonType, `
+              ($taskTriggers -join "|")
+          } catch {
+            $taskSettingsSummary = "unavailable ({0})" -f $_.Exception.GetType().Name
+          }
+          try {
+            $scheduledTaskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+            $taskInfoSummary = "last result={0}; last run={1:o}; next run={2:o}" -f `
+              $scheduledTaskInfo.LastTaskResult, $scheduledTaskInfo.LastRunTime, $scheduledTaskInfo.NextRunTime
+          } catch {
+            $taskInfoSummary = "unavailable ({0})" -f $_.Exception.GetType().Name
+          }
+          $taskEventSummary = "unavailable"
+          try {
+            $taskSchedulerLog = "Microsoft-Windows-TaskScheduler/Operational"
+            $matchingTaskEvents = @(
+              Get-WinEvent -FilterHashtable @{ LogName = $taskSchedulerLog; StartTime = $taskRegisteredAt } `
+                -MaxEvents 500 -ErrorAction Stop |
+                Where-Object {
+                  $_.Message -and $_.Message.IndexOf($taskName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+                } |
+                Sort-Object TimeCreated
+            )
+            if ($matchingTaskEvents.Count -eq 0) {
+              $taskEventSummary = "none"
+            } else {
+              $taskEventSummaries = @(
+                foreach ($eventRecord in ($matchingTaskEvents | Select-Object -Last 12)) {
+                  $eventMessage = [string]$eventRecord.Message
+                  $eventCodes = @(
+                    [regex]::Matches($eventMessage, '(?i)\b(?:error value|error code|result code|result|hresult)\s*[:=]\s*(0x[0-9a-f]+|\d+)') |
+                      ForEach-Object { $_.Groups[1].Value } |
+                      Select-Object -Unique
+                  )
+                  $eventCodeSummary = if ($eventCodes.Count -eq 0) { "none" } else { $eventCodes -join "," }
+                  "{0:o} id={1} level={2} code={3}" -f `
+                    $eventRecord.TimeCreated, $eventRecord.Id, $eventRecord.LevelDisplayName, $eventCodeSummary
+                }
+              )
+              if ($matchingTaskEvents.Count -gt $taskEventSummaries.Count) {
+                $taskEventSummaries += "omitted={0}" -f ($matchingTaskEvents.Count - $taskEventSummaries.Count)
+              }
+              $taskEventSummary = $taskEventSummaries -join " | "
+            }
+          } catch {
+            if ($_.FullyQualifiedErrorId -like "NoMatchingEventsFound,*") {
+              $taskEventSummary = "none"
+            } else {
+              $taskEventSummary = "unavailable ({0})" -f $_.Exception.GetType().Name
+            }
+          }
+          throw ("The isolated credential probe task did not write a result within 210 seconds (state={0}; {1}; task settings={2}; start exit={3}; start output={4}; Task Scheduler events={5})." -f `
+            $taskState, $taskInfoSummary, $taskSettingsSummary, $taskStartExitCode, $taskStartText, $taskEventSummary)
         }
         try {
           Assert-NgtAcceptanceFileContent -Path $authProbeResultPath `
