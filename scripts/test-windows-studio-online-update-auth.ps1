@@ -90,17 +90,32 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   Write-Output "Local candidate mode continued without GitHub credentials."
 
   $resolvedManualRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-    -TestReleaseRepository $testRepository
+    -TestReleaseRepository $testRepository -TargetTag "v2.0.23"
   $resolvedProductionRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-    -TestReleaseRepository $testRepository -ProductionUpdater
+    -TestReleaseRepository $testRepository -TargetTag "v2.0.23" -ProductionUpdater
+  $resolvedReadyProductionRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
+    -TestReleaseRepository $testRepository -TargetTag "v2.0.23" -ReleaseReady -ProductionUpdater
+  $resolvedFutureProductionRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
+    -TestReleaseRepository $testRepository -TargetTag "v2.0.24" -ProductionUpdater
   Assert-NgtOnlineAuthTest ($resolvedManualRepository -ceq $mainRepository) `
     "Manual upgrade authentication did not target the main repository."
-  Assert-NgtOnlineAuthTest ($resolvedProductionRepository -ceq $testRepository) `
-    "Production updater authentication did not target the isolated test repository."
+  Assert-NgtOnlineAuthTest ($resolvedProductionRepository -ceq $mainRepository) `
+    "The v2.0.23 production updater did not target the production repository."
+  Assert-NgtOnlineAuthTest ($resolvedReadyProductionRepository -ceq $testRepository) `
+    "Release Ready production updater authentication did not target the isolated test repository."
+  Assert-NgtOnlineAuthTest ($resolvedFutureProductionRepository -ceq $testRepository) `
+    "A later version's production updater authentication did not target the isolated test repository."
   try {
     Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-      -TestReleaseRepository $mainRepository -ProductionUpdater | Out-Null
-    throw "Production updater accepted the main repository as its public test repository."
+      -TestReleaseRepository $mainRepository -TargetTag "v2.0.23" -ReleaseReady -ProductionUpdater | Out-Null
+    throw "Release Ready production updater accepted the main repository as its public test repository."
+  } catch {
+    if ($_.Exception.Message -notlike "*separate test Release repository*") { throw }
+  }
+  try {
+    Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
+      -TargetTag "v2.0.23" -ReleaseReady -ProductionUpdater | Out-Null
+    throw "Release Ready production updater accepted a missing test repository."
   } catch {
     if ($_.Exception.Message -notlike "*separate test Release repository*") { throw }
   }
@@ -108,7 +123,8 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   $requiredModes = @(
     @{ Name = "remote candidate"; CandidateDirectory = ""; Manual = $false; Production = $false; Repository = $mainRepository },
     @{ Name = "manual upgrade"; CandidateDirectory = $candidateDirectory; Manual = $true; Production = $false; Repository = $resolvedManualRepository },
-    @{ Name = "production updater"; CandidateDirectory = $candidateDirectory; Manual = $false; Production = $true; Repository = $resolvedProductionRepository }
+    @{ Name = "production updater"; CandidateDirectory = $candidateDirectory; Manual = $false; Production = $true; Repository = $resolvedProductionRepository },
+    @{ Name = "Release Ready production updater"; CandidateDirectory = $candidateDirectory; Manual = $false; Production = $true; Repository = $resolvedReadyProductionRepository }
   )
   foreach ($mode in $requiredModes) {
     $result = Invoke-NgtOnlineAuthTest -GhPath $fakeGhPath -Repository $mode.Repository `

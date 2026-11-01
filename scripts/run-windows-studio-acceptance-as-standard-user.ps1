@@ -8,6 +8,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-studio-acceptance-coordinator.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-online-update-auth.ps1")
 
 function Get-NgtAcceptanceSha256([string]$Value) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -96,6 +97,12 @@ function Assert-NgtGhAuthMode(
 function Test-NgtGhAuthMatrix([string]$GhPath, [string]$TestRoot, [string]$ConfigToken) {
   $configDirectory = Join-Path $TestRoot "config"
   $emptyDirectory = Join-Path $TestRoot "empty-config"
+  New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+  [System.IO.File]::WriteAllText(
+    (Join-Path $configDirectory "hosts.yml"),
+    "github.com:`r`n    oauth_token: $ConfigToken`r`n    git_protocol: https`r`n",
+    [System.Text.Encoding]::UTF8
+  )
   New-Item -ItemType Directory -Path $emptyDirectory -Force | Out-Null
   $configTokenHash = Get-NgtAcceptanceSha256 $ConfigToken
   $ghOnlyToken = "ngt-gh-token-only-probe"
@@ -113,15 +120,8 @@ function Test-NgtGhAuthMatrix([string]$GhPath, [string]$TestRoot, [string]$Confi
 
 if ($AuthMatrixOnly) {
   $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-gh-auth-" + [guid]::NewGuid().ToString("N"))
-  $configDirectory = Join-Path $testRoot "config"
   $configToken = "ngt-config-only-probe"
   try {
-    New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
-    [System.IO.File]::WriteAllText(
-      (Join-Path $configDirectory "hosts.yml"),
-      "github.com:`r`n    oauth_token: $configToken`r`n    git_protocol: https`r`n",
-      [System.Text.Encoding]::UTF8
-    )
     $ghPath = Get-Command gh.exe -ErrorAction Stop | Select-Object -ExpandProperty Source
     Test-NgtGhAuthMatrix $ghPath $testRoot $configToken
   } finally {
@@ -171,11 +171,16 @@ if ($Child) {
     $gh = Get-Command gh.exe -ErrorAction Stop
     Test-NgtGhAuthMatrix $gh.Source ([string]$request.authProbeRoot) $configTokenMatch.Groups[1].Value
 
-    $repository = [string]$request.environment.NGT_UPDATER_TEST_REPOSITORY
     $targetTag = [string]$request.parameters.TargetTag
+    $repository = Resolve-NgtOnlineUpdateAuthRepository `
+      -MainRepository "JayWangsj/ngt1" `
+      -TestReleaseRepository ([string]$request.environment.NGT_UPDATER_TEST_REPOSITORY) `
+      -TargetTag $targetTag `
+      -ReleaseReady:([string]$request.environment.NGT_RELEASE_READY -ceq "true") `
+      -ProductionUpdater
     $manifest = Get-Content -LiteralPath ([string]$request.parameters.ExpectedManifestPath) -Raw | ConvertFrom-Json
     $releaseOutput = & $gh.Source release view $targetTag --repo $repository --json tagName,isDraft,assets 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "The public updater-test Draft is not readable through GH_CONFIG_DIR only." }
+    if ($LASTEXITCODE -ne 0) { throw "The target Draft Release is not readable through GH_CONFIG_DIR only." }
     $release = ($releaseOutput | Out-String) | ConvertFrom-Json
     $expectedNames = @($manifest.assets | ForEach-Object name | Sort-Object)
     $releaseNames = @($release.assets | ForEach-Object name | Sort-Object)
@@ -187,16 +192,16 @@ if ($Child) {
     New-Item -ItemType Directory -Path $draftDownloadDirectory -Force | Out-Null
     try {
       & $gh.Source release download $targetTag --repo $repository --dir $draftDownloadDirectory 2>$null
-      if ($LASTEXITCODE -ne 0) { throw "The public updater-test Draft assets could not be downloaded through GH_CONFIG_DIR only." }
+      if ($LASTEXITCODE -ne 0) { throw "The target Draft Release assets could not be downloaded through GH_CONFIG_DIR only." }
       $downloadedNames = @(Get-ChildItem -LiteralPath $draftDownloadDirectory -File | ForEach-Object Name | Sort-Object)
       if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $downloadedNames) {
-        throw "The downloaded public Draft asset inventory is incorrect."
+        throw "The downloaded Draft asset inventory is incorrect."
       }
       foreach ($asset in $manifest.assets) {
         $assetPath = Join-Path $draftDownloadDirectory $asset.name
         if ((Get-Item -LiteralPath $assetPath).Length -ne [long]$asset.size -or
             (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$asset.sha256) {
-          throw "A downloaded public Draft asset does not match the candidate SHA256: $($asset.name)"
+          throw "A downloaded Draft asset does not match the candidate SHA256: $($asset.name)"
         }
       }
     } finally {
@@ -210,7 +215,7 @@ if ($Child) {
         (Get-Date) -lt $taskProbeDeadline) { Start-Sleep -Milliseconds 250 }
     Assert-NgtAcceptanceFileContent -Path ([string]$request.authProbeResultPath) `
       -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
-    Write-Output "GH_CONFIG_DIR-only public Draft view, full asset download, and scheduled-task restart passed."
+    Write-Output "GH_CONFIG_DIR-only Draft view, full asset download, and scheduled-task restart passed."
   }
 
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()

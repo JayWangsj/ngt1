@@ -9,9 +9,12 @@ function Test-NgtOnlineUpdateRequiresGitHubAuth(
 function Resolve-NgtOnlineUpdateAuthRepository(
   [Parameter(Mandatory = $true)][string]$MainRepository,
   [string]$TestReleaseRepository,
+  [Parameter(Mandatory = $true)][string]$TargetTag,
+  [switch]$ReleaseReady,
   [switch]$ProductionUpdater
 ) {
   if (-not $ProductionUpdater) { return $MainRepository }
+  if ($TargetTag -ceq "v2.0.23" -and -not $ReleaseReady) { return $MainRepository }
   if ($TestReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
       $TestReleaseRepository -ieq $MainRepository) {
     throw "Production updater acceptance requires a separate test Release repository."
