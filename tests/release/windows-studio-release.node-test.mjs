@@ -1025,7 +1025,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
       "utf8",
     )
   ).replace(/\r\n/g, "\n");
-  const scheduledTaskAuthProbe = (
+  const freshProcessAuthProbe = (
     await readText("scripts/test-windows-studio-gh-config-task.ps1", "utf8")
   ).replace(/\r\n/g, "\n");
   const diagnostics = (
@@ -1280,15 +1280,38 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(online, /Get-NgtScreenVisibleWindows/);
   assert.ok(
     online.indexOf("$windowDiagnostics = @(Get-NgtUpdaterWindowDiagnostics") <
-      online.indexOf("if ($stateReadFailure) { throw $stateReadFailure }"),
+      online.indexOf("if ($processHasExited) {"),
     "window evidence must be collected before a failed update ends acceptance",
   );
   assert.ok(
     online.indexOf('Write-Output ("Window evidence:') <
-      online.indexOf("if ($stateReadFailure) { throw $stateReadFailure }"),
+      online.indexOf("if ($processHasExited) {"),
     "window evidence must be logged before a failed update ends acceptance",
   );
   assert.match(online, /silent online update displayed a visible installer/);
+  assert.match(
+    online,
+    /if \(\$processHasExited\) \{[\s\S]{0,180}if \(\$stateReadFailure\) \{ throw \$stateReadFailure \}/,
+  );
+  assert.match(
+    online,
+    /\$stateReadFailureIsMissing =[\s\S]{0,180}System\.IO\.FileNotFoundException/,
+  );
+  assert.match(
+    online,
+    /if \(-not \$stateReadFailureIsMissing\) \{ throw \$stateReadFailure \}/,
+  );
+  assert.match(
+    online,
+    /if \(\$stateReadFailure\) \{[\s\S]{0,280}Start-Sleep -Milliseconds 250[\s\S]{0,40}continue/,
+  );
+  assert.ok(
+    online.lastIndexOf("$finalStatus = Read-NgtOnlineUpdateStatusFile") >
+      online.indexOf(
+        "if (-not $pollDecision -or -not $pollDecision.ShouldComplete)",
+      ),
+    "a transient status-file gap must still end with a verified persisted status read",
+  );
   assert.match(online, /Get-NgtInteractiveSessionEvidence/);
   assert.match(online, /activeConsoleSessionId/);
   assert.match(online, /windowClass/);
@@ -1469,63 +1492,24 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
     /Get-FileHash -LiteralPath \$assetPath -Algorithm SHA256/,
   );
   assert.match(standardUserAcceptance, /authProbeReadyPath/);
-  assert.match(standardUserAcceptance, /Register-ScheduledTask/);
-  assert.match(standardUserAcceptance, /Unregister-ScheduledTask/);
   assert.match(
     standardUserAcceptance,
-    /New-ScheduledTaskSettingsSet -StartWhenAvailable/,
-  );
-  assert.match(standardUserAcceptance, /System32\\schtasks\.exe/);
-  assert.match(standardUserAcceptance, /\/Run \/TN \$taskName/);
-  assert.match(standardUserAcceptance, /\$taskStartExitCode = \$LASTEXITCODE/);
-  assert.match(
-    standardUserAcceptance,
-    /New-ScheduledTaskTrigger -Once -At \(Get-Date\)\.AddMinutes\(2\)/,
+    /Start-Process -FilePath \$powershellPath -ArgumentList \$probeArguments[\s\S]{0,200}-Credential \$credential -LoadUserProfile -UseNewEnvironment/,
   );
   assert.match(
     standardUserAcceptance,
-    /\$taskDeadline = \(Get-Date\)\.AddSeconds\(210\)/,
+    /\$probeDeadline = \(Get-Date\)\.AddSeconds\(60\)/,
   );
   assert.match(
     standardUserAcceptance,
-    /Get-ScheduledTaskInfo -TaskName \$taskName/,
+    /The fresh standard-user credential probe failed/,
   );
-  assert.match(
-    standardUserAcceptance,
-    /\$taskInfoSummary = "last result=\{0\}; last run=\{1:o\}; next run=\{2:o\}"/,
-  );
-  assert.match(
-    standardUserAcceptance,
-    /\$scheduledTask\.Settings\.StartWhenAvailable/,
-  );
-  assert.match(standardUserAcceptance, /\$scheduledTask\.Principal\.LogonType/);
-  assert.match(standardUserAcceptance, /\$scheduledTask\.Triggers/);
-  assert.match(
-    standardUserAcceptance,
-    /Microsoft-Windows-TaskScheduler\/Operational/,
-  );
-  assert.match(
-    standardUserAcceptance,
-    /Get-WinEvent -FilterHashtable @\{ LogName = \$taskSchedulerLog; StartTime = \$taskRegisteredAt \}/,
-  );
-  assert.match(
-    standardUserAcceptance,
-    /IndexOf\(\$taskName, \[System\.StringComparison\]::OrdinalIgnoreCase\)/,
-  );
-  assert.match(
-    standardUserAcceptance,
-    /"\{0:o\} id=\{1\} level=\{2\} code=\{3\}" -f[\s\S]{0,180}\$eventRecord\.LevelDisplayName, \$eventCodeSummary/,
-  );
-  assert.match(standardUserAcceptance, /Task Scheduler events=\{5\}/);
-  assert.match(standardUserAcceptance, /NoMatchingEventsFound,\*/);
-  assert.doesNotMatch(
-    standardUserAcceptance,
-    /Write-(?:Output|Host)\s+.*\$eventMessage/,
-  );
-  assert.match(scheduledTaskAuthProbe, /GH_CONFIG_DIR/);
-  assert.match(scheduledTaskAuthProbe, /GITHUB_TOKEN/);
-  assert.match(scheduledTaskAuthProbe, /auth token --hostname github\.com/);
-  assert.match(scheduledTaskAuthProbe, /ExpectedTokenSha256/);
+  assert.doesNotMatch(standardUserAcceptance, /Register-ScheduledTask/);
+  assert.doesNotMatch(standardUserAcceptance, /System32\\schtasks\.exe/);
+  assert.match(freshProcessAuthProbe, /GH_CONFIG_DIR/);
+  assert.match(freshProcessAuthProbe, /GITHUB_TOKEN/);
+  assert.match(freshProcessAuthProbe, /auth token --hostname github\.com/);
+  assert.match(freshProcessAuthProbe, /ExpectedTokenSha256/);
   assert.match(
     standardUserAcceptance,
     /GH_CONFIG_DIR = if \(\$requiresGitHubAuth\) \{ \$ghConfigDirectory \} else \{ \$null \}/,

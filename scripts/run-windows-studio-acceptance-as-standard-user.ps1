@@ -214,8 +214,8 @@ if ($Child) {
     while (-not (Test-Path -LiteralPath ([string]$request.authProbeResultPath) -PathType Leaf) -and
         (Get-Date) -lt $taskProbeDeadline) { Start-Sleep -Milliseconds 250 }
     Assert-NgtAcceptanceFileContent -Path ([string]$request.authProbeResultPath) `
-      -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
-    Write-Output "GH_CONFIG_DIR-only Draft view, full asset download, and scheduled-task restart passed."
+      -Expected "PASS" -Description "The fresh-process GH_CONFIG_DIR restart probe"
+    Write-Output "GH_CONFIG_DIR-only Draft view, full asset download, and fresh-process restart passed."
   }
 
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
@@ -338,8 +338,7 @@ $capturedStdout = ""
 $capturedStderr = ""
 $childFailureDetails = $null
 $additionalDiagnostics = New-Object 'System.Collections.Generic.List[string]'
-$taskName = $null
-$taskRegistered = $false
+$authProbeProcess = $null
 $workspaceAclPaths = @()
 $isolatedTemp = Join-Path $env:RUNNER_TEMP ("ngt-acceptance-" + $runId)
 $requestPath = Join-Path $isolatedTemp "request.json"
@@ -478,115 +477,44 @@ try {
 
   $acceptanceDeadline = (Get-Date).AddMinutes(110)
   $nextProgress = (Get-Date).AddMinutes(1)
-  $taskProbeCompleted = ($Acceptance -ne "production-update")
+  $authProbeCompleted = ($Acceptance -ne "production-update")
   while (-not $process.WaitForExit(1000)) {
-    if (-not $taskProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
+    if (-not $authProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
       try {
-        $taskName = "NGT Release GH Config Probe " + $runId
-        $taskScript = Join-Path $workspace "scripts\test-windows-studio-gh-config-task.ps1"
-        $taskArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $taskScript + '" -GhPath "' + $ghExecutablePath + '" -ExpectedConfigDirectory "' + $ghConfigDirectory + '" -ExpectedTokenSha256 ' + $expectedTokenSha256 + ' -ResultPath "' + $authProbeResultPath + '"'
-        $taskAction = New-ScheduledTaskAction -Execute $powershellPath -Argument $taskArguments
-        $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)
-        $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable
-        $taskRegisteredAt = Get-Date
-        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings `
-          -User $account -Password $passwordPlain -RunLevel Limited -Force | Out-Null
-        $taskRegistered = $true
-        $taskRunner = Join-Path $env:SystemRoot "System32\schtasks.exe"
-        $taskStartOutput = @(& $taskRunner /Run /TN $taskName 2>&1)
-        $taskStartExitCode = $LASTEXITCODE
-        $taskStartText = ($taskStartOutput | Out-String).Trim()
-        if ($taskStartExitCode -ne 0) {
-          throw ("The isolated credential probe task could not be started (exit code={0}; output={1})." -f `
-            $taskStartExitCode, $taskStartText)
-        }
-        $taskDeadline = (Get-Date).AddSeconds(210)
+        $probeScript = Join-Path $workspace "scripts\test-windows-studio-gh-config-task.ps1"
+        $probeArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $probeScript + '" -GhPath "' + $ghExecutablePath + '" -ExpectedConfigDirectory "' + $ghConfigDirectory + '" -ExpectedTokenSha256 ' + $expectedTokenSha256 + ' -ResultPath "' + $authProbeResultPath + '"'
+        $authProbeProcess = Start-Process -FilePath $powershellPath -ArgumentList $probeArguments `
+          -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $workspace `
+          -WindowStyle Hidden -PassThru
+        $probeDeadline = (Get-Date).AddSeconds(60)
         while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
-            (Get-Date) -lt $taskDeadline) { Start-Sleep -Milliseconds 250 }
+            -not $authProbeProcess.HasExited -and (Get-Date) -lt $probeDeadline) {
+          Start-Sleep -Milliseconds 250
+          $authProbeProcess.Refresh()
+        }
         if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
-          $taskState = "unavailable"
-          $taskInfoSummary = "unavailable"
-          $taskSettingsSummary = "unavailable"
-          try {
-            $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-            $taskState = [string]$scheduledTask.State
-            $taskTriggers = @($scheduledTask.Triggers | ForEach-Object {
-                "enabled={0},start={1}" -f [bool]$_.Enabled, [string]$_.StartBoundary
-              })
-            if ($taskTriggers.Count -eq 0) { $taskTriggers = @("none") }
-            $taskSettingsSummary = "StartWhenAvailable={0}; LogonType={1}; Triggers=[{2}]" -f `
-              [string]$scheduledTask.Settings.StartWhenAvailable, [string]$scheduledTask.Principal.LogonType, `
-              ($taskTriggers -join "|")
-          } catch {
-            $taskSettingsSummary = "unavailable ({0})" -f $_.Exception.GetType().Name
+          if (-not $authProbeProcess.HasExited) {
+            Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction SilentlyContinue
           }
-          try {
-            $scheduledTaskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
-            $taskInfoSummary = "last result={0}; last run={1:o}; next run={2:o}" -f `
-              $scheduledTaskInfo.LastTaskResult, $scheduledTaskInfo.LastRunTime, $scheduledTaskInfo.NextRunTime
-          } catch {
-            $taskInfoSummary = "unavailable ({0})" -f $_.Exception.GetType().Name
-          }
-          $taskEventSummary = "unavailable"
-          try {
-            $taskSchedulerLog = "Microsoft-Windows-TaskScheduler/Operational"
-            $matchingTaskEvents = @(
-              Get-WinEvent -FilterHashtable @{ LogName = $taskSchedulerLog; StartTime = $taskRegisteredAt } `
-                -MaxEvents 500 -ErrorAction Stop |
-                Where-Object {
-                  $_.Message -and $_.Message.IndexOf($taskName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-                } |
-                Sort-Object TimeCreated
-            )
-            if ($matchingTaskEvents.Count -eq 0) {
-              $taskEventSummary = "none"
-            } else {
-              $taskEventSummaries = @(
-                foreach ($eventRecord in ($matchingTaskEvents | Select-Object -Last 12)) {
-                  $eventMessage = [string]$eventRecord.Message
-                  $eventCodes = @(
-                    [regex]::Matches($eventMessage, '(?i)\b(?:error value|error code|result code|result|hresult)\s*[:=]\s*(0x[0-9a-f]+|\d+)') |
-                      ForEach-Object { $_.Groups[1].Value } |
-                      Select-Object -Unique
-                  )
-                  $eventCodeSummary = if ($eventCodes.Count -eq 0) { "none" } else { $eventCodes -join "," }
-                  "{0:o} id={1} level={2} code={3}" -f `
-                    $eventRecord.TimeCreated, $eventRecord.Id, $eventRecord.LevelDisplayName, $eventCodeSummary
-                }
-              )
-              if ($matchingTaskEvents.Count -gt $taskEventSummaries.Count) {
-                $taskEventSummaries += "omitted={0}" -f ($matchingTaskEvents.Count - $taskEventSummaries.Count)
-              }
-              $taskEventSummary = $taskEventSummaries -join " | "
-            }
-          } catch {
-            if ($_.FullyQualifiedErrorId -like "NoMatchingEventsFound,*") {
-              $taskEventSummary = "none"
-            } else {
-              $taskEventSummary = "unavailable ({0})" -f $_.Exception.GetType().Name
-            }
-          }
-          throw ("The isolated credential probe task did not write a result within 210 seconds (state={0}; {1}; task settings={2}; start exit={3}; start output={4}; Task Scheduler events={5})." -f `
-            $taskState, $taskInfoSummary, $taskSettingsSummary, $taskStartExitCode, $taskStartText, $taskEventSummary)
+          throw "The fresh standard-user credential probe did not write a result within 60 seconds."
         }
         try {
           Assert-NgtAcceptanceFileContent -Path $authProbeResultPath `
-            -Expected "PASS" -Description "The scheduled-task GH_CONFIG_DIR restart probe"
+            -Expected "PASS" -Description "The fresh-process GH_CONFIG_DIR restart probe"
         } catch {
           [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
           throw
         }
-        $taskStopDeadline = (Get-Date).AddSeconds(10)
-        do {
-          $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
-          if ($taskState -eq "Ready") { break }
-          Start-Sleep -Milliseconds 250
-        } while ((Get-Date) -lt $taskStopDeadline)
-        if ($taskState -ne "Ready") { throw "The isolated credential probe task did not finish cleanly." }
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-        $taskRegistered = $false
+        if (-not $authProbeProcess.WaitForExit(10000)) {
+          Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction SilentlyContinue
+          throw "The fresh standard-user credential probe did not exit cleanly."
+        }
+        $authProbeProcess.Refresh()
+        if ($authProbeProcess.ExitCode -ne 0) {
+          throw "The fresh standard-user credential probe failed."
+        }
         [System.IO.File]::WriteAllText($authProbeResultPath, "PASS", [System.Text.Encoding]::ASCII)
-        $taskProbeCompleted = $true
+        $authProbeCompleted = $true
       } catch {
         if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
           [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
@@ -629,18 +557,16 @@ try {
 } catch {
   $failureRecord = $_
 } finally {
-  if ($taskRegistered -and $taskName) {
+  if ($authProbeProcess) {
     try {
-      Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
-      $taskStopDeadline = (Get-Date).AddSeconds(5)
-      do {
-        $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
-        if ($taskState -eq "Ready") { break }
-        Start-Sleep -Milliseconds 250
-      } while ((Get-Date) -lt $taskStopDeadline)
-      if ($taskState -ne "Ready") { throw "The isolated credential probe task did not stop before cleanup." }
-      Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
-    } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Scheduled authentication task" -ErrorRecord $_ }
+      $authProbeProcess.Refresh()
+      if (-not $authProbeProcess.HasExited) {
+        Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction Stop
+        if (-not $authProbeProcess.WaitForExit(5000)) {
+          throw "The fresh credential probe process did not stop before cleanup."
+        }
+      }
+    } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Fresh authentication probe process" -ErrorRecord $_ }
   }
   if ($process) {
     try {

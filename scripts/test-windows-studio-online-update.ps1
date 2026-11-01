@@ -793,11 +793,15 @@ try {
     $pollDecision = $null
     do {
       $stateReadFailure = $null
+      $stateReadFailureIsMissing = $false
       try {
         $finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus `
           -ExpectedUpdateId $updateId -TargetVersion $targetVersion
       } catch {
         $stateReadFailure = $_.Exception.Message
+        $stateReadFailureIsMissing =
+          $_.Exception.InnerException -is [System.IO.FileNotFoundException] -or
+          $stateReadFailure -ceq "The persisted online update state file is missing."
       }
       if ($ProductionUpdater -and $finalStatus -and $finalStatus.stage -eq "downloading") {
         $downloadStageObserved = $true
@@ -839,7 +843,6 @@ try {
         }) -join ", "
         throw "The silent online update created an unexpected visible window: $windowOwners"
       }
-      if ($stateReadFailure) { throw $stateReadFailure }
       try {
         $updateProcess.Refresh()
         $peakUpdaterWorkingSet = [Math]::Max($peakUpdaterWorkingSet, [long]$updateProcess.PeakWorkingSet64)
@@ -861,8 +864,16 @@ try {
       $processExitCode = $null
       if ($processHasExited) {
         $processExitCode = $updateProcess.ExitCode
+        if ($stateReadFailure) { throw $stateReadFailure }
         $finalStatus = Read-NgtOnlineUpdateStatusFile -Path $updateStatus `
           -ExpectedUpdateId $updateId -TargetVersion $targetVersion
+      }
+      if ($stateReadFailure) {
+        if (-not $stateReadFailureIsMissing) { throw $stateReadFailure }
+        if (-not $apiAvailable) { $apiDisconnectedObserved = $true }
+        if ($apiDisconnectedObserved -and $apiAvailable) { $apiReconnectedAfterDisconnect = $true }
+        Start-Sleep -Milliseconds 250
+        continue
       }
       $pollDecision = Get-NgtOnlineUpdateReconnectDecision -PersistedStatus $finalStatus `
         -ApiAvailable $apiAvailable -LiveStatus $liveStatus -UpdateId $updateId `
