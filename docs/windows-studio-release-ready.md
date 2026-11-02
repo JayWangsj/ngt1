@@ -1,5 +1,9 @@
 # Windows Studio Release Ready test repository
 
+v2.0.23 is a one-time exception: it is qualified by the formal Draft Release
+acceptance jobs instead of this test-repository preflight. Later versions still
+use the Release Ready process described below.
+
 Release Ready uses a dedicated **public** test repository so the production
 repository `JayWangsj/ngt1` is never modified by the updater acceptance. The
 repository must use `main`, match the approved repository name exactly, and
