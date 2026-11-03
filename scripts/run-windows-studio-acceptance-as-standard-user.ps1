@@ -351,6 +351,8 @@ $hostsPath = Join-Path $ghConfigDirectory "hosts.yml"
 $authProbeRoot = Join-Path $isolatedTemp "auth-probe"
 $authProbeReadyPath = Join-Path $isolatedTemp "auth-probe.ready"
 $authProbeResultPath = Join-Path $isolatedTemp "auth-probe.result"
+$authProbeStdoutPath = Join-Path $isolatedTemp "auth-probe.stdout"
+$authProbeStderrPath = Join-Path $isolatedTemp "auth-probe.stderr"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $ghExecutablePath = $null
 $expectedTokenSha256 = $null
@@ -481,37 +483,27 @@ try {
   while (-not $process.WaitForExit(1000)) {
     if (-not $authProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
       try {
-        $probeScript = Join-Path $workspace "scripts\test-windows-studio-gh-config-task.ps1"
-        $probeArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $probeScript + '" -GhPath "' + $ghExecutablePath + '" -ExpectedConfigDirectory "' + $ghConfigDirectory + '" -ExpectedTokenSha256 ' + $expectedTokenSha256 + ' -ResultPath "' + $authProbeResultPath + '"'
-        $authProbeProcess = Start-Process -FilePath $powershellPath -ArgumentList $probeArguments `
+        $authProbeProcess = Start-Process -FilePath $ghExecutablePath -ArgumentList "auth token --hostname github.com" `
           -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $workspace `
+          -RedirectStandardOutput $authProbeStdoutPath -RedirectStandardError $authProbeStderrPath `
           -WindowStyle Hidden -PassThru
         $probeDeadline = (Get-Date).AddSeconds(60)
-        while (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf) -and
-            -not $authProbeProcess.HasExited -and (Get-Date) -lt $probeDeadline) {
+        while (-not $authProbeProcess.HasExited -and (Get-Date) -lt $probeDeadline) {
           Start-Sleep -Milliseconds 250
           $authProbeProcess.Refresh()
         }
-        if (-not (Test-Path -LiteralPath $authProbeResultPath -PathType Leaf)) {
-          if (-not $authProbeProcess.HasExited) {
-            Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction SilentlyContinue
-          }
-          throw "The fresh standard-user credential probe did not write a result within 60 seconds."
-        }
-        try {
-          Assert-NgtAcceptanceFileContent -Path $authProbeResultPath `
-            -Expected "PASS" -Description "The fresh-process GH_CONFIG_DIR restart probe"
-        } catch {
-          [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
-          throw
-        }
-        if (-not $authProbeProcess.WaitForExit(10000)) {
+        if (-not $authProbeProcess.HasExited) {
           Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction SilentlyContinue
-          throw "The fresh standard-user credential probe did not exit cleanly."
+          throw "The fresh standard-user native GitHub CLI probe did not exit within 60 seconds."
         }
+        $authProbeProcess.WaitForExit()
         $authProbeProcess.Refresh()
         if ($authProbeProcess.ExitCode -ne 0) {
-          throw "The fresh standard-user credential probe failed."
+          throw "The fresh standard-user native GitHub CLI probe failed with exit code $($authProbeProcess.ExitCode)."
+        }
+        $probeToken = (Get-Content -LiteralPath $authProbeStdoutPath -Raw).Trim()
+        if (-not $probeToken -or (Get-NgtAcceptanceSha256 $probeToken) -cne $expectedTokenSha256) {
+          throw "The fresh standard-user native GitHub CLI probe did not retrieve the isolated credential."
         }
         [System.IO.File]::WriteAllText($authProbeResultPath, "PASS", [System.Text.Encoding]::ASCII)
         $authProbeCompleted = $true
@@ -520,6 +512,9 @@ try {
           [System.IO.File]::WriteAllText($authProbeResultPath, "FAIL", [System.Text.Encoding]::ASCII)
         }
         throw
+      } finally {
+        $probeToken = $null
+        Remove-Item -LiteralPath $authProbeStdoutPath, $authProbeStderrPath -Force -ErrorAction SilentlyContinue
       }
     }
     if ((Get-Date) -ge $acceptanceDeadline) {

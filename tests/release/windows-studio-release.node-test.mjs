@@ -1494,15 +1494,28 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /authProbeReadyPath/);
   assert.match(
     standardUserAcceptance,
-    /Start-Process -FilePath \$powershellPath -ArgumentList \$probeArguments[\s\S]{0,200}-Credential \$credential -LoadUserProfile -UseNewEnvironment/,
+    /Start-Process -FilePath \$ghExecutablePath -ArgumentList "auth token --hostname github\.com"[\s\S]{0,250}-Credential \$credential -LoadUserProfile -UseNewEnvironment/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /-RedirectStandardOutput \$authProbeStdoutPath -RedirectStandardError \$authProbeStderrPath/,
   );
   assert.match(
     standardUserAcceptance,
     /\$probeDeadline = \(Get-Date\)\.AddSeconds\(60\)/,
   );
+  assert.match(standardUserAcceptance, /Get-NgtAcceptanceSha256 \$probeToken/);
   assert.match(
     standardUserAcceptance,
-    /The fresh standard-user credential probe failed/,
+    /Remove-Item -LiteralPath \$authProbeStdoutPath, \$authProbeStderrPath -Force/,
+  );
+  assert.doesNotMatch(
+    standardUserAcceptance,
+    /Start-Process -FilePath \$powershellPath -ArgumentList \$probeArguments/,
+  );
+  assert.doesNotMatch(
+    standardUserAcceptance,
+    /test-windows-studio-gh-config-task\.ps1/,
   );
   assert.doesNotMatch(standardUserAcceptance, /Register-ScheduledTask/);
   assert.doesNotMatch(standardUserAcceptance, /System32\\schtasks\.exe/);
