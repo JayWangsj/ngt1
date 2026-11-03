@@ -184,6 +184,17 @@ try {
   Assert-NgtAcceptanceTest ($stillRunningSequence.Passed -and $stillRunningSequence.EventCount -eq 3) `
     "The completed state passed before the updater exited or failed to pass after exit."
 
+  $staleLiveTask = New-NgtOnlineUpdateTestStatus -Status "failed" -Stage "rolling-back" `
+    -UpdateId "previous-update-id"
+  $staleLiveEvents = @(
+    @{ Persisted = $progress; ApiAvailable = $true; LiveStatus = $staleLiveTask; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $progress; ApiAvailable = $true; LiveStatus = $progressApi; UpdaterHasExited = $false; UpdaterExitCode = $null },
+    @{ Persisted = $complete; ApiAvailable = $true; LiveStatus = $complete; UpdaterHasExited = $true; UpdaterExitCode = 0 }
+  )
+  $staleLiveSequence = Invoke-NgtOnlineUpdateTestSequence -Events $staleLiveEvents -StatusPath $statusPath
+  Assert-NgtAcceptanceTest ($staleLiveSequence.Passed -and $staleLiveSequence.EventCount -eq 3) `
+    "A stale live API task was not tolerated until the current update task reconnected."
+
   $nonzeroExitEvents = @(
     @{ Persisted = $complete; ApiAvailable = $false; LiveStatus = $null; UpdaterHasExited = $true; UpdaterExitCode = 17 }
   )
