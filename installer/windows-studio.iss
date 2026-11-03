@@ -14,7 +14,7 @@
   #error InstallerSupportDirectory is required
 #endif
 
-#define AppName "NGT 工作室管理系统"
+#define AppName "NGTManager"
 #define AppId "{{D7F74E80-B49C-4C3D-B6FC-18C04DAA9D31}"
 
 [Setup]
@@ -51,11 +51,15 @@ Source: "{#InstallerSupportDirectory}\prepare-windows-studio-install.ps1"; DestD
 Source: "{#InstallerSupportDirectory}\windows-studio-install-coordination.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 
 [Icons]
-Name: "{autodesktop}\NGT 工作室管理系统"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
-Name: "{autoprograms}\NGT 工作室管理系统"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
+Name: "{autodesktop}\{#AppName}"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
+Name: "{autoprograms}\{#AppName}"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
+
+[InstallDelete]
+Type: files; Name: "{autodesktop}\NGT 工作室管理系统.url"
+Type: files; Name: "{autoprograms}\NGT 工作室管理系统.url"
 
 [Run]
-Filename: "http://127.0.0.1:3000"; Description: "打开 NGT 工作室管理系统"; Flags: shellexec postinstall nowait skipifsilent
+Filename: "http://127.0.0.1:3000"; Description: "Open {#AppName}"; Flags: shellexec postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{localappdata}\NGT\service\uninstall-windows-studio.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "StopNgtStudio"
