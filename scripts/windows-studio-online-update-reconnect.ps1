@@ -106,15 +106,21 @@ function Get-NgtOnlineUpdateReconnectDecision {
 
   $persistedComplete = Assert-NgtOnlineUpdateState -State $PersistedStatus `
     -ExpectedUpdateId $UpdateId -TargetVersion $TargetVersion -Source "Persisted"
-  $disconnected = $ApiDisconnectedObserved -or -not $ApiAvailable
-  $reconnected = $ApiReconnectedAfterDisconnect -or ($ApiDisconnectedObserved -and $ApiAvailable)
   $apiComplete = $false
+  $currentTaskAvailable = $false
 
   if ($ApiAvailable) {
     if ($null -eq $LiveStatus) { throw "The update API returned no status after connecting." }
-    $apiComplete = Assert-NgtOnlineUpdateState -State $LiveStatus -ExpectedUpdateId $UpdateId `
-      -TargetVersion $TargetVersion -Source "Live API" -AllowVerifyingTask
+    if (-not [string]::Equals([string]$LiveStatus.updateId, $UpdateId, [System.StringComparison]::Ordinal)) {
+      if ($UpdaterHasExited) { throw "Live API update state belongs to a different update task." }
+    } else {
+      $currentTaskAvailable = $true
+      $apiComplete = Assert-NgtOnlineUpdateState -State $LiveStatus -ExpectedUpdateId $UpdateId `
+        -TargetVersion $TargetVersion -Source "Live API" -AllowVerifyingTask
+    }
   }
+  $disconnected = $ApiDisconnectedObserved -or -not $currentTaskAvailable
+  $reconnected = $ApiReconnectedAfterDisconnect -or ($ApiDisconnectedObserved -and $currentTaskAvailable)
   if ($UpdaterHasExited) {
     if ($null -eq $UpdaterExitCode) { throw "The Rust updater exited without an operating-system exit code." }
     if ($UpdaterExitCode -ne 0) { throw "The Rust updater exited with code $UpdaterExitCode." }

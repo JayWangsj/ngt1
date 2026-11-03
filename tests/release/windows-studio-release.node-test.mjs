@@ -1494,12 +1494,21 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /authProbeReadyPath/);
   assert.match(
     standardUserAcceptance,
-    /Start-Process -FilePath \$ghExecutablePath -ArgumentList "auth token --hostname github\.com"[\s\S]{0,250}-Credential \$credential -LoadUserProfile -UseNewEnvironment/,
+    /"\$ghExecutablePath" auth token --hostname github\.com/,
   );
   assert.match(
     standardUserAcceptance,
-    /-RedirectStandardOutput \$authProbeStdoutPath -RedirectStandardError \$authProbeStderrPath/,
+    /Start-Process -FilePath \$cmdPath -ArgumentList \$authProbeArguments[\s\S]{0,180}-Credential \$credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory \$isolatedTemp/,
   );
+  assert.match(
+    standardUserAcceptance,
+    /> "\$authProbeExitCodePath" echo %NGT_AUTH_PROBE_EXIT%/,
+  );
+  assert.match(
+    standardUserAcceptance,
+    /\[int\]::TryParse\(\$probeExitCodeText, \[ref\]\$probeExitCode\)/,
+  );
+  assert.doesNotMatch(standardUserAcceptance, /\$authProbeProcess\.ExitCode/);
   assert.match(
     standardUserAcceptance,
     /\$probeDeadline = \(Get-Date\)\.AddSeconds\(60\)/,
@@ -1507,7 +1516,7 @@ test("workflow DAG gates publication and scopes Draft discovery to acceptance", 
   assert.match(standardUserAcceptance, /Get-NgtAcceptanceSha256 \$probeToken/);
   assert.match(
     standardUserAcceptance,
-    /Remove-Item -LiteralPath \$authProbeStdoutPath, \$authProbeStderrPath -Force/,
+    /Remove-Item -LiteralPath \$authProbeStdoutPath, \$authProbeStderrPath, \$authProbeExitCodePath, \$authProbeCommandPath/,
   );
   assert.doesNotMatch(
     standardUserAcceptance,

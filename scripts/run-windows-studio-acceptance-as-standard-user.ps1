@@ -353,7 +353,10 @@ $authProbeReadyPath = Join-Path $isolatedTemp "auth-probe.ready"
 $authProbeResultPath = Join-Path $isolatedTemp "auth-probe.result"
 $authProbeStdoutPath = Join-Path $isolatedTemp "auth-probe.stdout"
 $authProbeStderrPath = Join-Path $isolatedTemp "auth-probe.stderr"
+$authProbeExitCodePath = Join-Path $isolatedTemp "auth-probe.exit-code"
+$authProbeCommandPath = Join-Path $isolatedTemp "auth-probe.cmd"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$cmdPath = Join-Path $env:SystemRoot "System32\cmd.exe"
 $ghExecutablePath = $null
 $expectedTokenSha256 = $null
 $protectedTokens = @(
@@ -409,6 +412,14 @@ try {
     New-Item -ItemType Directory -Path $ghConfigDirectory -Force | Out-Null
     if ($Acceptance -eq "production-update") {
       New-Item -ItemType Directory -Path $authProbeRoot -Force | Out-Null
+      $authProbeCommand = @"
+@echo off
+"$ghExecutablePath" auth token --hostname github.com > "$authProbeStdoutPath" 2> "$authProbeStderrPath"
+set "NGT_AUTH_PROBE_EXIT=%ERRORLEVEL%"
+> "$authProbeExitCodePath" echo %NGT_AUTH_PROBE_EXIT%
+exit /b %NGT_AUTH_PROBE_EXIT%
+"@
+      [System.IO.File]::WriteAllText($authProbeCommandPath, $authProbeCommand, [System.Text.Encoding]::ASCII)
     }
     $hostsConfiguration = "github.com:`r`n    oauth_token: $($env:GH_TOKEN)`r`n    git_protocol: https`r`n"
     [System.IO.File]::WriteAllText($hostsPath, $hostsConfiguration, [System.Text.Encoding]::UTF8)
@@ -483,9 +494,9 @@ try {
   while (-not $process.WaitForExit(1000)) {
     if (-not $authProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
       try {
-        $authProbeProcess = Start-Process -FilePath $ghExecutablePath -ArgumentList "auth token --hostname github.com" `
-          -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $workspace `
-          -RedirectStandardOutput $authProbeStdoutPath -RedirectStandardError $authProbeStderrPath `
+        $authProbeArguments = "/d /s /c auth-probe.cmd"
+        $authProbeProcess = Start-Process -FilePath $cmdPath -ArgumentList $authProbeArguments `
+          -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $isolatedTemp `
           -WindowStyle Hidden -PassThru
         $probeDeadline = (Get-Date).AddSeconds(60)
         while (-not $authProbeProcess.HasExited -and (Get-Date) -lt $probeDeadline) {
@@ -498,8 +509,16 @@ try {
         }
         $authProbeProcess.WaitForExit()
         $authProbeProcess.Refresh()
-        if ($authProbeProcess.ExitCode -ne 0) {
-          throw "The fresh standard-user native GitHub CLI probe failed with exit code $($authProbeProcess.ExitCode)."
+        if (-not (Test-Path -LiteralPath $authProbeExitCodePath -PathType Leaf)) {
+          throw "The fresh standard-user native GitHub CLI probe did not record an exit code."
+        }
+        $probeExitCode = 0
+        $probeExitCodeText = (Get-Content -LiteralPath $authProbeExitCodePath -Raw).Trim()
+        if (-not [int]::TryParse($probeExitCodeText, [ref]$probeExitCode)) {
+          throw "The fresh standard-user native GitHub CLI probe recorded an invalid exit code."
+        }
+        if ($probeExitCode -ne 0) {
+          throw "The fresh standard-user native GitHub CLI probe failed with exit code $probeExitCode."
         }
         $probeToken = (Get-Content -LiteralPath $authProbeStdoutPath -Raw).Trim()
         if (-not $probeToken -or (Get-NgtAcceptanceSha256 $probeToken) -cne $expectedTokenSha256) {
@@ -514,7 +533,8 @@ try {
         throw
       } finally {
         $probeToken = $null
-        Remove-Item -LiteralPath $authProbeStdoutPath, $authProbeStderrPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $authProbeStdoutPath, $authProbeStderrPath, $authProbeExitCodePath, $authProbeCommandPath `
+          -Force -ErrorAction SilentlyContinue
       }
     }
     if ((Get-Date) -ge $acceptanceDeadline) {
