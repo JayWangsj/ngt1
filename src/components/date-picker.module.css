@@ -312,7 +312,7 @@
   :global(
     .date-picker-header .date-picker-heading-button:hover:not(:disabled)
   ) {
-  background: transparent;
+  background: transparent !important;
   color: #9a6d00;
   text-decoration: underline;
   text-underline-offset: 4px;

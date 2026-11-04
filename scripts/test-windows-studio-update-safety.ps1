@@ -280,6 +280,217 @@ try {
   }) -ServiceScript $serviceScript)) {
     throw "A supervisor using the configured stable service script was not recognized."
   }
+
+  $servicePath = Join-Path $PSScriptRoot "windows-service.ps1"
+  $serviceTokens = $null
+  $serviceParseErrors = $null
+  $serviceAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $servicePath, [ref]$serviceTokens, [ref]$serviceParseErrors
+  )
+  if ($serviceParseErrors.Count -gt 0) { throw "Windows service script has a PowerShell syntax error." }
+  $ownershipFunction = $serviceAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq "Test-NgtPortOwnership"
+  }, $true)
+  if (-not $ownershipFunction) { throw "The Windows service is missing its listener ownership check." }
+  . ([scriptblock]::Create($ownershipFunction.Extent.Text))
+
+  $previousServiceProjectRoot = Get-Variable projectRoot -ValueOnly -ErrorAction SilentlyContinue
+  $previousServiceInstallRoot = $installRoot
+  $previousServiceStateDirectory = Get-Variable stateDirectory -ValueOnly -ErrorAction SilentlyContinue
+  $previousServiceDataRoot = $env:NGT_DATA_ROOT
+  $listenerRoot = Join-Path $processRoot "service-listener-fixture"
+  $listenerInstallRoot = Join-Path $listenerRoot "install"
+  $listenerReleaseRoot = Join-Path $listenerInstallRoot "releases\v2.0.22"
+  $listenerStateDirectory = Join-Path $listenerInstallRoot ".local"
+  $listenerReleaseState = Join-Path $listenerReleaseRoot ".local"
+  $listenerNode = Join-Path $listenerReleaseRoot "runtime\node.exe"
+  New-Item -ItemType Directory -Path @(
+    (Split-Path -Parent $listenerNode),
+    (Join-Path $listenerReleaseRoot "scripts"),
+    $listenerStateDirectory,
+    $listenerReleaseState
+  ) -Force | Out-Null
+  Set-Content -LiteralPath $listenerNode -Value "fixture" -Encoding ascii
+  $projectRoot = $listenerReleaseRoot
+  $installRoot = $listenerInstallRoot
+  $stateDirectory = $listenerStateDirectory
+  $env:NGT_DATA_ROOT = Join-Path $listenerRoot "data"
+
+  $foreignListener = [pscustomobject]@{
+    ProcessId = 4401
+    ParentProcessId = 4
+    Name = "unrelated.exe"
+    ExecutablePath = "C:\Other\unrelated.exe"
+    CommandLine = '"C:\Other\unrelated.exe"'
+  }
+  $script:FixtureProcesses = @{ 4401 = $foreignListener }
+  $script:FixturePorts = @([pscustomobject]@{ LocalPort = 3000; OwningProcess = 4401 })
+  $stopCallsBeforeOwnerCheck = $script:FixtureStopCalls.Count
+  $foreignListenerRejected = $false
+  try { [void](Test-NgtPortOwnership -Port 3000) } catch {
+    $foreignListenerRejected = $_.Exception.Message -match "unverified PID 4401"
+  }
+  if (-not $foreignListenerRejected -or $script:FixtureStopCalls.Count -ne $stopCallsBeforeOwnerCheck) {
+    throw "The Windows service did not reject and preserve an unrelated port 3000 listener."
+  }
+
+  $applicationScript = Join-Path $listenerReleaseRoot "scripts\start.mjs"
+  $serviceApplication = [pscustomobject]@{
+    ProcessId = 4402
+    ParentProcessId = $PID
+    Name = "node.exe"
+    ExecutablePath = $listenerNode
+    CommandLine = '"' + $listenerNode + '" "' + $applicationScript + '"'
+  }
+  $serviceListener = [pscustomobject]@{
+    ProcessId = 4403
+    ParentProcessId = 4402
+    Name = "node.exe"
+    ExecutablePath = $listenerNode
+    CommandLine = '"' + $listenerNode + '" .next\standalone\server.js'
+  }
+  $script:FixtureProcesses = @{ 4402 = $serviceApplication; 4403 = $serviceListener }
+  Set-Content -LiteralPath (Join-Path $listenerStateDirectory "application.pid") -Value "4402" -Encoding ascii
+  $script:FixturePorts = @([pscustomobject]@{ LocalPort = 3000; OwningProcess = 4403 })
+  if (-not (Test-NgtPortOwnership -Port 3000)) {
+    throw "The Windows service did not accept its active-release application listener."
+  }
+  $serviceApplication.ParentProcessId = 4499
+  if (-not (Test-NgtPortOwnership -Port 3000)) {
+    throw "The Windows service rejected an active-release application after its supervisor restarted."
+  }
+
+  $oldReleaseNode = Join-Path $listenerRoot "releases\v2.0.21\runtime\node.exe"
+  $oldReleaseScript = Join-Path $listenerRoot "releases\v2.0.21\scripts\start.mjs"
+  New-Item -ItemType Directory -Path (Split-Path -Parent $oldReleaseNode) -Force | Out-Null
+  Set-Content -LiteralPath $oldReleaseNode -Value "old fixture" -Encoding ascii
+  $staleApplication = [pscustomobject]@{
+    ProcessId = 4404
+    ParentProcessId = $PID
+    Name = "node.exe"
+    ExecutablePath = $oldReleaseNode
+    CommandLine = '"' + $oldReleaseNode + '" "' + $oldReleaseScript + '"'
+  }
+  $staleListener = [pscustomobject]@{
+    ProcessId = 4405
+    ParentProcessId = 4404
+    Name = "node.exe"
+    ExecutablePath = $oldReleaseNode
+    CommandLine = '"' + $oldReleaseNode + '" .next\standalone\server.js'
+  }
+  $script:FixtureProcesses = @{ 4404 = $staleApplication; 4405 = $staleListener }
+  Set-Content -LiteralPath (Join-Path $listenerStateDirectory "application.pid") -Value "4404" -Encoding ascii
+  $script:FixturePorts = @([pscustomobject]@{ LocalPort = 3000; OwningProcess = 4405 })
+  $staleReleaseRejected = $false
+  try { [void](Test-NgtPortOwnership -Port 3000) } catch {
+    $staleReleaseRejected = $_.Exception.Message -match "unverified PID 4405"
+  }
+  if (-not $staleReleaseRejected) {
+    throw "The Windows service accepted an old-release application listener."
+  }
+
+  $databaseScript = Join-Path $listenerReleaseRoot "scripts\windows-db.mjs"
+  $serviceDatabaseRoot = [pscustomobject]@{
+    ProcessId = 4410
+    ParentProcessId = $PID
+    Name = "node.exe"
+    ExecutablePath = $listenerNode
+    CommandLine = '"' + $listenerNode + '" "' + $databaseScript + '"'
+  }
+  $databasePath = Join-Path $env:NGT_DATA_ROOT "data"
+  $postgresRuntime = Join-Path $listenerRoot "postgres-runtime"
+  $postgresExecutable = Join-Path $postgresRuntime "bin\postgres.exe"
+  $servicePostgres = [pscustomobject]@{
+    ProcessId = 4411
+    ParentProcessId = 4410
+    Name = "postgres.exe"
+    ExecutablePath = $postgresExecutable
+    CommandLine = '"' + $postgresExecutable + '" -D "' + $databasePath + '" -h 127.0.0.1 -p 55432'
+  }
+  $script:FixtureProcesses = @{ 4410 = $serviceDatabaseRoot; 4411 = $servicePostgres }
+  Set-Content -LiteralPath (Join-Path $listenerStateDirectory "database.pid") -Value "4410" -Encoding ascii
+  Set-Content -LiteralPath (Join-Path $listenerReleaseState "database-location.txt") -Value $databasePath -Encoding utf8
+  Set-Content -LiteralPath (Join-Path $listenerReleaseState "database-runtime-location.txt") -Value $postgresRuntime -Encoding utf8
+  $script:FixturePorts = @([pscustomobject]@{ LocalPort = 55432; OwningProcess = 4411 })
+  $databaseNodePaths = Get-NgtStudioNodePaths -ReleaseRoot $listenerReleaseRoot -InstallRoot $listenerInstallRoot
+  $databaseRootOwned = Test-NgtStudioDatabaseLauncherProcess -Process $serviceDatabaseRoot `
+    -ReleaseRoot $listenerReleaseRoot -AllowedNodePaths $databaseNodePaths `
+    -ActiveRelease $listenerReleaseRoot -SupervisorId $PID
+  $postgresTreeOwned = Test-NgtStudioProcessTree -ProcessId 4411 -AncestorId 4410
+  $postgresProcessOwned = Test-NgtStudioPostgresProcess -Process $servicePostgres `
+    -RuntimeRoot $postgresRuntime -DataDirectory $databasePath
+  if (-not $databaseRootOwned -or
+      -not $postgresTreeOwned -or -not $postgresProcessOwned) {
+    throw "The valid database listener fixture failed identity checks: launcher=$databaseRootOwned postgresTree=$postgresTreeOwned postgres=$postgresProcessOwned"
+  }
+  $recordedDataPath = (Get-Content -LiteralPath (Join-Path $listenerReleaseState "database-location.txt") -Raw).Trim()
+  $recordedRuntimePath = (Get-Content -LiteralPath (Join-Path $listenerReleaseState "database-runtime-location.txt") -Raw).Trim()
+  $recordedDataMatches = Test-NgtStudioPathEquals -Actual $recordedDataPath -Expected (Join-Path $env:NGT_DATA_ROOT "data")
+  $recordedProcessMatches = Test-NgtStudioPostgresProcess -Process $servicePostgres `
+    -RuntimeRoot $recordedRuntimePath -DataDirectory $recordedDataPath
+  if (-not $recordedDataMatches -or -not $recordedProcessMatches) {
+    throw "The recorded service listener paths failed checks: data=$recordedDataMatches postgres=$recordedProcessMatches recordedData=$recordedDataPath expectedData=$(Join-Path $env:NGT_DATA_ROOT 'data') runtime=$recordedRuntimePath"
+  }
+  if (-not (Test-NgtPortOwnership -Port 55432)) {
+    throw "The Windows service did not accept its active data-directory PostgreSQL listener."
+  }
+  $serviceDatabaseRoot.ParentProcessId = 4499
+  if (-not (Test-NgtPortOwnership -Port 55432)) {
+    throw "The Windows service rejected the active data-directory database after its supervisor restarted."
+  }
+  $servicePostgres.CommandLine = '"' + $postgresExecutable + '" -D "' + (Join-Path $listenerRoot "wrong-data") + '" -h 127.0.0.1'
+  $wrongDataDirectoryRejected = $false
+  try { [void](Test-NgtPortOwnership -Port 55432) } catch {
+    $wrongDataDirectoryRejected = $_.Exception.Message -match "unverified PID 4411"
+  }
+  if (-not $wrongDataDirectoryRejected) {
+    throw "The Windows service accepted PostgreSQL for the wrong data directory."
+  }
+
+  $startFunction = $serviceAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq "Start-NgtProcess"
+  }, $true)
+  if (-not $startFunction) { throw "The Windows service is missing its managed process start function." }
+  & {
+    $script:FixtureReadinessCalls = 0
+    $script:FixtureLaunchCalls = 0
+    function Test-NgtPortOwnership([int]$Port) { return $true }
+    function Test-NgtServicePortReady([int]$Port) {
+      $script:FixtureReadinessCalls++
+      return $script:FixtureReadinessCalls -ge 2
+    }
+    function Start-Sleep([int]$Milliseconds) { }
+    function Start-Process { $script:FixtureLaunchCalls++; throw "An already-owned process must not be launched again." }
+    . ([scriptblock]::Create($startFunction.Extent.Text))
+    $stateDirectory = $processStateDirectory
+    $projectRoot = $processReleaseRoot
+    $nodeExecutable = Join-Path $processReleaseRoot "runtime\node.exe"
+    Start-NgtProcess -Name "application" -Script (Join-Path $processReleaseRoot "scripts\start.mjs") -Port 3000
+    if ($script:FixtureReadinessCalls -ne 2 -or $script:FixtureLaunchCalls -ne 0) {
+      throw "The Windows service launched a duplicate process instead of adopting its active-release listener."
+    }
+  }
+  if ($null -eq $previousServiceProjectRoot) {
+    Remove-Variable projectRoot -ErrorAction SilentlyContinue
+  } else {
+    $projectRoot = $previousServiceProjectRoot
+  }
+  $installRoot = $previousServiceInstallRoot
+  if ($null -eq $previousServiceStateDirectory) {
+    Remove-Variable stateDirectory -ErrorAction SilentlyContinue
+  } else {
+    $stateDirectory = $previousServiceStateDirectory
+  }
+  if ($null -eq $previousServiceDataRoot) {
+    Remove-Item Env:\NGT_DATA_ROOT -ErrorAction SilentlyContinue
+  } else {
+    $env:NGT_DATA_ROOT = $previousServiceDataRoot
+  }
+
   $launcherPath = Join-Path $processInstallRoot "service\windows-studio-launcher.vbs"
   $validScheduledTask = [pscustomobject]@{
     Actions = @([pscustomobject]@{

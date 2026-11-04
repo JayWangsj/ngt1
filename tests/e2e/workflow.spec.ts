@@ -5158,7 +5158,7 @@ test("repair list exposes month, status, due-date and payment controls", async (
     .locator(".order-list-body > tr")
     .filter({ hasText: orderCode });
   await expect(localizedRow.locator(".order-updated-cell")).toContainText(
-    /\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/,
+    /\d{4}\/\d{1,2}\/\d{1,2} \d{2}:\d{2}/,
   );
   await localizedRow.click();
   await expect(

@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows-studio-common.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
 $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw | ConvertFrom-Json
 if (-not $ArchivePath) {
   $ArchivePath = Join-Path $projectRoot ("dist\ngt-studio-windows-v" + $package.version + ".zip")
@@ -79,6 +80,59 @@ try {
   }
   & (Join-Path $PSScriptRoot "verify-windows-studio-release.ps1") `
     -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$package.version) | Out-Null
+  $expectedCommit = [string]$env:GITHUB_SHA
+  if (-not $expectedCommit) {
+    $commitOutput = & git -C $projectRoot rev-parse HEAD
+    if (($LASTEXITCODE -ne 0) -or (-not $commitOutput)) {
+      throw "Unable to read the expected Git commit for the Studio package."
+    }
+    $expectedCommit = ($commitOutput | Out-String).Trim()
+  }
+  $nodeExecutable = Join-Path $releaseRoot "runtime\node.exe"
+  Test-NgtStudioReleaseMetadata `
+    -Path (Join-Path $releaseRoot "studio-release.json") `
+    -ExpectedVersion ([string]$package.version) `
+    -ExpectedCommit $expectedCommit `
+    -NodeExecutable $nodeExecutable
+  $staticRoot = Join-Path $releaseRoot ".next\static"
+  $standaloneStaticRoot = Join-Path $releaseRoot ".next\standalone\.next\static"
+  $staticFiles = @(Get-ChildItem -LiteralPath $staticRoot -File -Recurse)
+  if ($staticFiles.Count -eq 0) {
+    throw "Studio package has no static build assets."
+  }
+  foreach ($staticFile in $staticFiles) {
+    $relativeStaticPath = $staticFile.FullName.Substring(($staticRoot.TrimEnd("\") + "\").Length)
+    $standaloneStaticFile = Join-Path $standaloneStaticRoot $relativeStaticPath
+    if (-not (Test-Path -LiteralPath $standaloneStaticFile -PathType Leaf)) {
+      throw "Studio standalone package is missing static asset: $relativeStaticPath"
+    }
+    $sourceHash = (Get-FileHash -LiteralPath $staticFile.FullName -Algorithm SHA256).Hash
+    $standaloneHash = (Get-FileHash -LiteralPath $standaloneStaticFile -Algorithm SHA256).Hash
+    if ($sourceHash -cne $standaloneHash) {
+      throw "Studio standalone static asset does not match its release copy: $relativeStaticPath"
+    }
+  }
+  $publicRoot = Join-Path $releaseRoot "public"
+  $standalonePublicRoot = Join-Path $releaseRoot ".next\standalone\public"
+  $publicFiles = @(Get-ChildItem -LiteralPath $publicRoot -File -Recurse)
+  $standalonePublicFiles = @(Get-ChildItem -LiteralPath $standalonePublicRoot -File -Recurse)
+  $publicRelativePaths = @($publicFiles | ForEach-Object {
+    $_.FullName.Substring(($publicRoot.TrimEnd("\") + "\").Length)
+  } | Sort-Object)
+  $standalonePublicRelativePaths = @($standalonePublicFiles | ForEach-Object {
+    $_.FullName.Substring(($standalonePublicRoot.TrimEnd("\") + "\").Length)
+  } | Sort-Object)
+  if ((Compare-Object -ReferenceObject $publicRelativePaths -DifferenceObject $standalonePublicRelativePaths).Count -gt 0) {
+    throw "Studio standalone package public file inventory does not match the release copy."
+  }
+  foreach ($publicFile in $publicFiles) {
+    $relativePath = $publicFile.FullName.Substring(($publicRoot.TrimEnd("\") + "\").Length)
+    $standalonePublicFile = Join-Path $standalonePublicRoot $relativePath
+    if ((Get-FileHash -LiteralPath $publicFile.FullName -Algorithm SHA256).Hash -cne
+        (Get-FileHash -LiteralPath $standalonePublicFile -Algorithm SHA256).Hash) {
+      throw "Studio standalone public asset does not match its release copy: $relativePath"
+    }
+  }
   & (Join-Path $PSScriptRoot "test-windows-studio-update-safety.ps1")
   if (Test-Path -LiteralPath (Join-Path $releaseRoot ".next\standalone\node_modules\.pnpm")) {
     throw "Studio package contains the redundant standalone pnpm store."
@@ -132,6 +186,9 @@ try {
         throw "Studio package is missing runtime file: $requiredPath"
       }
     }
+    Invoke-NgtCommand `
+      (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
+      @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "test-windows-studio-baseline-json-encoding.ps1"))
     Push-Location -LiteralPath (Join-Path $releaseRoot ".next\standalone")
     $previousVerifyModules = $env:NGT_VERIFY_MODULES
     $previousPrismaPackage = $env:NGT_PRISMA_PACKAGE

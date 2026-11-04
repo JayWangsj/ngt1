@@ -64,6 +64,7 @@ function toUpdateInfo(
     latestVersion: value.latestVersion,
     releaseName: value.releaseName,
     releaseNotes: value.releaseNotes,
+    releaseUrl: value.releaseUrl,
     publishedAt: value.publishedAt,
     downloadSize: value.downloadSize,
     installInstanceId: value.installInstanceId,
@@ -287,13 +288,19 @@ export function UpdateStateProvider({
             ? 120_000
             : status.stage === "backing-up"
               ? 600_000
-              : status.stage === "installing"
-                ? 900_000
-                : status.stage === "rolling-back"
-                  ? 1_200_000
-                  : status.stage === "validating"
-                    ? 300_000
-                    : 120_000;
+              : status.stage === "verifying-backup"
+                ? 600_000
+                : status.stage === "preparing-release"
+                  ? 900_000
+                  : status.stage === "preparing-runtime"
+                    ? 900_000
+                    : status.stage === "installing"
+                      ? 900_000
+                      : status.stage === "rolling-back"
+                        ? 1_200_000
+                        : status.stage === "validating"
+                          ? 300_000
+                          : 120_000;
         const lastProgressAt = Date.parse(
           status.updatedAt || status.createdAt || "",
         );

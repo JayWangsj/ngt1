@@ -5586,6 +5586,16 @@ details.secondary-actions {
   line-height: 1.7;
   font-size: 13px;
 }
+.update-manual-installer {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.update-manual-installer small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .download-progress {
   display: grid;
   gap: 10px;

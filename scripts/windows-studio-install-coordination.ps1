@@ -309,15 +309,15 @@ function Test-NgtSafeStaleUpdate([object]$Status, [string]$CurrentVersion) {
       [string]$Status.previousVersion -eq $CurrentVersion
   }
   $stage = if ($Status.failedStage) { [string]$Status.failedStage } elseif ($Status.stage) { [string]$Status.stage } else { [string]$Status.status }
-  if ($stage -in @("starting", "queued", "reading-release", "checking", "downloading", "downloaded", "verifying", "preparing-runtime")) {
-    $completed = @($Status.completedStages | Where-Object { $_ -in @("backing-up", "installing", "validating", "rolling-back") })
+  if ($stage -in @("starting", "queued", "reading-release", "checking", "downloading", "downloaded", "verifying", "starting-installer", "preparing-runtime")) {
+    $completed = @($Status.completedStages | Where-Object { $_ -in @("backing-up", "preparing-release", "verifying-backup", "preparing-runtime", "installing", "validating", "rolling-back") })
     return $completed.Count -eq 0
   }
   if ($Status.status -eq "complete") {
     return [string]$Status.actualVersion -eq $CurrentVersion -or [string]$Status.targetVersion -eq $CurrentVersion
   }
   if ($Status.status -in @("failed", "interrupted")) {
-    return [string]$Status.failedStage -in @("starting", "reading-release", "checking", "downloading", "downloaded", "verifying", "preparing-runtime")
+    return [string]$Status.failedStage -in @("starting", "reading-release", "checking", "downloading", "downloaded", "verifying", "starting-installer", "preparing-runtime")
   }
   return $false
 }
@@ -640,7 +640,7 @@ function Start-NgtStudioManualInstall([string]$InstallRoot, [string]$TargetVersi
         throw "The previous update may have changed the database or installation. Verify and recover it before installing."
       }
     } elseif ($reservation.status) {
-      $active = [string]$reservation.status.status -in @("starting", "queued", "running", "checking", "downloading", "downloaded", "verifying", "preparing-runtime", "backing-up", "installing", "validating", "rolling-back")
+      $active = [string]$reservation.status.status -in @("starting", "queued", "running", "checking", "downloading", "downloaded", "verifying", "starting-installer", "preparing-release", "verifying-backup", "preparing-runtime", "backing-up", "installing", "validating", "rolling-back")
       if ($active) {
         $alive = Get-NgtUpdateExecutorState $null $reservation.status $plan.previousRelease
         if ($alive -ne $false -or -not (Test-NgtSafeStaleUpdate $reservation.status $plan.previousVersion)) {
@@ -842,10 +842,31 @@ function Set-NgtStudioOnlineUpdateStage(
     if ([string]$reservation.marker.operation -ne "online-update" -or
         [string]$reservation.marker.updateId -ne $UpdateId -or
         [string]$reservation.lock.updateId -ne $UpdateId -or
-        [string]$reservation.status.updateId -ne $UpdateId) {
+        [string]$reservation.status.updateId -ne $UpdateId -or
+        [string]$reservation.lock.operation -ne "online-update" -or
+        [string]$reservation.status.operation -ne "online-update" -or
+        [string]$reservation.marker.targetVersion -ne [string]$reservation.lock.targetVersion -or
+        [string]$reservation.marker.targetVersion -ne [string]$reservation.status.targetVersion) {
       throw "The online installer no longer owns its update stage."
     }
     $status = $reservation.status
+    $previousStage = [string]$status.stage
+    if ($previousStage -eq "checking") { $previousStage = "reading-release" }
+    $completedStages = @($status.completedStages | Where-Object { $_ })
+    $trackableStages = @(
+      "reading-release", "downloading", "verifying", "starting-installer",
+      "backing-up", "preparing-release", "verifying-backup",
+      "preparing-runtime", "installing", "validating"
+    )
+    if ($previousStage -in $trackableStages -and
+        $previousStage -ne $Stage -and
+        $previousStage -notin $completedStages) {
+      $completedStages += $previousStage
+    }
+    $status | Add-Member -NotePropertyName completedStages -NotePropertyValue @($completedStages) -Force
+    if (-not $status.skippedStages) {
+      $status | Add-Member -NotePropertyName skippedStages -NotePropertyValue @() -Force
+    }
     $status.status = if ($Stage -eq "validating") { "validating" } else { "installing" }
     $status.stage = $Stage
     $status.updatedAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -863,7 +884,11 @@ function Set-NgtStudioOnlineUpdateBackup(
     if ([string]$reservation.marker.operation -ne "online-update" -or
         [string]$reservation.marker.updateId -ne $UpdateId -or
         [string]$reservation.lock.updateId -ne $UpdateId -or
-        [string]$reservation.status.updateId -ne $UpdateId) {
+        [string]$reservation.status.updateId -ne $UpdateId -or
+        [string]$reservation.lock.operation -ne "online-update" -or
+        [string]$reservation.status.operation -ne "online-update" -or
+        [string]$reservation.marker.targetVersion -ne [string]$reservation.lock.targetVersion -or
+        [string]$reservation.marker.targetVersion -ne [string]$reservation.status.targetVersion) {
       throw "The online installer no longer owns the verified database backup."
     }
     $backupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
@@ -982,12 +1007,13 @@ function Complete-NgtStudioManualInstallRollback(
   [string]$InstallRoot,
   [string]$PreviousReleaseRoot,
   [string]$VerifiedVersion,
+  [string]$VerifiedCommit,
   [string]$FailureMessage,
   [string]$FailedStage,
   [switch]$OnlineUpdate,
-  [switch]$HealthVerified
+  [switch]$RuntimeVerified
 ) {
-  if (-not $HealthVerified) { throw "A successful rollback health check is required before maintenance can be cleared." }
+  if (-not $RuntimeVerified) { throw "A successful rollback runtime verification is required before maintenance can be cleared." }
   Invoke-NgtStudioInstallMutex $InstallRoot {
     $root = [System.IO.Path]::GetFullPath($InstallRoot)
     $reservation = Get-NgtManualInstallReservation $root
@@ -1006,8 +1032,10 @@ function Complete-NgtStudioManualInstallRollback(
     $activeRelease = [System.IO.Path]::GetFullPath([string]$configuration.activeRelease)
     $release = Get-NgtInstallJson (Join-Path $activeRelease "studio-release.json")
     if ($activeRelease -ine [System.IO.Path]::GetFullPath($PreviousReleaseRoot) -or
-        [string]$release.version -ne $VerifiedVersion) {
-      throw "The restored release does not match the health-verified rollback version."
+        [string]$release.version -ne $VerifiedVersion -or
+        [string]$release.commit -ine $VerifiedCommit -or
+        [string]$VerifiedCommit -notmatch '^[a-f0-9]{40}$') {
+      throw "The restored release does not match the runtime-verified rollback version and commit."
     }
     $status = [pscustomobject]@{
       status = "failed"
@@ -1020,6 +1048,8 @@ function Complete-NgtStudioManualInstallRollback(
       previousVersion = $VerifiedVersion
       currentVersion = $VerifiedVersion
       actualVersion = $VerifiedVersion
+      completedStages = @($reservation.status.completedStages)
+      skippedStages = @($reservation.status.skippedStages)
       installMode = [string]$marker.installMode
       recoveryStatus = "succeeded"
       recoveryMessage = $FailureMessage
@@ -1054,6 +1084,8 @@ function Set-NgtStudioManualInstallFailure(
       manualInstallId = if ($reservation.marker.operation -eq "manual-install") { [string]$reservation.marker.updateId } else { $null }
       targetVersion = [string]$reservation.marker.targetVersion
       previousVersion = [string]$reservation.marker.previousVersion
+      completedStages = @($reservation.status.completedStages)
+      skippedStages = @($reservation.status.skippedStages)
       installMode = [string]$reservation.marker.installMode
       message = $Message
       recoveryStatus = $RecoveryStatus

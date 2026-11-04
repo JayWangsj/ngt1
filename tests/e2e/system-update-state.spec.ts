@@ -29,6 +29,7 @@ function availableRelease() {
     updateAvailable: true,
     latestVersion: "2.0.10",
     releaseName: "NGT 2.0.10",
+    releaseUrl: "https://github.com/JayWangsj/ngt1/releases/tag/v2.0.10",
     releaseNotes: "Aggiornamenti affidabili e correzioni.",
     publishedAt: "2026-10-14T12:00:00Z",
     downloadSize: 240_000_000,
@@ -188,6 +189,24 @@ test("shows concise sidebar update-check statuses in both locales", async ({
   await expect(summary).toHaveText("更新不可用");
   await chineseCheckButton.click();
   await expect(summary).toHaveText("需要授权");
+});
+
+test("offers the verified release installer as a manual update fallback", async ({
+  page,
+}) => {
+  await mockAvailableCheck(page);
+  await page.goto("/settings/system-update");
+  await switchToItalian(page);
+  const fallback = page.getByRole("link", {
+    name: "Apri la pagina dell'installer manuale",
+  });
+  await expect(fallback).toHaveAttribute(
+    "href",
+    "https://github.com/JayWangsj/ngt1/releases/tag/v2.0.10",
+  );
+  await expect(page.locator(".update-manual-installer")).toContainText(
+    "ngt-studio-windows-setup-v2.0.10.exe",
+  );
 });
 
 test("prioritizes active and failed update-task statuses in the sidebar", async ({
@@ -668,6 +687,8 @@ test("shows progress only after the executor reports a real stage", async ({
             completedStages: ["reading-release"],
             bytesDownloaded: 120_000_000,
             totalBytes: 240_000_000,
+            bytesPerSecond: 4_000_000,
+            etaSeconds: 30,
             progressKnown: true,
           };
     return route.fulfill({
@@ -718,10 +739,167 @@ test("shows progress only after the executor reports a real stage", async ({
     "aria-valuenow",
     "50",
   );
+  await expect(page.locator(".download-progress-meta")).toContainText(
+    "Velocità",
+  );
+  const fillRatio = await page
+    .locator(".update-progress-track > span")
+    .evaluate((fill) => {
+      const trackWidth = fill.parentElement?.getBoundingClientRect().width || 0;
+      return trackWidth > 0
+        ? fill.getBoundingClientRect().width / trackWidth
+        : 0;
+    });
+  expect(fillRatio).toBeGreaterThanOrEqual(0.49);
+  expect(fillRatio).toBeLessThanOrEqual(0.51);
   await page.screenshot({
     path: path.join(screenshotDirectory, "05-confirmed-download-progress.png"),
     animations: "disabled",
   });
+});
+
+test("keeps download completion visible while checksum verification starts", async ({
+  page,
+}) => {
+  await mockAvailableCheck(page);
+  await page.route("**/api/system-update/status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "running",
+        stage: "verifying",
+        updateId: "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16",
+        targetVersion: "2.0.10",
+        previousVersion: "2.0.9",
+        executorAlive: true,
+        progressKnown: true,
+        bytesDownloaded: 256 * 1024 * 1024,
+        totalBytes: 256 * 1024 * 1024,
+        completedStages: ["reading-release", "downloading"],
+      }),
+    }),
+  );
+
+  await page.goto("/settings/system-update");
+  await switchToItalian(page);
+  await expect(page.locator(".update-progress-track")).toHaveAttribute(
+    "aria-valuenow",
+    "100",
+  );
+  await expect(page.locator(".download-progress-heading")).toContainText(
+    "Download completato",
+  );
+  await expect(page.locator(".download-progress-meta")).toContainText(
+    "256 MB / 256 MB",
+  );
+  const fillRatio = await page
+    .locator(".update-progress-track > span")
+    .evaluate((fill) => {
+      const trackWidth = fill.parentElement?.getBoundingClientRect().width || 0;
+      return trackWidth > 0
+        ? fill.getBoundingClientRect().width / trackWidth
+        : 0;
+    });
+  expect(fillRatio).toBeGreaterThanOrEqual(0.99);
+});
+
+test("shows a concise verified success summary without duplicate diagnostics", async ({
+  page,
+}) => {
+  await mockAvailableCheck(page);
+  await page.route("**/api/system-update/status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "complete",
+        stage: "complete",
+        updateId: "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16",
+        targetVersion: "2.0.10",
+        previousVersion: "2.0.9",
+        actualVersion: "2.0.10",
+        currentVersion: "2.0.10",
+        buildCommit: "3ff3697a9a74",
+        updatedAt: "2026-10-20T11:45:00.000Z",
+        executorConfirmed: true,
+      }),
+    }),
+  );
+
+  await page.goto("/settings/system-update");
+  await switchToItalian(page);
+  const result = page.locator(".update-result-card");
+  await expect(result).toContainText("Aggiornamento completato");
+  await expect(result).toContainText("v2.0.9 → v2.0.10");
+  await expect(result).toContainText(
+    "Versione prevista, commit e stato del servizio locale verificati.",
+  );
+  await expect(result).toContainText("3ff3697a9a74");
+  await expect(result.locator(".update-diagnostics-toggle")).toHaveCount(0);
+});
+
+test("marks the last trusted step during reconnection instead of leaving it active", async ({
+  page,
+}) => {
+  let statusReads = 0;
+  await mockAvailableCheck(page);
+  await page.route("**/api/system-update/status", (route) => {
+    statusReads += 1;
+    if (statusReads > 1) {
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "unavailable" }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "installing",
+        stage: "backing-up",
+        updateId: "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16",
+        targetVersion: "2.0.10",
+        previousVersion: "2.0.9",
+        executorAlive: true,
+        updatedAt: new Date().toISOString(),
+        completedStages: ["reading-release", "downloading", "verifying"],
+      }),
+    });
+  });
+
+  await page.goto("/settings/system-update");
+  await switchToItalian(page);
+  await expect(page.locator(".update-progress-summary")).toContainText(
+    "Riconnessione al servizio di aggiornamento",
+    { timeout: 8_000 },
+  );
+  await expect(page.locator(".update-progress-summary")).toContainText(
+    "Ultimo stato confermato",
+  );
+  await expect(page.locator(".update-progress-summary")).toContainText(
+    "Ultima fase confermata",
+  );
+  const backupStep = page
+    .locator(".update-stage-list li")
+    .filter({ hasText: "Backup dati" });
+  await expect(backupStep).toContainText("Ultima conferma");
+  await expect(backupStep).not.toHaveClass(/active/);
+  expect(
+    await page.locator(".update-stage-list li > span").allTextContents(),
+  ).toEqual([
+    "Lettura dei dati della versione",
+    "Download del pacchetto",
+    "Verifica pacchetto",
+    "Avvio del programma di installazione",
+    "Distribuzione dei file aggiornati",
+    "Backup dati",
+    "Nuova verifica del backup",
+    "Preparazione dell'ambiente condiviso",
+    "Installazione aggiornamento",
+    "Avvio e verifica database",
+  ]);
 });
 
 test("shows rollback as a result instead of a normal upgrade step", async ({

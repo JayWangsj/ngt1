@@ -92,6 +92,8 @@ struct InstallConfig {
 #[derive(Debug, Deserialize)]
 struct ReleaseMetadata {
     version: String,
+    #[serde(default)]
+    commit: String,
 }
 
 fn main() -> ExitCode {
@@ -285,9 +287,9 @@ fn run(args: &Args) -> Result<()> {
     append_log(&log_path, "Installer size and SHA-256 verified.")?;
 
     write_progress(
-        args,
-        "installing",
-        "installing",
+        &args,
+        "running",
+        "starting-installer",
         json!({
             "bytesDownloaded": installer_asset.size,
             "totalBytes": installer_asset.size,
@@ -310,8 +312,8 @@ fn run(args: &Args) -> Result<()> {
         &format!("Inno Setup exited with code {}.", exit_code(&setup_result)),
     )?;
 
-    write_progress(args, "validating", "validating", json!({}))?;
-    verify_installed_release(args, &client)?;
+    write_progress(&args, "validating", "validating", json!({}))?;
+    let build_commit = verify_installed_release(&args, &client)?;
     append_log(
         &log_path,
         "Installed release and application health verified.",
@@ -326,6 +328,7 @@ fn run(args: &Args) -> Result<()> {
         json!({
             "actualVersion": args.target_version,
             "currentVersion": args.target_version,
+            "buildCommit": build_commit,
             "executorAlive": false,
             "executorConfirmed": true,
             "progressKnown": false,
@@ -904,7 +907,7 @@ fn hide_console(command: &mut Command) {
     let _ = command;
 }
 
-fn verify_installed_release(args: &Args, client: &Client) -> Result<()> {
+fn verify_installed_release(args: &Args, client: &Client) -> Result<String> {
     let config: InstallConfig = read_json(&args.install_root.join("state").join("studio.json"))?;
     let active_release = canonical(&config.active_release)?;
     let release_directory = canonical(&args.install_root.join("releases"))?;
@@ -921,6 +924,12 @@ fn verify_installed_release(args: &Args, client: &Client) -> Result<()> {
             "The active application release version does not match the requested version.",
         ));
     }
+    if metadata.commit.is_empty() {
+        return Err(UpdateError::new(
+            "validating",
+            "The active application release is missing its build commit identity.",
+        ));
+    }
     let deadline = Instant::now() + Duration::from_secs(10 * 60);
     let mut delay = Duration::from_secs(1);
     while Instant::now() < deadline {
@@ -931,8 +940,13 @@ fn verify_installed_release(args: &Args, client: &Client) -> Result<()> {
         {
             if response.status().is_success() {
                 if let Ok(body) = response.json::<Value>() {
-                    if body["status"] == "ok" && body["currentVersion"] == args.target_version {
-                        return Ok(());
+                    if body["status"] == "ok"
+                        && body["currentVersion"] == args.target_version
+                        && body["buildCommit"]
+                            .as_str()
+                            .is_some_and(|commit| commit.eq_ignore_ascii_case(&metadata.commit))
+                    {
+                        return Ok(metadata.commit);
                     }
                 }
             }
@@ -942,7 +956,10 @@ fn verify_installed_release(args: &Args, client: &Client) -> Result<()> {
     }
     Err(UpdateError::new(
         "validating",
-        "The updated application did not pass its versioned health check within ten minutes.",
+        format!(
+            "The updated application did not report version {} and build commit {} within ten minutes.",
+            args.target_version, metadata.commit
+        ),
     ))
 }
 
@@ -978,7 +995,10 @@ fn write_progress(
     with_update_mutex(&args.install_root, || {
         let lock_path = args.install_root.join("state").join("update.lock");
         let mut lock: Value = read_json(&lock_path)?;
-        if lock["updateId"] != args.update_id {
+        if lock["updateId"] != args.update_id
+            || lock["targetVersion"] != args.target_version
+            || lock["operation"] != "online-update"
+        {
             return Err(UpdateError::new(
                 stage,
                 "The updater no longer owns the current update task.",
@@ -991,11 +1011,18 @@ fn write_progress(
 
         let status_path = args.install_root.join("state").join("update-status.json");
         let mut state: Value = read_json(&status_path)?;
-        if state["updateId"] != args.update_id {
+        if state["updateId"] != args.update_id
+            || state["targetVersion"] != args.target_version
+            || state["operation"] != "online-update"
+        {
             return Err(UpdateError::new(
                 stage,
                 "The saved task status belongs to a different update.",
             ));
+        }
+        complete_previous_stage(&mut state, stage);
+        if !state["skippedStages"].is_array() {
+            state["skippedStages"] = json!([]);
         }
         state["status"] = json!(status);
         state["stage"] = json!(stage);
@@ -1016,17 +1043,66 @@ fn write_progress(
     })
 }
 
+fn tracked_stage(stage: &str) -> Option<&'static str> {
+    match stage {
+        "checking" | "reading-release" => Some("reading-release"),
+        "downloading" => Some("downloading"),
+        "verifying" => Some("verifying"),
+        "starting-installer" => Some("starting-installer"),
+        "backing-up" => Some("backing-up"),
+        "preparing-release" => Some("preparing-release"),
+        "verifying-backup" => Some("verifying-backup"),
+        "preparing-runtime" => Some("preparing-runtime"),
+        "installing" => Some("installing"),
+        "validating" => Some("validating"),
+        _ => None,
+    }
+}
+
+fn complete_previous_stage(state: &mut Value, next_stage: &str) {
+    let previous_stage = state["stage"].as_str().and_then(tracked_stage);
+    let next_stage = tracked_stage(next_stage);
+    if let Some(previous_stage) = previous_stage.filter(|stage| Some(*stage) != next_stage) {
+        if !state["completedStages"].is_array() {
+            state["completedStages"] = json!([]);
+        }
+        let completed = state["completedStages"]
+            .as_array_mut()
+            .expect("completedStages array was initialized");
+        if !completed
+            .iter()
+            .any(|stage| stage.as_str() == Some(previous_stage))
+        {
+            completed.push(json!(previous_stage));
+        }
+    }
+}
+
 fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
     if !args.install_root.exists() {
         return Ok(());
     }
     with_update_mutex(&args.install_root, || {
         let status_path = args.install_root.join("state").join("update-status.json");
+        let lock_path = args.install_root.join("state").join("update.lock");
+        let lock: Value = match read_json(&lock_path) {
+            Ok(value) => value,
+            Err(_) => return Ok(()),
+        };
         let mut state: Value = match read_json(&status_path) {
             Ok(value) => value,
             Err(_) => return Ok(()),
         };
-        if state["updateId"] != args.update_id || state["status"] == "complete" {
+        if lock["updateId"] != args.update_id
+            || lock["targetVersion"] != args.target_version
+            || lock["operation"] != "online-update"
+            || state["updateId"] != args.update_id
+            || state["targetVersion"] != args.target_version
+            || state["operation"] != "online-update"
+        {
+            return Ok(());
+        }
+        if state["status"] == "complete" {
             return Ok(());
         }
         let installer_stage = failure_stage(&state, error);
@@ -1636,6 +1712,43 @@ fn is_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completes_the_previous_update_step_once_on_stage_change() {
+        let mut state = json!({
+            "stage": "checking",
+            "completedStages": []
+        });
+
+        complete_previous_stage(&mut state, "downloading");
+        complete_previous_stage(&mut state, "downloading");
+
+        assert_eq!(state["completedStages"], json!(["reading-release"]));
+    }
+
+    #[test]
+    fn reads_legacy_release_metadata_without_a_commit() {
+        let metadata: ReleaseMetadata =
+            serde_json::from_value(json!({ "version": "2.0.19" })).unwrap();
+
+        assert_eq!(metadata.version, "2.0.19");
+        assert!(metadata.commit.is_empty());
+    }
+
+    #[test]
+    fn completes_validation_when_the_update_enters_its_terminal_state() {
+        let mut state = json!({
+            "stage": "validating",
+            "completedStages": ["reading-release", "installing"]
+        });
+
+        complete_previous_stage(&mut state, "complete");
+
+        assert_eq!(
+            state["completedStages"],
+            json!(["reading-release", "installing", "validating"])
+        );
+    }
 
     #[cfg(windows)]
     #[test]

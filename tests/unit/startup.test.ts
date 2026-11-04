@@ -141,6 +141,14 @@ describe("Windows persistent startup", () => {
       ".github/actions/windows-studio-acceptance/action.yml",
       "utf8",
     );
+    const installerAcceptance = await readFile(
+      "scripts/test-windows-studio-installer.ps1",
+      "utf8",
+    );
+    const acceptanceCoordinator = await readFile(
+      "scripts/windows-studio-acceptance-coordinator.ps1",
+      "utf8",
+    );
     expect(runner).toContain("New-LocalUser -Name $userName");
     expect(runner).toContain(
       '-Description "NGT release acceptance standard account"',
@@ -151,12 +159,12 @@ describe("Windows persistent startup", () => {
     expect(runner).toContain(
       "Set-Content -LiteralPath $request.resultPath -Value $childExitCode -Encoding ascii",
     );
-    expect(runner).toContain(
-      "if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf))",
+    expect(runner).toContain("Get-NgtAcceptanceProcessOutcome");
+    expect(acceptanceCoordinator).toContain("Get-NgtAcceptanceChildExitCode");
+    expect(acceptanceCoordinator).toContain(
+      "The standard-user acceptance wrote an invalid exit result.",
     );
-    expect(runner).toContain(
-      "$childExitCode -ne 0 -or ($null -ne $processExitCode -and $processExitCode -ne 0)",
-    );
+    expect(acceptanceCoordinator).toContain("disagrees with process exit code");
     expect(runner).toContain("Remove-LocalUser -Name $userName");
     expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
     expect(workflow).toContain("acceptance: online-update");
@@ -165,6 +173,13 @@ describe("Windows persistent startup", () => {
       "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}",
     );
     expect(acceptanceAction).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(installerAcceptance).toContain(
+      "[string]$health.buildCommit -ieq $env:GITHUB_SHA",
+    );
+    expect(installerAcceptance).toContain("verify-windows-studio-runtime.ps1");
+    expect(installerAcceptance).toContain('repair "{0}"');
+    expect(installerAcceptance).toContain("NGTManager repair");
+    expect(installerAcceptance).not.toContain("/api/system-update");
   });
 
   it("ships only Node runtime scripts for application and database startup", async () => {
@@ -173,6 +188,7 @@ describe("Windows persistent startup", () => {
       "utf8",
     );
     expect(packager).toContain('"start.mjs"');
+    expect(packager).toContain('"verify-windows-studio-static-assets.mjs"');
     expect(packager).toContain('"windows-db.mjs"');
     expect(packager).toContain('"postgres-runtime.mjs"');
     expect(packager).toContain('"runtime-start-gate.cjs"');
@@ -180,6 +196,7 @@ describe("Windows persistent startup", () => {
     expect(packager).not.toContain('"windows-service.ps1"');
     expect(packager).not.toContain('"windows-studio-launcher.vbs"');
     expect(packager).not.toContain('"install-windows-startup.ps1"');
+    expect(packager).not.toContain('"verify-windows-studio-runtime.ps1"');
   });
 
   it("keeps the isolated test preview on a fixed restart-safe port", async () => {

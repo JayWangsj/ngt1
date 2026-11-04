@@ -25,8 +25,8 @@ function New-NgtInstallFixture([string]$Root) {
   New-Item -ItemType Directory -Path (Join-Path $installRoot ".local") -Force | Out-Null
   New-Item -ItemType Directory -Path $oldRelease -Force | Out-Null
   New-Item -ItemType Directory -Path $newRelease -Force | Out-Null
-  Set-Content -LiteralPath (Join-Path $oldRelease "studio-release.json") -Value '{"version":"2.0.11"}' -Encoding utf8
-  Set-Content -LiteralPath (Join-Path $newRelease "studio-release.json") -Value '{"version":"2.0.15"}' -Encoding utf8
+  Set-Content -LiteralPath (Join-Path $oldRelease "studio-release.json") -Value ('{"version":"2.0.11","commit":"' + ("a" * 40) + '"}') -Encoding utf8
+  Set-Content -LiteralPath (Join-Path $newRelease "studio-release.json") -Value ('{"version":"2.0.15","commit":"' + ("b" * 40) + '"}') -Encoding utf8
   Write-NgtInstallJsonAtomic (Join-Path $installRoot ".local\studio.json") ([pscustomobject]@{
     installRoot = $installRoot
     dataRoot = Join-Path $installRoot "data-store"
@@ -116,6 +116,37 @@ try {
       [string]$onlineMarkerAfterBackup.updateId -ne $onlineUpdateId -or
       [string]$onlineStatusAfterBackup.updateId -ne $onlineUpdateId) {
     throw "Online backup state fields were not persisted for the current update ID."
+  }
+  $onlineProgress = New-NgtInstallFixture (Join-Path $testRoot "online-progress-stages")
+  $progressUpdateId = [guid]::NewGuid().ToString()
+  Write-NgtInstallJsonAtomic (Join-Path $onlineProgress.installRoot "update.lock") ([pscustomobject]@{
+    updateId = $progressUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineProgress.installRoot "update-status.json") ([pscustomobject]@{
+    updateId = $progressUpdateId
+    operation = "online-update"
+    status = "running"
+    stage = "starting-installer"
+    targetVersion = "2.0.15"
+    updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  })
+  Write-NgtInstallJsonAtomic (Join-Path $onlineProgress.installRoot ".local\update-maintenance.json") ([pscustomobject]@{
+    updateId = $progressUpdateId
+    operation = "online-update"
+    targetVersion = "2.0.15"
+  })
+  foreach ($stage in @("preparing-release", "backing-up", "verifying-backup", "preparing-runtime", "installing", "validating")) {
+    Set-NgtStudioOnlineUpdateStage -InstallRoot $onlineProgress.installRoot `
+      -UpdateId $progressUpdateId -Stage $stage
+  }
+  $onlineProgressStatus = Get-NgtInstallJson (Join-Path $onlineProgress.installRoot "update-status.json")
+  if ([string]$onlineProgressStatus.stage -ne "validating" -or
+      [string]$onlineProgressStatus.status -ne "validating" -or
+      @($onlineProgressStatus.completedStages) -join "," -ne "starting-installer,preparing-release,backing-up,verifying-backup,preparing-runtime,installing" -or
+      $onlineProgressStatus.skippedStages -isnot [array]) {
+    throw "Online update stage changes did not preserve ordered completed and skipped steps."
   }
   $wrongBackupOwnerRejected = $false
   try {
@@ -501,11 +532,12 @@ try {
     Complete-NgtStudioManualInstallRollback -InstallRoot $rollback.installRoot `
       -PreviousReleaseRoot $rollback.oldRelease -VerifiedVersion "2.0.11" `
       -FailureMessage "simulated failed migration" -FailedStage "migrations"
-  } catch { $rollbackHealthRequired = $_.Exception.Message -like "A successful rollback health check*" }
-  if (-not $rollbackHealthRequired) { throw "The installer cleared maintenance without a verified rollback health check." }
+  } catch { $rollbackHealthRequired = $_.Exception.Message -like "A successful rollback runtime verification*" }
+  if (-not $rollbackHealthRequired) { throw "The installer cleared maintenance without a full runtime verification." }
   Complete-NgtStudioManualInstallRollback -InstallRoot $rollback.installRoot `
     -PreviousReleaseRoot $rollback.oldRelease -VerifiedVersion "2.0.11" `
-    -FailureMessage "simulated failed migration" -FailedStage "migrations" -HealthVerified
+    -VerifiedCommit ("a" * 40) -FailureMessage "simulated failed migration" `
+    -FailedStage "migrations" -RuntimeVerified
   $rollbackStatus = Get-NgtInstallJson (Join-Path $rollback.installRoot "update-status.json")
   if ($rollbackStatus.status -ne "failed" -or $rollbackStatus.recoveryStatus -ne "succeeded" -or
       $rollbackStatus.actualVersion -ne "2.0.11" -or $rollbackStatus.failedStage -ne "migrations" -or
@@ -549,7 +581,8 @@ try {
   }
   & $script:ProductionProtectNgtRepairInstallation -InstallRoot $repair.installRoot -Plan $repairPlan
   New-Item -ItemType Directory -Path $repair.oldRelease -Force | Out-Null
-  Set-Content -LiteralPath (Join-Path $repair.oldRelease "studio-release.json") -Value '{"version":"2.0.11"}'
+  Set-Content -LiteralPath (Join-Path $repair.oldRelease "studio-release.json") `
+    -Value ('{"version":"2.0.11","commit":"' + ("a" * 40) + '"}')
   Set-Content -LiteralPath (Join-Path $repair.oldRelease "candidate.txt") -Value "partially deployed repair"
   Restore-NgtStudioRepairReleaseBackup -InstallRoot $repair.installRoot `
     -ReleaseRoot $repair.oldRelease -UpdateId ([string]$repairMarker.updateId) | Out-Null
@@ -559,7 +592,8 @@ try {
   }
   Complete-NgtStudioManualInstallRollback -InstallRoot $repair.installRoot `
     -PreviousReleaseRoot $repair.oldRelease -VerifiedVersion "2.0.11" `
-    -FailureMessage "simulated repair failure" -FailedStage "release-deployment" -HealthVerified
+    -VerifiedCommit ("a" * 40) -FailureMessage "simulated repair failure" `
+    -FailedStage "release-deployment" -RuntimeVerified
 
   Write-Output "Windows Studio install coordination tests passed."
 } finally {

@@ -441,6 +441,9 @@ function activeTaskStatus(status?: string) {
     "downloading",
     "downloaded",
     "verifying",
+    "starting-installer",
+    "preparing-release",
+    "verifying-backup",
     "preparing-runtime",
     "backing-up",
     "installing",
@@ -467,6 +470,7 @@ function statusMessage(status: StudioUpdateStatus, currentVersion: string) {
     previousVersion: status.previousVersion,
     actualVersion: currentVersion,
     completedStages: status.completedStages,
+    skippedStages: status.skippedStages,
     failedStage: status.failedStage,
     message:
       "The update executor is no longer running. Check the update details before retrying.",
@@ -513,12 +517,19 @@ function safePreMutationStage(status: StudioUpdateStatus) {
       "downloading",
       "downloaded",
       "verifying",
+      "starting-installer",
       "preparing-runtime",
     ].includes(stage || "") &&
     !(status.completedStages || []).some((completed) =>
-      ["backing-up", "installing", "validating", "rolling-back"].includes(
-        completed,
-      ),
+      [
+        "backing-up",
+        "preparing-release",
+        "verifying-backup",
+        "preparing-runtime",
+        "installing",
+        "validating",
+        "rolling-back",
+      ].includes(completed),
     )
   );
 }
@@ -1490,6 +1501,9 @@ export async function startStudioUpdate(
           "downloading",
           "downloaded",
           "verifying",
+          "starting-installer",
+          "preparing-release",
+          "verifying-backup",
           "preparing-runtime",
           "backing-up",
           "installing",

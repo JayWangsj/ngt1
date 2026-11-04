@@ -137,20 +137,38 @@ try {
   for ($attempt = 0; $attempt -lt 180; $attempt++) {
     try {
       $health = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health" -TimeoutSec 5
-      if ([string]$health.currentVersion -eq [string]$metadata.version) { break }
+      if ([string]$health.status -eq "ok" -and
+          [string]$health.currentVersion -eq [string]$metadata.version -and
+          [string]$health.buildCommit -ieq $env:GITHUB_SHA) { break }
     } catch { }
     Start-Sleep -Seconds 1
   }
-  if (-not $health -or [string]$health.currentVersion -ne [string]$metadata.version) {
-    throw "The installed Studio did not report its active version as healthy."
+  if (-not $health -or [string]$health.status -ne "ok" -or
+      [string]$health.currentVersion -ne [string]$metadata.version -or
+      [string]$health.buildCommit -ine $env:GITHUB_SHA) {
+    throw "The installed Studio did not report the exact candidate version and commit as healthy."
   }
-  $orders = Invoke-WebRequest -Uri "http://127.0.0.1:3000/orders" -UseBasicParsing -TimeoutSec 30
-  if ($orders.StatusCode -ne 200) { throw "The installed Studio orders page did not load." }
-  $updateInfo = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system-update" `
-    -Headers @{ Origin = "http://127.0.0.1:3000"; "Sec-Fetch-Site" = "same-origin" } -TimeoutSec 45
-  if (-not $updateInfo.installed -or $updateInfo.currentVersion -ne [string]$metadata.version) {
-    throw "The installed Studio update endpoint did not recognize the active version."
+
+  $releaseManagerPath = Join-Path $releaseRoot "tools\NGTManager.exe"
+  $repairResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-repair-result.txt"
+  $repairArguments = 'repair "{0}" --result-file "{1}"' -f $releaseRoot, $repairResultPath
+  $repair = Start-Process -FilePath $releaseManagerPath -ArgumentList $repairArguments `
+    -WindowStyle Hidden -PassThru
+  Wait-NgtInstallerProcess -Process $repair -Description "NGTManager repair" `
+    -TimeoutMinutes 30 -ProgressPaths @($managerLog)
+  if ($repair.ExitCode -ne 0 -or
+      -not (Test-Path -LiteralPath $repairResultPath -PathType Leaf) -or
+      -not ([System.IO.File]::ReadAllText($repairResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    throw "NGTManager could not repair the verified candidate package."
   }
+  if (-not (Test-Path -LiteralPath (Join-Path $installRoot "data\postgres\PG_VERSION")) -or
+      @(Get-ChildItem -LiteralPath (Join-Path $installRoot "backups") -Directory -ErrorAction SilentlyContinue).Count -eq 0) {
+    throw "NGTManager repair did not preserve the database and create a verified backup."
+  }
+
+  & (Join-Path $PSScriptRoot "verify-windows-studio-runtime.ps1") `
+    -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$metadata.version) `
+    -ExpectedCommit $env:GITHUB_SHA
   Write-Output "Windows installer acceptance passed for v$($metadata.version)."
 } catch {
   try {

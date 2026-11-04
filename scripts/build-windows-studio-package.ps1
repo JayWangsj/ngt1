@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 . (Join-Path $PSScriptRoot "studio-runtime.ps1")
+. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")
 $standaloneBuild = Join-Path $BuildDirectory "standalone"
 if (-not (Test-Path -LiteralPath (Join-Path $standaloneBuild "server.js"))) {
   throw "Production build is missing. Run pnpm build first."
@@ -38,6 +39,46 @@ if (-not (Test-Path -LiteralPath $updaterBinary -PathType Leaf) -or
     -not (Test-Path -LiteralPath $managerBinary -PathType Leaf)) {
   throw "Rust installer or updater executable is missing after the release build."
 }
+$dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty Source -First 1
+if (-not $dumpbin) {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (Test-Path -LiteralPath $vswhere) {
+    $installationPath = (& $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath | Out-String).Trim()
+    if ($installationPath) {
+      $msvcTools = Join-Path $installationPath "VC\Tools\MSVC"
+      $latestTools = Get-ChildItem -LiteralPath $msvcTools -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { [version]$_.Name } -Descending |
+        Select-Object -First 1
+      if ($latestTools) {
+        $candidateDumpbin = Join-Path $latestTools.FullName "bin\Hostx64\x64\dumpbin.exe"
+        if (Test-Path -LiteralPath $candidateDumpbin -PathType Leaf) {
+          $dumpbin = $candidateDumpbin
+        }
+      }
+    }
+  }
+}
+if (-not $dumpbin) {
+  throw "dumpbin.exe is required to verify the updater's Windows runtime imports."
+}
+$updaterDependencies = @(& $dumpbin /dependents $updaterBinary 2>&1)
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to inspect the production updater's DLL dependencies."
+}
+$dynamicCrtImports = @($updaterDependencies | Where-Object {
+  [string]$_ -match '(?i)^\s*(?:VCRUNTIME140(?:_1)?|MSVCP140(?:_[A-Z0-9]+)?|CONCRT140|VCOMP140)\.dll\s*$'
+})
+if ($dynamicCrtImports.Count -gt 0) {
+  throw "The production updater imports the Visual C++ runtime dynamically: $($dynamicCrtImports -join ', ')"
+}
+$updaterDllImports = @($updaterDependencies | Where-Object {
+  [string]$_ -match '(?i)\.dll\s*$'
+} | ForEach-Object { ([string]$_).Trim() })
+Write-Output ("Production NGTUpdater.exe DLL imports: {0}" -f ($updaterDllImports -join ", "))
+Write-Output "Production updater has no dynamic Visual C++ CRT imports."
 $stage = Join-Path $projectRoot ".local\studio-package"
 if (Test-Path -LiteralPath $stage) {
   Remove-Item -LiteralPath $stage -Recurse -Force
@@ -137,8 +178,19 @@ $standaloneUpdaterSource = Join-Path $standaloneDestination "tools\ngt-updater"
 if (Test-Path -LiteralPath $standaloneUpdaterSource) {
   throw "The standalone package retained Rust updater source or build output."
 }
-Copy-Item -LiteralPath (Join-Path $BuildDirectory "static") -Destination (Join-Path $stage ".next\static") -Recurse -Force
+$staticSource = Join-Path $BuildDirectory "static"
+Copy-Item -LiteralPath $staticSource -Destination (Join-Path $stage ".next\static") -Recurse -Force
+$standaloneStaticDestination = Join-Path $standaloneDestination (Join-Path $BuildDirectory "static")
+if (Test-Path -LiteralPath $standaloneStaticDestination) {
+  Remove-Item -LiteralPath $standaloneStaticDestination -Recurse -Force
+}
+Copy-Item -LiteralPath $staticSource -Destination $standaloneStaticDestination -Recurse -Force
 Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public") -Recurse -Force
+$standalonePublicDestination = Join-Path $standaloneDestination "public"
+if (Test-Path -LiteralPath $standalonePublicDestination) {
+  Remove-Item -LiteralPath $standalonePublicDestination -Recurse -Force
+}
+Copy-Item -LiteralPath "public" -Destination $standalonePublicDestination -Recurse -Force
 $nonWindowsSharpPackages = Get-ChildItem -LiteralPath $stage -Directory -Recurse -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '^sharp-libvips-(darwin|linux|freebsd|linuxmusl|win32-arm64)' }
 foreach ($nativePackage in $nonWindowsSharpPackages) {
@@ -163,6 +215,7 @@ Copy-Item -LiteralPath $managerBinary -Destination (Join-Path $stageTools "NGTMa
 
 $runtimeScripts = @(
   "start.mjs",
+  "verify-windows-studio-static-assets.mjs",
   "windows-db.mjs",
   "postgres-runtime.mjs",
   "runtime-start-gate.cjs",
@@ -276,13 +329,17 @@ $stageFiles | ForEach-Object {
   $fileManifest[$relativePath] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-@{
+$releaseMetadata = @{
   version = $version
   commit = $commit
   runtimeHash = $runtimeHash
   files = $fileManifest
   createdAt = (Get-Date).ToUniversalTime().ToString("o")
-} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage "studio-release.json") -Encoding utf8
+}
+Write-NgtStudioReleaseMetadataNoBom `
+  -Path (Join-Path $stage "studio-release.json") `
+  -Metadata $releaseMetadata `
+  -Depth 5
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $archive = Join-Path $outputRoot ("ngt-studio-windows-v" + $version + ".zip")

@@ -31,6 +31,8 @@ const databasePort = Number(process.env.NGT_DB_PORT ?? "55432");
 await mkdir(workspace, { recursive: true });
 await mkdir(persistentRoot, { recursive: true });
 await mkdir(cache, { recursive: true });
+await writeFile(join(workspace, "database-location.txt"), dataDir);
+await writeFile(join(workspace, "database-runtime-location.txt"), runtime);
 let initialized = false;
 try {
   await access(join(dataDir, "PG_VERSION"));
@@ -201,8 +203,6 @@ try {
       "Runtime environment does not match the local database credentials.",
     );
 }
-await writeFile(join(workspace, "database-location.txt"), dataDir);
-await writeFile(join(workspace, "database-runtime-location.txt"), runtime);
 await writeFile(readyFile, String(process.pid));
 console.log(`Business PostgreSQL ready on 127.0.0.1:${databasePort}.`);
 async function stop() {

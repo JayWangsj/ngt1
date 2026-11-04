@@ -56,15 +56,12 @@ describe("NGT brand assets", () => {
       "utf8",
     );
     expect(launcher).toContain(
-      '[join(buildDirectory, "static"), join(standaloneBuildDirectory, "static")]',
+      'from "./verify-windows-studio-static-assets.mjs"',
     );
-    expect(launcher).toContain(
-      '[join(projectRoot, "public"), join(standaloneRoot, "public")]',
-    );
-    expect(launcher).toContain("await access(source)");
-    expect(launcher).toContain(
-      "await cp(source, destination, { recursive: true })",
-    );
+    expect(launcher).toContain("await verifyWindowsStudioStaticAssets({");
+    expect(launcher).toContain("buildDirectory,");
+    expect(launcher).toContain("standaloneBuildDirectory,");
+    expect(launcher).toContain("standaloneRoot,");
     expect(e2eRunner).toContain('cp("public", `${distDir}/standalone/public`');
     expect(packager).toContain(
       'Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public")',

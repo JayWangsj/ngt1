@@ -22,8 +22,18 @@ function Invoke-NgtInstallStage([string]$Name, [scriptblock]$Action) {
   $script:NgtInstallStage = $Name
   if ($script:NgtOnlineUpdateId) {
     $onlineStage = switch ($Name) {
-      "database-backup" { "backing-up" }
+      "database-backup" {
+        $marker = Get-NgtInstallJson (Join-Path $InstallRoot ".local\update-maintenance.json")
+        if ($marker.backupVerified -and $marker.backupRoot) {
+          "verifying-backup"
+        } else {
+          "backing-up"
+        }
+      }
+      "release-deployment" { "preparing-release" }
+      "runtime-preparation" { "preparing-runtime" }
       "health-validation" { "validating" }
+      "install-state-validation" { "validating" }
       default { "installing" }
     }
     Set-NgtStudioOnlineUpdateStage -InstallRoot $InstallRoot `
@@ -87,8 +97,9 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
   }
   $previousRelease = [System.IO.Path]::GetFullPath([string]$previousConfig.activeRelease)
   $previousReleaseMetadata = Get-NgtInstallJson (Join-Path $previousRelease "studio-release.json")
-  if (-not $previousReleaseMetadata.version) {
-    throw "The previous application release is not available for rollback."
+  if (-not $previousReleaseMetadata.version -or
+      [string]$previousReleaseMetadata.commit -notmatch '^[a-f0-9]{40}$') {
+    throw "The previous application release is missing its version or commit identity for rollback."
   }
   $startupScript = Join-Path $previousRelease "scripts\install-windows-startup.ps1"
   if (-not (Test-Path -LiteralPath $startupScript -PathType Leaf)) {
@@ -140,13 +151,18 @@ function Restore-NgtStudioAfterManualInstallFailure([string]$InstallRoot, [strin
   $env:NGT_DATA_ROOT = [System.IO.Path]::GetFullPath([string]$previousConfig.dataRoot)
   & $startupScript -InstallRoot $InstallRoot
   Wait-NgtStudioHealth -ExpectedVersion ([string]$previousReleaseMetadata.version)
+  & (Join-Path $previousRelease "scripts\verify-windows-studio-runtime.ps1") `
+    -ReleaseRoot $previousRelease `
+    -ExpectedVersion ([string]$previousReleaseMetadata.version) `
+    -ExpectedCommit ([string]$previousReleaseMetadata.commit)
   Complete-NgtStudioManualInstallRollback -InstallRoot $InstallRoot `
     -PreviousReleaseRoot $previousRelease `
     -VerifiedVersion ([string]$previousReleaseMetadata.version) `
+    -VerifiedCommit ([string]$previousReleaseMetadata.commit) `
     -FailureMessage ("Manual installation failed and the previous release and database backup were restored and health-checked. " + $FailureMessage) `
     -FailedStage $FailedStage `
     -OnlineUpdate:($marker.operation -eq "online-update") `
-    -HealthVerified
+    -RuntimeVerified
   return $true
 }
 
@@ -349,7 +365,9 @@ if ($isRelease) {
   & (Join-Path $PSScriptRoot "verify-windows-studio-release.ps1") `
     -ReleaseRoot $script:NgtProjectRoot `
     -ExpectedVersion ([string](Get-Content -LiteralPath (Join-Path $script:NgtProjectRoot "studio-release.json") -Raw | ConvertFrom-Json).version) | Out-Null
-  Install-NgtSharedRuntime -ProjectRoot $script:NgtProjectRoot -InstallRoot $stableInstallRoot
+  Invoke-NgtInstallStage "runtime-preparation" {
+    Install-NgtSharedRuntime -ProjectRoot $script:NgtProjectRoot -InstallRoot $stableInstallRoot
+  }
   $nodeExecutable = Get-NgtNodeExecutable
   $prismaCli = Join-Path $script:NgtProjectRoot "node_modules\prisma\build\index.js"
   if (-not (Test-Path -LiteralPath $prismaCli)) {
@@ -385,6 +403,12 @@ Invoke-NgtInstallStage "application-start" {
 Invoke-NgtInstallStage "health-validation" {
   $expectedVersion = if ($isRelease) { [string]$release.version } else { "" }
   Wait-NgtStudioHealth -ExpectedVersion $expectedVersion
+  if ($isRelease) {
+    & (Join-Path $PSScriptRoot "verify-windows-studio-runtime.ps1") `
+      -ReleaseRoot $script:NgtProjectRoot `
+      -ExpectedVersion ([string]$release.version) `
+      -ExpectedCommit ([string]$release.commit) | Out-Null
+  }
 }
 if ($manualInstall) {
   Invoke-NgtInstallStage "install-state-validation" {
