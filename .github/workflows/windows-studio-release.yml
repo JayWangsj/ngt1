@@ -85,8 +85,6 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
-    env:
-      NGT_PRODUCTION_UPDATER_BASELINE: v2.0.21
     steps:
       - uses: actions/checkout@v5
         with:
@@ -113,40 +111,44 @@ jobs:
           mode: draft
           acceptance: installer
 
-  manual-installer-acceptance:
-    name: Disposable Windows manual upgrade and repair acceptance
-    needs: [qualify, build]
-    runs-on: windows-2022
-    timeout-minutes: 120
-    permissions:
-      # GitHub exposes draft releases only to users with push access.
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }}
-      - uses: ./.github/actions/windows-studio-acceptance
-        with:
-          mode: draft
-          acceptance: manual-installer
-
-  manual-v2020-acceptance:
-    name: Disposable Windows v2.0.20 manual upgrade and repair acceptance
-    needs: [qualify, build]
-    runs-on: windows-2022
-    timeout-minutes: 120
-    permissions:
-      contents: write
+  backup-import-acceptance:
+    name: Exact-SHA versioned backup import acceptance
+    needs: qualify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ngt
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: ngt_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ngt -d ngt_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      NGT_MANUAL_UPGRADE_BASELINE: v2.0.20
+      DATABASE_URL: postgresql://ngt:ci-test-password@localhost:5432/ngt_test?schema=public
+      AUTH_SECRET: ci-only-secret-for-backup-import-2026
+      AUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - uses: ./.github/actions/windows-studio-acceptance
+      - uses: pnpm/action-setup@v4
         with:
-          mode: draft
-          acceptance: manual-installer
+          version: 11.19.0
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm db:migrate
+      - name: Exercise every supported versioned business backup format
+        run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/business.test.ts -t "versioned data backup import"
 
   publish:
     name: Publish verified Release
@@ -157,8 +159,7 @@ jobs:
         online-update-acceptance,
         production-updater-acceptance,
         installer-acceptance,
-        manual-installer-acceptance,
-        manual-v2020-acceptance,
+        backup-import-acceptance,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -190,8 +191,7 @@ jobs:
         online-update-acceptance,
         production-updater-acceptance,
         installer-acceptance,
-        manual-installer-acceptance,
-        manual-v2020-acceptance,
+        backup-import-acceptance,
         publish,
       ]
     if: ${{ always() }}

@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { statSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -743,17 +741,6 @@ export class GitHubReleaseApi {
     }
   }
 
-  async listReleases() {
-    const releases = [];
-    for (let page = 1; ; page++) {
-      const entries = await this.json(
-        this.repoPath("/releases?per_page=100&page=" + page),
-      );
-      releases.push(...entries);
-      if (entries.length < 100) return releases;
-    }
-  }
-
   async generateReleaseNotes(tag, sha) {
     const result = await this.json(this.repoPath("/releases/generate-notes"), {
       method: "POST",
@@ -849,135 +836,6 @@ export class GitHubReleaseApi {
       this.repoPath("/actions/runs/" + runId + "/jobs?per_page=100"),
     );
   }
-}
-
-function stableReleaseVersion(tag) {
-  const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag || "");
-  return match ? match.slice(1).map(Number) : null;
-}
-
-function compareReleaseVersions(left, right) {
-  for (let index = 0; index < left.length; index++) {
-    if (left[index] !== right[index]) return left[index] - right[index];
-  }
-  return 0;
-}
-
-export async function findPublishedUpdateBaseline(
-  api,
-  targetTag,
-  preferredTag,
-) {
-  const targetVersion = stableReleaseVersion(targetTag);
-  if (!targetVersion)
-    throw new Error("Online update target must be a stable release tag.");
-
-  const candidates = (await api.listReleases()).filter((release) => {
-    const version = stableReleaseVersion(release.tag_name);
-    if (
-      release.draft ||
-      release.prerelease ||
-      !version ||
-      compareReleaseVersions(version, targetVersion) >= 0
-    ) {
-      return false;
-    }
-    const names = new Set((release.assets || []).map((asset) => asset.name));
-    return [
-      "ngt-studio-windows-" + release.tag_name + ".zip",
-      "ngt-studio-windows-" + release.tag_name + ".zip.sha256",
-      "ngt-studio-runtime-" + release.tag_name + ".zip",
-      "ngt-studio-runtime-" + release.tag_name + ".zip.sha256",
-    ].every((name) => names.has(name));
-  });
-
-  if (preferredTag) {
-    return (
-      candidates.find((release) => release.tag_name === preferredTag) || null
-    );
-  }
-
-  candidates.sort((left, right) =>
-    compareReleaseVersions(
-      stableReleaseVersion(right.tag_name),
-      stableReleaseVersion(left.tag_name),
-    ),
-  );
-  return candidates[0] || null;
-}
-
-export function readUpdateBaselineToken({
-  env = process.env,
-  ghPath = "gh",
-  execFileSyncImpl = execFileSync,
-} = {}) {
-  const explicitToken = env.GITHUB_TOKEN || env.GH_TOKEN;
-  if (explicitToken) return explicitToken;
-
-  const configDirectory = String(env.GH_CONFIG_DIR || "").trim();
-  if (!configDirectory) {
-    throw new Error(
-      "find-update-baseline requires an explicit isolated GH_CONFIG_DIR.",
-    );
-  }
-  try {
-    if (!statSync(path.join(configDirectory, "hosts.yml")).isFile()) {
-      throw new Error("missing hosts file");
-    }
-  } catch {
-    throw new Error(
-      "find-update-baseline requires an isolated GitHub CLI hosts.yml.",
-    );
-  }
-
-  const ghEnvironment = { ...env, GH_CONFIG_DIR: configDirectory };
-  delete ghEnvironment.GH_TOKEN;
-  delete ghEnvironment.GITHUB_TOKEN;
-
-  let output;
-  try {
-    output = execFileSyncImpl(
-      ghPath,
-      ["auth", "token", "--hostname", "github.com"],
-      {
-        encoding: "utf8",
-        env: ghEnvironment,
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 10_000,
-        maxBuffer: 16 * 1024,
-        windowsHide: true,
-      },
-    );
-  } catch {
-    throw new Error(
-      "GitHub CLI could not read a token from the isolated GH_CONFIG_DIR.",
-    );
-  }
-
-  const token = String(output || "").trim();
-  if (!token || /\s/.test(token)) {
-    throw new Error(
-      "GitHub CLI returned an empty or invalid token from GH_CONFIG_DIR.",
-    );
-  }
-  return token;
-}
-
-export async function findUpdateBaselineWithConfiguredAuth(
-  targetTag,
-  preferredTag,
-  {
-    env = process.env,
-    ghPath = "gh",
-    execFileSyncImpl = execFileSync,
-    fetchImpl = fetch,
-  } = {},
-) {
-  const api = new GitHubReleaseApi({
-    token: readUpdateBaselineToken({ env, ghPath, execFileSyncImpl }),
-    fetchImpl,
-  });
-  return findPublishedUpdateBaseline(api, targetTag, preferredTag);
 }
 
 export async function qualifyRelease({
@@ -1100,8 +958,7 @@ export async function requireReleaseReady(api, sha) {
     "Release Ready candidate build",
     "Release Ready installer acceptance",
     "Release Ready online-update acceptance",
-    "Release Ready manual upgrade and repair acceptance",
-    "Release Ready v2.0.20 manual upgrade and repair acceptance",
+    "Release Ready versioned backup import acceptance",
     "Release Ready",
   ];
   if (
@@ -1148,20 +1005,6 @@ async function readExpectedEnvironment(allowCandidate = false) {
 
 async function main() {
   const [command, directoryArg] = process.argv.slice(2);
-  if (command === "find-update-baseline") {
-    if (!directoryArg)
-      throw new Error("find-update-baseline requires the target release tag.");
-    const baseline = await findUpdateBaselineWithConfiguredAuth(
-      directoryArg,
-      process.argv[4],
-    );
-    if (!baseline)
-      throw new Error(
-        "No published release with supported online-update assets was found.",
-      );
-    console.log(JSON.stringify({ tagName: baseline.tag_name }));
-    return;
-  }
   if (command === "manifest") {
     const directory = directoryArg || process.env.NGT_RELEASE_ASSET_DIR;
     if (!directory)

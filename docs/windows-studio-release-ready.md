@@ -1,48 +1,25 @@
-# Windows Studio Release Ready test repository
+# Windows Studio Release Ready
 
-v2.0.23 is a one-time exception: it is qualified by the formal Draft Release
-acceptance jobs instead of this test-repository preflight. Later versions still
-use the Release Ready process described below.
+Release Ready qualifies one exact source commit before creating a release tag.
+It requires the Verify MVP gates and the disposable Windows installer, repair,
+and Rust online-update acceptance jobs to pass for that commit. The online
+update test serves the exact candidate installer and assets through a local
+mock GitHub Releases API, then verifies the installed version, commit, database,
+and business data.
 
-Release Ready uses a dedicated **public** test repository so the production
-repository `JayWangsj/ngt1` is never modified by the updater acceptance. The
-repository must use `main`, match the approved repository name exactly, and
-contain no unrelated branches, tags, or Releases. Do not initialize it with a
-README or add unrelated content.
+The versioned backup import job runs the supported business backup fixtures
+against an isolated PostgreSQL database. It covers the legacy v1 and v9 formats,
+the current v10 round trip, import rollback, and rejection of a repeated import.
 
-## GitHub configuration
+The formal tagged-release workflow adds a standard-user production-updater
+acceptance against the exact candidate Draft Release. It checks the Draft build
+identity and asset hashes through an isolated `GH_CONFIG_DIR`, then verifies
+that the packaged Rust updater downloads the exact installer, completes the
+update, and preserves the business database and seeded business data. The
+GitHub CLI token-source matrix runs in the Windows candidate build.
 
-In the `ngt-updater-test` Environment:
-
-- Allow deployment only from the trusted `master` branch and retain the
-  repository's required review and self-review protections.
-- Set the non-secret Environment variable `NGT_UPDATER_TEST_REPOSITORY` to the
-  exact public `owner/repository` name. The workflow's manual input must match
-  this value; the input alone cannot select an arbitrary repository.
-- Set the Environment secret `NGT_UPDATER_TEST_TOKEN` to a fine-grained token
-  selected for this repository only, with `Contents: Read and write`. Do not
-  grant write access to `JayWangsj/ngt1` or unrelated repositories.
-
-Git ref pushes and Release creation/upload require repository Contents write.
-The production updater reads the token through an isolated `GH_CONFIG_DIR`;
-the workflow does not persist it in the standard user's profile or expose it
-as a command-line argument.
-
-## Public data and Draft handling
-
-The workflow mirrors the already-published v2.0.21 source tag and Release
-assets, then points `main` and the v2.0.23 candidate tag at the exact qualified
-public `master` commit. These source objects and the published baseline assets
-are public. Never add secrets, temporary credentials, machine configuration,
-or business test data to this repository or its refs.
-
-The v2.0.21 baseline Release is published so the original production updater
-can discover the baseline. The exact-SHA v2.0.23 candidate Release must remain
-a Draft throughout acceptance. The scoped token gives the updater access to
-that Draft and its assets; publishing it to make it readable is prohibited.
-Release Ready rejects unrelated Releases, mismatched refs or tags, altered
-baseline assets, and an already-published candidate. It does not overwrite or
-delete conflicting content.
-
-Keep the repository and its Releases for audit unless a maintainer separately
-approves cleanup. Never reuse it after adding unrelated refs or Releases.
+The workflows no longer require historical installer baselines or a separate
+updater-test repository. Release Ready remains non-writing: it does not create
+tags, Draft Releases, public Releases, or GitHub repository refs. The formal
+tagged-release workflow retains the exact-SHA Verify MVP, Release Ready,
+publication, and asset-integrity gates.

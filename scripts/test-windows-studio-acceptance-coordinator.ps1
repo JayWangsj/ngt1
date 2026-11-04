@@ -436,7 +436,7 @@ exit [int]$config.exitCode
   try { throw "temporary credential cleanup failure: $passwordPlain" }
   catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "temporary credential cleanup" -ErrorRecord $_ }
   Assert-NgtAcceptanceFailure { Assert-NgtAcceptanceCleanupSucceeded -Failures $cleanupFailures } "temporary credential cleanup"
-  $safeConsoleMessage = Get-NgtAcceptanceSafeFailureMessage -Acceptance "manual-installer" `
+  $safeConsoleMessage = Get-NgtAcceptanceSafeFailureMessage -Acceptance "installer" `
     -Message $primaryFailure.Exception.Message -Secrets $diagnosticSecrets
   try { throw $safeConsoleMessage } catch { $thrownConsoleMessage = $_.Exception.Message }
   foreach ($secret in $diagnosticSecrets) {
@@ -447,7 +447,7 @@ exit [int]$config.exitCode
   }
   $tokenStdout = (Read-NgtAcceptanceTextFile -Path $tokenCase.StdoutPath).Text
   $passwordStderr = (Read-NgtAcceptanceTextFile -Path $passwordCase.StderrPath).Text
-  Write-NgtAcceptanceFailureDiagnostic -Path $diagnosticPath -Acceptance "manual-installer" `
+  Write-NgtAcceptanceFailureDiagnostic -Path $diagnosticPath -Acceptance "installer" `
     -FailureRecord $primaryFailure -ChildFailure $childFailure -CleanupFailures $cleanupFailures.ToArray() `
     -Stdout $tokenStdout -Stderr $passwordStderr -ChildExitCode $actualChildExitCode `
     -ProcessExitCode $childException.ProcessExitCode -Secrets $diagnosticSecrets `
@@ -488,7 +488,7 @@ exit [int]$config.exitCode
   $writeFailures = New-Object 'System.Collections.Generic.List[object]'
   try {
     Write-NgtAcceptanceFailureDiagnostic -Path (Join-Path $occupiedDirectory "failure.json") `
-      -Acceptance "manual-installer" -FailureRecord $primaryFailure -Secrets $diagnosticSecrets
+      -Acceptance "installer" -FailureRecord $primaryFailure -Secrets $diagnosticSecrets
   } catch {
     Add-NgtAcceptanceCleanupFailure -Failures $writeFailures -Step "failure artifact generation" -ErrorRecord $_
   }
@@ -501,7 +501,7 @@ exit [int]$config.exitCode
   try {
     Assert-NgtAcceptanceFailure {
       Write-NgtAcceptanceFailureDiagnostic -Path $unsafeDiagnosticPath `
-        -Acceptance "manual-installer" -FailureRecord $primaryFailure -Secrets $diagnosticSecrets
+        -Acceptance "installer" -FailureRecord $primaryFailure -Secrets $diagnosticSecrets
     } "injected sanitization failure"
     Assert-NgtAcceptanceTest (-not (Test-Path -LiteralPath $unsafeDiagnosticPath)) `
       "An unsanitized diagnostic file was created after sanitization failed."

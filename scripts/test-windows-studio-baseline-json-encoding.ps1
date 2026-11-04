@@ -11,7 +11,6 @@ try {
 
   foreach ($scriptPath in @(
       $PSCommandPath,
-      (Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1"),
       (Join-Path $PSScriptRoot "windows-studio-ready-baseline.ps1"),
       (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1"),
       (Join-Path $PSScriptRoot "build-windows-studio-package.ps1"),

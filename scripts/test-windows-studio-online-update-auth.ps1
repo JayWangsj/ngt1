@@ -14,7 +14,6 @@ function Invoke-NgtOnlineAuthTest {
     [string]$GhPath,
     [string]$Repository,
     [string]$CandidateDirectory,
-    [switch]$ManualInstaller,
     [switch]$ProductionUpdater
   )
 
@@ -22,8 +21,7 @@ function Invoke-NgtOnlineAuthTest {
   try {
     $output = @(& {
       Assert-NgtOnlineUpdateGitHubAuth -GhPath $GhPath -Repository $Repository `
-        -CandidateDirectory $CandidateDirectory -ManualInstaller:$ManualInstaller `
-        -ProductionUpdater:$ProductionUpdater
+        -CandidateDirectory $CandidateDirectory -ProductionUpdater:$ProductionUpdater
     } 2>&1)
     return [pscustomobject]@{ Passed = $true; Output = $output; Message = $null }
   } catch {
@@ -49,7 +47,6 @@ $fakeToken = "ngt-isolated-auth-fixture-token"
 $decoyGhToken = "ngt-env-gh-token-decoy"
 $decoyGithubToken = "ngt-env-github-token-decoy"
 $mainRepository = "JayWangsj/ngt1"
-$testRepository = "ngt-fixture-owner/public-updater-test"
 $fakeGhPath = Join-Path $testRoot "gh.cmd"
 
 try {
@@ -89,46 +86,13 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   Assert-NgtOnlineAuthTest (-not (Test-Path -LiteralPath $argsPath)) "Local synthetic candidate mode called GitHub CLI."
   Write-Output "Local candidate mode continued without GitHub credentials."
 
-  $resolvedManualRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-    -TestReleaseRepository $testRepository -TargetTag "v2.0.23"
-  $resolvedProductionRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-    -TestReleaseRepository $testRepository -TargetTag "v2.0.23" -ProductionUpdater
-  $resolvedReadyProductionRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-    -TestReleaseRepository $testRepository -TargetTag "v2.0.23" -ReleaseReady -ProductionUpdater
-  $resolvedFutureProductionRepository = Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-    -TestReleaseRepository $testRepository -TargetTag "v2.0.24" -ProductionUpdater
-  Assert-NgtOnlineAuthTest ($resolvedManualRepository -ceq $mainRepository) `
-    "Manual upgrade authentication did not target the main repository."
-  Assert-NgtOnlineAuthTest ($resolvedProductionRepository -ceq $mainRepository) `
-    "The v2.0.23 production updater did not target the production repository."
-  Assert-NgtOnlineAuthTest ($resolvedReadyProductionRepository -ceq $testRepository) `
-    "Release Ready production updater authentication did not target the isolated test repository."
-  Assert-NgtOnlineAuthTest ($resolvedFutureProductionRepository -ceq $testRepository) `
-    "A later version's production updater authentication did not target the isolated test repository."
-  try {
-    Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-      -TestReleaseRepository $mainRepository -TargetTag "v2.0.23" -ReleaseReady -ProductionUpdater | Out-Null
-    throw "Release Ready production updater accepted the main repository as its public test repository."
-  } catch {
-    if ($_.Exception.Message -notlike "*separate test Release repository*") { throw }
-  }
-  try {
-    Resolve-NgtOnlineUpdateAuthRepository -MainRepository $mainRepository `
-      -TargetTag "v2.0.23" -ReleaseReady -ProductionUpdater | Out-Null
-    throw "Release Ready production updater accepted a missing test repository."
-  } catch {
-    if ($_.Exception.Message -notlike "*separate test Release repository*") { throw }
-  }
-
   $requiredModes = @(
-    @{ Name = "remote candidate"; CandidateDirectory = ""; Manual = $false; Production = $false; Repository = $mainRepository },
-    @{ Name = "manual upgrade"; CandidateDirectory = $candidateDirectory; Manual = $true; Production = $false; Repository = $resolvedManualRepository },
-    @{ Name = "production updater"; CandidateDirectory = $candidateDirectory; Manual = $false; Production = $true; Repository = $resolvedProductionRepository },
-    @{ Name = "Release Ready production updater"; CandidateDirectory = $candidateDirectory; Manual = $false; Production = $true; Repository = $resolvedReadyProductionRepository }
+    @{ Name = "remote candidate"; CandidateDirectory = ""; Production = $false; Repository = $mainRepository },
+    @{ Name = "production updater"; CandidateDirectory = $candidateDirectory; Production = $true; Repository = $mainRepository }
   )
   foreach ($mode in $requiredModes) {
     $result = Invoke-NgtOnlineAuthTest -GhPath $fakeGhPath -Repository $mode.Repository `
-      -CandidateDirectory $mode.CandidateDirectory -ManualInstaller:$mode.Manual -ProductionUpdater:$mode.Production
+      -CandidateDirectory $mode.CandidateDirectory -ProductionUpdater:$mode.Production
     $capturedArguments = if (Test-Path -LiteralPath $argsPath) { [System.IO.File]::ReadAllText($argsPath).Trim() } else { "missing" }
     $capturedEnvironment = if (Test-Path -LiteralPath $environmentPath) { [System.IO.File]::ReadAllText($environmentPath).Trim() } else { "missing" }
     Assert-NgtOnlineAuthTest ($result.Passed -and $result.Output.Count -eq 0) `
@@ -151,7 +115,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
     $env:NGT_FAKE_GH_STDOUT = "fake API body contains $fakeToken"
     $env:NGT_FAKE_GH_STDERR = "HTTP $status fake CLI diagnostic contains $fakeToken"
     $result = Invoke-NgtOnlineAuthTest -GhPath $fakeGhPath -Repository $mainRepository `
-      -CandidateDirectory $candidateDirectory -ManualInstaller
+      -CandidateDirectory $candidateDirectory -ProductionUpdater
     Assert-NgtOnlineAuthTest (-not $result.Passed -and
       $result.Message -eq "GitHub repository Releases API is not readable through the isolated GH_CONFIG_DIR.") `
       "An HTTP $status response was not rejected with a sanitized error."
@@ -164,7 +128,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   $env:NGT_FAKE_GH_STDOUT = ""
   $env:NGT_FAKE_GH_STDERR = "network failure contains $fakeToken"
   $networkFailure = Invoke-NgtOnlineAuthTest -GhPath $fakeGhPath -Repository $mainRepository `
-    -CandidateDirectory $candidateDirectory -ManualInstaller
+    -CandidateDirectory $candidateDirectory -ProductionUpdater
   Assert-NgtOnlineAuthTest (-not $networkFailure.Passed -and
     -not ((@($networkFailure.Output) + @($networkFailure.Message)) -join "`n").Contains($fakeToken)) `
     "A nonzero GitHub CLI result leaked its diagnostic or accepted an unavailable API."
@@ -173,7 +137,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   $env:NGT_FAKE_GH_STDOUT = "invalid JSON contains $fakeToken"
   $env:NGT_FAKE_GH_STDERR = ""
   $invalidResponse = Invoke-NgtOnlineAuthTest -GhPath $fakeGhPath -Repository $mainRepository `
-    -CandidateDirectory $candidateDirectory -ManualInstaller
+    -CandidateDirectory $candidateDirectory -ProductionUpdater
   Assert-NgtOnlineAuthTest (-not $invalidResponse.Passed -and
     $invalidResponse.Message -eq "GitHub repository Releases API returned an invalid response through the isolated GH_CONFIG_DIR.") `
     "A malformed successful CLI response was not rejected safely."
@@ -184,7 +148,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   Remove-Item -LiteralPath $argsPath -ErrorAction SilentlyContinue
   Remove-Item Env:\NGT_FAKE_GH_ARGS_PATH -ErrorAction SilentlyContinue
   $missingHosts = Invoke-NgtOnlineAuthTest -GhPath $fakeGhPath -Repository $mainRepository `
-    -CandidateDirectory $candidateDirectory -ManualInstaller
+    -CandidateDirectory $candidateDirectory -ProductionUpdater
   Assert-NgtOnlineAuthTest (-not $missingHosts.Passed -and
     $missingHosts.Message -eq "The isolated GitHub CLI hosts.yml is unavailable." -and
     -not (Test-Path -LiteralPath $argsPath)) `
@@ -215,7 +179,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   $childScript = Join-Path $PSScriptRoot "run-windows-studio-acceptance-as-standard-user.ps1"
   $childStdout = Join-Path $childRoot "stdout.txt"
   $childStderr = Join-Path $childRoot "stderr.txt"
-  $childArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $childScript + '" -Acceptance manual-installer -Child -RequestPath "' + $requestPath + '"'
+  $childArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $childScript + '" -Acceptance production-update -Child -RequestPath "' + $requestPath + '"'
   $childProcess = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
     -ArgumentList $childArguments -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $childStdout -RedirectStandardError $childStderr
