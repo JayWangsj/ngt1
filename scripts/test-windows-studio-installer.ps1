@@ -60,14 +60,16 @@ if ($checksum -notmatch '^([A-Fa-f0-9]{64})\s+(.+)$' -or
   throw "The Windows installer checksum is invalid."
 }
 
-$installRoot = Join-Path $env:LOCALAPPDATA "NGT"
-if (Test-Path -LiteralPath (Join-Path $installRoot ".local\studio.json")) {
-  throw "The disposable runner already has an NGT Studio installation."
+$installRoot = Join-Path $env:LOCALAPPDATA "NGTManager"
+$runKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+if (Test-Path -LiteralPath $installRoot) {
+  throw "The disposable user already has an NGTManager directory."
 }
-if (Get-ScheduledTask -TaskName "NGT Management System" -ErrorAction SilentlyContinue) {
-  throw "The disposable runner already has an NGT startup task."
+$runEntry = Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue
+if ($runEntry -and $runEntry.NGTManager) {
+  throw "The disposable user already has an NGTManager startup entry."
 }
-foreach ($port in @(3000, 55432)) {
+foreach ($port in @(3000, 55432, 55433)) {
   if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
     throw "Installer acceptance port $port is already in use."
   }
@@ -76,7 +78,7 @@ foreach ($port in @(3000, 55432)) {
 $installationAttempted = $false
 $cleanupSafe = $true
 $installerLog = Join-Path $env:RUNNER_TEMP "installer.log"
-$installStagesLog = Join-Path $installRoot "install-stages.log"
+$managerLog = Join-Path $installRoot "logs\manager.log"
 try {
   $installationAttempted = $true
   Write-Output "Starting the verified Windows installer; progress will be reported from its install logs."
@@ -84,12 +86,12 @@ try {
     -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installerLog") `
     -WindowStyle Hidden -PassThru
   Wait-NgtInstallerProcess -Process $installer -Description "Windows installer" `
-    -TimeoutMinutes 30 -ProgressPaths @($installerLog, $installStagesLog)
+    -TimeoutMinutes 30 -ProgressPaths @($installerLog, $managerLog)
   if ($installer.ExitCode -ne 0) {
     throw "The Windows installer exited with code $($installer.ExitCode)."
   }
 
-  $configurationPath = Join-Path $installRoot ".local\studio.json"
+  $configurationPath = Join-Path $installRoot "state\studio.json"
   if (-not (Test-Path -LiteralPath $configurationPath -PathType Leaf)) {
     throw "The installer did not write the stable Studio configuration."
   }
@@ -103,8 +105,32 @@ try {
   if ([string]$metadata.version -ne $ExpectedVersion) {
     throw "Installed release version does not match the verified build artifact."
   }
+  if ([System.IO.Path]::GetFullPath([string]$configuration.installRoot) -ne [System.IO.Path]::GetFullPath($installRoot) -or
+      [System.IO.Path]::GetFullPath([string]$configuration.dataRoot) -ne [System.IO.Path]::GetFullPath((Join-Path $installRoot "data"))) {
+    throw "The installed manager configuration points outside the per-user NGTManager directories."
+  }
   if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot "runtime\node.exe"))) {
     throw "The installed release is missing its verified Node runtime."
+  }
+  $managerPath = Join-Path $installRoot "tools\NGTManager.exe"
+  $statusResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-status.txt"
+  & $managerPath status --result-file $statusResultPath | Out-Null
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $statusResultPath -PathType Leaf)) {
+    throw "NGTManager could not write its status result."
+  }
+  $statusResult = [System.IO.File]::ReadAllText($statusResultPath)
+  if (-not $statusResult.StartsWith("SUCCESS`n", [StringComparison]::Ordinal)) {
+    throw "NGTManager did not return a successful status result."
+  }
+  $managerStatus = $statusResult.Substring(8) | ConvertFrom-Json
+  if (-not $managerStatus.installed -or
+      $managerStatus.transactionStage -ne "Committed" -or
+      [string]$managerStatus.version -ne [string]$metadata.version) {
+    throw "NGTManager did not report a committed installation of the verified release."
+  }
+  $runEntry = Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue
+  if (-not $runEntry -or $runEntry.NGTManager -notmatch 'NGTManager\.exe" run$') {
+    throw "NGTManager did not register direct per-user startup."
   }
 
   $health = $null
@@ -125,28 +151,16 @@ try {
   if (-not $updateInfo.installed -or $updateInfo.currentVersion -ne [string]$metadata.version) {
     throw "The installed Studio update endpoint did not recognize the active version."
   }
-  if (-not (Test-Path -LiteralPath $installStagesLog) -or
-      -not (Select-String -LiteralPath $installStagesLog -Pattern "COMPLETE health-validation" -Quiet)) {
-    throw "The installer did not complete its health-validation stage."
-  }
   Write-Output "Windows installer acceptance passed for v$($metadata.version)."
 } catch {
   try {
-    $releaseStateDirectory = Join-Path $installRoot ("releases\v" + $ExpectedVersion + "\.local")
     $diagnosticSources = @(
       $installerLog,
-      (Join-Path $installRoot "install.log"),
-      $installStagesLog,
-      (Join-Path $installRoot ".local\supervisor.error.log"),
-      (Join-Path $installRoot ".local\database.log"),
-      (Join-Path $installRoot ".local\database.error.log"),
-      (Join-Path $installRoot ".local\application.log"),
-      (Join-Path $installRoot ".local\application.error.log"),
-      (Join-Path $releaseStateDirectory "studio-database.log"),
-      (Join-Path $releaseStateDirectory "studio-database.error.log"),
-      (Join-Path $releaseStateDirectory "supervisor.error.log"),
-      (Join-Path $releaseStateDirectory "application.error.log")
+      (Join-Path $installRoot "logs\manager.log"),
+      (Join-Path $installRoot "logs\database.log"),
+      (Join-Path $installRoot "logs\application.log")
     )
+    $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "migration-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `
       -Stage "installer-acceptance" -Tag ("v" + $ExpectedVersion) -Commit $env:GITHUB_SHA `
       -Version $ExpectedVersion -Message $_.Exception.Message -SourcePaths $diagnosticSources -EmitToConsole
@@ -169,17 +183,24 @@ try {
         if ($uninstallProcess.ExitCode -ne 0) {
           throw "The Windows installer acceptance uninstaller exited with code $($uninstallProcess.ExitCode)."
         }
+        if (-not (Test-Path -LiteralPath (Join-Path $installRoot "data\postgres\PG_VERSION")) -or
+            -not (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json"))) {
+          throw "The uninstaller did not retain the business database and manager state."
+        }
+        if (Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue) {
+          throw "The uninstaller left the per-user NGTManager startup entry registered."
+        }
       } catch {
         $cleanupSafe = $false
         Write-Warning ("Installer acceptance cleanup failed: " + $_.Exception.Message)
       }
-    } elseif (Test-Path -LiteralPath (Join-Path $installRoot ".local\studio.json")) {
+    } elseif (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json")) {
       $cleanupSafe = $false
       Write-Warning "Installer acceptance could not find its uninstaller; retained the isolated installation."
     }
   }
   if ($cleanupSafe) {
-    foreach ($port in @(3000, 55432)) {
+    foreach ($port in @(3000, 55432, 55433)) {
       if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
         $cleanupSafe = $false
         Write-Warning "Installer acceptance left port $port open; no process was stopped by the test cleanup."
@@ -187,4 +208,11 @@ try {
     }
   }
   if (-not $cleanupSafe) { throw "Windows installer acceptance cleanup could not be verified." }
+  if (Test-Path -LiteralPath $installRoot) {
+    $expectedInstallRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "NGTManager"))
+    if ([System.IO.Path]::GetFullPath($installRoot) -ne $expectedInstallRoot) {
+      throw "Refusing to remove an unexpected installer acceptance directory."
+    }
+    Remove-Item -LiteralPath $installRoot -Recurse -Force
+  }
 }

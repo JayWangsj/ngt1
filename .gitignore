@@ -12,3 +12,4 @@ test-results/
 .local/
 backups/
 dist/
+/tools/ngt-updater/target/

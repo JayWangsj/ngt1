@@ -1,7 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use chrono::{SecondsFormat, Utc};
-use fs2::available_space;
+use fs2::{available_space, FileExt};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
@@ -99,29 +99,80 @@ fn main() -> ExitCode {
     if let Some(code) = run_acceptance_diagnostic() {
         return code;
     }
-    if let Err(error) = run() {
-        if let Ok(args) = parse_args() {
-            let log_path = update_log_path(&args.install_root, &args.update_id);
-            let _ = append_log(
-                &log_path,
-                &format!("FAILED {}: {}", error.stage, redact(&error.message)),
-            );
-            let _ = finish_failed(&args, &error);
-        }
+    #[cfg(windows)]
+    if let Some(code) = run_update_mutex_hold() {
+        return code;
+    }
+    let args = match parse_args() {
+        Ok(args) => args,
+        Err(_) => return ExitCode::FAILURE,
+    };
+    let _process_lease = match UpdateProcessLease::acquire(&args) {
+        Ok(lease) => lease,
+        Err(_) => return ExitCode::FAILURE,
+    };
+    if let Err(error) = run(&args) {
+        let log_path = update_log_path(&args.install_root, &args.update_id);
+        let _ = append_log(
+            &log_path,
+            &format!("FAILED {}: {}", error.stage, redact(&error.message)),
+        );
+        let _ = finish_failed(&args, &error);
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
 }
 
-fn run() -> Result<()> {
-    let args = parse_args()?;
+#[cfg(windows)]
+fn run_update_mutex_hold() -> Option<ExitCode> {
+    use std::ffi::OsStr;
+    let mut arguments = env::args_os().skip(1);
+    let command = arguments.next()?;
+    if command.as_os_str() != OsStr::new("--hold-update-mutex") {
+        return None;
+    }
+    let Some(root) = arguments.next().map(PathBuf::from) else {
+        return Some(ExitCode::FAILURE);
+    };
+    let Some(ready_path) = arguments.next().map(PathBuf::from) else {
+        return Some(ExitCode::FAILURE);
+    };
+    let Some(result_path) = arguments.next().map(PathBuf::from) else {
+        return Some(ExitCode::FAILURE);
+    };
+    if arguments.next().is_some() {
+        let _ = fs::write(&result_path, "ERROR\nUnexpected lock command arguments.");
+        return Some(ExitCode::FAILURE);
+    }
+    let result: Result<()> = (|| {
+        let _guard = WindowsMutex::acquire(&root)?;
+        fs::write(&ready_path, "READY")
+            .map_err(|error| UpdateError::new("running", error.to_string()))?;
+        let mut input = std::io::stdin();
+        let mut buffer = [0u8; 256];
+        while input.read(&mut buffer).map_err(UpdateError::from)? > 0 {}
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            let _ = fs::write(&result_path, "SUCCESS\nUpdate state lock released.");
+            Some(ExitCode::SUCCESS)
+        }
+        Err(error) => {
+            let _ = fs::write(&result_path, format!("ERROR\n{}", error.message));
+            Some(ExitCode::FAILURE)
+        }
+    }
+}
+
+fn run(args: &Args) -> Result<()> {
     let log_path = update_log_path(&args.install_root, &args.update_id);
     fs::create_dir_all(log_path.parent().expect("log directory"))?;
     append_log(&log_path, "Updater process started.")?;
 
-    let context = validate_install(&args)?;
+    let context = validate_install(args)?;
     write_progress(
-        &args,
+        args,
         "running",
         "checking",
         json!({
@@ -141,8 +192,8 @@ fn run() -> Result<()> {
         .build()
         .map_err(|error| UpdateError::new("checking", error.to_string()))?;
     let token = github_token(&args.release_root);
-    let release = get_release(&client, &args, token.as_deref())?;
-    validate_release(&release, &args)?;
+    let release = get_release(&client, args, token.as_deref())?;
+    validate_release(&release, args)?;
     if release.draft && token.is_none() {
         return Err(UpdateError::new(
             "checking",
@@ -155,13 +206,13 @@ fn run() -> Result<()> {
     let checksum_name = format!("{}.sha256", installer_name);
     let installer_asset = find_asset(&release, &installer_name)?;
     let checksum_asset = find_asset(&release, &checksum_name)?;
-    let download_root = args.install_root.join(".local").join("updates");
+    let download_root = args.install_root.join("state").join("updates");
     fs::create_dir_all(&download_root)?;
     let installer_path = download_root.join(format!("{}-{}", args.update_id, installer_name));
     let partial_path = installer_path.with_extension("exe.partial");
 
     write_progress(
-        &args,
+        args,
         "downloading",
         "downloading",
         json!({
@@ -170,7 +221,7 @@ fn run() -> Result<()> {
             "progressKnown": true,
         }),
     )?;
-    check_install_space(&args, &context, installer_asset.size)?;
+    check_install_space(args, &context, installer_asset.size)?;
     append_log(
         &log_path,
         &format!(
@@ -181,7 +232,7 @@ fn run() -> Result<()> {
 
     let result = download_asset(
         &client,
-        &args,
+        args,
         installer_asset,
         token.as_deref(),
         &partial_path,
@@ -198,7 +249,7 @@ fn run() -> Result<()> {
         .map_err(|error| UpdateError::new("downloading", error.to_string()))?;
 
     write_progress(
-        &args,
+        args,
         "verifying",
         "verifying",
         json!({
@@ -211,7 +262,7 @@ fn run() -> Result<()> {
     let checksum_partial = checksum_path.with_extension("sha256.partial");
     download_small_asset(
         &client,
-        &args,
+        args,
         checksum_asset,
         token.as_deref(),
         &checksum_partial,
@@ -234,7 +285,7 @@ fn run() -> Result<()> {
     append_log(&log_path, "Installer size and SHA-256 verified.")?;
 
     write_progress(
-        &args,
+        args,
         "installing",
         "installing",
         json!({
@@ -243,8 +294,8 @@ fn run() -> Result<()> {
             "progressKnown": true,
         }),
     )?;
-    let setup_result = run_installer(&args, &installer_path, &log_path)?;
-    if let Err(error) = ensure_installer_succeeded(&args, &setup_result) {
+    let setup_result = run_installer(args, &installer_path, &log_path)?;
+    if let Err(error) = ensure_installer_succeeded(args, &setup_result) {
         let _ = append_log(
             &log_path,
             &format!(
@@ -259,8 +310,8 @@ fn run() -> Result<()> {
         &format!("Inno Setup exited with code {}.", exit_code(&setup_result)),
     )?;
 
-    write_progress(&args, "validating", "validating", json!({}))?;
-    verify_installed_release(&args, &client)?;
+    write_progress(args, "validating", "validating", json!({}))?;
+    verify_installed_release(args, &client)?;
     append_log(
         &log_path,
         "Installed release and application health verified.",
@@ -269,7 +320,7 @@ fn run() -> Result<()> {
         .err()
         .map(|error| redact(&format!("{}: {}", error.stage, error.message)));
     write_progress(
-        &args,
+        args,
         "complete",
         "complete",
         json!({
@@ -290,6 +341,58 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+struct UpdateProcessLease {
+    _file: File,
+}
+
+impl UpdateProcessLease {
+    fn acquire(args: &Args) -> Result<Self> {
+        let state = args.install_root.join("state");
+        fs::create_dir_all(&state)?;
+        let path = state.join(format!("update-process-{}.lock", args.update_id));
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if !metadata.is_file() || is_reparse(&metadata) {
+                return Err(UpdateError::new(
+                    "starting",
+                    "The updater process lease is not a regular file.",
+                ));
+            }
+        }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        file.try_lock_exclusive().map_err(|error| {
+            UpdateError::new(
+                "starting",
+                if error.kind() == std::io::ErrorKind::WouldBlock {
+                    "The update task already has an active executor."
+                } else {
+                    "Unable to acquire the updater process lease."
+                },
+            )
+        })?;
+        file.set_len(0)?;
+        writeln!(file, "{}", std::process::id())?;
+        file.sync_all()?;
+        Ok(Self { _file: file })
+    }
+}
+
+fn is_reparse(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
 #[derive(Debug)]
 struct InstallContext {
     current_version: String,
@@ -298,7 +401,7 @@ struct InstallContext {
 }
 
 fn validate_install(args: &Args) -> Result<InstallContext> {
-    let config: InstallConfig = read_json(&args.install_root.join(".local").join("studio.json"))?;
+    let config: InstallConfig = read_json(&args.install_root.join("state").join("studio.json"))?;
     if canonical(&config.install_root)? != canonical(&args.install_root)? {
         return Err(UpdateError::new(
             "checking",
@@ -322,7 +425,7 @@ fn validate_install(args: &Args) -> Result<InstallContext> {
             "Downgrades and same-version online updates are not supported.",
         ));
     }
-    let lock_path = args.install_root.join("update.lock");
+    let lock_path = args.install_root.join("state").join("update.lock");
     let lock: Value = read_json(&lock_path)?;
     if lock["updateId"] != args.update_id {
         return Err(UpdateError::new(
@@ -668,7 +771,7 @@ fn parse_checksum(contents: &str, expected_filename: &str) -> Result<String> {
 
 fn check_install_space(args: &Args, context: &InstallContext, installer_size: u64) -> Result<()> {
     let release_size = directory_size(&context.active_release)?;
-    let data_size = directory_size(&context.data_root.join("data"))?.saturating_add(
+    let data_size = directory_size(&context.data_root.join("postgres"))?.saturating_add(
         fs::metadata(context.data_root.join("local-secrets.json"))
             .map(|metadata| metadata.len())
             .unwrap_or(0),
@@ -676,7 +779,9 @@ fn check_install_space(args: &Args, context: &InstallContext, installer_size: u6
     let temp_dir = env::temp_dir();
     let mut required = installer_size
         .saturating_add(release_size)
-        .saturating_add(release_size / 5);
+        .saturating_add(release_size / 5)
+        .saturating_add(data_size)
+        .saturating_add(512 * 1024 * 1024);
     if same_volume(&args.install_root, &context.data_root) {
         required = required.saturating_add(data_size);
     }
@@ -781,7 +886,7 @@ fn take_acceptance_failure_stage(install_root: &Path) -> Option<String> {
     {
         return None;
     }
-    let marker = install_root.join(".local").join("acceptance-failure-stage");
+    let marker = install_root.join("state").join("acceptance-failure-stage");
     let stage = fs::read_to_string(&marker).ok()?.trim().to_owned();
     if stage != "release-deployment" || fs::remove_file(marker).is_err() {
         return None;
@@ -800,18 +905,13 @@ fn hide_console(command: &mut Command) {
 }
 
 fn verify_installed_release(args: &Args, client: &Client) -> Result<()> {
-    let config: InstallConfig = read_json(&args.install_root.join(".local").join("studio.json"))?;
+    let config: InstallConfig = read_json(&args.install_root.join("state").join("studio.json"))?;
     let active_release = canonical(&config.active_release)?;
-    let expected_release = canonical(
-        &args
-            .install_root
-            .join("releases")
-            .join(format!("v{}", args.target_version)),
-    )?;
-    if active_release != expected_release {
+    let release_directory = canonical(&args.install_root.join("releases"))?;
+    if !active_release.starts_with(release_directory) {
         return Err(UpdateError::new(
             "validating",
-            "The installed configuration does not point to the requested release.",
+            "The installed configuration points outside the managed releases directory.",
         ));
     }
     let metadata: ReleaseMetadata = read_json(&active_release.join("studio-release.json"))?;
@@ -876,7 +976,7 @@ fn write_progress(
     fields: Value,
 ) -> Result<()> {
     with_update_mutex(&args.install_root, || {
-        let lock_path = args.install_root.join("update.lock");
+        let lock_path = args.install_root.join("state").join("update.lock");
         let mut lock: Value = read_json(&lock_path)?;
         if lock["updateId"] != args.update_id {
             return Err(UpdateError::new(
@@ -889,7 +989,7 @@ fn write_progress(
         lock["operation"] = json!("online-update");
         write_json_atomic(&lock_path, &lock)?;
 
-        let status_path = args.install_root.join("update-status.json");
+        let status_path = args.install_root.join("state").join("update-status.json");
         let mut state: Value = read_json(&status_path)?;
         if state["updateId"] != args.update_id {
             return Err(UpdateError::new(
@@ -921,15 +1021,12 @@ fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
         return Ok(());
     }
     with_update_mutex(&args.install_root, || {
-        let status_path = args.install_root.join("update-status.json");
+        let status_path = args.install_root.join("state").join("update-status.json");
         let mut state: Value = match read_json(&status_path) {
             Ok(value) => value,
             Err(_) => return Ok(()),
         };
-        if state["updateId"] != args.update_id {
-            return Ok(());
-        }
-        if state["status"] == "complete" {
+        if state["updateId"] != args.update_id || state["status"] == "complete" {
             return Ok(());
         }
         let installer_stage = failure_stage(&state, error);
@@ -951,7 +1048,7 @@ fn finish_failed(args: &Args, error: &UpdateError) -> Result<()> {
         if state["recoveryStatus"] == "failed"
             || args
                 .install_root
-                .join(".local")
+                .join("state")
                 .join("update-maintenance.json")
                 .exists()
         {
@@ -977,7 +1074,7 @@ fn failure_stage(state: &Value, error: &UpdateError) -> String {
 }
 
 fn remove_owned_downloads(install_root: &Path, update_id: &str) -> Result<()> {
-    let directory = install_root.join(".local").join("updates");
+    let directory = install_root.join("state").join("updates");
     if !directory.exists() {
         return Ok(());
     }
@@ -1640,6 +1737,30 @@ mod tests {
     }
 
     #[test]
+    fn updater_process_lease_is_exclusive_and_released_with_the_handle() {
+        let root = env::temp_dir().join(format!(
+            "ngt-updater-process-lease-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let args = Args {
+            install_root: root.clone(),
+            release_root: PathBuf::new(),
+            update_id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            target_version: "2.1.0".to_owned(),
+            repository: "owner/repo".to_owned(),
+        };
+        let active = UpdateProcessLease::acquire(&args).unwrap();
+        assert!(UpdateProcessLease::acquire(&args).is_err());
+        drop(active);
+        assert!(UpdateProcessLease::acquire(&args).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn install_space_estimate_counts_nested_files() {
         let root = env::temp_dir().join(format!(
             "ngt-updater-size-test-{}-{}",
@@ -1735,9 +1856,9 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        fs::create_dir_all(root.join(".local")).unwrap();
+        fs::create_dir_all(root.join("state")).unwrap();
         let update_id = "00000000-0000-4000-8000-000000000001";
-        let state = root.join("update-status.json");
+        let state = root.join("state").join("update-status.json");
         fs::write(
             &state,
             json!({"status":"complete", "updateId":update_id, "stage":"complete"}).to_string(),
@@ -1767,7 +1888,7 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        let updates = root.join(".local").join("updates");
+        let updates = root.join("state").join("updates");
         fs::create_dir_all(&updates).unwrap();
         let update_id = "00000000-0000-4000-8000-000000000001";
         fs::write(

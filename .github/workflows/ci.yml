@@ -79,6 +79,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy
+      - run: cargo test --manifest-path tools/ngt-updater/Cargo.toml --all-targets
       - run: pnpm build
         env:
           DATABASE_URL: postgresql://ngt:ci-only@127.0.0.1:55432/ngt?schema=public

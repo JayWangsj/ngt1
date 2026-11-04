@@ -10,8 +10,8 @@ async function createStudio() {
   const root = await mkdtemp(path.join(tmpdir(), "ngt-maintenance-"));
   roots.push(root);
   const installRoot = path.join(root, "installed");
+  await mkdir(path.join(installRoot, "state"), { recursive: true });
   await mkdir(path.join(root, ".local"), { recursive: true });
-  await mkdir(path.join(installRoot, ".local"), { recursive: true });
   await writeFile(
     path.join(root, ".local", "studio.json"),
     JSON.stringify({ installRoot }),
@@ -34,7 +34,7 @@ describe("studio maintenance write gate", () => {
   it("blocks writes while the update maintenance marker exists", async () => {
     const { root, installRoot } = await createStudio();
     await writeFile(
-      path.join(installRoot, ".local", "update-maintenance.json"),
+      path.join(installRoot, "state", "update-maintenance.json"),
       JSON.stringify({ updateId: "update-1", stage: "installing" }),
     );
     await expect(assertStudioWritesAvailable(root)).rejects.toThrow(
@@ -44,7 +44,7 @@ describe("studio maintenance write gate", () => {
 
   it("fails closed when the installed maintenance state cannot be read", async () => {
     const { root, installRoot } = await createStudio();
-    await mkdir(path.join(installRoot, ".local", "update-maintenance.json"), {
+    await mkdir(path.join(installRoot, "state", "update-maintenance.json"), {
       recursive: true,
     });
     await expect(assertStudioWritesAvailable(root)).rejects.toThrow(

@@ -7,6 +7,10 @@ edition = "2021"
 name = "NGTUpdater"
 path = "src/main.rs"
 
+[[bin]]
+name = "NGTManager"
+path = "src/ngt_manager.rs"
+
 [features]
 acceptance-api = []
 
@@ -20,4 +24,4 @@ serde_json = "1"
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading"] }

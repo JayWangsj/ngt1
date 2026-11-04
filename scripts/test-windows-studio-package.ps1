@@ -21,7 +21,11 @@ $normalizedArchiveEntries = @($archiveEntries | ForEach-Object {
 })
 $archiveUpdaterExecutables = @($normalizedArchiveEntries | Where-Object { $_ -match '(?i)(^|/)NGTUpdater\.exe$' })
 if ($archiveUpdaterExecutables.Count -ne 1 -or $archiveUpdaterExecutables[0] -ine "tools/NGTUpdater.exe") {
-  throw "Studio archive must contain only the production tools/NGTUpdater.exe binary."
+  throw "Studio archive must contain exactly one production tools/NGTUpdater.exe binary."
+}
+$archiveManagerExecutables = @($normalizedArchiveEntries | Where-Object { $_ -match '(?i)(^|/)NGTManager\.exe$' })
+if ($archiveManagerExecutables.Count -ne 1 -or $archiveManagerExecutables[0] -ine "tools/NGTManager.exe") {
+  throw "Studio archive must contain exactly one production tools/NGTManager.exe binary."
 }
 $unexpectedArchiveEntries = @($normalizedArchiveEntries | Where-Object {
   $_ -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
@@ -39,9 +43,12 @@ $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-studio-smoke-" + 
 $releaseRoot = Join-Path $smokeRoot "release"
 $dataRoot = Join-Path $smokeRoot "data"
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+$databaseProcess = $null
+$applicationProcess = $null
+$previousEnvironment = @{}
 
 function Write-SmokeLogs {
-  $stateDirectory = Join-Path $releaseRoot ".local"
+  $stateDirectory = Join-Path $smokeRoot "state"
   if (-not (Test-Path -LiteralPath $stateDirectory)) { return }
   Get-ChildItem -LiteralPath $stateDirectory -File -Filter "*.log" | ForEach-Object {
     Write-Output ("--- " + $_.Name + " ---")
@@ -56,7 +63,12 @@ try {
   $extractedUpdaterExecutables = @($extractedFiles | Where-Object { $_.Name -ieq "NGTUpdater.exe" })
   if ($extractedUpdaterExecutables.Count -ne 1 -or
       $extractedUpdaterExecutables[0].FullName -ine [System.IO.Path]::GetFullPath((Join-Path $releaseRoot "tools\NGTUpdater.exe"))) {
-    throw "Extracted Studio runtime must contain only the production tools\NGTUpdater.exe binary."
+    throw "Extracted Studio runtime must contain exactly one production tools\NGTUpdater.exe binary."
+  }
+  $extractedManagerExecutables = @($extractedFiles | Where-Object { $_.Name -ieq "NGTManager.exe" })
+  if ($extractedManagerExecutables.Count -ne 1 -or
+      $extractedManagerExecutables[0].FullName -ine [System.IO.Path]::GetFullPath((Join-Path $releaseRoot "tools\NGTManager.exe"))) {
+    throw "Extracted Studio runtime must contain exactly one production tools\NGTManager.exe binary."
   }
   $unexpectedExtractedFiles = @($extractedFiles | Where-Object {
     $relative = $_.FullName.Substring(([System.IO.Path]::GetFullPath($releaseRoot).TrimEnd("\") + "\").Length).Replace("\", "/")
@@ -65,28 +77,50 @@ try {
   if ($unexpectedExtractedFiles.Count -gt 0) {
     throw "Extracted Studio runtime contains Rust source, acceptance/debug output, or symbols: $($unexpectedExtractedFiles[0].FullName)"
   }
-  & (Join-Path $releaseRoot "scripts\verify-windows-studio-release.ps1") `
+  & (Join-Path $PSScriptRoot "verify-windows-studio-release.ps1") `
     -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$package.version) | Out-Null
-  & (Join-Path $releaseRoot "scripts\test-windows-studio-update-safety.ps1")
+  & (Join-Path $PSScriptRoot "test-windows-studio-update-safety.ps1")
   if (Test-Path -LiteralPath (Join-Path $releaseRoot ".next\standalone\node_modules\.pnpm")) {
     throw "Studio package contains the redundant standalone pnpm store."
   }
 
+  $previousEnvironment = @{
+    NGT_DATA_ROOT = $env:NGT_DATA_ROOT
+    NGT_DB_DIR = $env:NGT_DB_DIR
+    NGT_RUNTIME_STATE = $env:NGT_RUNTIME_STATE
+    NGT_ENV_FILE = $env:NGT_ENV_FILE
+    NGT_MANAGER_ROOT = $env:NGT_MANAGER_ROOT
+    NGT_STUDIO_ROOT = $env:NGT_STUDIO_ROOT
+    NGT_DB_PORT = $env:NGT_DB_PORT
+    TEMP = $env:TEMP
+    TMP = $env:TMP
+  }
+  $stateRoot = Join-Path $smokeRoot "state"
+  $tempRoot = Join-Path $smokeRoot "temp"
+  New-Item -ItemType Directory -Path $stateRoot, $tempRoot -Force | Out-Null
   $env:NGT_DATA_ROOT = $dataRoot
+  $env:NGT_DB_DIR = Join-Path $dataRoot "postgres"
+  $env:NGT_RUNTIME_STATE = $stateRoot
+  $env:NGT_ENV_FILE = Join-Path $stateRoot "application.env"
+  $env:NGT_MANAGER_ROOT = $smokeRoot
+  $env:NGT_STUDIO_ROOT = $releaseRoot
+  $env:NGT_DB_PORT = "55432"
+  $env:TEMP = $tempRoot
+  $env:TMP = $tempRoot
   Set-Location -LiteralPath $releaseRoot
-  . (Join-Path $releaseRoot "scripts\windows-studio-common.ps1")
-  $smokeInstallRoot = Join-Path $smokeRoot "install"
-  Set-NgtStudioConfig -Path (Join-Path $releaseRoot ".local\studio.json") -Configuration ([pscustomobject]@{
-    dataRoot = $dataRoot
-    installRoot = $smokeInstallRoot
+  New-Item -ItemType Directory -Path (Join-Path $stateRoot "runtime") -Force | Out-Null
+  @{
+    formatVersion = 1
+    installRoot = $smokeRoot
     activeRelease = $releaseRoot
+    dataRoot = $dataRoot
+    version = [string]$package.version
     repository = "JayWangsj/ngt1"
-  })
-
-  & (Join-Path $releaseRoot "scripts\check-windows-credential-store.ps1") | Out-Null
+    maintenance = $false
+  } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot "studio.json") -Encoding utf8
 
   if ($IntegrityOnly) {
-    $nodeExecutable = Get-NgtNodeExecutable
+    $nodeExecutable = Join-Path $releaseRoot "runtime\node.exe"
     Invoke-NgtCommand $nodeExecutable @("--version")
     Invoke-NgtCommand $nodeExecutable @("-e", "require('pg');")
     foreach ($requiredPath in @(
@@ -142,30 +176,45 @@ try {
       "--pwfile=$passwordFile"
     )
     Write-Output "Studio package integrity test passed."
-    Write-Output ("Archive size: {0:N0} bytes; production Rust updater: {1:N0} bytes." -f `
-      (Get-Item -LiteralPath $ArchivePath).Length, (Get-Item -LiteralPath (Join-Path $releaseRoot "tools\NGTUpdater.exe")).Length)
+    Write-Output ("Archive size: {0:N0} bytes; Rust installer: {1:N0} bytes; updater: {2:N0} bytes." -f `
+      (Get-Item -LiteralPath $ArchivePath).Length,
+      (Get-Item -LiteralPath (Join-Path $releaseRoot "tools\NGTManager.exe")).Length,
+      (Get-Item -LiteralPath (Join-Path $releaseRoot "tools\NGTUpdater.exe")).Length)
     return
   }
 
-  Start-NgtStudioDatabase
-
-  $nodeExecutable = Get-NgtNodeExecutable
+  $nodeExecutable = Join-Path $releaseRoot "runtime\node.exe"
+  $databaseLog = Join-Path $stateRoot "database.log"
+  $databaseProcess = Start-Process -FilePath $nodeExecutable `
+    -ArgumentList (Join-Path $releaseRoot "scripts\windows-db.mjs") `
+    -WorkingDirectory $releaseRoot `
+    -RedirectStandardOutput $databaseLog `
+    -RedirectStandardError (Join-Path $stateRoot "database.error.log") `
+    -WindowStyle Hidden -PassThru
+  $readyFile = Join-Path $stateRoot "database-ready.pid"
+  for ($attempt = 0; $attempt -lt 180 -and -not (Test-Path -LiteralPath $readyFile); $attempt++) {
+    if ($databaseProcess.HasExited) {
+      throw "Packaged database runtime exited during startup."
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  if (-not (Test-Path -LiteralPath $readyFile)) {
+    throw "Packaged database runtime did not become ready."
+  }
   $prismaCli = Join-Path $releaseRoot "node_modules\prisma\build\index.js"
-  Invoke-NgtCommand $nodeExecutable @($prismaCli, "migrate", "deploy")
+  & $nodeExecutable ("--env-file=" + $env:NGT_ENV_FILE) $prismaCli migrate deploy
+  if ($LASTEXITCODE -ne 0) { throw "Packaged database migrations failed with exit code $LASTEXITCODE." }
 
-  $applicationLog = Join-Path $releaseRoot ".local\application.log"
-  $applicationErrorLog = Join-Path $releaseRoot ".local\application.error.log"
-  $application = Start-Process -FilePath $nodeExecutable `
+  $applicationLog = Join-Path $stateRoot "application.log"
+  $applicationErrorLog = Join-Path $stateRoot "application.error.log"
+  $applicationProcess = Start-Process -FilePath $nodeExecutable `
     -ArgumentList (Join-Path $releaseRoot "scripts\start.mjs") `
     -WorkingDirectory $releaseRoot `
     -RedirectStandardOutput $applicationLog `
     -RedirectStandardError $applicationErrorLog `
     -WindowStyle Hidden -PassThru
-  Set-Content -LiteralPath (Join-Path $releaseRoot ".local\application.pid") `
-    -Value $application.Id -Encoding ascii
-
-  Wait-NgtStudioHealth
-  $githubCli = Get-NgtGitHubCli
+  Wait-NgtStudioHealth ([string]$package.version)
+  $githubCli = Join-Path $releaseRoot "runtime\gh.exe"
   $authHelp = & $githubCli auth login --help | Out-String
   if (($LASTEXITCODE -ne 0) -or
       (-not $authHelp.Contains("--web")) -or
@@ -190,8 +239,8 @@ try {
   }
   Write-Output "Studio package smoke test passed."
 } catch {
-  Write-Output "--- Archive bootstrap entries ---"
-  & tar.exe -tf $ArchivePath | Where-Object { $_ -match "install-windows-studio-bootstrap" }
+  Write-Output "--- Packaged startup files ---"
+  & tar.exe -tf $ArchivePath | Where-Object { $_ -match "(^|/)(start\.mjs|windows-db\.mjs|NGTManager\.exe)$" }
   $releaseScripts = Join-Path $releaseRoot "scripts"
   if (Test-Path -LiteralPath $releaseScripts -PathType Container) {
     Write-Output "--- Extracted release scripts ---"
@@ -200,8 +249,34 @@ try {
   Write-SmokeLogs
   throw
 } finally {
-  if (Test-Path -LiteralPath (Join-Path $releaseRoot "scripts\windows-studio-common.ps1")) {
-    try { Stop-NgtStudioProcesses } catch { Write-Warning $_.Exception.Message }
+  if ($applicationProcess) {
+    $applicationProcess.Refresh()
+    if (-not $applicationProcess.HasExited) {
+      & taskkill.exe /PID $applicationProcess.Id /T /F | Out-Null
+    }
+  }
+  $databaseData = Join-Path $dataRoot "postgres"
+  $runtimeLocationPath = Join-Path $smokeRoot "state\database-runtime-location.txt"
+  if ((Test-Path -LiteralPath (Join-Path $databaseData "PG_VERSION")) -and
+      (Test-Path -LiteralPath $runtimeLocationPath)) {
+    $databaseRuntime = (Get-Content -LiteralPath $runtimeLocationPath -Raw).Trim()
+    $pgCtl = Join-Path $databaseRuntime "bin\pg_ctl.exe"
+    if (Test-Path -LiteralPath $pgCtl) {
+      & $pgCtl -D $databaseData -m fast -w -t 30 stop 2>$null | Out-Null
+    }
+  }
+  if ($databaseProcess) {
+    $databaseProcess.Refresh()
+    if (-not $databaseProcess.HasExited) {
+      & taskkill.exe /PID $databaseProcess.Id /T /F | Out-Null
+    }
+  }
+  foreach ($name in $previousEnvironment.Keys) {
+    if ($null -eq $previousEnvironment[$name]) {
+      Remove-Item -Path "Env:\$name" -ErrorAction SilentlyContinue
+    } else {
+      Set-Item -Path "Env:\$name" -Value $previousEnvironment[$name]
+    }
   }
   Set-Location -LiteralPath $projectRoot
   Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -53,11 +53,11 @@ foreach ($sourcePath in $SourcePaths) {
       if ((Split-Path -Leaf $sourcePath) -eq "online-update.log") { "online-update.log" }
       elseif ((Split-Path -Leaf $sourcePath) -eq "update-status.json") { "update-status.json" }
       elseif ((Split-Path -Leaf $sourcePath) -match '^update-.+\.inno\.log$') { "online-installer.inno.log" }
-      elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
+      elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
       else { $null }
     }
     "installer-acceptance" {
-      if ((Split-Path -Leaf $sourcePath) -in @("installer.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "database.log", "database.error.log", "application.log", "application.error.log")) { Split-Path -Leaf $sourcePath }
+      if ((Split-Path -Leaf $sourcePath) -in @("installer.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
       else { $null }
     }
   }

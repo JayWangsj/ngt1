@@ -5,12 +5,14 @@ import { BusinessError } from "./domain";
 export async function assertStudioWritesAvailable(
   root = process.env.NGT_STUDIO_ROOT || process.cwd(),
 ) {
-  const configPath = path.join(root, ".local", "studio.json");
-  let config: { installRoot?: string };
+  type StudioConfig = { installRoot?: string; maintenance?: boolean };
+  const managerRoot = process.env.NGT_MANAGER_ROOT;
+  const configPath = managerRoot
+    ? path.join(managerRoot, "state", "studio.json")
+    : path.join(root, ".local", "studio.json");
+  let config: StudioConfig;
   try {
-    config = JSON.parse(await readFile(configPath, "utf8")) as {
-      installRoot?: string;
-    };
+    config = JSON.parse(await readFile(configPath, "utf8")) as StudioConfig;
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return;
     throw new BusinessError(
@@ -18,10 +20,15 @@ export async function assertStudioWritesAvailable(
     );
   }
   if (!config.installRoot) return;
+  if (config.maintenance) {
+    throw new BusinessError(
+      "Manutenzione di sistema in corso. Riprova tra poco.",
+    );
+  }
 
   try {
     await readFile(
-      path.join(config.installRoot, ".local", "update-maintenance.json"),
+      path.join(config.installRoot, "state", "update-maintenance.json"),
       "utf8",
     );
   } catch (cause) {

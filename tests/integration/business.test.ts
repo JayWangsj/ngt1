@@ -8,7 +8,7 @@ import {
   it,
   expect,
 } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import {
   saveCustomer,
@@ -4064,7 +4064,7 @@ describe("service order safety", () => {
   });
 });
 
-describe("versioned data backup and merge import", () => {
+describe("versioned data backup import", () => {
   it("exports, clears, restores and skips an identical second import", async () => {
     const usersBefore = await db.user.count();
     const product = await createProduct(owner, {
@@ -4144,37 +4144,9 @@ describe("versioned data backup and merge import", () => {
       manualDate: testBusinessDay,
     });
 
-    const conflict = structuredClone(backup);
-    const originalOrderId = conflict.data.orders[0].id;
-    const conflictingOrderId = randomUUID();
-    conflict.data.orders[0].id = conflictingOrderId;
-    for (const item of conflict.data.items) {
-      if (item.orderId === originalOrderId) {
-        item.id = randomUUID();
-        item.orderId = conflictingOrderId;
-      }
-    }
-    for (const payment of conflict.data.payments) {
-      if (payment.orderId === originalOrderId) {
-        payment.id = randomUUID();
-        payment.requestId = randomUUID();
-        payment.orderId = conflictingOrderId;
-      }
-    }
-    for (const history of conflict.data.histories) {
-      if (history.orderId === originalOrderId) {
-        history.id = randomUUID();
-        history.orderId = conflictingOrderId;
-      }
-    }
-    for (const audit of conflict.data.audits) {
-      if (audit.entityId === originalOrderId) {
-        audit.id = randomUUID();
-        audit.entityId = conflictingOrderId;
-      }
-    }
-    const conflictResult = await importBusinessData(owner, conflict);
-    expect(conflictResult.imported).toBe(0);
+    await expect(importBusinessData(owner, backup)).rejects.toThrow(
+      "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
+    );
     expect(await db.workOrder.count()).toBe(1);
     expect(await db.workOrderItem.count()).toBe(1);
 
@@ -4226,9 +4198,9 @@ describe("versioned data backup and merge import", () => {
       "iPhone 18 Pro Max",
     );
 
-    const second = await importBusinessData(owner, backup);
-    expect(second.imported).toBe(0);
-    expect(second.skipped).toBeGreaterThan(0);
+    await expect(importBusinessData(owner, backup)).rejects.toThrow(
+      "Il ripristino di un backup è consentito una sola volta in un database vuoto.",
+    );
     expect(await db.workOrder.count()).toBe(1);
     expect(await db.customer.count()).toBe(1);
   });
@@ -4323,8 +4295,9 @@ describe("versioned data backup and merge import", () => {
       where: { productId: unlimited.id },
     });
 
-    const second = await importBusinessData(owner, backup);
-    expect(second.imported).toBe(0);
+    await expect(importBusinessData(owner, backup)).rejects.toThrow(
+      "Il ripristino di un backup è consentito una sola volta in un database vuoto.",
+    );
     expect(await db.inventoryMovement.count()).toBe(movementCount);
     expect(await db.retailSale.count()).toBe(2);
     expect(await db.workOrderProduct.count()).toBe(1);
@@ -4511,8 +4484,9 @@ describe("versioned data backup and merge import", () => {
       await db.inventoryMovement.count({ where: { productId: product.id } }),
     ).toBe(1);
 
-    const secondImport = await importBusinessData(owner, legacy);
-    expect(secondImport.imported).toBe(0);
+    await expect(importBusinessData(owner, legacy)).rejects.toThrow(
+      "Il ripristino di un backup è consentito una sola volta in un database vuoto.",
+    );
     expect(
       await db.priceRuleOption.count({
         where: { ruleId: rule.id, productId: product.id },
@@ -4590,7 +4564,7 @@ describe("versioned data backup and merge import", () => {
     ).toBe(1);
   });
 
-  it("does not append stale quote lines when merging a backup into an existing order", async () => {
+  it("rejects backup import into an existing order without changing it", async () => {
     const order = await createOrder(owner, input({ deposit: "0" }));
     const backup = await exportBusinessData();
     await replaceQuote(owner, order.id, [
@@ -4601,13 +4575,77 @@ describe("versioned data backup and merge import", () => {
       },
     ]);
 
-    await importBusinessData(owner, backup);
+    await expect(importBusinessData(owner, backup)).rejects.toThrow(
+      "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
+    );
 
     const currentItems = await db.workOrderItem.findMany({
       where: { orderId: order.id },
     });
     expect(currentItems).toHaveLength(1);
     expect(currentItems[0].final.toString()).toBe("120");
+  });
+
+  it("rejects unsupported backup fields and invalid values before importing", async () => {
+    const unknownSection = await exportBusinessData();
+    (unknownSection.data as unknown as Record<string, unknown>).futureRecords =
+      [];
+    await expect(importBusinessData(owner, unknownSection)).rejects.toThrow(
+      "Il backup contiene sezioni non supportate.",
+    );
+
+    const unknownField = await exportBusinessData();
+    unknownField.data.orders.push({ futureField: "value" } as never);
+    await expect(importBusinessData(owner, unknownField)).rejects.toThrow(
+      "Il backup contiene campi non supportati.",
+    );
+
+    const invalidAmount = await exportBusinessData();
+    invalidAmount.data.payments.push({ amount: "1.234" } as never);
+    await expect(importBusinessData(owner, invalidAmount)).rejects.toThrow(
+      "Il backup contiene un valore non valido.",
+    );
+
+    const invalidQuantity = await exportBusinessData();
+    invalidQuantity.data.retailSaleItems.push({ quantity: 1.5 } as never);
+    await expect(importBusinessData(owner, invalidQuantity)).rejects.toThrow(
+      "Il backup contiene un valore non valido.",
+    );
+
+    const integerOverflow = await exportBusinessData();
+    integerOverflow.data.products.push({
+      stockQuantity: 2_147_483_648,
+    } as never);
+    await expect(importBusinessData(owner, integerOverflow)).rejects.toThrow(
+      "Il backup contiene un valore non valido.",
+    );
+
+    const invalidReference = await exportBusinessData();
+    invalidReference.data.workOrderDevices.push({
+      orderId: "missing-order",
+      deviceId: "missing-device",
+    } as never);
+    await expect(importBusinessData(owner, invalidReference)).rejects.toThrow(
+      "Il backup contiene un riferimento non valido.",
+    );
+
+    await saveCustomer(owner, null, {
+      name: "Duplicate backup customer",
+      phone: "3331234500",
+    });
+    const duplicateUniqueValue = await exportBusinessData();
+    duplicateUniqueValue.data.customers.push({
+      ...duplicateUniqueValue.data.customers[0],
+    });
+    await expect(
+      importBusinessData(owner, duplicateUniqueValue),
+    ).rejects.toThrow("Il backup contiene valori univoci duplicati.");
+
+    const invalidExportDate = await exportBusinessData();
+    invalidExportDate.exportedAt = "invalid";
+    await expect(importBusinessData(owner, invalidExportDate)).rejects.toThrow(
+      "Formato di backup non supportato.",
+    );
   });
 
   it("continues to accept version 1 backups without inventory arrays", async () => {
@@ -4623,10 +4661,46 @@ describe("versioned data backup and merge import", () => {
     delete legacy.data.retailSales;
     delete legacy.data.retailSaleItems;
     delete legacy.data.paymentAllocations;
+    await clearBusinessData(owner);
     await expect(importBusinessData(owner, legacy)).resolves.toEqual({
-      imported: 0,
-      skipped: expect.any(Number),
+      imported: expect.any(Number),
+      skipped: 0,
     });
+  });
+
+  it("imports backed-up fault defaults over the new installation catalog", async () => {
+    const backup = await exportBusinessData();
+    const fault = {
+      id: createHash("md5").update("PHONE:Non si accende").digest("hex"),
+      category: "PHONE",
+      name: "Non si accende",
+      key: "non si accende",
+      note: "Difetto storico",
+      sortOrder: 0,
+      hidden: false,
+    };
+    backup.data.faults.push(fault);
+    await clearBusinessData(owner);
+    await db.faultOption.create({ data: { ...fault, note: "" } });
+
+    await expect(importBusinessData(owner, backup)).resolves.toMatchObject({
+      skipped: 0,
+    });
+    expect(
+      await db.faultOption.findUniqueOrThrow({ where: { id: fault.id } }),
+    ).toMatchObject({ note: fault.note });
+
+    await clearBusinessData(owner);
+    await db.faultOption.create({
+      data: { ...fault, note: "Catalog edited locally" },
+    });
+    await expect(importBusinessData(owner, backup)).rejects.toThrow(
+      "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
+    );
+    expect(await db.priceRule.count()).toBe(0);
+    expect(
+      await db.faultOption.findUniqueOrThrow({ where: { id: fault.id } }),
+    ).toMatchObject({ note: "Catalog edited locally" });
   });
 });
 
@@ -4706,7 +4780,7 @@ it.each(["SMARTWATCH", "SMARTBAND"])(
   },
 );
 
-it("does not import an extra phone already owned by another active customer", async () => {
+it("rejects normalized phone conflicts in a backup without importing partial data", async () => {
   const first = await saveCustomer(owner, null, {
     name: "First",
     phone: "3330000001",
@@ -4718,10 +4792,11 @@ it("does not import an extra phone already owned by another active customer", as
   const backup = await exportBusinessData();
   backup.data.phones.push({ customerId: second.id, phone: "+393330000001" });
   await clearBusinessData(owner);
-  await importBusinessData(owner, backup);
-  expect(
-    await db.customerPhone.findMany({ where: { phone: "+393330000001" } }),
-  ).toEqual([{ phone: "+393330000001", customerId: first.id }]);
+  await expect(importBusinessData(owner, backup)).rejects.toThrow(
+    "Il backup contiene numeri assegnati a più clienti attivi.",
+  );
+  expect(await db.customer.count()).toBe(0);
+  expect(await db.customerPhone.count()).toBe(0);
 });
 
 it("batch customer deletion is atomic and retains orders, payments and per-customer audit", async () => {

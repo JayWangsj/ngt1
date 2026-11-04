@@ -2,7 +2,7 @@ import { access, cp, readFile, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 try {
-  process.loadEnvFile(".env");
+  process.loadEnvFile(process.env.NGT_ENV_FILE ?? ".env");
 } catch (e) {
   if (e.code !== "ENOENT") throw e;
 }

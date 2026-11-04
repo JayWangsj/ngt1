@@ -15,11 +15,11 @@ describe("NGTManager naming", () => {
     expect(layout).toContain('applicationName: "NGTManager"');
   });
 
-  it("renames installer entries while preserving the existing installation identity", () => {
+  it("uses the dedicated manager identity and per-user installation directory", () => {
     const installer = readFileSync("installer/windows-studio.iss", "utf8");
     expect(installer).toContain('#define AppName "NGTManager"');
     expect(installer).toContain(
-      '#define AppId "{{D7F74E80-B49C-4C3D-B6FC-18C04DAA9D31}"',
+      '#define AppId "{{E7B1C553-4F5A-4239-A4C2-7DCA1DC27121}"',
     );
     expect(installer).toContain("AppName={#AppName}");
     expect(installer).toContain("UninstallDisplayName={#AppName}");
@@ -29,6 +29,6 @@ describe("NGTManager naming", () => {
         `Type: files; Name: "{${location}}\\NGT 工作室管理系统.url"`,
       );
     }
-    expect(installer).toContain("DefaultDirName={localappdata}\\NGT");
+    expect(installer).toContain("DefaultDirName={localappdata}\\NGTManager");
   });
 });

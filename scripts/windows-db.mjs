@@ -1,7 +1,6 @@
 // Windows PostgreSQL cannot bootstrap UTF-8 clusters from a non-ASCII binary path.
 // Copy only the database runtime to an ASCII temporary path; application files stay put.
 import {
-  cp,
   mkdir,
   readFile,
   writeFile,
@@ -10,57 +9,74 @@ import {
   rename,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, resolve, join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomBytes, createHash } from "node:crypto";
+import { resolve, join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { resolvePostgresRuntime } from "./postgres-runtime.mjs";
+
 const require = createRequire(import.meta.url);
 const { Client } = require("pg");
-const packagedNative = resolve("runtime/postgres");
-let native;
-try {
-  await access(join(packagedNative, "bin/postgres.exe"));
-  native = packagedNative;
-} catch {
-  const embeddedRequire = createRequire(require.resolve("embedded-postgres"));
-  native = resolve(
-    dirname(embeddedRequire.resolve("@embedded-postgres/windows-x64")),
-    "../native",
-  );
-}
-const workspace = resolve(".local");
+const { runtime, cache } = await resolvePostgresRuntime();
+const workspace = resolve(process.env.NGT_RUNTIME_STATE ?? ".local");
 const readyFile = join(workspace, "database-ready.pid");
-const cache = join(
-  tmpdir(),
-  `ngt-pg-${createHash("sha256").update(process.cwd()).digest("hex").slice(0, 10)}`,
-);
-const runtime = /[^\x00-\x7F]/.test(native) ? join(cache, "runtime") : native;
 const configuredDataRoot = process.env.NGT_DATA_ROOT?.trim();
 const persistentRoot = configuredDataRoot
   ? resolve(configuredDataRoot)
   : workspace;
-if (/[^\x00-\x7F]/.test(cache))
-  throw new Error(
-    "Set TEMP to an ASCII-only directory for the Windows PostgreSQL runtime.",
-  );
+const dataDir = configuredDataRoot
+  ? join(persistentRoot, "postgres")
+  : join(cache, "data");
+const envFile = resolve(process.env.NGT_ENV_FILE ?? ".env");
+const databasePort = Number(process.env.NGT_DB_PORT ?? "55432");
 await mkdir(workspace, { recursive: true });
 await mkdir(persistentRoot, { recursive: true });
-let secrets;
+await mkdir(cache, { recursive: true });
+let initialized = false;
 try {
-  secrets = JSON.parse(
-    await readFile(join(persistentRoot, "local-secrets.json"), "utf8"),
-  );
-} catch {
+  await access(join(dataDir, "PG_VERSION"));
+  initialized = true;
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+if (!initialized) {
+  let dataDirectoryExists = true;
+  try {
+    await access(dataDir);
+  } catch (error) {
+    if (error.code === "ENOENT") dataDirectoryExists = false;
+    else throw error;
+  }
+  if (dataDirectoryExists)
+    throw new Error(
+      "Database directory is incomplete; existing data was preserved.",
+    );
+}
+let secrets;
+const secretsFile = join(persistentRoot, "local-secrets.json");
+try {
+  secrets = JSON.parse(await readFile(secretsFile, "utf8"));
+  if (
+    typeof secrets.password !== "string" ||
+    !/^[0-9a-f]{48}$/.test(secrets.password) ||
+    typeof secrets.authSecret !== "string" ||
+    !/^[0-9a-f]{64}$/.test(secrets.authSecret)
+  )
+    throw new Error("invalid stored credentials");
+} catch (error) {
+  if (error.code !== "ENOENT")
+    throw new Error(
+      "Stored local database credentials are unreadable or invalid.",
+    );
+  if (initialized)
+    throw new Error(
+      "Database credentials are missing; existing data was preserved.",
+    );
   secrets = {
     password: randomBytes(24).toString("hex"),
     authSecret: randomBytes(32).toString("hex"),
   };
-  await writeFile(
-    join(persistentRoot, "local-secrets.json"),
-    JSON.stringify(secrets),
-  );
+  await writeFile(secretsFile, JSON.stringify(secrets), { flag: "wx" });
 }
-await mkdir(cache, { recursive: true });
 if (runtime === native) {
   console.log(`Using packaged PostgreSQL runtime at ${runtime}.`);
 } else {
@@ -104,25 +120,7 @@ function run(exe, args) {
     });
   });
 }
-const dataDir = configuredDataRoot
-  ? join(persistentRoot, "data")
-  : join(cache, "data");
-let initialized = false;
-try {
-  await access(join(dataDir, "PG_VERSION"));
-  initialized = true;
-} catch (error) {
-  if (error.code !== "ENOENT") throw error;
-}
 if (!initialized) {
-  try {
-    await access(dataDir);
-    const incompleteDataDir = `${dataDir}.incomplete-${Date.now()}`;
-    await rename(dataDir, incompleteDataDir);
-    console.warn(`Preserved incomplete database at ${incompleteDataDir}.`);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
   const initializingDataDir = `${dataDir}.initializing-${process.pid}`;
   const passwordFile = join(cache, "init-password");
   await writeFile(passwordFile, secrets.password);
@@ -146,7 +144,7 @@ if (!initialized) {
 console.log(`Starting PostgreSQL from ${runtime}.`);
 const postgres = spawn(
   join(runtime, "bin/postgres.exe"),
-  ["-D", dataDir, "-h", "127.0.0.1", "-p", "55432"],
+  ["-D", dataDir, "-h", "127.0.0.1", "-p", String(databasePort)],
   { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] },
 );
 postgres.on("error", (error) => {
@@ -169,7 +167,7 @@ postgres.on("exit", (code, signal) => {
     process.stderr.write(`${details}\n`, () => process.exit(code || 1));
   }
 });
-const connection = `postgresql://ngt:${secrets.password}@127.0.0.1:55432/`;
+const connection = `postgresql://ngt:${secrets.password}@127.0.0.1:${databasePort}/`;
 for (let attempt = 0; attempt < 100; attempt++) {
   const client = new Client({ connectionString: `${connection}postgres` });
   try {
@@ -193,14 +191,20 @@ if (!ready) {
 const env = (name) =>
   `DATABASE_URL="${connection}${name}?schema=public"\nAUTH_SECRET="${secrets.authSecret}"\nAUTH_URL="http://localhost:3000"\nAUTH_TRUST_HOST="true"\n`;
 try {
-  await writeFile(".env", env("ngt"), { flag: "wx" });
+  await mkdir(dirname(envFile), { recursive: true });
+  const expectedEnv = env("ngt");
+  await writeFile(envFile, expectedEnv, { flag: "wx" });
 } catch (e) {
   if (e.code !== "EEXIST") throw e;
+  if (configuredDataRoot && (await readFile(envFile, "utf8")) !== env("ngt"))
+    throw new Error(
+      "Runtime environment does not match the local database credentials.",
+    );
 }
 await writeFile(join(workspace, "database-location.txt"), dataDir);
 await writeFile(join(workspace, "database-runtime-location.txt"), runtime);
 await writeFile(readyFile, String(process.pid));
-console.log("Business PostgreSQL ready on 127.0.0.1:55432.");
+console.log(`Business PostgreSQL ready on 127.0.0.1:${databasePort}.`);
 async function stop() {
   await unlink(readyFile).catch(() => {});
   await run("pg_ctl.exe", ["-D", dataDir, "-m", "fast", "stop"]);

@@ -27,14 +27,102 @@ import type {
   InventoryCategory,
   BusinessClock,
 } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { db } from "./db";
-import { BusinessError, type Actor } from "./domain";
+import { BusinessError, normalizePhone, type Actor } from "./domain";
 import { normalizeBrand, normalizeModel } from "./catalog";
 import { syncLegacyDefaultPriceOption } from "./service";
 
 export const BACKUP_FORMAT = "ngt-repair-data";
 export const BACKUP_VERSION = 10;
+const LEGACY_IMPORT_MARKER_ID = "ngt-legacy-backup-import";
+const LEGACY_IMPORT_MARKER_ACTION = "LEGACY_BACKUP_IMPORTED";
+const BACKUP_MODELS = {
+  customers: "Customer",
+  phones: "CustomerPhone",
+  devices: "Device",
+  orders: "WorkOrder",
+  items: "WorkOrderItem",
+  payments: "Payment",
+  histories: "StatusHistory",
+  prices: "PriceRule",
+  priceOptions: "PriceRuleOption",
+  faults: "FaultOption",
+  audits: "AuditLog",
+  products: "Product",
+  inventoryMovements: "InventoryMovement",
+  retailSales: "RetailSale",
+  retailSaleItems: "RetailSaleItem",
+  paymentAllocations: "PaymentAllocation",
+  workOrderProducts: "WorkOrderProduct",
+  workOrderFaults: "WorkOrderFault",
+  reworkSessions: "ReworkSession",
+  reworkItems: "ReworkItem",
+  deviceCatalogDeletions: "DeviceCatalogDeletion",
+  productCompatibilities: "ProductCompatibility",
+  quickServices: "QuickService",
+  retailServiceItems: "RetailServiceItem",
+  workOrderDevices: "WorkOrderDevice",
+  inventoryCategories: "InventoryCategory",
+  businessClock: "BusinessClock",
+} satisfies Record<keyof BackupData, string>;
+const INITIAL_FAULT_NAMES = [
+  "Non si accende",
+  "Alimentazione / ricarica",
+  "Riavvio improvviso",
+  "Lento / bloccato",
+  "Surriscaldamento",
+  "Danno da liquido",
+  "Danno da caduta",
+];
+const INITIAL_FAULT_CATEGORIES = [
+  "PHONE",
+  "TABLET",
+  "LAPTOP",
+  "DESKTOP",
+  "CONSOLE",
+  "SMARTWATCH",
+  "SMARTBAND",
+  "OTHER",
+];
+const INITIAL_FAULT_EXTRAS = [
+  "Display rotto",
+  "Display nero / anomalo",
+  "Touch non funzionante",
+  "Batteria dura poco",
+  "Fotocamera difettosa",
+  "Audio / microfono",
+  "Tasti difettosi",
+  "SIM / rete mobile",
+  "Wi-Fi / Bluetooth",
+];
+const INITIAL_FAULT_CATALOG = new Map(
+  INITIAL_FAULT_CATEGORIES.flatMap((category) =>
+    [
+      ...INITIAL_FAULT_NAMES.map((name, sortOrder) => ({ name, sortOrder })),
+      ...(category === "PHONE" || category === "TABLET"
+        ? INITIAL_FAULT_EXTRAS.map((name, index) => ({
+            name,
+            sortOrder: index + 10,
+          }))
+        : []),
+    ].map(({ name, sortOrder }) => {
+      const id = createHash("md5").update(`${category}:${name}`).digest("hex");
+      return [
+        id,
+        {
+          category,
+          name,
+          key: name.toLowerCase(),
+          note: "",
+          sortOrder,
+          hidden: false,
+        },
+      ] as const;
+    }),
+  ),
+);
 
 type JsonRow<T> = {
   [K in keyof T]: T[K] extends Date
@@ -94,11 +182,114 @@ function ensureBackup(value: unknown): BackupFile {
   if (
     candidate.format !== BACKUP_FORMAT ||
     typeof candidate.version !== "number" ||
+    !Number.isInteger(candidate.version) ||
+    candidate.version < 1 ||
     candidate.version > BACKUP_VERSION ||
+    typeof candidate.exportedAt !== "string" ||
+    !Number.isFinite(Date.parse(candidate.exportedAt)) ||
     !candidate.data ||
     typeof candidate.data !== "object"
   )
     throw new BusinessError("Formato di backup non supportato.");
+  const backupKeys = new Set(["format", "version", "exportedAt", "data"]);
+  if (Object.keys(value).some((key) => !backupKeys.has(key)))
+    throw new BusinessError("Il backup contiene campi non supportati.");
+  const data = candidate.data as Record<string, unknown>;
+  const allowedDataKeys = new Set(Object.keys(BACKUP_MODELS));
+  if (Object.keys(data).some((key) => !allowedDataKeys.has(key)))
+    throw new BusinessError("Il backup contiene sezioni non supportate.");
+  for (const [section, modelName] of Object.entries(BACKUP_MODELS)) {
+    const rows = data[section];
+    if (rows === undefined || rows === null) continue;
+    const model = Prisma.dmmf.datamodel.models.find(
+      (item) => item.name === modelName,
+    );
+    if (!model) throw new BusinessError("Schema di backup non disponibile.");
+    const fields = new Set(
+      model.fields
+        .filter((field) => field.kind === "scalar" || field.kind === "enum")
+        .map((field) => field.name),
+    );
+    const enumValues = new Map(
+      Prisma.dmmf.datamodel.enums.map((item) => [
+        item.name,
+        new Set(item.values.map(({ name }) => name)),
+      ]),
+    );
+    const records = section === "businessClock" ? [rows] : rows;
+    if (!Array.isArray(records))
+      throw new BusinessError("File di backup incompleto.");
+    for (const row of records) {
+      if (!row || typeof row !== "object" || Array.isArray(row))
+        throw new BusinessError("Il backup contiene una riga non valida.");
+      const record = row as Record<string, unknown>;
+      if (Object.keys(record).some((key) => !fields.has(key)))
+        throw new BusinessError("Il backup contiene campi non supportati.");
+      for (const field of model.fields) {
+        if (!(field.name in record)) continue;
+        const value = record[field.name];
+        if (value === null) {
+          if (field.isRequired)
+            throw new BusinessError("Il backup contiene un valore non valido.");
+          continue;
+        }
+        let valid = true;
+        if (field.kind === "enum") {
+          valid =
+            typeof value === "string" &&
+            (enumValues.get(field.type)?.has(value) ?? false);
+        } else if (field.kind === "scalar") {
+          switch (field.type) {
+            case "String":
+              valid = typeof value === "string";
+              break;
+            case "Boolean":
+              valid = typeof value === "boolean";
+              break;
+            case "Int":
+              valid =
+                typeof value === "number" &&
+                Number.isInteger(value) &&
+                value >= -2_147_483_648 &&
+                value <= 2_147_483_647;
+              break;
+            case "Float":
+              valid = typeof value === "number" && Number.isFinite(value);
+              break;
+            case "Decimal": {
+              const decimal = typeof value === "number" ? String(value) : value;
+              if (typeof decimal !== "string") {
+                valid = false;
+                break;
+              }
+              const match = /^-?(\d+)(?:\.(\d+))?$/.exec(decimal);
+              if (!match) {
+                valid = false;
+                break;
+              }
+              const args = Array.isArray(field.nativeType)
+                ? field.nativeType[1]
+                : null;
+              const precision = Number(args?.[0]);
+              const scale = Number(args?.[1]);
+              const integerDigits = match[1].replace(/^0+/, "").length;
+              const significantFraction = (match[2] ?? "").replace(/0+$/, "");
+              valid =
+                significantFraction.length <= scale &&
+                integerDigits <= precision - scale;
+              break;
+            }
+            case "DateTime":
+              valid =
+                typeof value === "string" && Number.isFinite(Date.parse(value));
+              break;
+          }
+        }
+        if (!valid)
+          throw new BusinessError("Il backup contiene un valore non valido.");
+      }
+    }
+  }
   for (const key of [
     "customers",
     "phones",
@@ -163,7 +354,7 @@ function ensureBackup(value: unknown): BackupFile {
     !Array.isArray(inventoryCategories)
   )
     throw new BusinessError("File di backup incompleto.");
-  return {
+  const normalized: BackupFile = {
     ...(candidate as BackupFile),
     data: {
       ...(candidate.data as BackupData),
@@ -186,6 +377,157 @@ function ensureBackup(value: unknown): BackupFile {
       businessClock,
     },
   };
+  validateBackupReferences(normalized.data);
+  validateBackupUniqueValues(normalized.data);
+  validateBackupBusinessConstraints(normalized.data);
+  return normalized;
+}
+
+function validateBackupReferences(data: BackupData) {
+  const rowsByModel = new Map<string, Record<string, unknown>[]>();
+  for (const [section, modelName] of Object.entries(BACKUP_MODELS)) {
+    const value = data[section as keyof BackupData];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    rowsByModel.set(modelName, rows as Record<string, unknown>[]);
+  }
+
+  for (const [modelName, rows] of rowsByModel) {
+    const model = Prisma.dmmf.datamodel.models.find(
+      (item) => item.name === modelName,
+    );
+    if (!model) throw new BusinessError("Schema di backup non disponibile.");
+    for (const relation of model.fields) {
+      const fromFields = relation.relationFromFields;
+      const toFields = relation.relationToFields;
+      if (
+        relation.kind !== "object" ||
+        !fromFields?.length ||
+        !toFields?.length ||
+        relation.type === "User"
+      )
+        continue;
+      const targets = rowsByModel.get(relation.type);
+      if (!targets) continue;
+      const targetKeys = new Set(
+        targets.map((target) =>
+          JSON.stringify(toFields.map((field) => target[field])),
+        ),
+      );
+      for (const row of rows) {
+        const sourceKey = fromFields.map((field) => row[field]);
+        if (sourceKey.every((value) => value === null || value === undefined))
+          continue;
+        if (
+          sourceKey.some((value) => value === null || value === undefined) ||
+          !targetKeys.has(JSON.stringify(sourceKey))
+        )
+          throw new BusinessError(
+            "Il backup contiene un riferimento non valido.",
+          );
+      }
+    }
+  }
+}
+
+function validateBackupUniqueValues(data: BackupData) {
+  const rowsByModel = new Map<string, Record<string, unknown>[]>();
+  for (const [section, modelName] of Object.entries(BACKUP_MODELS)) {
+    const value = data[section as keyof BackupData];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    rowsByModel.set(modelName, rows as Record<string, unknown>[]);
+  }
+  for (const [modelName, rows] of rowsByModel) {
+    const model = Prisma.dmmf.datamodel.models.find(
+      (item) => item.name === modelName,
+    );
+    if (!model) throw new BusinessError("Schema di backup non disponibile.");
+    const constraints = [
+      ...(model.primaryKey ? [model.primaryKey.fields] : []),
+      ...model.uniqueFields,
+      ...model.uniqueIndexes.map(({ fields }) => fields),
+      ...model.fields
+        .filter((field) => field.isId || field.isUnique)
+        .map((field) => [field.name]),
+    ];
+    const seenConstraints = new Set<string>();
+    for (const fields of constraints) {
+      const constraintKey = JSON.stringify(fields);
+      if (seenConstraints.has(constraintKey)) continue;
+      seenConstraints.add(constraintKey);
+      const seenValues = new Set<string>();
+      for (const row of rows) {
+        const values = fields.map((field) => row[field]);
+        if (values.some((value) => value === null || value === undefined))
+          continue;
+        const valueKey = JSON.stringify(values);
+        if (seenValues.has(valueKey))
+          throw new BusinessError(
+            "Il backup contiene valori univoci duplicati.",
+          );
+        seenValues.add(valueKey);
+      }
+    }
+  }
+}
+
+function isInitialFaultCatalog(faults: FaultOption[]) {
+  return faults.every((fault) => {
+    const expected = INITIAL_FAULT_CATALOG.get(fault.id);
+    if (!expected) return false;
+    return (
+      expected.category === fault.category &&
+      expected.name === fault.name &&
+      expected.key === fault.key &&
+      expected.note === fault.note &&
+      expected.sortOrder === fault.sortOrder &&
+      expected.hidden === fault.hidden
+    );
+  });
+}
+
+function validateBackupBusinessConstraints(data: BackupData) {
+  const activeCustomerIds = new Set(
+    data.customers
+      .filter(
+        (customer) =>
+          customer.deletedAt === null || customer.deletedAt === undefined,
+      )
+      .map((customer) => customer.id),
+  );
+  const activePhoneOwners = new Map<string, string>();
+  const claimPhone = (phone: string, customerId: string) => {
+    if (!phone) return;
+    const normalizedPhone = normalizePhone(phone);
+    const owner = activePhoneOwners.get(normalizedPhone);
+    if (owner && owner !== customerId)
+      throw new BusinessError(
+        "Il backup contiene numeri assegnati a più clienti attivi.",
+      );
+    activePhoneOwners.set(normalizedPhone, customerId);
+  };
+  for (const customer of data.customers) {
+    if (activeCustomerIds.has(customer.id))
+      claimPhone(customer.phone, customer.id);
+  }
+  for (const phone of data.phones) {
+    if (activeCustomerIds.has(phone.customerId))
+      claimPhone(phone.phone, phone.customerId);
+  }
+  for (const payment of data.payments) {
+    if (Boolean(payment.orderId) === Boolean(payment.saleId))
+      throw new BusinessError(
+        "Il backup contiene un pagamento senza una sola origine valida.",
+      );
+  }
+  const defaultRules = new Set<string>();
+  for (const option of data.priceOptions) {
+    if (!option.isDefault) continue;
+    if (defaultRules.has(option.ruleId))
+      throw new BusinessError(
+        "Il backup contiene più opzioni predefinite per una regola.",
+      );
+    defaultRules.add(option.ruleId);
+  }
 }
 async function ensureActor(actor: Actor) {
   const found = await db.user.findFirst({
@@ -248,7 +590,10 @@ export async function exportBusinessData(): Promise<BackupFile> {
         tx.faultOption.findMany({
           orderBy: [{ category: "asc" }, { key: "asc" }],
         }),
-        tx.auditLog.findMany({ orderBy: { createdAt: "asc" } }),
+        tx.auditLog.findMany({
+          where: { id: { not: LEGACY_IMPORT_MARKER_ID } },
+          orderBy: { createdAt: "asc" },
+        }),
         tx.product.findMany({ orderBy: { createdAt: "asc" } }),
         tx.inventoryMovement.findMany({ orderBy: { createdAt: "asc" } }),
         tx.retailSale.findMany({ orderBy: { number: "asc" } }),
@@ -357,6 +702,54 @@ export async function importBusinessData(
   let imported = 0;
   let skipped = 0;
   await db.$transaction(async (tx) => {
+    const existingImport = await tx.auditLog.findUnique({
+      where: { id: LEGACY_IMPORT_MARKER_ID },
+    });
+    if (existingImport) {
+      throw new BusinessError(
+        "Il ripristino di un backup è consentito una sola volta in un database vuoto.",
+      );
+    }
+    const [businessDataCounts, targetFaults] = await Promise.all([
+      Promise.all([
+        tx.customer.count(),
+        tx.customerPhone.count(),
+        tx.device.count(),
+        tx.workOrder.count(),
+        tx.workOrderItem.count(),
+        tx.payment.count(),
+        tx.statusHistory.count(),
+        tx.product.count(),
+        tx.inventoryMovement.count(),
+        tx.retailSale.count(),
+        tx.retailSaleItem.count(),
+        tx.paymentAllocation.count(),
+        tx.workOrderProduct.count(),
+        tx.workOrderFault.count(),
+        tx.reworkSession.count(),
+        tx.reworkItem.count(),
+        tx.deviceCatalogDeletion.count(),
+        tx.productCompatibility.count(),
+        tx.retailServiceItem.count(),
+        tx.workOrderDevice.count(),
+        tx.priceRule.count(),
+        tx.priceRuleOption.count(),
+        tx.quickService.count(),
+        tx.inventoryCategory.count(),
+        tx.businessClock.count(),
+        tx.auditLog.count({ where: { action: { not: "USER_CREATED" } } }),
+      ]),
+      tx.faultOption.findMany(),
+    ]);
+    const initialFaultCatalog = isInitialFaultCatalog(targetFaults);
+    if (
+      businessDataCounts.some((count) => count > 0) ||
+      (targetFaults.length > 0 && !initialFaultCatalog)
+    ) {
+      throw new BusinessError(
+        "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
+      );
+    }
     const customerIds = new Map<string, string>();
     const deviceIds = new Map<string, string>();
     const priceIds = new Map<string, string>();
@@ -364,6 +757,7 @@ export async function importBusinessData(
     const legacyPriceOptionIds = new Map<string, string>();
     const priceOptionRuleIds = new Set<string>();
     const orderIds = new Map<string, string>();
+    const primaryWorkOrderDeviceKeys = new Set<string>();
     const existingOrderIds = new Set<string>();
     const saleIds = new Map<string, string>();
     const paymentIds = new Map<string, string>();
@@ -654,16 +1048,6 @@ export async function importBusinessData(
         continue;
       }
       let target = await tx.device.findUnique({ where: { id: source.id } });
-      target ??= await tx.device.findFirst({
-        where: {
-          customerId,
-          category: source.category,
-          brand: normalizeBrand(source.brand),
-          series: normalizeModel(source.series),
-          model: normalizeModel(source.model),
-          imei: source.imei,
-        },
-      });
       if (!target) {
         target = await tx.device.create({
           data: {
@@ -892,6 +1276,7 @@ export async function importBusinessData(
       imported++;
       orderIds.set(source.id, created.id);
       entityIds.set(source.id, created.id);
+      primaryWorkOrderDeviceKeys.add(`${created.id}\u0000${deviceId}`);
     }
     for (const source of backup.data.workOrderDevices) {
       if (existingOrderIds.has(source.orderId)) {
@@ -907,6 +1292,12 @@ export async function importBusinessData(
       const exists = await tx.workOrderDevice.findUnique({
         where: { orderId_deviceId: { orderId, deviceId } },
       });
+      if (
+        exists &&
+        primaryWorkOrderDeviceKeys.has(`${orderId}\u0000${deviceId}`)
+      ) {
+        continue;
+      }
       if (exists) skipped++;
       else {
         await tx.workOrderDevice.create({ data: { orderId, deviceId } });
@@ -1202,12 +1593,21 @@ export async function importBusinessData(
             category_key: { category: source.category, key: source.key },
           },
         }));
-      if (exists) skipped++;
+      if (exists && initialFaultCatalog) {
+        await tx.faultOption.update({
+          where: { id: exists.id },
+          data: source,
+        });
+        imported++;
+      } else if (exists) skipped++;
       else {
         await tx.faultOption.create({ data: source });
         imported++;
       }
-      faultIds.set(source.id, exists?.id ?? source.id);
+      faultIds.set(
+        source.id,
+        initialFaultCatalog ? source.id : (exists?.id ?? source.id),
+      );
     }
     for (const source of backup.data.workOrderFaults) {
       if (existingOrderIds.has(source.orderId)) {
@@ -1237,6 +1637,13 @@ export async function importBusinessData(
       }
     }
     for (const source of backup.data.audits) {
+      if (
+        source.id === LEGACY_IMPORT_MARKER_ID ||
+        source.action === LEGACY_IMPORT_MARKER_ACTION
+      ) {
+        skipped++;
+        continue;
+      }
       if (existingOrderIds.has(source.entityId)) {
         skipped++;
         continue;
@@ -1326,6 +1733,11 @@ export async function importBusinessData(
         imported++;
       }
     }
+    if (skipped > 0) {
+      throw new BusinessError(
+        "Il backup contiene righe non importabili; nessun dato è stato salvato.",
+      );
+    }
     await tx.$executeRawUnsafe(
       "SELECT setval(" +
         "pg_get_serial_sequence('\"WorkOrder\"', 'number'), " +
@@ -1338,6 +1750,20 @@ export async function importBusinessData(
         'GREATEST((SELECT COALESCE(MAX("number"), 0) FROM "RetailSale"), 1), ' +
         '(SELECT COUNT(*) > 0 FROM "RetailSale"))',
     );
+    await tx.auditLog.create({
+      data: {
+        id: LEGACY_IMPORT_MARKER_ID,
+        entityId: LEGACY_IMPORT_MARKER_ID,
+        action: LEGACY_IMPORT_MARKER_ACTION,
+        actorId: actor.id,
+        actorName: actor.name,
+        context: {
+          backupFormat: backup.format,
+          backupVersion: backup.version,
+          exportedAt: backup.exportedAt,
+        },
+      },
+    });
   });
   return { imported, skipped };
 }
