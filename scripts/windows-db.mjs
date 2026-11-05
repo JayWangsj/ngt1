@@ -9,7 +9,7 @@ import {
   rename,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { resolve, join } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolvePostgresRuntime } from "./postgres-runtime.mjs";
@@ -79,19 +79,7 @@ try {
   };
   await writeFile(secretsFile, JSON.stringify(secrets), { flag: "wx" });
 }
-if (runtime === native) {
-  console.log(`Using packaged PostgreSQL runtime at ${runtime}.`);
-} else {
-  console.log(`Preparing PostgreSQL runtime at ${runtime}.`);
-  try {
-    await access(join(runtime, "bin/postgres.exe"));
-  } catch {
-    await cp(native, runtime, {
-      recursive: true,
-      dereference: true,
-    });
-  }
-}
+console.log(`Using PostgreSQL runtime at ${runtime}.`);
 function run(exe, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(join(runtime, "bin", exe), args, {

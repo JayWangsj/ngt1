@@ -23,7 +23,9 @@ export async function resolvePostgresRuntime() {
   const cacheKey = resolve(
     process.env.NGT_MANAGER_ROOT ?? process.cwd(),
   ).toLowerCase();
-  let runtimeFingerprint = native.toLowerCase();
+  let runtimeFingerprint = createHash("sha256")
+    .update(native.toLowerCase())
+    .digest("hex");
   let runtimeFiles = [];
   if (process.env.NGT_MANAGER_ROOT) {
     const manifestText = await readFile(resolve("studio-release.json"), "utf8");
