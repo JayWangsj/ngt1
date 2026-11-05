@@ -51,7 +51,7 @@ function Invoke-NgtBusinessDataProbe([string]$ReleaseRoot, [string]$Action, [str
   $probePath = Join-Path $PSScriptRoot "windows-studio-business-probe.cjs"
   $node = Join-Path $ReleaseRoot "runtime\node.exe"
   $client = Join-Path $ReleaseRoot ".next\standalone\node_modules\@prisma\client"
-  & $node $probePath $Action (Join-Path $ReleaseRoot ".env") $client $Code $SnapshotPath
+  & $node $probePath $Action (Join-Path $installRoot "state\application.env") $client $Code $SnapshotPath
   if ($LASTEXITCODE -ne 0) { throw "Isolated business database $Action probe failed." }
 }
 
