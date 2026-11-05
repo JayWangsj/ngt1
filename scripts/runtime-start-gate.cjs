@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node's --require preload must use CommonJS.
 const { readFileSync, unlinkSync } = require("node:fs");
 
 const gate = process.env.NGT_RUNTIME_START_GATE;

@@ -287,7 +287,7 @@ fn run(args: &Args) -> Result<()> {
     append_log(&log_path, "Installer size and SHA-256 verified.")?;
 
     write_progress(
-        &args,
+        args,
         "running",
         "starting-installer",
         json!({
@@ -312,8 +312,8 @@ fn run(args: &Args) -> Result<()> {
         &format!("Inno Setup exited with code {}.", exit_code(&setup_result)),
     )?;
 
-    write_progress(&args, "validating", "validating", json!({}))?;
-    let build_commit = verify_installed_release(&args, &client)?;
+    write_progress(args, "validating", "validating", json!({}))?;
+    let build_commit = verify_installed_release(args, &client)?;
     append_log(
         &log_path,
         "Installed release and application health verified.",
