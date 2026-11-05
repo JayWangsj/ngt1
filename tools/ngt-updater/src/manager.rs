@@ -3115,7 +3115,8 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 1024];
-            stream.read(&mut request).unwrap();
+            let bytes_read = stream.read(&mut request).unwrap();
+            assert!(bytes_read > 0, "health check client sent no request");
             let body = br#"{"status":"ok","currentVersion":"2.0.23"}"#;
             write!(
                 stream,
