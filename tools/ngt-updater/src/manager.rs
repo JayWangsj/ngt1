@@ -1384,47 +1384,45 @@ fn run_migrations(
     Ok(())
 }
 
-#[cfg(windows)]
-fn health_matches(version: &str) -> bool {
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-    let mut stream = match TcpStream::connect_timeout(
-        &std::net::SocketAddr::from(([127, 0, 0, 1], APPLICATION_PORT)),
-        Duration::from_secs(2),
-    ) {
-        Ok(stream) => stream,
-        Err(_) => return false,
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-    if stream
-        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
-        return false;
-    }
-    let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() {
-        return false;
-    }
-    let Some((headers, body)) = response.split_once("\r\n\r\n") else {
+fn health_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("Unable to initialize application health client: {error}"))
+}
+
+fn health_matches_at(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    version: &str,
+) -> bool {
+    let Ok(response) = client.get(url).send() else {
         return false;
     };
-    if !headers
-        .lines()
-        .next()
-        .is_some_and(|line| line.contains(" 200 "))
-    {
+    if !response.status().is_success() {
         return false;
     }
-    serde_json::from_str::<serde_json::Value>(body)
+    response
+        .json::<serde_json::Value>()
         .map(|value| value["status"] == "ok" && value["currentVersion"] == version)
         .unwrap_or(false)
 }
 
 #[cfg(windows)]
+fn health_matches(client: &reqwest::blocking::Client, version: &str) -> bool {
+    health_matches_at(
+        client,
+        &format!("http://127.0.0.1:{APPLICATION_PORT}/api/health"),
+        version,
+    )
+}
+
+#[cfg(windows)]
 fn wait_for_health(application: &mut Child, version: &str) -> Result<(), String> {
+    let client = health_client()?;
     for _ in 0..180 {
-        if health_matches(version) {
+        if health_matches(&client, version) {
             return Ok(());
         }
         if let Some(status) = application
@@ -2818,8 +2816,9 @@ fn open_system(root: &Path) -> Result<String, String> {
     if !runtime_is_active(root)? {
         launch_manager(root, "run")?;
     }
+    let client = health_client()?;
     for _ in 0..180 {
-        if health_matches(&config.version) {
+        if health_matches(&client, &config.version) {
             let mut command = Command::new("cmd.exe");
             command
                 .args(["/C", "start", "", "http://127.0.0.1:3000"])
@@ -3105,6 +3104,34 @@ pub fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_check_accepts_chunked_http_json() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            stream.read(&mut request).unwrap();
+            let body = br#"{"status":"ok","currentVersion":"2.0.23"}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{:X}\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+            stream.write_all(b"\r\n0\r\n\r\n").unwrap();
+        });
+
+        let client = health_client().unwrap();
+        let url = format!("http://{address}/api/health");
+        assert!(health_matches_at(&client, &url, "2.0.23"));
+        server.join().unwrap();
+    }
 
     fn create_test_install(version: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
