@@ -234,8 +234,11 @@ if ($Child) {
   }
 
   $arguments = @{}
+  $orchestrationOnlyParameters = @("TargetTag", "ExpectedCommitSha", "ExpectedManifestPath")
   foreach ($entry in $request.parameters.PSObject.Properties) {
-    $arguments[$entry.Name] = $entry.Value
+    if ($entry.Name -notin $orchestrationOnlyParameters) {
+      $arguments[$entry.Name] = $entry.Value
+    }
   }
   $childExitCode = 0
   try {

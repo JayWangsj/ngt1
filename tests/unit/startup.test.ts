@@ -160,6 +160,10 @@ describe("Windows persistent startup", () => {
       "Set-Content -LiteralPath $request.resultPath -Value $childExitCode -Encoding ascii",
     );
     expect(runner).toContain("Get-NgtAcceptanceProcessOutcome");
+    expect(runner).toContain(
+      '$orchestrationOnlyParameters = @("TargetTag", "ExpectedCommitSha", "ExpectedManifestPath")',
+    );
+    expect(runner).toContain("$entry.Name -notin $orchestrationOnlyParameters");
     expect(acceptanceCoordinator).toContain("Get-NgtAcceptanceChildExitCode");
     expect(acceptanceCoordinator).toContain(
       "The standard-user acceptance wrote an invalid exit result.",
