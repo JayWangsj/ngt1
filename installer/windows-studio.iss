@@ -69,6 +69,8 @@ var
   PackagePath: String;
   ResultPath: String;
   ResultMessage: String;
+  ResultLines: TArrayOfString;
+  ResultIndex: Integer;
   Parameters: String;
   Operation: String;
   UpdateId: String;
@@ -94,7 +96,13 @@ begin
     (ResultCode <> 0) then
   begin
     ResultMessage := 'No detailed error was written.';
-    LoadStringFromFile(ResultPath, ResultMessage);
+    if LoadStringsFromFile(ResultPath, ResultLines) and
+      (GetArrayLength(ResultLines) > 1) then
+    begin
+      ResultMessage := ResultLines[1];
+      for ResultIndex := 2 to GetArrayLength(ResultLines) - 1 do
+        ResultMessage := ResultMessage + #13#10 + ResultLines[ResultIndex];
+    end;
     if not WizardSilent then
       MsgBox('NGTManager could not complete installation.' + #13#10 + ResultMessage, mbError, MB_OK);
     RaiseException('NGTManager installation failed. Exit code: ' + IntToStr(ResultCode) + #13#10 + ResultMessage);

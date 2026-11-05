@@ -472,9 +472,8 @@ describe("Windows persistent startup", () => {
 
   it("surfaces Rust manager failures in the Inno installer", async () => {
     const installer = await readFile("installer/windows-studio.iss", "utf8");
-    expect(installer).toContain(
-      "LoadStringFromFile(ResultPath, ResultMessage)",
-    );
+    expect(installer).toContain("LoadStringsFromFile(ResultPath, ResultLines)");
+    expect(installer).toContain("ResultMessage := ResultLines[1]");
     expect(installer).toContain("NGTManager installation failed.");
     expect(installer).toContain("RaiseException");
   });
