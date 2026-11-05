@@ -445,7 +445,21 @@ try {
     if ([System.IO.Path]::GetFullPath($installRoot) -ne $expectedInstallRoot) {
       throw "Refusing to remove an unexpected installer acceptance directory."
     }
-    Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
-    if (Test-Path -LiteralPath $installRoot) { throw "The isolated installer acceptance directory remains after cleanup." }
+    $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(60)
+    while (Test-Path -LiteralPath $installRoot) {
+      try {
+        Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction Stop
+      } catch {
+        if ([DateTime]::UtcNow -ge $cleanupDeadline) {
+          throw "Unable to remove the isolated installer acceptance directory within 60 seconds."
+        }
+      }
+      if (Test-Path -LiteralPath $installRoot) {
+        if ([DateTime]::UtcNow -ge $cleanupDeadline) {
+          throw "The isolated installer acceptance directory remains after cleanup."
+        }
+        Start-Sleep -Milliseconds 100
+      }
+    }
   }
 }
