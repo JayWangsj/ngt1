@@ -1392,11 +1392,7 @@ fn health_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|error| format!("Unable to initialize application health client: {error}"))
 }
 
-fn health_matches_at(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    version: &str,
-) -> bool {
+fn health_matches_at(client: &reqwest::blocking::Client, url: &str, version: &str) -> bool {
     let Ok(response) = client.get(url).send() else {
         return false;
     };
