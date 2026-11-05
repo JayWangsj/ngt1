@@ -1732,14 +1732,12 @@ fn restore_database(root: &Path, backup_root: &Path, operation_id: &str) -> Resu
     let data_root = root.join("data");
     let data = data_root.join("postgres");
     let backup = backup_root.join("database");
-    let backup_metadata = fs::symlink_metadata(&backup)
-        .map_err(|_| {
-            "The verified database backup is missing; original data was preserved.".to_owned()
-        })?;
-    let backup_version = fs::symlink_metadata(backup.join("PG_VERSION"))
-        .map_err(|_| {
-            "The verified database backup is missing; original data was preserved.".to_owned()
-        })?;
+    let backup_metadata = fs::symlink_metadata(&backup).map_err(|_| {
+        "The verified database backup is missing; original data was preserved.".to_owned()
+    })?;
+    let backup_version = fs::symlink_metadata(backup.join("PG_VERSION")).map_err(|_| {
+        "The verified database backup is missing; original data was preserved.".to_owned()
+    })?;
     if !backup_metadata.is_dir()
         || is_reparse(&backup_metadata)
         || !backup_version.is_file()
@@ -1752,11 +1750,7 @@ fn restore_database(root: &Path, backup_root: &Path, operation_id: &str) -> Resu
     let preserved = data_root.join(format!("postgres-interrupted-{operation_id}"));
     let preserved_exists = match fs::symlink_metadata(&preserved) {
         Ok(metadata) if metadata.is_dir() && !is_reparse(&metadata) => true,
-        Ok(_) => {
-            return Err(
-                "The interrupted database copy is not a regular directory.".to_owned(),
-            )
-        }
+        Ok(_) => return Err("The interrupted database copy is not a regular directory.".to_owned()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
             return Err(format!(
@@ -3170,7 +3164,11 @@ mod tests {
         assert!(!preserved.exists());
 
         fs::create_dir_all(&preserved).unwrap();
-        fs::write(preserved.join("PG_VERSION"), "preserved before interrupted restore").unwrap();
+        fs::write(
+            preserved.join("PG_VERSION"),
+            "preserved before interrupted restore",
+        )
+        .unwrap();
         remove_owned_directory(&data_root, &data).unwrap();
         fs::create_dir_all(&data).unwrap();
         fs::write(data.join("PG_VERSION"), "partial restore").unwrap();

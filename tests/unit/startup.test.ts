@@ -172,7 +172,10 @@ describe("Windows persistent startup", () => {
     expect(acceptanceAction).toContain(
       "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}",
     );
-    expect(acceptanceAction).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(acceptanceAction).toContain("GITHUB_TOKEN: ${{ github.token }}");
+    expect(acceptanceAction).toContain(
+      "GH_TOKEN: ${{ inputs.acceptance == 'production-update' && github.token || '' }}",
+    );
     expect(installerAcceptance).toContain(
       "[string]$health.buildCommit -ieq $env:GITHUB_SHA",
     );
