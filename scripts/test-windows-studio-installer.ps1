@@ -445,6 +445,7 @@ try {
     if ([System.IO.Path]::GetFullPath($installRoot) -ne $expectedInstallRoot) {
       throw "Refusing to remove an unexpected installer acceptance directory."
     }
-    Remove-Item -LiteralPath $installRoot -Recurse -Force
+    Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $installRoot) { throw "The isolated installer acceptance directory remains after cleanup." }
   }
 }
