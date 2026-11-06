@@ -1960,8 +1960,7 @@ fn install_package(
         ));
         transaction.candidate_release = Some(final_release.clone());
         advance_transaction(&root, &mut transaction, Stage::Switching)?;
-        fs::rename(&candidate_stage, &final_release)
-            .map_err(|error| format!("Unable to activate the verified release: {error}"))?;
+        activate_candidate(&candidate_stage, &final_release)?;
         copy_file_atomically(
             &source.join("tools/NGTManager.exe"),
             &root.join("tools/NGTManager.exe"),
@@ -2023,6 +2022,39 @@ fn install_package(
             Err(error)
         }
     }
+}
+
+fn activate_candidate(candidate_stage: &Path, final_release: &Path) -> Result<(), String> {
+    const MAX_ATTEMPTS: usize = 50;
+    const RETRY_DELAY: Duration = Duration::from_millis(100);
+
+    for attempt in 0..MAX_ATTEMPTS {
+        if final_release.exists() {
+            return Err(
+                "Unable to activate the verified release: destination already exists.".to_owned(),
+            );
+        }
+        match fs::rename(candidate_stage, final_release) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if attempt + 1 < MAX_ATTEMPTS
+                    && (matches!(error.raw_os_error(), Some(5 | 32 | 33))
+                        || matches!(
+                            error.kind(),
+                            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+                        )) =>
+            {
+                thread::sleep(RETRY_DELAY);
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Unable to activate the verified release after {} attempt(s): {error}",
+                    attempt + 1
+                ));
+            }
+        }
+    }
+    unreachable!("the last activation attempt returns its result")
 }
 
 #[cfg(windows)]
@@ -3226,6 +3258,41 @@ mod tests {
         process_cleanup.unwrap();
         assert!(child_status.code().is_some());
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn candidate_activation_retries_temporary_file_locks() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("ngt-manager-activation-retry-{}", unique_id()));
+        let candidate = root.join(".candidate");
+        let release = root.join("v2.0.23");
+        fs::create_dir_all(&candidate).unwrap();
+        let held_path = candidate.join("held-open.bin");
+        fs::write(&held_path, b"candidate file").unwrap();
+        let held_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(&held_path)
+            .unwrap();
+        let release_lock = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            drop(held_file);
+        });
+
+        let started = std::time::Instant::now();
+        let activation = activate_candidate(&candidate, &release);
+        let elapsed = started.elapsed();
+        release_lock.join().unwrap();
+
+        assert!(activation.is_ok(), "activation failed: {activation:?}");
+        assert!(elapsed >= Duration::from_millis(200));
+        assert!(release.is_dir());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn create_test_install(version: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
 
