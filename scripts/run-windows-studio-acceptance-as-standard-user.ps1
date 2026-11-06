@@ -489,6 +489,7 @@ try {
       try {
         $authProbeScript = @(
           "@echo off"
+          'for /f "tokens=2,*" %%A in (''reg query HKCU\Environment /v GH_CONFIG_DIR 2^>nul'') do set "GH_CONFIG_DIR=%%B"'
           ('"{0}" auth token --hostname github.com 1>"{1}" 2>"{2}"' -f `
             $ghExecutablePath, $authProbeStdoutPath, $authProbeStderrPath)
           'if errorlevel 1 goto authProbeFailed'
