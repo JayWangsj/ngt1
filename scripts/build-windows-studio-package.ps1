@@ -31,11 +31,13 @@ $cargoTarget = if ($env:CARGO_TARGET_DIR) {
 } else {
   Join-Path $projectRoot "tools\ngt-updater\target"
 }
-& cargo build --release --manifest-path $updaterManifest --target-dir $cargoTarget
-if ($LASTEXITCODE -ne 0) { throw "Rust updater release build failed." }
+& cargo build --release --bins --manifest-path $updaterManifest --target-dir $cargoTarget
+if ($LASTEXITCODE -ne 0) { throw "Rust installer and updater build failed." }
 $updaterBinary = Join-Path $cargoTarget "release\NGTUpdater.exe"
-if (-not (Test-Path -LiteralPath $updaterBinary -PathType Leaf)) {
-  throw "Rust updater executable is missing after the release build."
+$managerBinary = Join-Path $cargoTarget "release\NGTManager.exe"
+if (-not (Test-Path -LiteralPath $updaterBinary -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $managerBinary -PathType Leaf)) {
+  throw "Rust installer or updater executable is missing after the release build."
 }
 $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty Source -First 1
@@ -209,30 +211,15 @@ Copy-Item -LiteralPath "assets\ngt-studio.ico" -Destination $stageAssets -Force
 $stageTools = Join-Path $stage "tools"
 New-Item -ItemType Directory -Path $stageTools -Force | Out-Null
 Copy-Item -LiteralPath $updaterBinary -Destination (Join-Path $stageTools "NGTUpdater.exe") -Force
+Copy-Item -LiteralPath $managerBinary -Destination (Join-Path $stageTools "NGTManager.exe") -Force
 
 $runtimeScripts = @(
-  "backup-windows-studio.ps1",
-  "check-windows-credential-store.ps1",
-  "test-windows-studio-backup.ps1",
-  "test-windows-studio-install-coordination.ps1",
-  "test-windows-studio-update-safety.ps1",
-  "install-windows-startup.ps1",
-  "install-windows-studio.ps1",
-  "install-windows-studio-bootstrap.ps1",
-  "prepare-windows-studio-install.ps1",
-  "retain-windows-studio-releases.ps1",
-  "studio-runtime.ps1",
   "start.mjs",
   "verify-windows-studio-static-assets.mjs",
-  "uninstall-windows-startup.ps1",
-  "uninstall-windows-studio.ps1",
-  "verify-windows-studio-release.ps1",
-  "verify-windows-studio-runtime.ps1",
   "windows-db.mjs",
-  "windows-service.ps1",
-  "windows-studio-launcher.vbs",
-  "windows-studio-common.ps1",
-  "windows-studio-install-coordination.ps1"
+  "postgres-runtime.mjs",
+  "runtime-start-gate.cjs",
+  "run-pg-ctl.mjs"
 )
 $stageScripts = Join-Path $stage "scripts"
 New-Item -ItemType Directory -Path $stageScripts -Force | Out-Null
@@ -325,6 +312,11 @@ if ($updaterExecutables.Count -ne 1 -or
     $updaterExecutables[0].FullName -ine [System.IO.Path]::GetFullPath((Join-Path $stage "tools\NGTUpdater.exe"))) {
   throw "The staged runtime must contain only the production tools\NGTUpdater.exe binary."
 }
+$managerExecutables = @($stageFiles | Where-Object { $_.Name -ieq "NGTManager.exe" })
+if ($managerExecutables.Count -ne 1 -or
+    $managerExecutables[0].FullName -ine [System.IO.Path]::GetFullPath((Join-Path $stage "tools\NGTManager.exe"))) {
+  throw "The staged runtime must contain the production tools\NGTManager.exe binary."
+}
 $unexpectedUpdaterFiles = @($stageFiles | Where-Object {
   $relative = $_.FullName.Substring(([System.IO.Path]::GetFullPath($stage).TrimEnd("\") + "\").Length).Replace("\", "/")
   $relative -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
@@ -378,7 +370,11 @@ if (-not ($archiveEntries | Where-Object { $_ -like ("*" + $requiredPrismaClient
 $normalizedArchiveEntries = @($archiveEntries | ForEach-Object { ([string]$_).Replace("\", "/").TrimStart([char[]]@('.', '/')) })
 $archiveUpdaterExecutables = @($normalizedArchiveEntries | Where-Object { $_ -match '(?i)(^|/)NGTUpdater\.exe$' })
 if ($archiveUpdaterExecutables.Count -ne 1 -or $archiveUpdaterExecutables[0] -ine "tools/NGTUpdater.exe") {
-  throw "The archive must contain only the production tools/NGTUpdater.exe binary."
+  throw "The archive must contain the production tools/NGTUpdater.exe binary."
+}
+$archiveManagerExecutables = @($normalizedArchiveEntries | Where-Object { $_ -match '(?i)(^|/)NGTManager\.exe$' })
+if ($archiveManagerExecutables.Count -ne 1 -or $archiveManagerExecutables[0] -ine "tools/NGTManager.exe") {
+  throw "The archive must contain the production tools/NGTManager.exe binary."
 }
 $unexpectedArchiveEntries = @($normalizedArchiveEntries | Where-Object {
   $_ -match '(?i)(^|/)tools/ngt-updater/(target|src|acceptance|debug|\.cargo)(/|$)|(^|/)tools/ngt-updater/.*\.(rs|toml|lock)$|\.(pdb|rlib|rmeta|d)$'
@@ -389,6 +385,6 @@ if ($unexpectedArchiveEntries.Count -gt 0) {
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
 Set-Content -LiteralPath ($archive + ".sha256") -Value ("$hash  " + (Split-Path $archive -Leaf)) -Encoding ascii
 Write-Output $archive
-Write-Output ("Archive size: {0:N0} bytes; production Rust updater: {1:N0} bytes." -f `
-  (Get-Item -LiteralPath $archive).Length, (Get-Item -LiteralPath $updaterBinary).Length)
+Write-Output ("Archive size: {0:N0} bytes; Rust installer: {1:N0} bytes; updater: {2:N0} bytes." -f `
+  (Get-Item -LiteralPath $archive).Length, (Get-Item -LiteralPath $managerBinary).Length, (Get-Item -LiteralPath $updaterBinary).Length)
 Write-Output ("Excluded {0} source maps and {1} non-Windows Sharp packages." -f $sourceMaps.Count, $nonWindowsSharpPackages.Count)

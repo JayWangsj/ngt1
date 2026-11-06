@@ -1,37 +1,18 @@
 function Test-NgtOnlineUpdateRequiresGitHubAuth(
   [string]$CandidateDirectory,
-  [switch]$ManualInstaller,
   [switch]$ProductionUpdater
 ) {
-  return (-not $CandidateDirectory) -or $ManualInstaller -or $ProductionUpdater
-}
-
-function Resolve-NgtOnlineUpdateAuthRepository(
-  [Parameter(Mandatory = $true)][string]$MainRepository,
-  [string]$TestReleaseRepository,
-  [Parameter(Mandatory = $true)][string]$TargetTag,
-  [switch]$ReleaseReady,
-  [switch]$ProductionUpdater
-) {
-  if (-not $ProductionUpdater) { return $MainRepository }
-  if ($TargetTag -ceq "v2.0.23" -and -not $ReleaseReady) { return $MainRepository }
-  if ($TestReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
-      $TestReleaseRepository -ieq $MainRepository) {
-    throw "Production updater acceptance requires a separate test Release repository."
-  }
-  return $TestReleaseRepository
+  return (-not $CandidateDirectory) -or $ProductionUpdater
 }
 
 function Assert-NgtOnlineUpdateGitHubAuth(
   [string]$GhPath,
   [string]$Repository = "JayWangsj/ngt1",
   [string]$CandidateDirectory,
-  [switch]$ManualInstaller,
   [switch]$ProductionUpdater
 ) {
   if (-not (Test-NgtOnlineUpdateRequiresGitHubAuth `
         -CandidateDirectory $CandidateDirectory `
-        -ManualInstaller:$ManualInstaller `
         -ProductionUpdater:$ProductionUpdater)) {
     return
   }

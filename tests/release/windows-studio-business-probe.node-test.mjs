@@ -133,7 +133,7 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
     "utf8",
   );
   const acceptanceScript = await readFile(
-    "scripts/test-windows-studio-online-update.ps1",
+    "scripts/test-windows-studio-installer.ps1",
     "utf8",
   );
   assert.match(schema, /model PriceRuleOption\s*\{/);
@@ -141,7 +141,10 @@ test("release data probe preserves a v2.0.18 payment, stock and legacy quote fix
   assert.match(schema, /model WorkOrderProduct\s*\{/);
   assert.match(migration, /INSERT INTO "PriceRuleOption"/);
   assert.match(migration, /rule\."requiredProductId"/);
-  assert.match(acceptanceScript, /releases\\\$oldTag/);
+  assert.match(
+    acceptanceScript,
+    /Invoke-NgtBusinessDataProbe -ReleaseRoot \$releaseRoot/,
+  );
   assert.match(acceptanceScript, /runtime\\node\.exe/);
   assert.match(acceptanceScript, /standalone\\node_modules\\@prisma\\client/);
 

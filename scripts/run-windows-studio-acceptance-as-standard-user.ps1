@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("online-update", "installer", "manual-installer", "production-update")]
+  [ValidateSet("online-update", "installer", "production-update")]
   [string]$Acceptance,
   [switch]$Child,
   [string]$RequestPath,
@@ -8,7 +8,6 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-studio-acceptance-coordinator.ps1")
-. (Join-Path $PSScriptRoot "windows-studio-online-update-auth.ps1")
 
 function Get-NgtAcceptanceSha256([string]$Value) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -171,37 +170,47 @@ if ($Child) {
     $gh = Get-Command gh.exe -ErrorAction Stop
     Test-NgtGhAuthMatrix $gh.Source ([string]$request.authProbeRoot) $configTokenMatch.Groups[1].Value
 
-    $targetTag = [string]$request.parameters.TargetTag
-    $repository = Resolve-NgtOnlineUpdateAuthRepository `
-      -MainRepository "JayWangsj/ngt1" `
-      -TestReleaseRepository ([string]$request.environment.NGT_UPDATER_TEST_REPOSITORY) `
-      -TargetTag $targetTag `
-      -ReleaseReady:([string]$request.environment.NGT_RELEASE_READY -ceq "true") `
-      -ProductionUpdater
     $manifest = Get-Content -LiteralPath ([string]$request.parameters.ExpectedManifestPath) -Raw | ConvertFrom-Json
-    $releaseOutput = & $gh.Source release view $targetTag --repo $repository --json tagName,isDraft,assets 2>$null
+    $targetTag = [string]$request.parameters.TargetTag
+    $repository = "JayWangsj/ngt1"
+    $expectedTag = "v" + [string]$request.parameters.ExpectedVersion
+    if ($targetTag -cne $expectedTag -or
+        [string]$manifest.tag -cne $expectedTag -or
+        [string]$manifest.sha -ine [string]$request.parameters.ExpectedCommitSha) {
+      throw "The authenticated production updater target does not match the exact candidate manifest."
+    }
+    $releaseOutput = & $gh.Source release view $targetTag --repo $repository --json tagName,isDraft,assets,body 2>$null
     if ($LASTEXITCODE -ne 0) { throw "The target Draft Release is not readable through GH_CONFIG_DIR only." }
     $release = ($releaseOutput | Out-String) | ConvertFrom-Json
+    $expectedMarker = "<!-- ngt-release-build:v1 tag=$expectedTag sha=$($manifest.sha) version=$($manifest.version) identity=$($manifest.buildIdentity) -->"
     $expectedNames = @($manifest.assets | ForEach-Object name | Sort-Object)
     $releaseNames = @($release.assets | ForEach-Object name | Sort-Object)
     if ($release.tagName -ne $targetTag -or -not $release.isDraft -or
+        -not ([string]$release.body).Contains($expectedMarker) -or
         (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $releaseNames)) {
-      throw "The authenticated updater-test Draft identity or asset inventory is incorrect."
+      throw "The authenticated production Draft identity or asset inventory is incorrect."
+    }
+    foreach ($asset in $manifest.assets) {
+      $remoteAsset = @($release.assets | Where-Object name -eq $asset.name)
+      if ($remoteAsset.Count -ne 1 -or [long]$remoteAsset[0].size -ne [long]$asset.size -or
+          ($remoteAsset[0].digest -and [string]$remoteAsset[0].digest -ine "sha256:$($asset.sha256)")) {
+        throw "The authenticated production Draft asset does not match the exact candidate: $($asset.name)"
+      }
     }
     $draftDownloadDirectory = Join-Path ([string]$request.authProbeRoot) "public-draft-assets"
     New-Item -ItemType Directory -Path $draftDownloadDirectory -Force | Out-Null
     try {
       & $gh.Source release download $targetTag --repo $repository --dir $draftDownloadDirectory 2>$null
-      if ($LASTEXITCODE -ne 0) { throw "The target Draft Release assets could not be downloaded through GH_CONFIG_DIR only." }
+      if ($LASTEXITCODE -ne 0) { throw "The exact production Draft assets could not be downloaded through GH_CONFIG_DIR only." }
       $downloadedNames = @(Get-ChildItem -LiteralPath $draftDownloadDirectory -File | ForEach-Object Name | Sort-Object)
       if (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $downloadedNames) {
-        throw "The downloaded Draft asset inventory is incorrect."
+        throw "The downloaded production Draft asset inventory is incorrect."
       }
       foreach ($asset in $manifest.assets) {
         $assetPath = Join-Path $draftDownloadDirectory $asset.name
         if ((Get-Item -LiteralPath $assetPath).Length -ne [long]$asset.size -or
             (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$asset.sha256) {
-          throw "A downloaded Draft asset does not match the candidate SHA256: $($asset.name)"
+          throw "A downloaded production Draft asset does not match the candidate SHA256: $($asset.name)"
         }
       }
     } finally {
@@ -215,7 +224,7 @@ if ($Child) {
         (Get-Date) -lt $taskProbeDeadline) { Start-Sleep -Milliseconds 250 }
     Assert-NgtAcceptanceFileContent -Path ([string]$request.authProbeResultPath) `
       -Expected "PASS" -Description "The fresh-process GH_CONFIG_DIR restart probe"
-    Write-Output "GH_CONFIG_DIR-only Draft view, full asset download, and fresh-process restart passed."
+    Write-Output "GH_CONFIG_DIR-only exact-SHA Draft view, asset download, and fresh-process restart passed."
   }
 
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
@@ -225,8 +234,11 @@ if ($Child) {
   }
 
   $arguments = @{}
+  $orchestrationOnlyParameters = @("TargetTag", "ExpectedCommitSha", "ExpectedManifestPath")
   foreach ($entry in $request.parameters.PSObject.Properties) {
-    $arguments[$entry.Name] = $entry.Value
+    if ($entry.Name -notin $orchestrationOnlyParameters) {
+      $arguments[$entry.Name] = $entry.Value
+    }
   }
   $childExitCode = 0
   try {
@@ -275,9 +287,8 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hoste
 }
 
 $scriptPath = switch ($Acceptance) {
-  "online-update" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
-  "production-update" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
-  "manual-installer" { Join-Path $PSScriptRoot "test-windows-studio-online-update.ps1" }
+  "online-update" { Join-Path $PSScriptRoot "test-windows-studio-installer.ps1" }
+  "production-update" { Join-Path $PSScriptRoot "test-windows-studio-installer.ps1" }
   "installer" { Join-Path $PSScriptRoot "test-windows-studio-installer.ps1" }
 }
 $candidateVersion = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "package.json") -Raw | ConvertFrom-Json).version
@@ -285,31 +296,25 @@ $targetTag = if ($env:NGT_RELEASE_READY -eq "true") { "v$candidateVersion" } els
 $parameters = switch ($Acceptance) {
   "online-update" {
     @{
+      InstallerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-v$candidateVersion.exe"
+      ExpectedVersion = $candidateVersion
+      OnlineUpdateAcceptance = $true
+      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+      AcceptanceUpdaterPath = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance\NGTUpdater.exe"
       TargetTag = $targetTag
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
-      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
-      AcceptanceUpdaterPath = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance\NGTUpdater.exe"
     }
   }
   "production-update" {
     @{
+      InstallerPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\ngt-studio-windows-setup-v$candidateVersion.exe"
+      ExpectedVersion = $candidateVersion
+      ProductionUpdaterAcceptance = $true
+      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
       TargetTag = $targetTag
       ExpectedCommitSha = $env:GITHUB_SHA
       ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
-      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
-      AcceptanceUpdaterPath = Join-Path $env:RUNNER_TEMP "ngt-updater-acceptance\NGTUpdater.exe"
-      TestReleaseRepository = $env:NGT_UPDATER_TEST_REPOSITORY
-      ProductionUpdater = $true
-    }
-  }
-  "manual-installer" {
-    @{
-      TargetTag = $targetTag
-      ExpectedCommitSha = $env:GITHUB_SHA
-      ExpectedManifestPath = Join-Path $env:GITHUB_WORKSPACE "release-assets\release-manifest.json"
-      CandidateDirectory = Join-Path $env:GITHUB_WORKSPACE "release-assets"
-      ManualInstaller = $true
     }
   }
   "installer" {
@@ -319,8 +324,7 @@ $parameters = switch ($Acceptance) {
     }
   }
 }
-$requiresGitHubAuth = ($Acceptance -in @("manual-installer", "production-update")) -or
-  ($Acceptance -eq "online-update" -and -not $parameters.CandidateDirectory)
+$requiresGitHubAuth = ($Acceptance -eq "production-update")
 
 $runId = [guid]::NewGuid().ToString("N")
 $userName = "ngtci" + $runId.Substring(0, 8)
@@ -353,6 +357,9 @@ $authProbeReadyPath = Join-Path $isolatedTemp "auth-probe.ready"
 $authProbeResultPath = Join-Path $isolatedTemp "auth-probe.result"
 $authProbeStdoutPath = Join-Path $isolatedTemp "auth-probe.stdout"
 $authProbeStderrPath = Join-Path $isolatedTemp "auth-probe.stderr"
+$authProbeExitCodePath = Join-Path $isolatedTemp "auth-probe.exit-code"
+$authProbeCommandPath = Join-Path $authProbeRoot "auth-probe.cmd"
+$commandPath = Join-Path $env:SystemRoot "System32\cmd.exe"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $ghExecutablePath = $null
 $expectedTokenSha256 = $null
@@ -449,9 +456,6 @@ try {
       GITHUB_WORKSPACE = $workspace
       RUNNER_TEMP = $isolatedTemp
       GH_CONFIG_DIR = if ($requiresGitHubAuth) { $ghConfigDirectory } else { $null }
-      NGT_MANUAL_UPGRADE_BASELINE = $env:NGT_MANUAL_UPGRADE_BASELINE
-      NGT_PRODUCTION_UPDATER_BASELINE = $env:NGT_PRODUCTION_UPDATER_BASELINE
-      NGT_UPDATER_TEST_REPOSITORY = $env:NGT_UPDATER_TEST_REPOSITORY
       PATH = $env:PATH
     }
     verifyGitHubAuth = ($Acceptance -eq "production-update")
@@ -483,9 +487,15 @@ try {
   while (-not $process.WaitForExit(1000)) {
     if (-not $authProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
       try {
-        $authProbeProcess = Start-Process -FilePath $ghExecutablePath -ArgumentList "auth token --hostname github.com" `
-          -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $workspace `
-          -RedirectStandardOutput $authProbeStdoutPath -RedirectStandardError $authProbeStderrPath `
+        $authProbeScript = @(
+          "@echo off"
+          ('"{0}" auth token --hostname github.com 1>"{1}" 2>"{2}"' -f `
+            $ghExecutablePath, $authProbeStdoutPath, $authProbeStderrPath)
+          ('echo %ERRORLEVEL%>"{0}"' -f $authProbeExitCodePath)
+        ) -join "`r`n"
+        [System.IO.File]::WriteAllText($authProbeCommandPath, $authProbeScript + "`r`n", [System.Text.Encoding]::ASCII)
+        $authProbeProcess = Start-Process -FilePath $commandPath -ArgumentList @("/d", "/c", "auth-probe.cmd") `
+          -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $authProbeRoot `
           -WindowStyle Hidden -PassThru
         $probeDeadline = (Get-Date).AddSeconds(60)
         while (-not $authProbeProcess.HasExited -and (Get-Date) -lt $probeDeadline) {
@@ -493,13 +503,17 @@ try {
           $authProbeProcess.Refresh()
         }
         if (-not $authProbeProcess.HasExited) {
-          Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction SilentlyContinue
+          $authProbeProcess.Kill()
+          [void]$authProbeProcess.WaitForExit(5000)
           throw "The fresh standard-user native GitHub CLI probe did not exit within 60 seconds."
         }
         $authProbeProcess.WaitForExit()
-        $authProbeProcess.Refresh()
-        if ($authProbeProcess.ExitCode -ne 0) {
-          throw "The fresh standard-user native GitHub CLI probe failed with exit code $($authProbeProcess.ExitCode)."
+        if (-not (Test-Path -LiteralPath $authProbeExitCodePath -PathType Leaf)) {
+          throw "The fresh standard-user native GitHub CLI probe did not write its exit result."
+        }
+        $authProbeExitCode = [System.IO.File]::ReadAllText($authProbeExitCodePath).Trim()
+        if ($authProbeExitCode -cne "0") {
+          throw "The fresh standard-user native GitHub CLI probe failed with exit code $authProbeExitCode."
         }
         $probeToken = (Get-Content -LiteralPath $authProbeStdoutPath -Raw).Trim()
         if (-not $probeToken -or (Get-NgtAcceptanceSha256 $probeToken) -cne $expectedTokenSha256) {
@@ -556,7 +570,7 @@ try {
     try {
       $authProbeProcess.Refresh()
       if (-not $authProbeProcess.HasExited) {
-        Stop-Process -Id $authProbeProcess.Id -Force -ErrorAction Stop
+        $authProbeProcess.Kill()
         if (-not $authProbeProcess.WaitForExit(5000)) {
           throw "The fresh credential probe process did not stop before cleanup."
         }

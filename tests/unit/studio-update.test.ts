@@ -1,7 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -11,7 +9,7 @@ import {
   compareVersions,
   getGitHubLoginStatus,
   getStudioUpdateLog,
-  getStudioUpdateStatus,
+  getStudioUpdateStatus as getStudioUpdateStatusWithOptions,
   startGitHubLogin,
   startStudioUpdate as startStudioUpdateWithOptions,
 } from "../../src/lib/studio-update";
@@ -41,21 +39,6 @@ function authProcess() {
   };
 }
 
-function updateProcess() {
-  const events = new EventEmitter();
-  return {
-    process: {
-      pid: 4242,
-      exitCode: null,
-      signalCode: null,
-      unref() {},
-      on: events.on.bind(events),
-      once: events.once.bind(events),
-    } as unknown as ChildProcess,
-    emit: events.emit.bind(events),
-  };
-}
-
 function updateRelease(tag = "v1.11.58") {
   return {
     tag_name: tag,
@@ -70,11 +53,109 @@ function updateRelease(tag = "v1.11.58") {
   };
 }
 
+const mutationTails = new Map<string, Promise<void>>();
+
+async function testMutationMutex<T>(
+  installRoot: string,
+  action: () => Promise<T>,
+) {
+  const key = path.resolve(installRoot).toLowerCase();
+  const previous = mutationTails.get(key) || Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.catch(() => undefined).then(() => gate);
+  mutationTails.set(key, tail);
+  await previous.catch(() => undefined);
+  try {
+    return await action();
+  } finally {
+    release();
+    if (mutationTails.get(key) === tail) mutationTails.delete(key);
+  }
+}
+
+function managerCommandFor(onCommand?: (args: string[]) => void) {
+  return async (installRoot: string, args: string[]) => {
+    onCommand?.(args);
+    const state = path.join(installRoot, "state");
+    const lockPath = path.join(state, "update.lock");
+    const statusPath = path.join(state, "update-status.json");
+    if (args[0] === "clear-update-lock") {
+      const lock = JSON.parse(await readFile(lockPath, "utf8")) as {
+        updateId?: string;
+      };
+      if (lock.updateId !== args[1]) throw new Error("update lock mismatch");
+      await rm(lockPath);
+      return "Update lock released.";
+    }
+    if (args[0] === "reserve-update") {
+      const [, updateId, targetVersion] = args;
+      const createdAt = new Date().toISOString();
+      const updaterPath = path.join(installRoot, "tools", "NGTUpdater.exe");
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          updateId,
+          targetVersion,
+          createdAt,
+          executorPath: updaterPath,
+        }),
+      );
+      await writeFile(
+        statusPath,
+        JSON.stringify({
+          status: "starting",
+          stage: "starting",
+          updateId,
+          targetVersion,
+          previousVersion: "1.11.57",
+          executorPath: updaterPath,
+          executorConfirmed: false,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      );
+      return "Update task reserved.";
+    }
+    if (args[0] === "start-update") {
+      const status = JSON.parse(await readFile(statusPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      status.status = "checking";
+      status.stage = "checking";
+      status.executorConfirmed = true;
+      status.executorPid = 4242;
+      status.executorPath = path.join(installRoot, "tools", "NGTUpdater.exe");
+      status.updatedAt = new Date().toISOString();
+      await writeFile(statusPath, JSON.stringify(status));
+      return JSON.stringify(status);
+    }
+    throw new Error(`unexpected manager command: ${args[0]}`);
+  };
+}
+
+type StatusOptions = NonNullable<
+  Parameters<typeof getStudioUpdateStatusWithOptions>[1]
+>;
+
+function getStudioUpdateStatus(root?: string, options: StatusOptions = {}) {
+  return getStudioUpdateStatusWithOptions(root, {
+    ...options,
+    managerCommand: options.managerCommand || managerCommandFor(),
+    mutationMutex: options.mutationMutex || testMutationMutex,
+  });
+}
+
 function startStudioUpdate(
   options: Parameters<typeof startStudioUpdateWithOptions>[0] = {},
 ) {
   return startStudioUpdateWithOptions({
     ...options,
+    managerCommand: options.managerCommand || managerCommandFor(),
+    mutationMutex: options.mutationMutex || testMutationMutex,
     fetchImpl:
       options.fetchImpl ||
       (async () =>
@@ -82,53 +163,28 @@ function startStudioUpdate(
   });
 }
 
-function launchUpdater(
-  root: string,
-  child: ReturnType<typeof updateProcess>,
-  launches?: { executable: string; args: string[] }[],
-) {
-  return (executable: string, args: string[]) => {
-    launches?.push({ executable, args });
-    const updateId = args[args.indexOf("--update-id") + 1];
-    const statusPath = path.join(root, "installed", "update-status.json");
-    writeFileSync(
-      statusPath,
-      JSON.stringify({
-        status: "checking",
-        stage: "checking",
-        operation: "online-update",
-        updateId,
-        targetVersion: args[args.indexOf("--target-version") + 1],
-        previousVersion: "1.11.57",
-        executorConfirmed: true,
-        executorPid: child.process.pid,
-        executorPath: executable,
-        updatedAt: new Date().toISOString(),
-      }),
-    );
-    return child.process;
-  };
-}
-
 async function studioRoot(repository = "JayWangsj/ngt1") {
   const root = await mkdtemp(path.join(tmpdir(), "ngt-studio-update-"));
   temporaryRoots.push(root);
   const installRoot = path.join(root, "installed");
+  const stateRoot = path.join(installRoot, "state");
   await Promise.all([
     mkdir(path.join(root, "runtime"), { recursive: true }),
     mkdir(path.join(root, ".local"), { recursive: true }),
     mkdir(path.join(root, "scripts"), { recursive: true }),
     mkdir(path.join(root, "tools"), { recursive: true }),
     mkdir(installRoot, { recursive: true }),
+    mkdir(stateRoot, { recursive: true }),
+    mkdir(path.join(installRoot, "tools"), { recursive: true }),
   ]);
-  await mkdir(path.join(installRoot, ".local"), { recursive: true });
   await Promise.all([
     writeFile(
       path.join(root, "studio-release.json"),
       JSON.stringify({ version: "1.11.57" }),
     ),
     writeFile(path.join(root, "runtime", "gh.exe"), "test"),
-    writeFile(path.join(root, "tools", "NGTUpdater.exe"), "test binary"),
+    writeFile(path.join(installRoot, "tools", "NGTUpdater.exe"), "test binary"),
+    writeFile(path.join(installRoot, "tools", "NGTManager.exe"), "test binary"),
     writeFile(
       path.join(root, ".local", "studio.json"),
       JSON.stringify({
@@ -138,7 +194,7 @@ async function studioRoot(repository = "JayWangsj/ngt1") {
       }),
     ),
   ]);
-  return { root, installRoot };
+  return { root, installRoot: stateRoot };
 }
 
 afterEach(async () => {
@@ -186,7 +242,7 @@ describe("studio update", () => {
       writeFile(
         path.join(root, ".local", "studio.json"),
         `\uFEFF${JSON.stringify({
-          installRoot,
+          installRoot: path.dirname(installRoot),
           repository: "JayWangsj/ngt-repair-system",
         })}`,
       ),
@@ -405,12 +461,10 @@ describe("studio update", () => {
       ),
     ]);
 
-    const child = updateProcess();
     await expect(
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: launchUpdater(root, child),
       }),
     ).resolves.toMatchObject({ status: "checking" });
     const nextLock = JSON.parse(await readFile(lockFile, "utf8")) as {
@@ -458,7 +512,7 @@ describe("studio update", () => {
         }),
       ),
       writeFile(
-        path.join(installRoot, ".local", "update-maintenance.json"),
+        path.join(installRoot, "update-maintenance.json"),
         JSON.stringify({ updateId: "ba4e7a2e-5d35-4f8f-9f64-084d254c660a" }),
       ),
     ]);
@@ -500,7 +554,11 @@ describe("studio update", () => {
         JSON.stringify({
           updateId,
           executorPid: 4242,
-          executorPath: path.join(root, "tools", "NGTUpdater.exe"),
+          executorPath: path.join(
+            path.dirname(installRoot),
+            "tools",
+            "NGTUpdater.exe",
+          ),
           createdAt: "2020-01-01T00:00:00.000Z",
         }),
       ),
@@ -560,7 +618,8 @@ describe("studio update", () => {
   it("keeps a verified manual-install supersession informational and opens the old task log", async () => {
     const { root, installRoot } = await studioRoot();
     const previousUpdateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
-    await mkdir(path.join(installRoot, "logs"), { recursive: true });
+    const logs = path.join(path.dirname(installRoot), "logs");
+    await mkdir(logs, { recursive: true });
     await Promise.all([
       writeFile(
         path.join(installRoot, "update-status.json"),
@@ -575,7 +634,7 @@ describe("studio update", () => {
         }),
       ),
       writeFile(
-        path.join(installRoot, "logs", `update-${previousUpdateId}.log`),
+        path.join(logs, `update-${previousUpdateId}.log`),
         "old queued task was superseded after a verified manual install",
       ),
     ]);
@@ -668,14 +727,13 @@ describe("studio update", () => {
 
     let launchCount = 0;
     const inspect = async () => false;
-    const launch = (executable: string, args: string[]) => {
-      launchCount += 1;
-      return launchUpdater(root, updateProcess())(executable, args);
-    };
+    const managerCommand = managerCommandFor((args) => {
+      if (args[0] === "start-update") launchCount += 1;
+    });
 
     const results = await Promise.allSettled([
-      startStudioUpdate({ root, inspect, launch }),
-      startStudioUpdate({ root, inspect, launch }),
+      startStudioUpdate({ root, inspect, managerCommand }),
+      startStudioUpdate({ root, inspect, managerCommand }),
     ]);
 
     expect(launchCount).toBe(1);
@@ -694,18 +752,16 @@ describe("studio update", () => {
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: (executable, args) => {
-          launchCount += 1;
-          return launchUpdater(root, updateProcess())(executable, args);
-        },
+        managerCommand: managerCommandFor((args) => {
+          if (args[0] === "start-update") launchCount += 1;
+        }),
       }),
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: (executable, args) => {
-          launchCount += 1;
-          return launchUpdater(root, updateProcess())(executable, args);
-        },
+        managerCommand: managerCommandFor((args) => {
+          if (args[0] === "start-update") launchCount += 1;
+        }),
       }),
     ]);
 
@@ -718,60 +774,42 @@ describe("studio update", () => {
     ).toHaveLength(1);
   });
 
-  it("does not let a late old executor callback overwrite a newer task", async () => {
+  it("leaves update state unchanged when the manager rejects a reservation", async () => {
     const { root, installRoot } = await studioRoot();
-    const child = updateProcess();
-    await startStudioUpdate({ root, launch: launchUpdater(root, child) });
-    const nextId = "ce931cdf-1b06-40a2-a356-14c17e08dfb2";
-    await Promise.all([
-      writeFile(
-        path.join(installRoot, "update.lock"),
-        JSON.stringify({
-          updateId: nextId,
-          createdAt: new Date().toISOString(),
-        }),
-      ),
-      writeFile(
-        path.join(installRoot, "update-status.json"),
-        JSON.stringify({
-          status: "starting",
-          updateId: nextId,
-          message: "new task",
-        }),
-      ),
-    ]);
-
-    child.emit("close", 1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
+    await expect(
+      startStudioUpdate({
+        root,
+        managerCommand: async (_installRoot, args) => {
+          if (args[0] === "reserve-update")
+            throw new Error("reservation rejected");
+          throw new Error("unexpected manager command");
+        },
+      }),
+    ).rejects.toThrow("reservation rejected");
     await expect(
       readFile(path.join(installRoot, "update-status.json"), "utf8"),
-    ).resolves.toContain(nextId);
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       readFile(path.join(installRoot, "update.lock"), "utf8"),
-    ).resolves.toContain(nextId);
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("treats a legacy lock as inactive when no updater process is found", async () => {
+  it("fails closed when an update lock is malformed", async () => {
     const { root, installRoot } = await studioRoot();
-    await writeFile(
-      path.join(installRoot, "update.lock"),
-      "2020-01-01T00:00:00.000Z",
-    );
+    await writeFile(path.join(installRoot, "update.lock"), "not-json");
 
     const result = await getStudioUpdateStatus(root, {
       inspect: async () => false,
     });
 
-    expect(result.status).toBe("interrupted");
-    expect(result.executorAlive).not.toBe(true);
+    expect(result.status).toBe("verifying-task");
+    expect(result.manualReview).toBe(true);
   });
 
-  it("clears only the matching maintenance marker after verified completion", async () => {
+  it("does not report completion while the maintenance marker remains", async () => {
     const { root, installRoot } = await studioRoot();
     const updateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
-    const localState = path.join(installRoot, ".local");
-    await mkdir(localState, { recursive: true });
+    const maintenance = path.join(installRoot, "update-maintenance.json");
     await Promise.all([
       writeFile(
         path.join(installRoot, "update-status.json"),
@@ -782,35 +820,47 @@ describe("studio update", () => {
           actualVersion: "1.11.57",
         }),
       ),
-      writeFile(
-        path.join(localState, "update-maintenance.json"),
-        JSON.stringify({ updateId }),
-      ),
+      writeFile(maintenance, JSON.stringify({ updateId })),
     ]);
 
     await expect(getStudioUpdateStatus(root)).resolves.toMatchObject({
-      status: "complete",
-      actualVersion: "1.11.57",
+      status: "verifying-task",
+      manualReview: true,
     });
-    await expect(
-      readFile(path.join(localState, "update-maintenance.json"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(maintenance, "utf8")).resolves.toContain(updateId);
   });
 
-  it("records an asynchronous process start failure as a terminal task result", async () => {
+  it("preserves the manager's recorded startup failure", async () => {
     const { root, installRoot } = await studioRoot();
-    const child = updateProcess();
+    const managerCommand = async (
+      actualInstallRoot: string,
+      args: string[],
+    ) => {
+      if (args[0] === "reserve-update")
+        return managerCommandFor()(actualInstallRoot, args);
+      if (args[0] === "start-update") {
+        await writeFile(
+          path.join(actualInstallRoot, "state", "update-status.json"),
+          JSON.stringify({
+            status: "failed",
+            stage: "starting",
+            updateId: args[1],
+            message:
+              "Unable to start the Rust updater: simulated spawn failure",
+          }),
+        );
+        await rm(path.join(actualInstallRoot, "state", "update.lock"));
+        throw new Error(
+          "Unable to start the Rust updater: simulated spawn failure",
+        );
+      }
+      throw new Error("unexpected manager command");
+    };
     await expect(
       startStudioUpdate({
         root,
         inspect: async () => false,
-        launch: () => {
-          setTimeout(
-            () => child.emit("error", new Error("simulated spawn failure")),
-            0,
-          );
-          return child.process;
-        },
+        managerCommand,
       }),
     ).rejects.toThrow(
       "Unable to start the Rust updater: simulated spawn failure",
@@ -830,44 +880,24 @@ describe("studio update", () => {
     });
   });
 
-  it("preserves the Rust updater's installer failure stage and diagnostics", async () => {
+  it("reads the Rust manager's installer failure stage and diagnostics", async () => {
     const { root, installRoot } = await studioRoot();
-    const child = updateProcess();
     const installerFailure =
       "Inno Setup exited with code 23. See update-setup.inno.log and install-preflight.log.";
-    await expect(
-      startStudioUpdate({
-        root,
-        inspect: async () => false,
-        launch: (executable, args) => {
-          const updateId = args[args.indexOf("--update-id") + 1];
-          writeFileSync(
-            path.join(installRoot, "update-status.json"),
-            JSON.stringify({
-              status: "failed",
-              stage: "installing",
-              failedStage: "installing",
-              updateId,
-              message: installerFailure,
-              executorConfirmed: true,
-              executorPid: child.process.pid,
-              executorPath: executable,
-            }),
-          );
-          return child.process;
-        },
+    await writeFile(
+      path.join(installRoot, "update-status.json"),
+      JSON.stringify({
+        status: "failed",
+        stage: "installing",
+        failedStage: "installing",
+        updateId: "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16",
+        previousVersion: "1.11.57",
+        actualVersion: "1.11.57",
+        message: installerFailure,
       }),
-    ).rejects.toThrow(installerFailure);
-
-    const saved = JSON.parse(
-      await readFile(path.join(installRoot, "update-status.json"), "utf8"),
-    ) as {
-      status: string;
-      stage: string;
-      failedStage: string;
-      message: string;
-    };
-    expect(saved).toMatchObject({
+    );
+    const status = await getStudioUpdateStatus(root);
+    expect(status).toMatchObject({
       status: "failed",
       stage: "installing",
       failedStage: "installing",
@@ -878,7 +908,8 @@ describe("studio update", () => {
   it("redacts tokens from diagnostic logs read from an isolated install root", async () => {
     const { root, installRoot } = await studioRoot();
     const updateId = "0bd7d5ac-4cd6-4a7e-9fd4-d11c136caf16";
-    await mkdir(path.join(installRoot, "logs"));
+    const logs = path.join(path.dirname(installRoot), "logs");
+    await mkdir(logs);
     await writeFile(
       path.join(installRoot, "update-status.json"),
       JSON.stringify({
@@ -890,7 +921,7 @@ describe("studio update", () => {
       }),
     );
     await writeFile(
-      path.join(installRoot, "logs", `update-${updateId}.log`),
+      path.join(logs, `update-${updateId}.log`),
       "failed request token: ghp_123456789012345678901234567890123456\n",
     );
 
@@ -947,20 +978,22 @@ describe("studio update", () => {
     ]);
     expect(calls[1]).toContain("JayWangsj/ngt1");
 
-    const updateLaunches: { executable: string; args: string[] }[] = [];
-    const updateChild = updateProcess();
+    const managerCommands: string[][] = [];
     await startStudioUpdate({
       root,
-      launch: launchUpdater(root, updateChild, updateLaunches),
+      managerCommand: managerCommandFor((args) => managerCommands.push(args)),
     });
-    expect(updateLaunches[0].executable).toBe(
-      path.join(root, "tools", "NGTUpdater.exe"),
-    );
-    expect(updateLaunches[0].args).toContain("--update-id");
+    expect(managerCommands.map(([command]) => command)).toEqual([
+      "reserve-update",
+      "start-update",
+    ]);
     const status = JSON.parse(
       await readFile(path.join(installRoot, "update-status.json"), "utf8"),
-    ) as { status: string };
+    ) as { status: string; executorPath: string };
     expect(status.status).toBe("checking");
+    expect(status.executorPath).toBe(
+      path.join(path.dirname(installRoot), "tools", "NGTUpdater.exe"),
+    );
     await expect(startStudioUpdate({ root })).rejects.toThrow(
       "studio_update_in_progress",
     );

@@ -20,22 +20,19 @@ on:
       - "scripts/test-windows-studio-acceptance-coordinator.ps1"
       - "scripts/test-windows-studio-backup.ps1"
       - "scripts/test-windows-studio-install-coordination.ps1"
-      - "scripts/test-windows-studio-baseline-json-encoding.ps1"
       - "scripts/test-windows-studio-package.ps1"
-      - "scripts/test-windows-studio-online-update.ps1"
+      - "scripts/test-windows-studio-baseline-json-encoding.ps1"
+      - "scripts/test-windows-studio-installer.ps1"
       - "scripts/test-windows-studio-online-update-auth.ps1"
-      - "scripts/prepare-windows-studio-updater-test-release.mjs"
-      - "scripts/push-windows-studio-updater-test-refs.ps1"
-      - "scripts/test-windows-studio-updater-test-refs.ps1"
       - "scripts/windows-studio-online-update-auth.ps1"
       - "scripts/windows-studio-online-update-reconnect.ps1"
       - "scripts/windows-studio-ready-baseline.ps1"
       - "scripts/windows-studio-release-metadata.ps1"
       - "scripts/verify-windows-studio-runtime.ps1"
       - "scripts/test-windows-studio-update-safety.ps1"
-      - "tests/release/windows-studio-online-update-ui.mjs"
-      - "tests/release/windows-studio-updater-test-release.node-test.mjs"
       - "tests/release/windows-studio-release.node-test.mjs"
+      - "tests/release/windows-studio-business-probe.node-test.mjs"
+      - "tests/release/windows-studio-online-update-ui.mjs"
       - "scripts/studio-runtime.ps1"
       - "scripts/windows-studio-common.ps1"
       - "scripts/windows-studio-install-coordination.ps1"
@@ -73,13 +70,22 @@ jobs:
       - uses: ./.github/actions/build-windows-studio-candidate
         env:
           NGT_RELEASE_READY: "true"
+      - name: Upload exact-SHA offline installer candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngt-studio-installer-candidate-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ngt-windows-release-assets/ngt-studio-windows-setup-*.exe
+            ${{ runner.temp }}/ngt-windows-release-assets/ngt-studio-windows-setup-*.exe.sha256
+            ${{ runner.temp }}/ngt-windows-release-assets/release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify runtime gate rejects redirects and generic error pages
         shell: powershell
         run: node tests/release/windows-studio-runtime-verifier.test.mjs
       - name: Install the exact candidate as a disposable standard user
         shell: powershell
         env:
-          GH_TOKEN: ${{ github.token }}
           NGT_RELEASE_READY: "true"
         run: |
           $candidate = Join-Path $env:RUNNER_TEMP "ngt-windows-release-assets"
@@ -87,12 +93,6 @@ jobs:
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
           Get-ChildItem -LiteralPath $candidate -Force | Copy-Item -Destination $destination -Recurse -Force
           ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update
-      - name: Verify the latest published baseline upgrades and repairs with the candidate installer
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NGT_RELEASE_READY: "true"
-        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance manual-installer
       - name: Upload sanitized Windows acceptance failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

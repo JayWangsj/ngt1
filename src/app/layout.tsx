@@ -25,9 +25,9 @@ const sidebarPreferenceScript = `try{const d=document.documentElement,w=Number(l
 )})==="true",v=c?${SIDEBAR_COLLAPSED_WIDTH}:Math.min(${SIDEBAR_MAX_WIDTH},Math.max(${SIDEBAR_MIN_WIDTH},Number.isFinite(w)?w:${SIDEBAR_DEFAULT_WIDTH}));d.style.setProperty("--sidebar-width",v+"px");d.dataset.sidebarCollapsed=String(c)}catch{}`;
 
 export const metadata: Metadata = {
-  title: { default: "NGT · Laboratorio riparazioni", template: "%s · NGT" },
+  title: { default: "NGTManager", template: "%s · NGTManager" },
   description: "Gestione del laboratorio di riparazione",
-  applicationName: "NGT · NEXT GEN TECH",
+  applicationName: "NGTManager",
   icons: {
     icon: [
       { url: "/brand/ngt-app-icon.svg", type: "image/svg+xml" },

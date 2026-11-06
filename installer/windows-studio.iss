@@ -10,20 +10,16 @@
 #ifndef OutputDir
   #error OutputDir is required
 #endif
-#ifndef InstallerSupportDirectory
-  #error InstallerSupportDirectory is required
-#endif
-
-#define AppName "NGT 工作室管理系统"
-#define AppId "{{D7F74E80-B49C-4C3D-B6FC-18C04DAA9D31}"
+#define AppName "NGTManager"
+#define AppId "{{E7B1C553-4F5A-4239-A4C2-7DCA1DC27121}"
 
 [Setup]
 AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=NGT
-DefaultDirName={localappdata}\NGT
-UninstallFilesDir={localappdata}\NGT\uninstall
+DefaultDirName={localappdata}\NGTManager
+UninstallFilesDir={localappdata}\NGTManager\uninstall
 UsePreviousAppDir=no
 DisableDirPage=yes
 DisableStartupPrompt=yes
@@ -32,6 +28,7 @@ OutputDir={#OutputDir}
 OutputBaseFilename=ngt-studio-windows-setup-v{#AppVersion}
 SetupIconFile={#IconPath}
 PrivilegesRequired=lowest
+SetupLogging=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma2/normal
@@ -40,112 +37,100 @@ WizardStyle=modern
 CloseApplications=no
 RestartApplications=no
 UninstallDisplayName={#AppName}
-UninstallDisplayIcon={localappdata}\NGT\assets\ngt-studio.ico
+UninstallDisplayIcon={localappdata}\NGTManager\assets\ngt-studio.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\NGTStudioPackage"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#InstallerSupportDirectory}\prepare-windows-studio-install.ps1"; DestDir: "{tmp}"; Flags: dontcopy
-Source: "{#InstallerSupportDirectory}\windows-studio-install-coordination.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 
 [Icons]
-Name: "{autodesktop}\NGT 工作室管理系统"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
-Name: "{autoprograms}\NGT 工作室管理系统"; Filename: "http://127.0.0.1:3000"; WorkingDir: "{app}"; IconFilename: "{localappdata}\NGT\assets\ngt-studio.ico"
+Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
+Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
+
+[InstallDelete]
+Type: files; Name: "{autodesktop}\NGT 工作室管理系统.url"
+Type: files; Name: "{autoprograms}\NGT 工作室管理系统.url"
 
 [Run]
-Filename: "http://127.0.0.1:3000"; Description: "打开 NGT 工作室管理系统"; Flags: shellexec postinstall nowait skipifsilent
+Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "Open {#AppName}"; Flags: runhidden postinstall nowait skipifsilent
 
-[UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{localappdata}\NGT\service\uninstall-windows-studio.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "StopNgtStudio"
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\NGTManager\releases"
+Type: filesandordirs; Name: "{localappdata}\NGTManager\tools"
+Type: filesandordirs; Name: "{localappdata}\NGTManager\assets"
 
 [Code]
-var
-  InstallFilesStartedAt: Longint;
-
-function GetTickCount: Longint;
-  external 'GetTickCount@kernel32.dll stdcall';
-
-procedure WriteInstallStage(const Stage, Detail: String);
-var
-  LogPath: String;
-  Line: String;
-begin
-  LogPath := ExpandConstant('{localappdata}\NGT\install-stages.log');
-  Line := IntToStr(GetTickCount) + ' ' + Detail + ' ' + Stage + ' ' + #13#10;
-  SaveStringToFile(LogPath, Line, True);
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ResultCode: Integer;
-  PowerShellPath: String;
-  Parameters: String;
-  PreflightLogPath: String;
-  OnlineUpdateId: String;
-begin
-  ExtractTemporaryFile('prepare-windows-studio-install.ps1');
-  ExtractTemporaryFile('windows-studio-install-coordination.ps1');
-  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-  PreflightLogPath := ExpandConstant('{localappdata}\NGT\install-preflight.log');
-  Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{tmp}\prepare-windows-studio-install.ps1') +
-    '" -InstallRoot "' + ExpandConstant('{localappdata}\NGT') +
-    '" -TargetVersion "{#AppVersion}" -LogPath "' + PreflightLogPath + '"';
-  OnlineUpdateId := ExpandConstant('{param:NGTUpdateId|}');
-  if OnlineUpdateId <> '' then
-    Parameters := Parameters + ' -UpdateId "' + OnlineUpdateId + '"';
-  if (not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
-    (ResultCode <> 0) then
-  begin
-    Result := '安装前安全检查失败。请查看日志：' + PreflightLogPath;
-  end
-  else
-    Result := '';
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  PowerShellPath: String;
+  ManagerPath: String;
+  PackagePath: String;
+  ResultPath: String;
+  ResultMessage: String;
+  ResultLines: TArrayOfString;
+  ResultIndex: Integer;
   Parameters: String;
-  OnlineUpdateId: String;
-  AcceptanceFailureStage: String;
+  Operation: String;
+  UpdateId: String;
 begin
-  if CurStep = ssInstall then
-  begin
-    InstallFilesStartedAt := GetTickCount;
-    WriteInstallStage('install-files', 'START');
-    exit;
-  end;
-
   if CurStep <> ssPostInstall then
     exit;
 
-  WriteInstallStage('install-files', 'COMPLETE durationSeconds=' +
-    FloatToStr((GetTickCount - InstallFilesStartedAt) / 1000));
-  WizardForm.StatusLabel.Caption := '正在验证安装模式、备份数据并执行数据库迁移…';
-  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-  Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{tmp}\NGTStudioPackage\scripts\install-windows-studio-bootstrap.ps1') +
-    '" -DataRoot "' + ExpandConstant('{localappdata}\NGT\data-store') +
-    '" -InstallRoot "' + ExpandConstant('{localappdata}\NGT') +
-    '" -LogPath "' + ExpandConstant('{localappdata}\NGT\install.log') + '"';
-  OnlineUpdateId := ExpandConstant('{param:NGTUpdateId|}');
-  if OnlineUpdateId <> '' then
-    Parameters := Parameters + ' -UpdateId "' + OnlineUpdateId + '"';
-  AcceptanceFailureStage := ExpandConstant('{param:NGTAcceptanceFailureStage|}');
-  if AcceptanceFailureStage <> '' then
-    Parameters := Parameters + ' -AcceptanceFailureStage "' + AcceptanceFailureStage + '"';
-
-  if (not Exec(PowerShellPath, Parameters, ExpandConstant('{tmp}\NGTStudioPackage'),
-    SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+  ManagerPath := ExpandConstant('{tmp}\NGTStudioPackage\tools\NGTManager.exe');
+  PackagePath := ExpandConstant('{tmp}\NGTStudioPackage');
+  ResultPath := ExpandConstant('{tmp}\NGTManager-setup-result.txt');
+  DeleteFile(ResultPath);
+  Operation := 'install';
+  UpdateId := ExpandConstant('{param:NGTUpdateId|}');
+  if UpdateId <> '' then
+    Operation := 'update';
+  Parameters := Operation + ' "' + PackagePath + '"';
+  if UpdateId <> '' then
+    Parameters := Parameters + ' ' + UpdateId;
+  Parameters := Parameters + ' --result-file "' + ResultPath + '"';
+  WizardForm.StatusLabel.Caption := 'Checking the system and preparing NGTManager…';
+  ResultCode := -1;
+  if (not Exec(ManagerPath, Parameters, PackagePath, SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
+    (ResultCode <> 0) then
   begin
+    ResultMessage := 'No detailed error was written.';
+    if LoadStringsFromFile(ResultPath, ResultLines) and
+      (GetArrayLength(ResultLines) > 1) then
+    begin
+      ResultMessage := ResultLines[1];
+      for ResultIndex := 2 to GetArrayLength(ResultLines) - 1 do
+        ResultMessage := ResultMessage + #13#10 + ResultLines[ResultIndex];
+    end;
     if not WizardSilent then
-      MsgBox('系统初始化失败。详细原因已保存到：' + #13#10 +
-        ExpandConstant('{localappdata}\NGT\install.log'),
-        mbError, MB_OK);
-    RaiseException('系统初始化失败，退出代码：' + IntToStr(ResultCode));
+      MsgBox('NGTManager could not complete installation.' + #13#10 + ResultMessage, mbError, MB_OK);
+    RaiseException('NGTManager installation failed. Exit code: ' + IntToStr(ResultCode) + #13#10 + ResultMessage);
+  end;
+end;
+function InitializeUninstall(): Boolean;
+var
+  ManagerPath: String;
+  InstallRoot: String;
+  ResultCode: Integer;
+begin
+  Result := True;
+  InstallRoot := ExpandConstant('{localappdata}\NGTManager');
+  ManagerPath := InstallRoot + '\tools\NGTManager.exe';
+  if not FileExists(ManagerPath) then
+  begin
+    if not UninstallSilent then
+      MsgBox('NGTManager cannot verify a safe shutdown because its manager executable is missing. Preserve the data folder and repair the installation first.', mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
+
+  ResultCode := -1;
+  if (not Exec(ManagerPath, 'uninstall', InstallRoot, SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
+    (ResultCode <> 0) then
+  begin
+    if not UninstallSilent then
+      MsgBox('NGTManager could not stop safely. Close the active operation and retry uninstall.', mbError, MB_OK);
+    Result := False;
   end;
 end;

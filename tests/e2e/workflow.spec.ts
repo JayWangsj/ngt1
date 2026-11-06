@@ -11013,7 +11013,7 @@ test("price editor keeps deletion inside batch management", async ({
   await expect(removable).toHaveCount(0);
 });
 
-test("settings exports data and re-import skips existing records", async ({
+test("settings exports data and refuses import into a non-empty database", async ({
   page,
 }) => {
   await page.goto("/settings/data");
@@ -11044,10 +11044,11 @@ test("settings exports data and re-import skips existing records", async ({
     data: backup,
     headers: sameOriginHeaders,
   });
-  expect(imported.ok()).toBe(true);
-  const result = await imported.json();
-  expect(result.imported).toBe(0);
-  expect(result.skipped).toBeGreaterThan(0);
+  expect(imported.status()).toBe(400);
+  expect(await imported.json()).toMatchObject({
+    error:
+      "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
+  });
 });
 
 for (const width of [1280, 768, 390]) {

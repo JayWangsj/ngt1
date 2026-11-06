@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "NGT · NEXT GEN TECH",
-    short_name: "NGT",
+    name: "NGTManager",
+    short_name: "NGTManager",
     description: "Gestione del laboratorio di riparazione",
     start_url: "/",
     display: "standalone",

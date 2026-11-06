@@ -5,7 +5,7 @@ inputs:
     description: draft or ready
     required: true
   acceptance:
-    description: installer, online-update, production-update, or manual-installer
+    description: installer, online-update, or production-update
     required: true
   failure_probe:
     description: Release Ready only; simulate an isolated installer acceptance failure.
@@ -43,7 +43,7 @@ runs:
         NGT_RELEASE_READY: ${{ inputs.mode == 'ready' }}
       run: node scripts/windows-studio-release.mjs verify-artifact release-assets
     - name: Download isolated acceptance-only Rust updater
-      if: inputs.acceptance == 'online-update' || inputs.acceptance == 'production-update'
+      if: inputs.acceptance == 'online-update'
       uses: actions/download-artifact@v4
       with:
         name: ngt-updater-acceptance-${{ github.sha }}
@@ -55,7 +55,7 @@ runs:
     - name: Exercise verified Windows candidate
       shell: powershell
       env:
-        GH_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ inputs.acceptance == 'production-update' && github.token || '' }}
         NGT_RELEASE_READY: ${{ inputs.mode == 'ready' }}
       run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}
     - name: Keep sanitized failure diagnostics

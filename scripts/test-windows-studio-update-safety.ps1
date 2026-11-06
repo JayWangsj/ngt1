@@ -23,13 +23,18 @@ try {
   }
 
   $releaseFixture = Join-Path $testRoot "release-fixture"
-  New-Item -ItemType Directory -Path (Join-Path $releaseFixture ".next\standalone") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $releaseFixture ".local") -Force | Out-Null
-  New-Item -ItemType Directory -Path (Join-Path $releaseFixture "scripts") -Force | Out-Null
-  New-Item -ItemType Directory -Path (Join-Path $releaseFixture "tools") -Force | Out-Null
-  New-Item -ItemType Directory -Path (Join-Path $releaseFixture "prisma") -Force | Out-Null
   $releaseFiles = @(
     ".next/standalone/server.js",
+    "assets/ngt-studio.ico",
+    "scripts/start.mjs",
+    "scripts/windows-db.mjs",
+    "scripts/postgres-runtime.mjs",
+    "scripts/runtime-start-gate.cjs",
+    "scripts/run-pg-ctl.mjs",
+    "runtime/node.exe",
+    "runtime/postgres/bin/postgres.exe",
+    "tools/NGTManager.exe",
     "tools/NGTUpdater.exe",
     "scripts/check-windows-credential-store.ps1",
     "scripts/install-windows-studio.ps1",
@@ -44,6 +49,7 @@ try {
   $manifest = @{}
   foreach ($relativePath in $releaseFiles) {
     $filePath = Join-Path $releaseFixture ($relativePath.Replace("/", "\"))
+    New-Item -ItemType Directory -Path (Split-Path -Parent $filePath) -Force | Out-Null
     Set-Content -LiteralPath $filePath -Value $relativePath -Encoding ascii
     $manifest[$relativePath] = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
   }
@@ -362,8 +368,8 @@ try {
     throw "The Windows service rejected an active-release application after its supervisor restarted."
   }
 
-  $oldReleaseNode = Join-Path $listenerRoot "releases\v2.0.21\runtime\node.exe"
-  $oldReleaseScript = Join-Path $listenerRoot "releases\v2.0.21\scripts\start.mjs"
+  $oldReleaseNode = Join-Path $listenerRoot "releases\previous\runtime\node.exe"
+  $oldReleaseScript = Join-Path $listenerRoot "releases\previous\scripts\start.mjs"
   New-Item -ItemType Directory -Path (Split-Path -Parent $oldReleaseNode) -Force | Out-Null
   Set-Content -LiteralPath $oldReleaseNode -Value "old fixture" -Encoding ascii
   $staleApplication = [pscustomobject]@{

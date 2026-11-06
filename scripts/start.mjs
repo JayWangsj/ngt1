@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 import { verifyWindowsStudioStaticAssets } from "./verify-windows-studio-static-assets.mjs";
 try {
-  process.loadEnvFile(".env");
+  process.loadEnvFile(process.env.NGT_ENV_FILE ?? ".env");
 } catch (e) {
   if (e.code !== "ENOENT") throw e;
 }

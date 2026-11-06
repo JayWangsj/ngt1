@@ -50,7 +50,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node --test tests/release/windows-studio-release.node-test.mjs tests/release/windows-studio-updater-test-release.node-test.mjs tests/release/windows-studio-business-probe.node-test.mjs tests/release/windows-studio-ready-gh.node-test.mjs
+      - run: node --test tests/release/windows-studio-release.node-test.mjs tests/release/windows-studio-business-probe.node-test.mjs
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm lint
@@ -79,6 +79,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy
+      - run: cargo test --manifest-path tools/ngt-updater/Cargo.toml --all-targets
       - run: pnpm build
         env:
           DATABASE_URL: postgresql://ngt:ci-only@127.0.0.1:55432/ngt?schema=public

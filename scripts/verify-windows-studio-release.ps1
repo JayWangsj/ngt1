@@ -58,15 +58,16 @@ foreach ($entry in $metadata.files.PSObject.Properties) {
 }
 foreach ($requiredFile in @(
   ".next/standalone/server.js",
+  "assets/ngt-studio.ico",
+  "scripts/start.mjs",
+  "scripts/windows-db.mjs",
+  "scripts/postgres-runtime.mjs",
+  "scripts/runtime-start-gate.cjs",
+  "scripts/run-pg-ctl.mjs",
+  "tools/NGTManager.exe",
   "tools/NGTUpdater.exe",
-  "scripts/check-windows-credential-store.ps1",
-  "scripts/install-windows-studio.ps1",
-  "scripts/prepare-windows-studio-install.ps1",
-  "scripts/windows-studio-install-coordination.ps1",
-  "scripts/retain-windows-studio-releases.ps1",
-  "scripts/verify-windows-studio-release.ps1",
-  "scripts/test-windows-studio-update-safety.ps1",
-  "scripts/test-windows-studio-install-coordination.ps1",
+  "runtime/node.exe",
+  "runtime/postgres/bin/postgres.exe",
   "prisma/schema.prisma"
 )) {
   if (-not (Test-Path -LiteralPath (Join-Path $root $requiredFile.Replace("/", "\")) -PathType Leaf)) {

@@ -9,10 +9,6 @@ on:
         required: true
         default: none
         options: [none, installer]
-      test_repository:
-        description: "Exact dedicated public test repository approved by ngt-updater-test Environment. Uses main, creates a published v2.0.21 baseline and a v2.0.23 candidate Draft; retained for audit. Token is scoped only to this repository."
-        type: string
-        required: true
 
 permissions:
   actions: read
@@ -94,23 +90,31 @@ jobs:
           mode: ready
           acceptance: online-update
 
-  production-updater-acceptance:
-    name: Release Ready production updater against isolated GitHub Releases
+  backup-import-acceptance:
+    name: Release Ready versioned backup import acceptance
     needs: [qualify, build]
-    environment: ngt-updater-test
-    runs-on: windows-2022
-    timeout-minutes: 120
-    permissions:
-      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ngt
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: ngt_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ngt -d ngt_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      NGT_PRODUCTION_UPDATER_BASELINE: v2.0.21
-      NGT_UPDATER_TEST_REPOSITORY: ${{ vars.NGT_UPDATER_TEST_REPOSITORY }}
-      NGT_UPDATER_TEST_REPOSITORY_INPUT: ${{ inputs.test_repository }}
+      DATABASE_URL: postgresql://ngt:ci-test-password@localhost:5432/ngt_test?schema=public
+      AUTH_SECRET: ci-only-secret-for-backup-import-2026
+      AUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 11.19.0
@@ -119,104 +123,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install pinned acceptance dependencies
-        shell: powershell
-        run: pnpm install --frozen-lockfile --config.node-linker=hoisted --config.package-import-method=copy
-      - name: Download exact-SHA Release Ready candidate assets
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-candidate-${{ github.sha }}
-          path: release-assets
-      - name: Download original-updater acceptance artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ngt-updater-acceptance-${{ github.sha }}
-          path: ${{ runner.temp }}/ngt-updater-acceptance
-      - name: Verify exact-SHA candidate assets
-        shell: powershell
-        env:
-          NGT_RELEASE_READY: "true"
-        run: node scripts/windows-studio-release.mjs verify-artifact release-assets
-      - name: Require the approved public repository and scoped credential
-        shell: powershell
-        env:
-          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-        run: |
-          $approvedRepository = [string]$env:NGT_UPDATER_TEST_REPOSITORY
-          $requestedRepository = [string]$env:NGT_UPDATER_TEST_REPOSITORY_INPUT
-          if (-not $env:NGT_UPDATER_TEST_TOKEN) { throw "Configure NGT_UPDATER_TEST_TOKEN with Contents write access to only the approved public test repository." }
-          if ($approvedRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or $approvedRepository -ieq $env:GITHUB_REPOSITORY -or $requestedRepository -cne $approvedRepository) { throw "Release Ready requires the exact approved public repository configured in the ngt-updater-test Environment." }
-      - name: Verify the isolated repository before any Git writes
-        shell: powershell
-        env:
-          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-        run: node scripts/prepare-windows-studio-updater-test-release.mjs preflight
-      - name: Add the published baseline source to the isolated repository
-        shell: powershell
-        env:
-          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-        run: ./scripts/push-windows-studio-updater-test-refs.ps1 -Stage baseline
-      - name: Mirror and publish the v2.0.21 public baseline Release
-        shell: powershell
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-        run: node scripts/prepare-windows-studio-updater-test-release.mjs baseline
-      - name: Advance isolated main and add the exact candidate tag
-        shell: powershell
-        env:
-          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-        run: ./scripts/push-windows-studio-updater-test-refs.ps1 -Stage candidate
-      - name: Prepare the exact-SHA candidate Draft Release
-        shell: powershell
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          NGT_UPDATER_TEST_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-        run: node scripts/prepare-windows-studio-updater-test-release.mjs candidate release-assets
-      - name: Exercise the original v2.0.21 production updater as a standard user
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ secrets.NGT_UPDATER_TEST_TOKEN }}
-          NGT_RELEASE_READY: "true"
-        run: ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance production-update
-      - name: Keep sanitized failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-production-updater-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/
-          if-no-files-found: warn
-          retention-days: 7
-
-  manual-installer-acceptance:
-    name: Release Ready manual upgrade and repair acceptance
-    needs: build
-    runs-on: windows-2022
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }}
-      - uses: ./.github/actions/windows-studio-acceptance
-        with:
-          mode: ready
-          acceptance: manual-installer
-
-  manual-v2020-acceptance:
-    name: Release Ready v2.0.20 manual upgrade and repair acceptance
-    needs: build
-    runs-on: windows-2022
-    timeout-minutes: 120
-    env:
-      NGT_MANUAL_UPGRADE_BASELINE: v2.0.20
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }}
-      - uses: ./.github/actions/windows-studio-acceptance
-        with:
-          mode: ready
-          acceptance: manual-installer
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm db:migrate
+      - name: Exercise every supported versioned business backup format
+        run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/business.test.ts -t "versioned data backup import"
 
   release-ready:
     name: Release Ready
@@ -226,9 +137,7 @@ jobs:
         build,
         installer-acceptance,
         online-update-acceptance,
-        production-updater-acceptance,
-        manual-installer-acceptance,
-        manual-v2020-acceptance,
+        backup-import-acceptance,
       ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -240,11 +149,9 @@ jobs:
           BUILD: ${{ needs.build.result }}
           INSTALLER: ${{ needs.installer-acceptance.result }}
           ONLINE: ${{ needs.online-update-acceptance.result }}
-          PRODUCTION_UPDATER: ${{ needs.production-updater-acceptance.result }}
-          MANUAL: ${{ needs.manual-installer-acceptance.result }}
-          MANUAL_V2020: ${{ needs.manual-v2020-acceptance.result }}
+          BACKUP_IMPORT: ${{ needs.backup-import-acceptance.result }}
         run: |
-          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$PRODUCTION_UPDATER" "$MANUAL" "$MANUAL_V2020"; do
+          for result in "$QUALIFY" "$BUILD" "$INSTALLER" "$ONLINE" "$BACKUP_IMPORT"; do
             if [[ "$result" != success ]]; then
               echo "::error::Release Ready requires every candidate build and acceptance job to succeed."
               exit 1

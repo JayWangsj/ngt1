@@ -1,77 +1,136 @@
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("Windows persistent startup", () => {
   it("supervises both the database and application without machine-specific paths", async () => {
-    const service = await readFile("scripts/windows-service.ps1", "utf8");
-    expect(service).toContain(
-      'Join-Path $projectRoot "scripts\\windows-db.mjs"',
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    expect(manager).toContain("fn start_supervised_runtime(");
+    expect(manager).toContain("RuntimeJob::new()?");
+    expect(manager).toContain("start_database(&job");
+    expect(manager).toContain("start_application(&job");
+    expect(manager).toContain("wait_for_health(&mut application");
+    expect(manager).toContain("fn stop_children(");
+    const databaseStop = manager.slice(
+      manager.indexOf("fn stop_database_launcher("),
+      manager.indexOf(
+        "fn pg_ctl_status(",
+        manager.indexOf("fn stop_database_launcher("),
+      ),
     );
-    expect(service).toContain('Join-Path $projectRoot "scripts\\start.mjs"');
-    expect(service).toContain("Get-NgtStudioPortConnections -Port $Port");
-    expect(service).toContain("Test-NgtPortOwnership");
-    expect(service).toContain("Test-NgtStudioProcessTree");
-    expect(service).toContain("Test-NgtStudioApplicationProcess");
-    expect(service).toContain("Test-NgtStudioPostgresProcess");
-    expect(service).toContain("unverified PID");
-    expect(service).toContain("$expectedCommit");
-    expect(service).toContain("$health.buildCommit");
-    expect(service).toContain("$process.HasExited");
-    expect(service).toContain("$PSScriptRoot");
-    expect(service).not.toContain("D:\\NGT");
+    expect(databaseStop).toContain("spawn_pg_ctl(job");
+    expect(databaseStop).not.toContain("Command::new");
+    expect(manager).toContain("let mut restarts = 0;");
+    expect(manager).toContain("if restarts >= 3");
+    expect(manager).not.toContain("D:\\NGT");
   });
 
   it("waits for database initialization before starting the application", async () => {
-    const service = (
-      await readFile("scripts/windows-service.ps1", "utf8")
-    ).replace(/\r\n/g, "\n");
-    expect(service).toContain(
-      'Join-Path $projectRoot ".local\\database-ready.pid"',
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    const supervisor = manager.slice(
+      manager.indexOf("fn start_supervised_runtime("),
+      manager.indexOf(
+        "fn start_application(",
+        manager.indexOf("fn start_supervised_runtime("),
+      ),
     );
-    expect(service).toContain('Join-Path $stateDirectory "database.pid"');
-    expect(service).toContain("$readyProcessId -eq $databaseProcessId");
-    expect(service.indexOf('Start-NgtProcess -Name "database"')).toBeLessThan(
-      service.indexOf("\n    Wait-NgtDatabaseReady\n"),
+    const database = await readFile("scripts/windows-db.mjs", "utf8");
+    expect(supervisor.indexOf("start_database(&job")).toBeLessThan(
+      supervisor.indexOf("start_application(&job"),
     );
-    expect(service.indexOf("\n    Wait-NgtDatabaseReady\n")).toBeLessThan(
-      service.indexOf('Start-NgtProcess -Name "application"'),
-    );
+    expect(manager).toContain('join("database-ready.pid")');
+    expect(manager).toContain("ready_process_id == Some(database.id())");
+    expect(database).toContain('join(workspace, "database-ready.pid")');
+    expect(database).toContain("String(process.pid)");
   });
 
-  it("installs a logon task with restart settings and has a matching uninstaller", async () => {
-    const installer = await readFile(
-      "scripts/install-windows-startup.ps1",
-      "utf8",
+  it("holds bundled Node processes until the manager releases the startup gate", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ngt-start-gate-"));
+    const gate = join(directory, "start.gate");
+    await writeFile(gate, "pending");
+    const child = spawn(
+      process.execPath,
+      [
+        "--require",
+        "./scripts/runtime-start-gate.cjs",
+        "-e",
+        "const fs = require('node:fs'); if (fs.existsSync(process.env.TEST_GATE_PATH)) process.exit(2); process.stdout.write('released')",
+      ],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          NGT_RUNTIME_START_GATE: gate,
+          TEST_GATE_PATH: gate,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
-    const uninstaller = await readFile(
-      "scripts/uninstall-windows-startup.ps1",
-      "utf8",
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => (output += chunk));
+    const completion = new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+    }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(output).toBe("");
+      await writeFile(gate, "ready");
+      const result = await Promise.race([
+        completion,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Node startup gate timed out.")),
+            5000,
+          );
+        }),
+      ]);
+      expect(result).toEqual({ code: 0, signal: null });
+      expect(output).toBe("released");
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (child.exitCode === null) {
+        child.kill();
+        await Promise.race([
+          completion.catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 1000)),
+        ]);
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("registers per-user startup directly to the Rust manager", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    const autostart = manager.slice(
+      manager.indexOf("fn set_autostart("),
+      manager.indexOf(
+        "fn read_build_number(",
+        manager.indexOf("fn set_autostart("),
+      ),
     );
-    expect(installer).toContain("New-ScheduledTaskTrigger -AtLogOn");
-    expect(installer).toContain(
-      "New-ScheduledTaskAction -Execute $wscriptPath",
+    expect(autostart).toContain(
+      "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
     );
-    expect(installer).toContain("//B //Nologo");
-    expect(installer).toContain("Register-ScheduledTask");
-    expect(installer).not.toContain("Start-ScheduledTask");
-    expect(installer).toContain(
-      "Start-Process -FilePath $wscriptPath -ArgumentList $launcherArguments -WindowStyle Hidden",
+    expect(autostart).toContain('root.join("tools").join("NGTManager.exe")');
+    expect(autostart).toContain(
+      'format!("\\\"{}\\\" run", executable.display())',
     );
-    expect(installer).toContain(
-      "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-    );
-    expect(installer).toContain("Start-Process -FilePath $wscriptPath");
-    expect(uninstaller).toContain("Unregister-ScheduledTask");
-    expect(uninstaller).toContain("Remove-ItemProperty");
+    expect(autostart).not.toContain("ScheduledTask");
+    expect(autostart).not.toContain("wscript.exe");
   });
 
   it("runs real Windows release acceptance with a disposable standard user", async () => {
     const runner = await readFile(
       "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
-      "utf8",
-    );
-    const coordinator = await readFile(
-      "scripts/windows-studio-acceptance-coordinator.ps1",
       "utf8",
     );
     const workflow = await readFile(
@@ -80,6 +139,14 @@ describe("Windows persistent startup", () => {
     );
     const acceptanceAction = await readFile(
       ".github/actions/windows-studio-acceptance/action.yml",
+      "utf8",
+    );
+    const installerAcceptance = await readFile(
+      "scripts/test-windows-studio-installer.ps1",
+      "utf8",
+    );
+    const acceptanceCoordinator = await readFile(
+      "scripts/windows-studio-acceptance-coordinator.ps1",
       "utf8",
     );
     expect(runner).toContain("New-LocalUser -Name $userName");
@@ -92,15 +159,16 @@ describe("Windows persistent startup", () => {
     expect(runner).toContain(
       "Set-Content -LiteralPath $request.resultPath -Value $childExitCode -Encoding ascii",
     );
-    expect(runner).toContain("windows-studio-acceptance-coordinator.ps1");
     expect(runner).toContain("Get-NgtAcceptanceProcessOutcome");
-    expect(coordinator).toContain("Required acceptance file is missing");
-    expect(coordinator).toContain("Required acceptance file is empty");
-    expect(coordinator).toContain("$childExitCode -ne 0");
-    expect(runner).toContain("@($protectedTokens) + @($passwordPlain)");
-    expect(runner).toContain("foreach ($sensitiveValue in $diagnosticSecrets)");
-    expect(runner).toContain("throw $safeFailureMessage");
-    expect(runner).not.toContain("throw $failureRecord");
+    expect(runner).toContain(
+      '$orchestrationOnlyParameters = @("TargetTag", "ExpectedCommitSha", "ExpectedManifestPath")',
+    );
+    expect(runner).toContain("$entry.Name -notin $orchestrationOnlyParameters");
+    expect(acceptanceCoordinator).toContain("Get-NgtAcceptanceChildExitCode");
+    expect(acceptanceCoordinator).toContain(
+      "The standard-user acceptance wrote an invalid exit result.",
+    );
+    expect(acceptanceCoordinator).toContain("disagrees with process exit code");
     expect(runner).toContain("Remove-LocalUser -Name $userName");
     expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
     expect(workflow).toContain("acceptance: online-update");
@@ -108,77 +176,34 @@ describe("Windows persistent startup", () => {
     expect(acceptanceAction).toContain(
       "run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance ${{ inputs.acceptance }}",
     );
-    expect(acceptanceAction).toContain("GH_TOKEN: ${{ github.token }}");
-    expect(acceptanceAction).toContain("if: failure()");
+    expect(acceptanceAction).toContain("GITHUB_TOKEN: ${{ github.token }}");
     expect(acceptanceAction).toContain(
-      "ngt-acceptance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/",
+      "GH_TOKEN: ${{ inputs.acceptance == 'production-update' && github.token || '' }}",
     );
+    expect(installerAcceptance).toContain(
+      "[string]$health.buildCommit -ieq $env:GITHUB_SHA",
+    );
+    expect(installerAcceptance).toContain("verify-windows-studio-runtime.ps1");
+    expect(installerAcceptance).toContain('repair "{0}"');
+    expect(installerAcceptance).toContain("NGTManager repair");
+    expect(installerAcceptance).not.toContain("/api/system-update");
   });
 
-  it("adapts only legacy baseline startup for the non-interactive hosted runner", async () => {
-    const acceptance = await readFile(
-      "scripts/test-windows-studio-online-update.ps1",
-      "utf8",
-    );
-    expect(acceptance).toContain(
-      'Join-Path $baselineRoot "scripts\\install-windows-startup.ps1"',
-    );
-    expect(acceptance).toContain('"Start-ScheduledTask -TaskName `$taskName"');
-    expect(acceptance).toContain(
-      '"Start-Process -FilePath `$wscriptPath -ArgumentList `$launcherArguments -WindowStyle Hidden"',
-    );
-    expect(acceptance).toContain(
-      '$baselineMetadata.files.PSObject.Properties["scripts/install-windows-startup.ps1"]',
-    );
-    expect(acceptance).toContain(
-      "Baseline startup script failed integrity validation before runner adaptation.",
-    );
-    expect(acceptance).toContain(
-      "$startupManifestEntry.Value = (Get-FileHash -LiteralPath $baselineStartupScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()",
-    );
-    expect(acceptance).toContain(
-      "Adapted legacy baseline atomic file replacement for Windows PowerShell 5.1",
-    );
-    expect(acceptance).toContain(
-      "Baseline script failed integrity validation before runner adaptation",
-    );
-    expect(acceptance).toContain(
-      "Baseline startup script has no supported immediate launcher command.",
-    );
-  });
-
-  it("writes baseline manifests through the shared BOM-free metadata helper", async () => {
-    const acceptance = await readFile(
-      "scripts/test-windows-studio-online-update.ps1",
-      "utf8",
-    );
-    const metadataHelper = await readFile(
-      "scripts/windows-studio-release-metadata.ps1",
-      "utf8",
-    );
-    const packageBuilder = await readFile(
+  it("ships only Node runtime scripts for application and database startup", async () => {
+    const packager = await readFile(
       "scripts/build-windows-studio-package.ps1",
       "utf8",
     );
-
-    expect(acceptance).toContain(
-      '. (Join-Path $PSScriptRoot "windows-studio-release-metadata.ps1")',
-    );
-    expect(
-      acceptance.match(
-        /Write-NgtStudioReleaseMetadataNoBom\s+-Path \$baselineMetadataPath\s+-Metadata \$baselineMetadata/g,
-      ),
-    ).toHaveLength(3);
-    expect(metadataHelper).toContain(
-      "function Write-NgtStudioReleaseMetadataNoBom",
-    );
-    expect(metadataHelper).toMatch(/\[int\]\$Depth = 100/);
-    expect(metadataHelper).toContain(
-      "ConvertTo-Json -InputObject $Metadata -Depth $Depth",
-    );
-    expect(packageBuilder).toMatch(
-      /Write-NgtStudioReleaseMetadataNoBom\s+`\s*-Path \(Join-Path \$stage "studio-release\.json"\)\s+`\s*-Metadata \$releaseMetadata\s+`\s*-Depth 5/,
-    );
+    expect(packager).toContain('"start.mjs"');
+    expect(packager).toContain('"verify-windows-studio-static-assets.mjs"');
+    expect(packager).toContain('"windows-db.mjs"');
+    expect(packager).toContain('"postgres-runtime.mjs"');
+    expect(packager).toContain('"runtime-start-gate.cjs"');
+    expect(packager).toContain('"run-pg-ctl.mjs"');
+    expect(packager).not.toContain('"windows-service.ps1"');
+    expect(packager).not.toContain('"windows-studio-launcher.vbs"');
+    expect(packager).not.toContain('"install-windows-startup.ps1"');
+    expect(packager).not.toContain('"verify-windows-studio-runtime.ps1"');
   });
 
   it("keeps the isolated test preview on a fixed restart-safe port", async () => {
@@ -259,403 +284,120 @@ describe("Windows persistent startup", () => {
     expect(desktopLauncher).toContain("UseShellExecute = true");
   });
 
-  it("keeps studio data outside versioned releases and packages updates at home", async () => {
-    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  it("keeps manager state and business data outside versioned releases", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const database = await readFile("scripts/windows-db.mjs", "utf8");
-    const service = await readFile("scripts/windows-service.ps1", "utf8");
-    const installer = await readFile(
-      "scripts/install-windows-studio.ps1",
+    const postgresRuntime = await readFile(
+      "scripts/postgres-runtime.mjs",
       "utf8",
     );
     const packager = await readFile(
       "scripts/build-windows-studio-package.ps1",
       "utf8",
     );
-    const runtime = await readFile("scripts/studio-runtime.ps1", "utf8");
-    const updateAssets = await readFile(
-      "scripts/prepare-windows-studio-update-assets.ps1",
-      "utf8",
+    const installer = await readFile("installer/windows-studio.iss", "utf8");
+    expect(manager).toContain('join("NGTManager")');
+    expect(manager).toContain('root.join("state")');
+    expect(manager).toContain('root.join("data")');
+    expect(manager).toContain('root.join("backups")');
+    expect(manager).toContain('root.join("releases")');
+    expect(manager).toContain('"runtime/gh.exe"');
+    expect(manager).toContain("fn verify_database_copy");
+    expect(manager).toContain("fn restore_database");
+    expect(manager).toContain("fn spawn_pg_ctl(");
+    expect(manager).toContain("fn spawn_runtime_process(");
+    expect(manager).toContain('"./scripts/run-pg-ctl.mjs"');
+    expect(manager).toContain('"./scripts/runtime-start-gate.cjs"');
+    const preflight = manager.slice(
+      manager.indexOf("fn preflight("),
+      manager.indexOf("fn required_space(", manager.indexOf("fn preflight(")),
     );
-    const start = await readFile("scripts/start.mjs", "utf8");
-    const materializedCopy = await readFile(
-      "scripts/copy-directory-materialized.mjs",
-      "utf8",
+    expect(preflight.indexOf("check_windows_build()?")).toBeLessThan(
+      preflight.indexOf("validate_runtime(source)?"),
+    );
+    expect(preflight).toContain("ascii_temp_directory()");
+    expect(preflight).toContain(
+      "check_space(&temporary, postgres_runtime_size)",
     );
     expect(database).toContain("process.env.NGT_DATA_ROOT");
+    expect(database).toContain('from "./postgres-runtime.mjs"');
+    expect(postgresRuntime).toContain(
+      "process.env.NGT_MANAGER_ROOT ?? process.cwd()",
+    );
+    expect(postgresRuntime).toContain('startsWith("runtime/postgres/")');
+    expect(postgresRuntime).toContain('"runtime.fingerprint"');
+    expect(database).toContain('join(persistentRoot, "postgres")');
+    expect(database).toContain('join(workspace, "database-ready.pid")');
     expect(database).toContain(
-      'const runtime = /[^\\x00-\\x7F]/.test(native) ? join(cache, "runtime") : native;',
+      "Database directory is incomplete; existing data was preserved.",
     );
-    expect(database).toContain("Using packaged PostgreSQL runtime");
-    expect(database).toContain("Preparing PostgreSQL runtime");
-    expect(database).toContain("Initializing PostgreSQL data");
-    expect(database).toContain("Starting PostgreSQL from");
-    expect(database).toContain(
-      'const readyFile = join(workspace, "database-ready.pid")',
-    );
-    expect(database).toContain(
-      "await writeFile(readyFile, String(process.pid))",
-    );
-    expect(database).toContain("Preserved incomplete database");
-    expect(database).toContain("initializingDataDir");
-    expect(database).toContain("output.trim()");
-    expect(packageJson.dependencies["embedded-postgres"]).toBe(
-      "17.10.0-beta.17",
-    );
-    expect(database).toContain('join(persistentRoot, "data")');
-    expect(installer).toContain("Stop-NgtStudioProcesses");
-    expect(installer.indexOf("Stop-NgtStudioProcesses")).toBeLessThan(
-      installer.indexOf("Start-NgtStudioDatabase"),
-    );
-    expect(installer).toContain("Start-NgtStudioDatabase");
-    expect(installer).toContain("Wait-NgtStudioHealth");
-    const standalonePublicDestination = packager.indexOf(
-      '$standalonePublicDestination = Join-Path $standaloneDestination "public"',
-    );
-    const removeStandalonePublic = packager.indexOf(
-      "Remove-Item -LiteralPath $standalonePublicDestination -Recurse -Force",
-      standalonePublicDestination,
-    );
-    const copyStandalonePublic = packager.indexOf(
-      'Copy-Item -LiteralPath "public" -Destination $standalonePublicDestination -Recurse -Force',
-      removeStandalonePublic,
-    );
-    expect(standalonePublicDestination).toBeGreaterThanOrEqual(0);
-    expect(removeStandalonePublic).toBeGreaterThan(standalonePublicDestination);
-    expect(copyStandalonePublic).toBeGreaterThan(removeStandalonePublic);
-    const common = await readFile("scripts/windows-studio-common.ps1", "utf8");
-    expect(common).toContain("$process.HasExited");
-    expect(common).toContain(
-      '$readyFile = Join-Path $script:NgtStateDirectory "database-ready.pid"',
-    );
-    expect(common).toContain("$readyProcessId.Trim() -eq [string]$process.Id");
-    expect(common).not.toContain("Database did not open port 55432 in time.");
-    expect(common).toContain("studio-database.error.log");
-    expect(common).toContain("studio-database.log");
-    expect(common).toContain("$process.WaitForExit()");
-    expect(common).toContain("$process.Refresh()");
-    expect(common).toContain('"unknown"');
-    expect(common).toContain("if ($content) { $content.Trim() }");
-    expect(common).toContain("$details -join");
-    expect(common).not.toContain(
-      "(Get-Content -LiteralPath $errorLog -Raw).Trim()",
-    );
-    expect(service).toContain('"studio.json"');
-    expect(service).toContain('"runtime\\node.exe"');
-    expect(service).toContain('"supervisor.pid"');
-    expect(common).toContain("Get-CimInstance -ClassName Win32_Process");
-    expect(common).toContain('"windows-service.ps1"');
-    expect(common).toContain("$stateDirectories");
-    expect(common).toContain('$ErrorActionPreference = "Stop"');
-    expect(common).toContain("$stoppedDatabasePaths");
-    expect(common).toContain("Test-NgtStudioPostgresProcess");
-    expect(common).toContain("Test-NgtStudioProcessTree");
-    expect(common).toContain(
-      "Stop-NgtStudioProcessIfUnchanged -Process $databaseProcess",
-    );
-    expect(installer).toContain('"releases\\v" + $release.version');
-    expect(installer).toContain('"--max-old-space-size=1536"');
-    expect(packager).toContain("--config.node-linker=hoisted");
-    expect(packager).toContain('"scripts\\copy-directory-materialized.mjs"');
-    expect(packager).toContain('"node_modules\\@swc\\helpers"');
-    expect(packager).toContain("_interop_require_default.js");
-    expect(packager).toContain(
-      "Studio archive is missing the @swc/helpers runtime.",
-    );
-    expect(packager).toContain('"node_modules\\@next\\env"');
-    expect(packager).toContain(
-      '".next\\standalone\\node_modules\\@next\\env\\dist\\index.js"',
-    );
-    expect(packager).toContain(
-      "Studio archive is missing the @next/env runtime.",
-    );
-    expect(packager).toContain('"node_modules\\@prisma\\client\\runtime"');
-    expect(packager).toContain(
-      '".next\\standalone\\node_modules\\@prisma\\client\\runtime\\library.js"',
-    );
-    expect(packager).toContain("The @prisma/client runtime is missing.");
-    expect(packager).toContain('"node_modules\\.prisma\\client"');
-    expect(packager).toContain("require.resolve('.prisma/client/default'");
-    expect(packager).toContain("$prismaClientSourceOutput");
-    expect(packager).toContain(
-      '".next\\standalone\\node_modules\\.prisma\\client\\default.js"',
-    );
-    expect(packager).toContain(
-      "Studio archive is missing the generated Prisma client.",
-    );
-    expect(packager).toContain("runtimeHash = $runtimeHash");
-    expect(runtime).toContain("Install-NgtSharedRuntime");
-    expect(runtime).toContain("New-Item -ItemType HardLink");
-    expect(runtime).toContain("Remove-NgtUnusedRuntimes");
-    expect(updateAssets).toContain('Where-Object { $_.Name -ne "runtime" }');
-    expect(updateAssets).toContain(
-      '".next/standalone/node_modules/@prisma/client/runtime/library.js"',
-    );
-    expect(updateAssets).toContain(
-      "Application update archive is missing the Prisma client runtime.",
-    );
-    expect(updateAssets).toContain(
-      "$actualRuntimeHash -ne [string]$releaseMetadata.runtimeHash",
-    );
-    expect(updateAssets).toContain(
-      '[string]$PackageDirectory = ".local\\studio-package"',
-    );
-    expect(updateAssets).toContain(
-      '"ngt-studio-runtime-v" + $version + ".zip"',
-    );
-    expect(materializedCopy).toContain("lstat(sourcePath)");
-    expect(materializedCopy).toContain("readlink(sourcePath)");
-    expect(packager).toContain('$runtimeDirectory "postgres"');
-    expect(packager).toContain("VCToolsRedistDir");
-    expect(packager).toContain("$vcRuntimeCandidates += (Join-Path");
-    expect(packager).toContain("vswhere.exe");
+    expect(packager).toContain('"NGTUpdater.exe"');
+    expect(packager).toContain('"NGTManager.exe"');
+    expect(packager).toContain('"start.mjs"');
+    expect(packager).toContain('"windows-db.mjs"');
+    expect(packager).toContain('"postgres-runtime.mjs"');
+    expect(packager).toContain('"runtime-start-gate.cjs"');
+    expect(packager).toContain('"run-pg-ctl.mjs"');
     expect(packager).toContain('"msvcp140.dll"');
     expect(packager).toContain('"vcruntime140.dll"');
-    expect(packager).toContain('"vcruntime140_1.dll"');
-    expect(packager).toContain('".next\\standalone\\.env"');
-    expect(packager).toContain("--frozen-lockfile");
-    expect(packager).toContain("tar.exe -a -c");
-    expect(packager).toContain(
-      "sharp-libvips-(darwin|linux|freebsd|linuxmusl|win32-arm64)",
+    expect(installer).toContain("DefaultDirName={localappdata}\\NGTManager");
+    expect(installer).toContain("PrivilegesRequired=lowest");
+    const uninstallRules = installer.slice(
+      installer.indexOf("[UninstallDelete]"),
+      installer.indexOf("[Code]"),
     );
-    expect(packager).toContain(
-      'Get-ChildItem -LiteralPath $stage -File -Recurse -Filter "*.map"',
-    );
-    expect(start).toContain('nextConfig.distDir ?? ".next"');
-    expect(start).toContain("verifyWindowsStudioStaticAssets");
-    expect(start).not.toContain("await rm(");
-    expect(start).not.toContain("await cp(");
-    expect(packager).toContain('Join-Path $standaloneDestination "public"');
-    expect(packager).toContain('$env:GITHUB_REF_TYPE -eq "tag"');
+    expect(uninstallRules).not.toContain("\\data");
+    expect(uninstallRules).not.toContain("\\backups");
+    expect(uninstallRules).not.toContain("\\state");
   });
 
-  it("backs up and verifies private releases before switching the studio", async () => {
-    const backup = await readFile("scripts/backup-windows-studio.ps1", "utf8");
+  it("backs up data, validates a candidate, and installs through the shared manager", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const updater = await readFile("tools/ngt-updater/src/main.rs", "utf8");
-    const studioCommon = await readFile(
-      "scripts/windows-studio-common.ps1",
+    const installer = await readFile("installer/windows-studio.iss", "utf8");
+    const packager = await readFile(
+      "scripts/build-windows-studio-package.ps1",
       "utf8",
     );
     const workflow = (
       await readFile(".github/workflows/windows-studio-release.yml", "utf8")
     ).replace(/\r\n/g, "\n");
-    const acceptanceAction = await readFile(
-      ".github/actions/windows-studio-acceptance/action.yml",
-      "utf8",
+    const installStart = manager.indexOf("fn install_package(");
+    const installEnd = manager.indexOf(
+      "#[cfg(windows)]\nfn validate_candidate",
+      installStart,
     );
-    const buildAction = await readFile(
-      ".github/actions/build-windows-studio-candidate/action.yml",
-      "utf8",
+    const install = manager.slice(installStart, installEnd);
+    expect(manager).toContain("Stage::BackupVerifying");
+    expect(manager).toContain("fn verify_database_copy");
+    expect(manager).toContain("fn restore_database");
+    expect(manager).toContain("fn recover_transaction");
+    expect(manager).toContain("fn atomic_write");
+    expect(install.indexOf("preflight(source)?")).toBeLessThan(
+      install.indexOf("backup_database("),
     );
-    const packageSmokeTest = await readFile(
-      "scripts/test-windows-studio-package.ps1",
-      "utf8",
+    expect(install.indexOf("backup_database(")).toBeLessThan(
+      install.indexOf("validate_candidate("),
     );
-    const onlineUpdateTest = await readFile(
-      "scripts/test-windows-studio-online-update.ps1",
-      "utf8",
-    );
-    const installScript = await readFile(
-      "scripts/install-windows-studio.ps1",
-      "utf8",
-    );
-    const installBootstrap = await readFile(
-      "scripts/install-windows-studio-bootstrap.ps1",
-      "utf8",
-    );
-    const acceptanceServer = await readFile(
-      "scripts/windows-studio-updater-acceptance-server.cjs",
-      "utf8",
-    );
-    const innoInstaller = await readFile(
-      "installer/windows-studio.iss",
-      "utf8",
-    );
-    const ciWorkflow = await readFile(".github/workflows/ci.yml", "utf8");
-    expect(backup).toContain('"SHA256SUMS.txt"');
-    expect(backup).toContain("Stop-NgtStudioProcesses");
-    expect(backup).toContain("$_.FullName.Substring($backupPrefix.Length)");
-    expect(backup).not.toContain("[System.IO.Path]::GetRelativePath");
-    expect(studioCommon).toContain(
-      "if (Test-Path -LiteralPath $postmasterPid -PathType Leaf) {",
-    );
-    expect(
-      studioCommon.indexOf("if (Test-Path -LiteralPath $postmasterPid"),
-    ).toBeLessThan(
-      studioCommon.indexOf("& $pgCtl -D $recordedData -m fast stop 2>$null"),
-    );
-    const fileReplaceCalls = [
-      ...studioCommon.matchAll(/\[System\.IO\.File\]::Replace\([^\r\n]+/g),
-    ];
-    expect(fileReplaceCalls.length).toBeGreaterThan(0);
-    for (const replaceCall of fileReplaceCalls) {
-      expect(replaceCall[0]).not.toMatch(/,\s*\$null\s*\)/);
-    }
+    expect(install).toContain("write_maintenance(&root, &id, true)");
+    expect(install).toContain("write_maintenance(&root, &id, false)");
     expect(updater).toContain("https://api.github.com");
-    expect(updater).toContain("The installer checksum sidecar is invalid.");
     expect(updater).toContain("Installer size and SHA-256 verified.");
-    expect(updater).toContain("CREATE_NO_WINDOW");
     expect(updater).toContain('"/VERYSILENT"');
     expect(updater).toContain('"/SUPPRESSMSGBOXES"');
-    expect(updater).toContain('"/SP-"');
     expect(updater).toContain('"/NORESTART"');
     expect(updater).toContain("check_install_space");
-    expect(updater).toContain('"actualVersion": args.target_version');
     expect(updater).toContain("finish_failed");
-    expect(updater).toContain("take_acceptance_failure_stage");
-    expect(updater).toContain('feature = "acceptance-api"');
-    expect(updater).toContain("update_log_path");
-    expect(onlineUpdateTest).toContain("Get-NgtUpdaterWindowDiagnostics");
-    expect(onlineUpdateTest).toContain("Get-NgtInteractiveSessionEvidence");
-    expect(onlineUpdateTest).toContain("Get-NgtScreenVisibleWindows");
-    expect(onlineUpdateTest).toContain("Get-NgtVisibleWindowProcessIds");
-    expect(onlineUpdateTest).toContain("GetWindowRect");
-    expect(onlineUpdateTest).toContain("windowBounds");
-    expect(onlineUpdateTest).toContain("boundsAvailable");
-    expect(onlineUpdateTest).toContain("OnScreen");
-    expect(onlineUpdateTest).toContain("inno.log");
-    expect(onlineUpdateTest).toContain(
-      "silent online update displayed a visible installer",
-    );
-    expect(onlineUpdateTest).toContain("100 MiB design target");
-    expect(onlineUpdateTest).toContain("Rust updater peak working set");
-    expect(onlineUpdateTest).toContain("NGT_TEST_RELEASE_API_URL");
-    expect(onlineUpdateTest).toContain("acceptance-failure-stage");
-    expect(onlineUpdateTest).toContain(
-      "Injected deployment interruption rolled back the release and database",
-    );
-    expect(onlineUpdateTest).toContain("quarantinedCandidates");
-    expect(onlineUpdateTest).toContain(
-      "The API started a process other than the versioned Rust updater.",
-    );
-    expect(acceptanceServer).toContain(
-      'request.url === "/repos/JayWangsj/ngt1/releases/latest"',
-    );
-    expect(innoInstaller).toContain("SW_HIDE, ewWaitUntilTerminated");
-    expect(innoInstaller).toContain("skipifsilent");
-    expect(innoInstaller).toContain("DisableStartupPrompt=yes");
-    expect(innoInstaller).toContain("NGTAcceptanceFailureStage");
-    expect(installBootstrap).toContain("-AcceptanceFailureStage");
-    expect(installScript).toContain('RUNNER_ENVIRONMENT -ne "github-hosted"');
-    expect(installScript).toContain(
-      "Injected hosted acceptance failure after partial release deployment.",
-    );
-    expect(onlineUpdateTest).toContain("Assert-ReleaseChecksum $oldAppArchive");
-    expect(onlineUpdateTest).toContain(
-      "Assert-ReleaseChecksum $oldRuntimeArchive",
-    );
-    expect(onlineUpdateTest).toContain(
-      '$baselineRuntimeArchive = Join-Path $CandidateDirectory "ngt-studio-runtime-$TargetTag.zip"',
-    );
-    expect(onlineUpdateTest).toContain(
-      "Candidate baseline runtime archive extraction failed.",
-    );
-    const baselinePathNormalization = onlineUpdateTest.indexOf(
-      "Normalize-LegacyBaselineDocumentationPaths -Root $baselineRoot",
-    );
-    const baselineInstallation = onlineUpdateTest.indexOf(
-      '& (Join-Path $baselineRoot "scripts\\install-windows-studio.ps1")',
-    );
-    expect(baselinePathNormalization).toBeGreaterThanOrEqual(0);
-    expect(baselinePathNormalization).toBeLessThan(baselineInstallation);
-    const normalizationFunctionStart = onlineUpdateTest.indexOf(
-      "function Normalize-LegacyBaselineDocumentationPaths",
-    );
-    const normalizationFunctionEnd = onlineUpdateTest.indexOf(
-      "function Invoke-BusinessDataProbe",
-      normalizationFunctionStart,
-    );
-    const normalizationFunction = onlineUpdateTest.slice(
-      normalizationFunctionStart,
-      normalizationFunctionEnd,
-    );
-    expect(normalizationFunction).toContain("Get-FileHash");
-    expect(normalizationFunction).toContain("Move-Item");
-    const onlineTestRootCreation = onlineUpdateTest.indexOf(
-      "New-Item -ItemType Directory -Path $testRoot -Force | Out-Null",
-    );
-    expect(onlineTestRootCreation).toBeGreaterThanOrEqual(0);
-    expect(onlineTestRootCreation).toBeLessThan(
-      onlineUpdateTest.indexOf("$taskRoot = Join-Path $installRoot"),
-    );
-    const onlineTestCleanupDirectoryReset = onlineUpdateTest.indexOf(
-      "Set-Location -LiteralPath ([System.IO.Path]::GetTempPath())",
-    );
-    const onlineTestRootCleanup = onlineUpdateTest.indexOf(
-      "Remove-Item -LiteralPath $testRoot -Recurse -Force",
-    );
-    expect(onlineTestCleanupDirectoryReset).toBeGreaterThanOrEqual(0);
-    expect(onlineTestCleanupDirectoryReset).toBeLessThan(onlineTestRootCleanup);
-    expect(workflow).toContain('tags:\n      - "v*"');
+    expect(installer).toContain("NGTManager.exe");
+    expect(installer).toContain("Operation := 'install'");
+    expect(installer).toContain("Operation := 'update'");
+    expect(installer).toContain("NGTUpdateId");
+    expect(installer).toContain("RaiseException");
+    expect(packager).toContain("cargo build --release --bins");
+    expect(packager).toContain('"NGTManager.exe"');
+    expect(packager).toContain('"NGTUpdater.exe"');
     expect(workflow).toContain("runs-on: windows-2022");
-    expect(ciWorkflow).toContain("--config.node-linker=hoisted");
-    expect(ciWorkflow).toContain("--config.package-import-method=copy");
-    expect(ciWorkflow).toContain(
-      "node --test tests/release/windows-studio-release.node-test.mjs",
-    );
-    const packageBuilder = await readFile(
-      "scripts/build-windows-studio-package.ps1",
-      "utf8",
-    );
-    const updateSafetyTest = await readFile(
-      "scripts/test-windows-studio-update-safety.ps1",
-      "utf8",
-    );
-    const releaseVerifier = await readFile(
-      "scripts/verify-windows-studio-release.ps1",
-      "utf8",
-    );
-    expect(packageBuilder).toContain("cargo build --release");
-    expect(packageBuilder).toContain('"NGTUpdater.exe"');
-    expect(updateSafetyTest).toContain('"tools/NGTUpdater.exe"');
-    expect(releaseVerifier).toContain('"tools/NGTUpdater.exe"');
-    expect(packageBuilder).not.toContain('"update-windows-studio.ps1"');
-    expect(workflow).not.toContain("actions/download-artifact@v4");
-    expect(workflow).not.toContain("windows-studio-package-${{ github.sha }}");
-    expect(workflow).not.toContain("prepare-candidate:");
-    expect(workflow).toContain(
-      "node scripts/windows-studio-release.mjs prepare-draft",
-    );
     expect(workflow).toContain("./.github/actions/windows-studio-acceptance");
-    expect(acceptanceAction).toContain(
-      "node scripts/windows-studio-release.mjs download-draft release-assets",
-    );
-    expect(acceptanceAction).toContain(
-      "node scripts/windows-studio-release.mjs verify-artifact release-assets",
-    );
-    expect(workflow).toContain(
-      "node scripts/windows-studio-release.mjs publish release-assets",
-    );
-    expect(workflow).toMatch(
-      /needs:\s*\[\s*qualify,\s*build,\s*online-update-acceptance,\s*production-updater-acceptance,\s*installer-acceptance,\s*manual-installer-acceptance,\s*manual-v2020-acceptance,?\s*\]/,
-    );
-    expect(workflow).toContain(
-      "./.github/actions/build-windows-studio-candidate",
-    );
-    expect(buildAction).toContain("innosetup --version=6.7.1");
-    expect(buildAction).toContain("$installedInnoSetup[0].DisplayVersion");
-    expect(buildAction).toContain("$compilerDirectory");
-    expect(workflow).toContain("windows-studio-release-metrics.mjs");
-    expect(workflow).not.toContain("--clobber");
-    expect(workflow).not.toContain("continue-on-error");
-    expect(packageSmokeTest).toContain("Start-NgtStudioDatabase");
-    expect(packageSmokeTest).toContain("[switch]$IntegrityOnly");
-    expect(packageSmokeTest).toContain('"initdb.exe"');
-    expect(packageSmokeTest).toContain("--- Archive bootstrap entries ---");
-    expect(packageSmokeTest).toContain("--- Extracted release scripts ---");
-    expect(packageSmokeTest).toContain("require('pg')");
-    expect(packageSmokeTest).toContain("new PrismaClient()");
-    expect(packageSmokeTest).toContain("verify-windows-studio-release.ps1");
-    expect(packageSmokeTest).toContain(
-      '".next\\standalone\\node_modules\\.prisma\\client\\default.js"',
-    );
-    expect(packageSmokeTest).toContain(
-      '".next\\standalone\\node_modules\\@prisma\\client\\runtime\\library.js"',
-    );
-    expect(packageSmokeTest).toContain('"migrate", "deploy"');
-    expect(packageSmokeTest).toContain("Wait-NgtStudioHealth");
-    expect(packageSmokeTest).toContain("Write-SmokeLogs");
-    expect(packageSmokeTest).toContain("-Tail 200");
-    expect(packageSmokeTest).toContain("Stop-NgtStudioProcesses");
   });
 
   it("installs pnpm before setup-node enables its cache", async () => {
@@ -676,14 +418,10 @@ describe("Windows persistent startup", () => {
     );
   });
 
-  it("builds a one-click per-user studio installer", async () => {
+  it("builds a one-click per-user installer that delegates lifecycle to Rust", async () => {
     const definition = await readFile("installer/windows-studio.iss", "utf8");
     const builder = await readFile(
       "scripts/build-windows-studio-installer.ps1",
-      "utf8",
-    );
-    const bootstrap = await readFile(
-      "scripts/install-windows-studio-bootstrap.ps1",
       "utf8",
     );
     const packager = await readFile(
@@ -698,173 +436,49 @@ describe("Windows persistent startup", () => {
       ".github/actions/build-windows-studio-candidate/action.yml",
       "utf8",
     );
-    const uninstaller = await readFile(
-      "scripts/uninstall-windows-studio.ps1",
-      "utf8",
-    );
     const icon = await readFile("assets/ngt-studio.ico");
     expect(definition).toContain("PrivilegesRequired=lowest");
-    expect(definition).toContain("UsePreviousAppDir=no");
-    expect(definition).not.toContain("BootstrapPath");
-    expect(definition).toContain("install-windows-studio.ps1");
-    expect(definition).toContain("uninstall-windows-studio.ps1");
+    expect(definition).toContain("DefaultDirName={localappdata}\\NGTManager");
+    expect(definition).toContain(
+      'Filename: "{localappdata}\\NGTManager\\tools\\NGTManager.exe"',
+    );
+    expect(definition).toContain('Parameters: "open"');
+    expect(definition).toContain("Parameters := Operation +");
+    expect(definition).toContain("Operation := 'install'");
+    expect(definition).toContain("Operation := 'update'");
+    expect(definition).toContain("function InitializeUninstall()");
+    expect(definition).toContain("Exec(ManagerPath, 'uninstall'");
+    expect(definition).toContain("SetupLogging=yes");
     expect(definition).toContain("{autodesktop}");
-    expect(definition).toContain("SetupIconFile={#IconPath}");
+    expect(definition).toContain("{autoprograms}");
     expect(definition).toContain('Source: "{#PackageDirectory}\\*"');
-    expect(definition).toContain("recursesubdirs createallsubdirs");
-    expect(definition).not.toContain("ngt-studio-package.zip");
-    expect(definition).toContain("UninstallDisplayIcon");
-    expect(definition).toContain(
-      "UninstallFilesDir={localappdata}\\NGT\\uninstall",
+    const uninstallRules = definition.slice(
+      definition.indexOf("[UninstallDelete]"),
+      definition.indexOf("[Code]"),
     );
-    expect(definition).toContain(
-      'IconFilename: "{localappdata}\\NGT\\assets\\ngt-studio.ico"',
-    );
-    expect(definition).toContain("IconFilename");
-    expect(definition).toContain('Filename: "http://127.0.0.1:3000"');
-    expect(definition).toContain(
-      "Flags: shellexec postinstall nowait skipifsilent",
-    );
-    expect(definition).not.toContain("{sys}\\explorer.exe");
+    expect(uninstallRules).toContain("\\releases");
+    expect(uninstallRules).toContain("\\tools");
+    expect(uninstallRules).not.toContain("\\data");
+    expect(uninstallRules).not.toContain("\\backups");
+    expect(uninstallRules).not.toContain("\\state");
     expect(builder).toContain("ISCC.exe");
-    expect(builder).not.toContain("BootstrapPath");
-    expect(builder.indexOf("$compilerCandidates")).toBeLessThan(
-      builder.indexOf('Get-Command "iscc.exe"'),
-    );
-    expect(builder).toContain("Studio installer bootstrap is missing");
-    expect(builder).toContain("Inno Setup compiler:");
     expect(builder).toContain("Get-FileHash");
-    expect(packager).toContain('"windows-studio-launcher.vbs"');
-    expect(packager).toContain('"install-windows-studio-bootstrap.ps1"');
-    expect(packager).toContain(
-      '$standaloneDocs = Join-Path $standaloneDestination "docs"',
-    );
-    expect(packager).toContain('"assets\\ngt-studio.ico"');
-    expect(packager).toContain('(Join-Path $runtimeDirectory "gh.exe")');
-    expect(packager).toContain('"licenses\\github-cli.txt"');
+    expect(packager).toContain("cargo build --release --bins");
+    expect(packager).toContain('"NGTManager.exe"');
+    expect(packager).toContain('"NGTUpdater.exe"');
+    expect(buildAction).toContain("build-windows-studio-installer.ps1");
     expect(workflow).toContain(
       "./.github/actions/build-windows-studio-candidate",
     );
-    expect(buildAction).toContain("build-windows-studio-installer.ps1");
-    expect(buildAction).toContain("prepare-windows-studio-update-assets.ps1");
-    expect(
-      buildAction.indexOf("build-windows-studio-installer.ps1"),
-    ).toBeLessThan(
-      buildAction.indexOf("prepare-windows-studio-update-assets.ps1"),
-    );
-    expect(bootstrap).not.toContain("Expand-Archive");
-    expect(bootstrap).not.toContain("PackagePath");
-    expect(bootstrap).toContain("install-windows-studio.ps1");
-    expect(bootstrap).not.toContain("-InPlace");
-    expect(bootstrap).toContain("Start-Transcript");
-    expect(definition).toContain("install.log");
-    expect(definition).toContain("if not WizardSilent then");
-    expect(bootstrap).toContain("Start-Transcript");
-    expect(
-      await readFile("scripts/install-windows-studio.ps1", "utf8"),
-    ).toContain('"health-validation"');
-    expect(uninstaller).toContain("Stop-NgtStudioProcesses");
-    expect(uninstaller).toContain("uninstall-windows-startup.ps1");
-    expect(uninstaller).not.toContain("data-store");
-    const service = await readFile("scripts/windows-service.ps1", "utf8");
-    const startup = await readFile(
-      "scripts/install-windows-startup.ps1",
-      "utf8",
-    );
-    const installerScript = await readFile(
-      "scripts/install-windows-studio.ps1",
-      "utf8",
-    );
-    expect(service).toContain("studioConfig.activeRelease");
-    expect(startup).toContain('"service\\windows-studio-launcher.vbs"');
-    expect(installerScript).toContain("activeRelease = $projectRoot");
-    expect(installerScript).toContain("-InPlace -OnlineUpdate:$OnlineUpdate");
-    expect(installerScript).toContain("$resolvedDataRoot = $DataRoot");
-    expect(installerScript).toContain(
-      "$resolvedDataRoot = [string]$onlineInstallPlan.dataRoot",
-    );
-    expect(installerScript).toContain(
-      "$resolvedDataRoot = [string]$manualInstallPlan.dataRoot",
-    );
-    expect(installerScript).toContain(
-      "Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue",
-    );
-    expect(installerScript).toContain(
-      "$manualReservation.marker.previousRelease",
-    );
-    expect(installerScript).toContain(
-      'if ($manualInstall -or $onlineInstall) { Invoke-NgtInstallStage "incomplete-release-recovery"',
-    );
-    expect(
-      installerScript.indexOf(
-        "$stableInstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)",
-      ),
-    ).toBeLessThan(
-      installerScript.indexOf('Invoke-NgtInstallStage "release-backup"'),
-    );
-    expect(installerScript).toContain(
-      "if ($InPlace -and $PreviousReleaseRoot -and -not $OnlineUpdate) { $OnlineUpdate = $true }",
-    );
     expect(icon.readUInt16LE(0)).toBe(0);
     expect(icon.readUInt16LE(2)).toBe(1);
-    const iconCount = icon.readUInt16LE(4);
-    const iconSizes = Array.from({ length: iconCount }, (_, index) => {
-      const size = icon[6 + index * 16];
-      return size === 0 ? 256 : size;
-    });
-    expect(iconSizes).toEqual([16, 24, 32, 48, 64, 128, 256]);
-    const firstImageOffset = icon.readUInt32LE(6 + 12);
-    expect(icon.readUInt32LE(firstImageOffset)).toBe(40);
   });
-});
 
-describe("Windows installer acceptance boundaries", () => {
-  it("checks the installed candidate locally without querying GitHub updates", async () => {
-    const installerAcceptance = await readFile(
-      "scripts/test-windows-studio-installer.ps1",
-      "utf8",
-    );
-    expect(installerAcceptance).toContain(
-      "[string]$health.buildCommit -ieq $env:GITHUB_SHA",
-    );
-    expect(installerAcceptance).toContain(
-      "scripts\\verify-windows-studio-runtime.ps1",
-    );
-    expect(installerAcceptance).not.toContain("/api/system-update");
-  });
-});
-
-describe("Production updater GitHub authentication", () => {
-  it("proves isolated CLI and GH_TOKEN access in the real standard-user child", async () => {
-    const runner = await readFile(
-      "scripts/run-windows-studio-acceptance-as-standard-user.ps1",
-      "utf8",
-    );
-    expect(runner).toContain("auth token --hostname $Hostname");
-    expect(runner).toContain("ngt-noauth.invalid");
-    expect(runner).toContain("SetAccessRuleProtection($true, $false)");
-    expect(runner).toContain("expectedTokenSha256");
-    expect(runner).toContain('Join-Path $ghConfigDirectory "hosts.yml"');
-    expect(runner).toContain("must not be written to request.json");
-    expect(runner).toContain("AddMinutes(110)");
-    expect(runner).toContain("windows-studio-acceptance-coordinator.ps1");
-    expect(runner).toContain("Assert-NgtAcceptanceTokenNotExposed");
-    expect(runner).toContain("childFailurePath");
-    expect(runner).not.toContain("GH_TOKEN = $env:GH_TOKEN");
-  });
-});
-
-describe("Windows installer failure diagnostics", () => {
-  it("logs the original PowerShell error and rethrows it without ScriptHalted", async () => {
-    const installer = await readFile(
-      "scripts/install-windows-studio.ps1",
-      "utf8",
-    );
-    expect(installer).toContain("$failureRecord = $_");
-    expect(installer).toContain(
-      "$failureRecord.InvocationInfo.PositionMessage",
-    );
-    expect(installer).toContain("$failureRecord.ScriptStackTrace");
-    expect(installer).toContain("throw $failureRecord");
+  it("surfaces Rust manager failures in the Inno installer", async () => {
+    const installer = await readFile("installer/windows-studio.iss", "utf8");
+    expect(installer).toContain("LoadStringsFromFile(ResultPath, ResultLines)");
+    expect(installer).toContain("ResultMessage := ResultLines[1]");
+    expect(installer).toContain("NGTManager installation failed.");
+    expect(installer).toContain("RaiseException");
   });
 });
