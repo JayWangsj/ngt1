@@ -655,7 +655,10 @@ fn release_response(response: Response) -> Result<Release> {
     if !response.status().is_success() {
         return Err(UpdateError::new(
             "checking",
-            format!("GitHub Release lookup failed with HTTP {}.", response.status()),
+            format!(
+                "GitHub Release lookup failed with HTTP {}.",
+                response.status()
+            ),
         ));
     }
     response
@@ -2028,7 +2031,10 @@ mod tests {
                 if index == 1 {
                     let query: Value = serde_json::from_slice(&request_body).unwrap();
                     assert_eq!(query["variables"]["tagName"], "v2.1.0");
-                    assert!(query["query"].as_str().unwrap().contains("release(tagName:"));
+                    assert!(query["query"]
+                        .as_str()
+                        .unwrap()
+                        .contains("release(tagName:"));
                 }
                 let headers = format!(
                     "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -2047,13 +2053,7 @@ mod tests {
             target_version: "2.1.0".to_owned(),
             repository: "owner/repo".to_owned(),
         };
-        let release = get_release_at(
-            &client,
-            &args,
-            None,
-            &format!("http://{address}"),
-        )
-        .unwrap();
+        let release = get_release_at(&client, &args, None, &format!("http://{address}")).unwrap();
 
         server.join().unwrap();
         assert_eq!(release.tag_name, "v2.1.0");
