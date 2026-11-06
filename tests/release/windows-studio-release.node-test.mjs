@@ -674,10 +674,9 @@ test("release gates require exact candidate install, Rust update, and versioned 
   assert.ok(standardUser.includes(":authProbeFailed"));
   assert.ok(standardUser.includes("echo 0 >"));
   assert.ok(standardUser.includes("echo 1 >"));
-  assert.ok(
-    standardUser.includes("reg query HKCU\\Environment /v GH_CONFIG_DIR"),
-  );
-  assert.ok(standardUser.includes('set "GH_CONFIG_DIR=%%B"'));
+  assert.ok(standardUser.includes('set "GH_TOKEN="'));
+  assert.ok(standardUser.includes('set "GITHUB_TOKEN="'));
+  assert.ok(standardUser.includes('set "GH_CONFIG_DIR={0}"'));
   assert.ok(!standardUser.includes("echo %ERRORLEVEL%"));
   assert.ok(!standardUser.includes("$authProbeProcess.ExitCode"));
   assert.ok(standardUser.includes('$repository = "JayWangsj/ngt1"'));
