@@ -375,6 +375,7 @@ try {
       (Join-Path $installRoot "logs\database.log"),
       (Join-Path $installRoot "logs\application.log")
     )
+    $diagnosticSources += Join-Path $installRoot "state\update-status.json"
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "update-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "migration-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `

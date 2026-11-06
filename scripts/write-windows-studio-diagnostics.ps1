@@ -57,7 +57,7 @@ foreach ($sourcePath in $SourcePaths) {
       else { $null }
     }
     "installer-acceptance" {
-      if ((Split-Path -Leaf $sourcePath) -in @("installer.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
+      if ((Split-Path -Leaf $sourcePath) -in @("installer.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log", "update-status.json") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
       else { $null }
     }
   }
