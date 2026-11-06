@@ -981,6 +981,43 @@ impl RuntimeJob {
         }
         Ok(child)
     }
+
+    fn terminate_and_wait(&self) -> Result<(), String> {
+        use windows_sys::Win32::System::JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        };
+        if unsafe { TerminateJobObject(self.0, 0) } == 0 {
+            return Err(format!(
+                "Unable to stop the candidate process group: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        for _ in 0..200 {
+            let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION =
+                unsafe { std::mem::zeroed() };
+            let queried = unsafe {
+                QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicAccountingInformation,
+                    &mut accounting as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of_val(&accounting) as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if queried == 0 {
+                return Err(format!(
+                    "Unable to inspect the candidate process group: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if accounting.ActiveProcesses == 0 {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err("The candidate process group did not stop before activation.".to_owned())
+    }
 }
 
 #[cfg(windows)]
@@ -1996,30 +2033,40 @@ fn validate_candidate(
     transaction: &mut Transaction,
 ) -> Result<(), String> {
     let job = RuntimeJob::new()?;
-    let mut database = start_database(&job, release, root)?;
-    if let Err(error) = run_migrations(&job, release, root, operation_id) {
-        let _ = stop_database_launcher(&job, &mut database, release, root);
-        return Err(error);
-    }
-    advance_transaction(root, transaction, Stage::Migrated)?;
-    let mut application = match start_application(&job, release, root) {
-        Ok(application) => application,
-        Err(error) => {
+    let validation = (|| {
+        let mut database = start_database(&job, release, root)?;
+        if let Err(error) = run_migrations(&job, release, root, operation_id) {
             let _ = stop_database_launcher(&job, &mut database, release, root);
             return Err(error);
         }
-    };
-    let health = wait_for_health(&mut application, &verify_release(release)?.version);
-    let mut children = RuntimeChildren {
-        database,
-        application,
-    };
-    let stopped = stop_children(&job, &mut children, release, root);
+        advance_transaction(root, transaction, Stage::Migrated)?;
+        let mut application = match start_application(&job, release, root) {
+            Ok(application) => application,
+            Err(error) => {
+                let _ = stop_database_launcher(&job, &mut database, release, root);
+                return Err(error);
+            }
+        };
+        let health = wait_for_health(&mut application, &verify_release(release)?.version);
+        let mut children = RuntimeChildren {
+            database,
+            application,
+        };
+        let stopped = stop_children(&job, &mut children, release, root);
+        health?;
+        stopped
+    })();
+    let process_cleanup = job.terminate_and_wait();
     drop(job);
-    health?;
-    stopped
+    match (validation, process_cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(validation_error), Ok(())) => Err(validation_error),
+        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+        (Err(validation_error), Err(cleanup_error)) => Err(format!(
+            "{validation_error}; candidate process cleanup also failed: {cleanup_error}"
+        )),
+    }
 }
-
 #[cfg(not(windows))]
 fn validate_candidate(
     _release: &Path,
@@ -3130,6 +3177,55 @@ mod tests {
         server.join().unwrap();
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn candidate_activation_waits_for_validation_processes_to_exit() {
+        let root = std::env::temp_dir().join(format!("ngt-manager-activation-{}", unique_id()));
+        let candidate = root.join(".candidate");
+        let release = root.join("v2.0.23");
+        fs::create_dir_all(&candidate).unwrap();
+        fs::write(candidate.join("held-open.bin"), b"candidate file").unwrap();
+
+        let job = RuntimeJob::new().unwrap();
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-Command",
+            "$stream=[System.IO.File]::Open('held-open.bin',[System.IO.FileMode]::Open,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None);[System.IO.File]::WriteAllText('ready','ready');Start-Sleep -Seconds 60",
+        ]);
+        command.current_dir(&candidate);
+        let mut child = job.spawn(&mut command).unwrap();
+        let ready = candidate.join("ready");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !ready.exists() && std::time::Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        if !ready.exists() {
+            let _ = job.terminate_and_wait();
+            let _ = child.wait();
+            let _ = fs::remove_dir_all(&root);
+            panic!("The candidate test process did not acquire its file.");
+        }
+
+        let rename_while_open = fs::rename(&candidate, &release);
+        let process_cleanup = job.terminate_and_wait();
+        drop(job);
+        let child_status = child.wait().unwrap();
+        if candidate.exists() {
+            fs::rename(&candidate, &release).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(
+            rename_while_open.is_err(),
+            "Windows should block activation while a candidate file is open."
+        );
+        process_cleanup.unwrap();
+        assert!(child_status.code().is_some());
+    }
     fn create_test_install(version: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
 
