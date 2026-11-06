@@ -82,6 +82,36 @@ struct Release {
 }
 
 #[derive(Debug, Deserialize)]
+struct GraphqlReleaseLookup {
+    data: Option<GraphqlReleaseData>,
+    #[serde(default)]
+    errors: Vec<GraphqlError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphqlReleaseData {
+    repository: Option<GraphqlRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphqlRepository {
+    release: Option<GraphqlRelease>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphqlRelease {
+    #[serde(rename = "databaseId")]
+    database_id: Option<u64>,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphqlError {
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InstallConfig {
     install_root: PathBuf,
@@ -515,17 +545,75 @@ fn validate_release(release: &Release, args: &Args) -> Result<()> {
 }
 
 fn get_release(client: &Client, args: &Args, token: Option<&str>) -> Result<Release> {
+    get_release_at(client, args, token, &github_api_base())
+}
+
+fn get_release_at(
+    client: &Client,
+    args: &Args,
+    token: Option<&str>,
+    api_base: &str,
+) -> Result<Release> {
+    let tag = format!("v{}", args.target_version);
     let url = format!(
-        "{}/repos/{}/releases/tags/v{}",
-        github_api_base(),
+        "{}/repos/{}/releases/tags/{}",
+        api_base.trim_end_matches('/'),
         args.repository,
-        args.target_version
+        tag
     );
+    let response = github_get(client, &url, token)?;
+    if response.status().as_u16() == 404 {
+        let Some(release_id) = find_draft_release_id(client, args, token, api_base, &tag)? else {
+            return release_response(response);
+        };
+        let url = format!(
+            "{}/repos/{}/releases/{}",
+            api_base.trim_end_matches('/'),
+            args.repository,
+            release_id
+        );
+        return release_response(github_get(client, &url, token)?);
+    }
+    release_response(response)
+}
+
+fn github_get(client: &Client, url: &str, token: Option<&str>) -> Result<Response> {
     let mut request = client
         .get(url)
         .header(ACCEPT, "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .header(USER_AGENT, "NGT-Studio-Updater");
+    if let Some(token) = token {
+        request = request.header(AUTHORIZATION, format!("Bearer {}", token));
+    }
+    request
+        .send()
+        .map_err(|error| UpdateError::new("checking", error.to_string()))
+}
+
+fn find_draft_release_id(
+    client: &Client,
+    args: &Args,
+    token: Option<&str>,
+    api_base: &str,
+    tag: &str,
+) -> Result<Option<u64>> {
+    let (owner, name) = args
+        .repository
+        .split_once('/')
+        .filter(|(owner, name)| !owner.is_empty() && !name.is_empty())
+        .ok_or_else(|| UpdateError::new("checking", "The Release repository is invalid."))?;
+    let url = format!("{}/graphql", api_base.trim_end_matches('/'));
+    let mut request = client
+        .post(url)
+        .header(ACCEPT, "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header(USER_AGENT, "NGT-Studio-Updater")
+        .json(&json!({
+            "query": "query ReleaseByTag($owner: String!, $name: String!, $tagName: String!) { repository(owner: $owner, name: $name) { release(tagName: $tagName) { databaseId isDraft } } }",
+            "variables": { "owner": owner, "name": name, "tagName": tag }
+        }));
     if let Some(token) = token {
         request = request.header(AUTHORIZATION, format!("Bearer {}", token));
     }
@@ -536,9 +624,38 @@ fn get_release(client: &Client, args: &Args, token: Option<&str>) -> Result<Rele
         return Err(UpdateError::new(
             "checking",
             format!(
-                "GitHub Release lookup failed with HTTP {}.",
+                "GitHub Draft Release lookup failed with HTTP {}.",
                 response.status()
             ),
+        ));
+    }
+    let lookup: GraphqlReleaseLookup = response
+        .json()
+        .map_err(|error| UpdateError::new("checking", error.to_string()))?;
+    if let Some(error) = lookup.errors.first() {
+        return Err(UpdateError::new(
+            "checking",
+            format!("GitHub Draft Release lookup failed: {}", error.message),
+        ));
+    }
+    let release = lookup
+        .data
+        .and_then(|data| data.repository)
+        .and_then(|repository| repository.release);
+    let Some(release) = release.filter(|release| release.is_draft) else {
+        return Ok(None);
+    };
+    release
+        .database_id
+        .map(Some)
+        .ok_or_else(|| UpdateError::new("checking", "The Draft Release ID is missing."))
+}
+
+fn release_response(response: Response) -> Result<Release> {
+    if !response.status().is_success() {
+        return Err(UpdateError::new(
+            "checking",
+            format!("GitHub Release lookup failed with HTTP {}.", response.status()),
         ));
     }
     response
@@ -1840,6 +1957,107 @@ mod tests {
         let mut incomplete = release;
         incomplete.assets.pop();
         assert!(validate_release(&incomplete, &args).is_err());
+    }
+
+    #[test]
+    fn draft_release_lookup_falls_back_to_graphql_and_fetches_by_id() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let responses = [
+                (
+                    "GET /repos/owner/repo/releases/tags/v2.1.0 HTTP/1.1",
+                    404,
+                    "Not Found",
+                    r#"{"message":"Not Found"}"#,
+                ),
+                (
+                    "POST /graphql HTTP/1.1",
+                    200,
+                    "OK",
+                    r#"{"data":{"repository":{"release":{"databaseId":42,"isDraft":true}}}}"#,
+                ),
+                (
+                    "GET /repos/owner/repo/releases/42 HTTP/1.1",
+                    200,
+                    "OK",
+                    r#"{"tag_name":"v2.1.0","draft":true,"body":"draft","assets":[]}"#,
+                ),
+            ];
+
+            for (index, (expected_request, status, reason, body)) in
+                responses.into_iter().enumerate()
+            {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let (mut stream, _) = loop {
+                    match listener.accept() {
+                        Ok(connection) => break connection,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "updater request timed out");
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("failed to accept updater request: {error}"),
+                    }
+                };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                request.push_str(&line);
+                let mut content_length = 0;
+                loop {
+                    line.clear();
+                    if reader.read_line(&mut line).unwrap() == 0 || line.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse::<usize>().unwrap();
+                        }
+                    }
+                }
+                let mut request_body = vec![0; content_length];
+                reader.read_exact(&mut request_body).unwrap();
+                drop(reader);
+
+                assert_eq!(request.trim(), expected_request);
+                if index == 1 {
+                    let query: Value = serde_json::from_slice(&request_body).unwrap();
+                    assert_eq!(query["variables"]["tagName"], "v2.1.0");
+                    assert!(query["query"].as_str().unwrap().contains("release(tagName:"));
+                }
+                let headers = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(headers.as_bytes()).unwrap();
+                stream.write_all(body.as_bytes()).unwrap();
+            }
+        });
+
+        let client = Client::builder().no_proxy().build().unwrap();
+        let args = Args {
+            install_root: PathBuf::new(),
+            release_root: PathBuf::new(),
+            update_id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            target_version: "2.1.0".to_owned(),
+            repository: "owner/repo".to_owned(),
+        };
+        let release = get_release_at(
+            &client,
+            &args,
+            None,
+            &format!("http://{address}"),
+        )
+        .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(release.tag_name, "v2.1.0");
+        assert!(release.draft);
     }
 
     #[test]
