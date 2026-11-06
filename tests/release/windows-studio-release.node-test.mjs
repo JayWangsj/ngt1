@@ -670,7 +670,11 @@ test("release gates require exact candidate install, Rust update, and versioned 
     ),
   );
   assert.ok(standardUser.includes("auth-probe.cmd"));
-  assert.ok(standardUser.includes("echo %ERRORLEVEL%"));
+  assert.ok(standardUser.includes("if errorlevel 1 goto authProbeFailed"));
+  assert.ok(standardUser.includes(":authProbeFailed"));
+  assert.ok(standardUser.includes("echo 0 >"));
+  assert.ok(standardUser.includes("echo 1 >"));
+  assert.ok(!standardUser.includes("echo %ERRORLEVEL%"));
   assert.ok(!standardUser.includes("$authProbeProcess.ExitCode"));
   assert.ok(standardUser.includes('$repository = "JayWangsj/ngt1"'));
   assert.ok(installer.includes("windows-studio-updater-acceptance-server.cjs"));

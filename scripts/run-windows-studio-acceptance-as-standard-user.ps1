@@ -491,7 +491,12 @@ try {
           "@echo off"
           ('"{0}" auth token --hostname github.com 1>"{1}" 2>"{2}"' -f `
             $ghExecutablePath, $authProbeStdoutPath, $authProbeStderrPath)
-          ('echo %ERRORLEVEL%>"{0}"' -f $authProbeExitCodePath)
+          'if errorlevel 1 goto authProbeFailed'
+          ('echo 0 >"{0}"' -f $authProbeExitCodePath)
+          'goto authProbeDone'
+          ':authProbeFailed'
+          ('echo 1 >"{0}"' -f $authProbeExitCodePath)
+          ':authProbeDone'
         ) -join "`r`n"
         [System.IO.File]::WriteAllText($authProbeCommandPath, $authProbeScript + "`r`n", [System.Text.Encoding]::ASCII)
         $authProbeProcess = Start-Process -FilePath $commandPath -ArgumentList @("/d", "/c", "auth-probe.cmd") `
