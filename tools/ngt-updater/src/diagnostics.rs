@@ -223,8 +223,8 @@ impl LogSession {
                 if store.cleanup_expired().is_err() {
                     writer_error_state.store(true, Ordering::Relaxed);
                 }
-                let mut detail_targets = HashMap::new();
-                let mut detail_components = HashMap::new();
+                let mut detail_targets: HashMap<String, String> = HashMap::new();
+                let mut detail_components: HashMap<String, Component> = HashMap::new();
                 let mut pending_details: HashMap<String, VecDeque<u8>> = HashMap::new();
                 let mut failed_detail_buckets = HashSet::new();
                 while let Ok(message) = receiver.recv() {
@@ -1804,7 +1804,6 @@ fn read_bounded_line<R: BufRead>(
     limit: usize,
 ) -> io::Result<(bool, bool, bool)> {
     line.clear();
-    let mut found = false;
     let mut oversized = false;
     loop {
         let (consume, newline, add) = {
@@ -1828,11 +1827,10 @@ fn read_bounded_line<R: BufRead>(
         }
         reader.consume(consume);
         if newline {
-            found = true;
             break;
         }
     }
-    Ok((found, found, oversized))
+    Ok((true, true, oversized))
 }
 
 fn valid_event(event: &DiagnosticEvent) -> bool {
