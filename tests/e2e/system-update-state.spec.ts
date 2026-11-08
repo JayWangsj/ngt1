@@ -169,7 +169,8 @@ test("shows concise sidebar update-check statuses in both locales", async ({
   expect(checkRequests).toBe(0);
 
   await page.locator(".sidebar-update-entry").click();
-  await expect(page).toHaveURL(/settings\/system-update/);
+  await expect(page).toHaveURL(/\/settings\/?$/);
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(summary).toHaveText("正在检查…");
   releaseInitialCheck();
   await expect(summary).toHaveText("已是最新");
@@ -455,7 +456,8 @@ test("captures an available release in the expanded sidebar without progress", a
   await expect(page.locator(".update-notification")).toHaveCount(0);
   await expect(page.locator(".sidebar-update-dot")).toBeVisible();
   await page.locator(".sidebar-update-entry").click();
-  await expect(page).toHaveURL(/settings\/system-update/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator(".update-release-card")).toContainText("2.0.10");
   await expect(page.locator(".update-progress-card")).toHaveCount(0);
   await page.screenshot({
@@ -486,6 +488,7 @@ test("shows a newer but incomplete release without offering installation", async
   await page.goto("/settings/system-update");
   await switchToItalian(page);
 
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator(".update-version-block")).toContainText("2.0.10");
   await expect(page.locator(".update-release-card")).toContainText("2.0.10");
   await expect(page.locator(".update-release-card")).toContainText(
@@ -524,6 +527,7 @@ test("localizes the manual-review guidance for an interrupted update", async ({
   });
   await page.reload();
   await page.waitForLoadState("networkidle");
+  await page.locator(".sidebar-update-entry").click();
   await expect(page.locator(".update-task-compact")).toContainText(
     "上次更新的恢复状态无法确认，已阻止再次更新。",
   );
@@ -564,6 +568,7 @@ test("keeps queued task stages separate from the installed version", async ({
     document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
   });
   await page.reload();
+  await page.locator(".sidebar-update-entry").click();
   const version = page.locator(".update-version-block strong");
   await expect(version).toHaveText("v2.0.15");
   await expect(page.locator(".update-task-compact")).toContainText(
@@ -611,11 +616,11 @@ test("shows a superseded task as informational and keeps its diagnostics", async
     }),
   );
 
-  await page.goto("/settings/system-update");
+  await page.goto("/");
   await page.evaluate(() => {
     document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
   });
-  await page.reload();
+  await page.goto("/settings/system-update");
   const notice = page.locator(".update-task-compact");
   await expect(notice).toContainText("历史更新任务已由经过验证的安装替代");
   await expect(notice).toHaveAttribute("role", "status");
@@ -629,6 +634,7 @@ test("shows a superseded task as informational and keeps its diagnostics", async
     document.cookie = "ngt-locale=it; Path=/; SameSite=Lax";
   });
   await page.reload();
+  await page.locator(".sidebar-update-entry").click();
   await expect(notice).toContainText("La vecchia attività è stata sostituita");
 });
 
@@ -651,7 +657,8 @@ test("keeps the version link and red dot usable when the sidebar is collapsed", 
     animations: "disabled",
   });
   await page.locator(".sidebar-update-entry").click();
-  await expect(page).toHaveURL(/settings\/system-update/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator(".system-update-page")).toBeVisible();
 });
 
 test("shows progress only after the executor reports a real stage", async ({
@@ -1055,6 +1062,7 @@ test("reuses a recent install-scoped update result after a page reload", async (
   ).toBeVisible();
   expect(updateChecks).toBe(1);
   await page.reload();
+  await page.locator(".sidebar-update-entry").click();
   await expect(
     page.getByText("Il sistema è aggiornato.", { exact: true }),
   ).toBeVisible();

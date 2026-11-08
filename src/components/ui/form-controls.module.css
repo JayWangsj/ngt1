@@ -100,16 +100,16 @@
 :where(.scope) :global(input:focus),
 :where(.scope) :global(select:focus),
 :where(.scope) :global(textarea:focus) {
-  border-color: var(--border-focus);
   outline: 0;
-  box-shadow: 0 0 0 3px hsl(45 100% 25% / 16%);
+  box-shadow: none;
 }
 
 :where(.scope) :global(input:focus-visible),
 :where(.scope) :global(select:focus-visible),
 :where(.scope) :global(textarea:focus-visible) {
+  border-color: var(--border-control);
   outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 
 :where(.scope) :global(input::placeholder),

@@ -4461,6 +4461,184 @@ describe("service order safety", () => {
   });
 });
 
+describe("temporary repair option drafts", () => {
+  it("saves compatible temporary options atomically without replacing order prices", async () => {
+    const product = async (name: string) =>
+      createProduct(owner, {
+        requestId: randomUUID(),
+        name,
+        category: "Ricambi",
+        usage: "REPAIR",
+        costPrice: "20",
+        salePrice: "0",
+        initialStock: 5,
+        minStock: 0,
+        compatibilities: [
+          {
+            category: "PHONE",
+            brand: "Apple",
+            model: "iPhone 11",
+            project: "临时屏幕",
+          },
+        ],
+      });
+    const [oled, lcd] = await Promise.all([
+      product("iPhone 11 OLED"),
+      product("iPhone 11 LCD"),
+    ]);
+    const request = input({
+      model: "iPhone11",
+      deposit: "0",
+      items: [
+        {
+          project: "临时屏幕",
+          final: "90",
+          saveRule: true,
+          requiredProductId: oled.id,
+          requiredQuantity: 1,
+          draftPriceOption: {
+            productId: oled.id,
+            name: "OLED 方案",
+            suggested: "120",
+            cost: "20",
+            quantity: 1,
+            minutes: 45,
+            warrantyDays: 30,
+            notes: "保留草稿报价",
+            isDefault: true,
+          },
+        },
+        {
+          project: "临时屏幕",
+          final: "90",
+          saveRule: true,
+          requiredProductId: lcd.id,
+          requiredQuantity: 1,
+          draftPriceOption: {
+            productId: lcd.id,
+            name: "LCD 方案",
+            suggested: "80",
+            cost: "15",
+            quantity: 1,
+            minutes: 60,
+            warrantyDays: 7,
+            notes: "",
+            isDefault: false,
+          },
+        },
+      ],
+    });
+    const order = await createOrder(staff, request);
+    const repeated = await createOrder(staff, request);
+    const savedRule = await db.priceRule.findUniqueOrThrow({
+      where: {
+        category_brand_series_model_project: {
+          category: "PHONE",
+          brand: "Apple",
+          series: "",
+          model: "iPhone 11",
+          project: "临时屏幕",
+        },
+      },
+      include: { options: { orderBy: { productId: "asc" } } },
+    });
+    const savedOrder = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: { orderBy: { priceOptionName: "asc" } } },
+    });
+
+    expect(repeated.id).toBe(order.id);
+    expect(savedRule.suggested.toString()).toBe("120");
+    expect(savedRule.options.map((option) => option.name).sort()).toEqual([
+      "LCD 方案",
+      "OLED 方案",
+    ]);
+    expect(savedOrder.items.map((item) => item.final.toString())).toEqual([
+      "90",
+      "90",
+    ]);
+    expect(savedOrder.items.map((item) => item.priceOptionName).sort()).toEqual(
+      ["LCD 方案", "OLED 方案"],
+    );
+    expect(savedRule.options.filter((option) => option.isDefault)).toHaveLength(
+      1,
+    );
+    expect(
+      await db.productCompatibility.count({ where: { model: "iPhone 11" } }),
+    ).toBe(2);
+
+    await expect(
+      createOrder(
+        staff,
+        input({
+          model: "iPhone 11",
+          deposit: "0",
+          items: [
+            {
+              project: "临时屏幕",
+              final: "90",
+              saveRule: true,
+              requiredProductId: oled.id,
+              requiredQuantity: 1,
+              draftPriceOption: {
+                productId: oled.id,
+                name: "OLED 方案",
+                suggested: "121",
+                cost: "20",
+                quantity: 1,
+                minutes: 45,
+                warrantyDays: 30,
+                notes: "保留草稿报价",
+                isDefault: true,
+              },
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("不同的配件报价方案");
+    expect(await db.priceRule.count({ where: { model: "iPhone 11" } })).toBe(1);
+  });
+
+  it("rejects a direct part when its model or project compatibility does not match", async () => {
+    const product = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "iPhone 12 display",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "20",
+      salePrice: "0",
+      initialStock: 2,
+      minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 12",
+          project: "Display",
+        },
+      ],
+    });
+    await expect(
+      createOrder(
+        staff,
+        input({
+          model: "iPhone 11",
+          deposit: "0",
+          items: [
+            {
+              project: "Display",
+              final: "80",
+              requiredProductId: product.id,
+              requiredQuantity: 1,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("不适用于当前设备和维修项目");
+    expect(await db.workOrder.count()).toBe(0);
+  });
+});
+
 describe("versioned data backup import", () => {
   it("exports, clears, restores and skips an identical second import", async () => {
     const usersBefore = await db.user.count();

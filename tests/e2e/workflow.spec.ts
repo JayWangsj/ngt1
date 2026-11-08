@@ -1497,6 +1497,147 @@ test("creates a repair part and quote option directly from a new order", async (
   await expect(productRow).toContainText("Apple / Telefono / iPhone 13");
 });
 
+test("temporary iPhone 11 projects hide other-model schemes and save drafts on submit", async ({
+  page,
+}) => {
+  const suffix = Date.now();
+  const projectName = `Temporary compatibility ${suffix}`;
+  const productName = `iPhone 15 display fixture ${suffix}`;
+  const optionName = `iPhone 15 scheme ${suffix}`;
+  let productId = "";
+  const setupDb = new PrismaClient();
+  try {
+    const customer = await setupDb.customer.findFirstOrThrow({
+      where: { name: "Cliente Playwright" },
+    });
+    await setupDb.device.create({
+      data: {
+        customerId: customer.id,
+        category: "PHONE",
+        brand: "Apple",
+        model: "iPhone 11",
+      },
+    });
+    const product = await setupDb.product.create({
+      data: {
+        name: productName,
+        category: "Schermi",
+        usage: "REPAIR",
+        costPrice: "20",
+        salePrice: "0",
+        stockQuantity: 2,
+        compatibilities: {
+          create: {
+            category: "PHONE",
+            brand: "Apple",
+            model: "iPhone 15 Pro Max",
+            project: projectName,
+          },
+        },
+      },
+    });
+    productId = product.id;
+    const rule = await setupDb.priceRule.create({
+      data: {
+        category: "PHONE",
+        brand: "",
+        series: "",
+        model: "",
+        project: projectName,
+        suggested: "125",
+        minutes: 60,
+      },
+    });
+    await setupDb.priceRuleOption.create({
+      data: {
+        ruleId: rule.id,
+        productId: product.id,
+        name: optionName,
+        suggested: "125",
+        cost: "20",
+        quantity: 1,
+        minutes: 60,
+        warrantyDays: 30,
+        isDefault: true,
+      },
+    });
+  } finally {
+    await setupDb.$disconnect();
+  }
+
+  await page.goto("/orders/new");
+  await chooseBusinessOption(page, "Cerca cliente", "Cliente Playwright");
+  await chooseRepairDevice(page, "Apple iPhone 11");
+  await page.getByLabel("Display rotto", { exact: true }).check();
+  await page
+    .getByLabel("Consegna prevista", { exact: true })
+    .fill("2099-12-31");
+  await createRepairProject(page, projectName, "90");
+
+  await page.locator(".quote-required-part-add:visible").click();
+  const optionPicker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await expect(optionPicker).not.toContainText(optionName);
+  await expect(
+    optionPicker
+      .locator(".price-option-choice")
+      .filter({ hasText: productName }),
+  ).toHaveCount(0);
+  await expect(optionPicker.locator(".price-option-add")).toBeVisible();
+  await optionPicker.locator(".price-option-add").click();
+
+  const draftDialog = page.getByRole("dialog", {
+    name: "Nuova opzione ricambio",
+    exact: true,
+  });
+  await chooseBusinessOption(
+    page,
+    "Ricambio richiesto",
+    productName,
+    draftDialog,
+  );
+  await draftDialog.getByLabel(/Nome opzione/).fill("iPhone 11 repair scheme");
+  await draftDialog.getByLabel(/Prezzo suggerito/).fill("120");
+  await draftDialog.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(draftDialog).toHaveCount(0);
+  await expect(page.locator(".price-option-picker-summary")).toContainText(
+    "iPhone 11 repair scheme",
+  );
+  await expect(
+    page.getByRole("button", {
+      name: "Modifica dati Preventivo attuale",
+      exact: true,
+    }),
+  ).toContainText("90,00");
+
+  await save(page);
+  const orderId = new URL(page.url()).pathname.split("/").pop();
+  if (!orderId) throw new Error("Created repair order id was not available.");
+  const verifyDb = new PrismaClient();
+  try {
+    const orderItem = await verifyDb.workOrderItem.findFirstOrThrow({
+      where: { orderId },
+      include: { priceOption: true },
+    });
+    expect(orderItem.final.toString()).toBe("90");
+    expect(orderItem.priceOptionName).toBe("iPhone 11 repair scheme");
+    expect(orderItem.priceOption?.suggested.toString()).toBe("120");
+    expect(
+      await verifyDb.productCompatibility.count({
+        where: {
+          productId,
+          model: "iPhone 11",
+          project: projectName.toLocaleLowerCase("it"),
+        },
+      }),
+    ).toBe(1);
+  } finally {
+    await verifyDb.$disconnect();
+  }
+});
+
 test("new custom repair projects use the shared repair-part picker without quote options", async ({
   page,
 }) => {
@@ -3434,6 +3575,7 @@ test("settings detail pages use a scoped shell layout", async ({ page }) => {
 
   await page.goto("/settings/system-update");
   const updatePanels = page.locator(".system-update-page > .panel");
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(updatePanels).toHaveCount(2);
   expect(
     await updatePanels.evaluateAll((elements) =>
@@ -3447,6 +3589,7 @@ test("settings action rows keep shared layout and responsive behavior", async ({
 }) => {
   await page.goto("/settings/system-update");
   const updateAction = page.locator(".update-preferences .settings-action");
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(updateAction).toHaveCSS("display", "flex");
   await expect(updateAction).toHaveCSS("gap", "24px");
   await expect(updateAction).toHaveCSS("padding-bottom", "0px");
@@ -3518,102 +3661,64 @@ test("settings inline managers fill their content at desktop and mobile widths",
   }
 });
 
-test("settings opens system update as a separate page", async ({ page }) => {
+test("settings stays grouped and the sidebar owns the update panel", async ({
+  page,
+}) => {
   await page.goto("/settings");
-  const settingsGrid = page.locator(".settings-grid");
-  await expect(settingsGrid).toHaveCSS("display", "grid");
-  await expect(settingsGrid).toHaveCSS("gap", "22px");
-  const desktopViewport = page.viewportSize();
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(
-    await settingsGrid.evaluate(
-      (element) => element.scrollWidth > element.clientWidth,
-    ),
-  ).toBe(false);
-  if (desktopViewport) await page.setViewportSize(desktopViewport);
+  const entries = page.locator('a.settings-entry[href^="/settings/"]');
+  const entryHrefs = await entries.evaluateAll((items) =>
+    items.map((item) => item.getAttribute("href")),
+  );
+  expect(entryHrefs.slice(0, 7)).toEqual([
+    "/settings/language",
+    "/settings/interface-motion",
+    "/settings/business-date",
+    "/settings/quick-services",
+    "/settings/device-models",
+    "/settings/fault-catalog",
+    "/settings/data",
+  ]);
+  expect(entryHrefs.slice(7)).toEqual(
+    entryHrefs.length === 8 ? ["/settings/test-tools"] : [],
+  );
+  const overviewWidth = await entries
+    .first()
+    .evaluate((element) =>
+      Math.round(
+        element.closest("section")!.parentElement!.getBoundingClientRect()
+          .width,
+      ),
+    );
+  expect(overviewWidth).toBeLessThanOrEqual(1000);
 
-  const entries = page.locator(".settings-entry");
-  await expect(entries).toHaveCount(9);
-  await expect
-    .poll(() =>
-      entries.evaluateAll((items) =>
-        items.map((item) => item.getAttribute("href")),
-      ),
-    )
-    .toEqual([
-      "/settings/language",
-      "/settings/interface-motion",
-      "/settings/test-tools",
-      "/settings/business-date",
-      "/settings/system-update",
-      "/settings/quick-services",
-      "/settings/device-models",
-      "/settings/fault-catalog",
-      "/settings/data",
-    ]);
-  const entry = page.locator(".system-update-entry");
-  await expect(entry).toContainText("Versione corrente");
-  const entryIcon = entry.locator(".settings-entry-icon");
-  await expect(entryIcon).toHaveCSS("width", "38px");
-  await expect(entryIcon).toHaveCSS("height", "38px");
-  await expect(entry.locator(".settings-entry-copy")).toHaveCSS("gap", "5px");
-  const label = entry.locator(".dashboard-link-label");
-  const arrow = entry.locator("svg").last();
-  await expect(label, "title underline starts collapsed").toHaveCSS(
-    "position",
-    "relative",
-  );
-  await expect
-    .poll(() =>
-      label.evaluate(
-        (element) => getComputedStyle(element, "::after").transform,
-      ),
-    )
-    .toBe("matrix(0, 0, 0, 1, 0, 0)");
-  await entry.hover();
-  await expect(entry).toHaveCSS("border-top-color", "rgb(231, 201, 90)");
-  await expect(entry).toHaveCSS("transform", "none");
-  await expect(entryIcon.locator("svg")).toHaveCSS("transform", "none");
-  await expect
-    .poll(() =>
-      arrow.evaluate((element) => getComputedStyle(element).transform),
-    )
-    .not.toBe("none");
-  await expect
-    .poll(() =>
-      label.evaluate(
-        (element) => getComputedStyle(element, "::after").transform,
-      ),
-    )
-    .toBe("matrix(1, 0, 0, 1, 0, 0)");
-  await entry.click();
-  await expect(page).toHaveURL(/\/settings\/system-update$/);
-  const updatePreferences = page.locator(".update-preferences");
-  await expect(updatePreferences).toHaveCSS("display", "grid");
-  await expect(updatePreferences).toHaveCSS("gap", "18px");
-  await expect(updatePreferences.locator(".settings-card-title")).toHaveCSS(
-    "display",
-    "flex",
-  );
-  const settingsHeader = page.locator(".settings-detail-page > .page-header");
-  await expect
-    .poll(() =>
-      settingsHeader.evaluate((element) =>
-        Math.round(element.getBoundingClientRect().width),
-      ),
-    )
-    .toBeLessThanOrEqual(920);
-  await expect(
-    page.getByRole("link", { name: "Torna alle impostazioni" }),
-  ).toHaveClass(/back-link/);
-  const back = page.getByRole("link", { name: "Torna alle impostazioni" });
-  const content = page.locator(".settings-detail-page");
-  expect((await back.boundingBox())!.x).toBe((await content.boundingBox())!.x);
-  expect((await settingsHeader.boundingBox())!.x).toBeGreaterThan(
-    (await back.boundingBox())!.x,
-  );
-  await back.hover();
-  await expect(back).toHaveCSS("transform", "none");
+  const updateEntry = page.locator(".sidebar-update-entry");
+  await updateEntry.click();
+  const updateDialog = page.getByRole("dialog");
+  await expect(updateDialog).toBeVisible();
+  expect(
+    await updateDialog.evaluate((element) =>
+      Math.round(element.getBoundingClientRect().width),
+    ),
+  ).toBeLessThanOrEqual(360);
+  await page.keyboard.press("Escape");
+  await expect(updateDialog).toHaveCount(0);
+  await expect(updateEntry).toBeFocused();
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  await updateEntry.click();
+  await expect(updateDialog).toBeVisible();
+  expect(
+    await updateDialog.evaluate((element) =>
+      Math.round(element.getBoundingClientRect().width),
+    ),
+  ).toBeLessThanOrEqual(296);
+  await page.locator(".page-header h1").click();
+  await expect(updateDialog).toHaveCount(0);
+
+  await page.goto("/settings/system-update");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page).not.toHaveURL(/open-update/);
 });
 
 test("service order print renders mirrored copies from live order data", async ({
@@ -7152,9 +7257,8 @@ test("system update page checks a private release and shows real progress", asyn
     exact: true,
   });
   if (await italianButton.isVisible()) await italianButton.click();
-  await expect(
-    page.getByRole("link", { name: "Torna alle impostazioni" }),
-  ).toBeVisible();
+  const updateDialog = page.getByRole("dialog");
+  await expect(updateDialog).toBeVisible();
   const releaseCard = page.locator(".update-release-card");
   await expect(releaseCard).toContainText("v1.11.58");
   await expect(releaseCard).toContainText("Correzioni e miglioramenti");
@@ -7162,28 +7266,16 @@ test("system update page checks a private release and shows real progress", asyn
   await releaseCard
     .getByRole("button", { name: "Aggiorna ora", exact: true })
     .click();
-  const confirmation = page.getByRole("dialog");
+  const confirmation = page.locator(".update-confirmation-step");
+  await expect(confirmation).toBeVisible();
   await expect(confirmation).toContainText("Conferma aggiornamento");
   await expect(confirmation).toContainText("1.11.58");
-  const confirmationForm = confirmation.locator(":scope > .dialog-form-layout");
-  const confirmationBody = confirmationForm.locator(
-    ":scope > .dialog-body.confirm-update-dialog",
-  );
-  await expect(confirmation).toHaveCSS(
-    "width",
-    `${Math.min(520, page.viewportSize()!.width - 32)}px`,
-  );
-  await expect(confirmationBody).toBeVisible();
-  await expect(confirmationBody).toHaveCSS("display", "grid");
-  await expect(confirmationBody).toHaveCSS("gap", "14px");
-  await expect(confirmationBody.locator("p")).toHaveCSS("margin", "0px");
-  await expect(
-    confirmationForm.locator(":scope > .dialog-footer"),
-  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
   await confirmation
     .getByRole("button", { name: "Annulla", exact: true })
     .click();
   await expect(confirmation).toHaveCount(0);
+  await expect(updateDialog).toBeVisible();
   expect(updateStarted).toBe(false);
   await releaseCard
     .getByRole("button", { name: "Aggiorna ora", exact: true })

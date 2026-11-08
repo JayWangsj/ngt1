@@ -90,11 +90,13 @@
   border-color: #e0bd37;
   background: #fffdf7;
 }
-:where(.scope):global(.date-picker.is-open .date-picker-input),
-:where(.scope) :global(.date-picker-input:focus-visible) {
+:where(.scope):global(.date-picker.is-open .date-picker-input) {
   border-color: #e4ae00;
-  box-shadow: 0 0 0 2px rgb(228 174 0 / 18%);
-  outline: none;
+}
+:where(.scope):global(.date-picker .date-picker-input:focus-visible) {
+  border-color: #d9dddb;
+  outline: 2px solid var(--border-focus);
+  outline-offset: 0;
 }
 :where(.scope):global(.date-picker.is-disabled .date-picker-leading-icon) {
   color: #9ca3a0;
@@ -188,7 +190,7 @@
 :where(.scope) :global(.date-picker-months button:focus-visible),
 :where(.scope) :global(.date-picker-header button:focus-visible),
 :where(.scope) :global(.date-picker-footer button:focus-visible) {
-  outline: 2px solid #e4ae00;
+  outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
 :where(.scope) :global(.date-picker-days button:disabled),
@@ -320,7 +322,7 @@
 :where(.scope) :global(.date-picker-heading-button:focus-visible),
 :where(.scope) :global(.date-picker-year-jump button:focus-visible),
 :where(.scope) :global(.date-picker-year-input:focus-visible) {
-  outline: 2px solid #e4ae00;
+  outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
 :where(.scope) :global(.date-picker-heading-button:disabled) {
@@ -423,7 +425,7 @@
 :where(.scope) :global(.date-picker-years button:focus-visible),
 :where(.scope) :global(.date-picker-months button:focus-visible),
 :where(.scope) :global(.date-picker-days button:focus-visible) {
-  outline: 2px solid #e4ae00;
+  outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
 :where(.scope) :global(.date-picker-years button:disabled) {

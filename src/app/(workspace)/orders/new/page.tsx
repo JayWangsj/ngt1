@@ -18,7 +18,20 @@ export default async function NewOrder({
     include: {
       options: {
         where: { enabled: true },
-        include: { product: true },
+        include: {
+          product: {
+            include: {
+              compatibilities: {
+                select: {
+                  category: true,
+                  brand: true,
+                  model: true,
+                  project: true,
+                },
+              },
+            },
+          },
+        },
         orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
       },
     },
@@ -60,7 +73,15 @@ export default async function NewOrder({
     }),
     db.product.findMany({
       where: { enabled: true, usage: "REPAIR" },
-      select: { id: true, name: true, category: true, stockQuantity: true },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        stockQuantity: true,
+        compatibilities: {
+          select: { category: true, brand: true, model: true, project: true },
+        },
+      },
       orderBy: [{ favorite: "desc" }, { name: "asc" }],
     }),
     db.inventoryCategory.findMany({
@@ -126,6 +147,7 @@ export default async function NewOrder({
                 product.stockQuantity -
                   (reservedByProduct.get(product.id) ?? 0),
               ),
+              compatibilities: product.compatibilities,
             }))}
             productCategories={productCategories}
             rules={priceRuleViews(rules, reservedByProduct)}

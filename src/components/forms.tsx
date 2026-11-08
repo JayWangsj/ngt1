@@ -37,6 +37,10 @@ import {
   groupPriceRules,
   pricePath,
 } from "@/lib/options";
+import {
+  matchesProductCompatibility,
+  normalizeRepairProject,
+} from "@/lib/domain";
 import { useRouter } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -193,9 +197,12 @@ export type PriceRuleOptionView = {
     id: string;
     name: string;
     category: string;
+    enabled?: boolean;
+    usage?: string;
     stock: number;
     reserved: number;
     available: number;
+    compatibilities?: ProductCompatibilityDraft[];
   };
 };
 
@@ -341,6 +348,18 @@ export type ItemView = {
   } | null;
   requiredQuantity?: number;
   requiredProductRemoved?: boolean;
+  draftPriceOption?: DraftPriceOption;
+};
+export type DraftPriceOption = {
+  productId: string;
+  name: string;
+  suggested: string;
+  cost?: string;
+  quantity: number;
+  minutes: number;
+  warrantyDays: number;
+  notes?: string;
+  isDefault?: boolean;
 };
 const blankItem = (): ItemView => ({
   project: "",
@@ -405,6 +424,7 @@ export function removePartPricePatch(
   return {
     priceOptionId: "",
     priceOptionName: "",
+    draftPriceOption: undefined,
     suggested: baseSuggestion,
     requiredProductId: "",
     requiredProductName: "",
@@ -421,7 +441,7 @@ export function removePartPricePatch(
   };
 }
 function normalizedProject(value: string) {
-  return value.trim().toLocaleLowerCase("it");
+  return normalizeRepairProject(value);
 }
 export function quoteItemsValid(
   items: ItemView[],
@@ -493,6 +513,7 @@ export type CreatedProduct = {
   reserved?: number;
   available?: number;
   costPrice?: string;
+  compatibilities?: ProductCompatibilityDraft[];
 };
 
 function ruleLinkedProducts(
@@ -834,6 +855,7 @@ export function ProductForm({
           category,
           stock: unlimitedStock ? 0 : initialStock,
           costPrice,
+          compatibilities: quickCompatibility ? [quickCompatibility] : [],
         });
       onClose();
       if (!onCreated) router.refresh();
@@ -1231,6 +1253,9 @@ function PriceOptionPicker({
                   </div>
                 </button>
               ))}
+              {!options.length && !inventoryProducts.length && (
+                <p className="empty">{it.noPartOptions}</p>
+              )}
               {inventoryProducts
                 .filter(
                   (entry) =>
@@ -1294,6 +1319,7 @@ function PriceOptionPicker({
                 className={`quick-service-picker-add price-option-add ${quickServiceActionStyles.pickerAdd}`}
                 disabled={disabled}
                 onClick={() => {
+                  onOpenChange(false, true);
                   onAdd();
                 }}
               >
@@ -1330,6 +1356,179 @@ function PriceOptionPicker({
   );
 }
 
+function DraftPriceOptionForm({
+  products,
+  initial,
+  defaultMinutes,
+  onCancel,
+  onSave,
+}: {
+  products: CreatedProduct[];
+  initial?: DraftPriceOption;
+  defaultMinutes: number;
+  onCancel: () => void;
+  onSave: (value: DraftPriceOption) => void;
+}) {
+  const it = useMessages();
+  const [productId, setProductId] = useState(initial?.productId ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [suggested, setSuggested] = useState(initial?.suggested ?? "");
+  const [cost, setCost] = useState(initial?.cost ?? "");
+  const [quantity, setQuantity] = useState(initial?.quantity ?? 1);
+  const [minutes, setMinutes] = useState(initial?.minutes ?? defaultMinutes);
+  const [warrantyDays, setWarrantyDays] = useState(initial?.warrantyDays ?? 0);
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [isDefault, setIsDefault] = useState(initial?.isDefault ?? false);
+  const [error, setError] = useState("");
+  const selected = products.find((product) => product.id === productId);
+  const selectProduct = (value: string) => {
+    setProductId(value);
+    const product = products.find((entry) => entry.id === value);
+    if (!product) return;
+    if (!name.trim()) setName(product.name);
+    if (!cost.trim() && product.costPrice) setCost(product.costPrice);
+  };
+  return (
+    <>
+      <DialogBody className="dialog-form">
+        <Field label={`${it.requiredPart} *`}>
+          <SearchableCombobox
+            value={productId}
+            onChange={selectProduct}
+            ariaLabel={it.requiredPart}
+            placeholder={it.selectOption}
+            searchPlaceholder={it.searchInventoryPart}
+            emptyText={it.noMatches}
+            groups={[
+              {
+                options: products.map((product) => ({
+                  value: product.id,
+                  label: product.name,
+                  secondary: product.category,
+                })),
+              },
+            ]}
+          />
+        </Field>
+        <div className="form-grid two">
+          <Field label={`${it.partOptionName} *`}>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              maxLength={120}
+              required
+            />
+          </Field>
+          <Field label={`${it.suggested} (€) *`}>
+            <input
+              inputMode="decimal"
+              value={suggested}
+              onChange={(event) => setSuggested(event.target.value)}
+              required
+            />
+          </Field>
+          <Field label={`${it.cost} (€)`}>
+            <input
+              inputMode="decimal"
+              value={cost}
+              onChange={(event) => setCost(event.target.value)}
+            />
+          </Field>
+          <Field label={`${it.quantity} *`}>
+            <QuantityStepper
+              ariaLabel={it.quantity}
+              min={1}
+              max={999}
+              value={quantity}
+              onValueChange={(value) => setQuantity(Number(value))}
+            />
+          </Field>
+          <Field label={`${it.durationMinutes} *`}>
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              step={1}
+              value={minutes}
+              onChange={(event) => setMinutes(Number(event.target.value))}
+              required
+            />
+          </Field>
+          <Field label={it.warrantyDays}>
+            <SimpleSelect
+              value={String(warrantyDays)}
+              onChange={(value) => setWarrantyDays(Number(value))}
+              placeholder={it.selectOption}
+              ariaLabel={it.warrantyDays}
+              options={warrantyOptions(warrantyDays, it)}
+            />
+          </Field>
+        </div>
+        <Field label={it.notes}>
+          <textarea
+            rows={2}
+            maxLength={2000}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+          />
+        </Field>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={isDefault}
+            onChange={(event) => setIsDefault(event.target.checked)}
+          />
+          {it.defaultRecommended}
+        </label>
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+      </DialogBody>
+      <DialogFooter>
+        <Button type="button" variant="cancel" onClick={onCancel}>
+          {it.cancel}
+        </Button>
+        <Button
+          type="button"
+          disabled={
+            !selected ||
+            !name.trim() ||
+            !validPositiveAmount(suggested) ||
+            (cost.trim() && !validAmount(cost)) ||
+            !Number.isInteger(quantity) ||
+            quantity < 1 ||
+            quantity > 999 ||
+            !Number.isInteger(minutes) ||
+            minutes < 0 ||
+            minutes > 10000 ||
+            !Number.isInteger(warrantyDays) ||
+            warrantyDays < 0 ||
+            warrantyDays > 3650
+          }
+          onClick={() => {
+            if (!selected) return setError(it.requiredPart);
+            onSave({
+              productId,
+              name: name.trim(),
+              suggested,
+              cost,
+              quantity,
+              minutes,
+              warrantyDays,
+              notes: notes.trim(),
+              isDefault,
+            });
+          }}
+        >
+          {it.save}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
 export function ItemsEditor({
   items,
   onChange,
@@ -1358,6 +1557,7 @@ export function ItemsEditor({
     reserved?: number;
     available?: number;
     costPrice?: string;
+    compatibilities?: ProductCompatibilityDraft[];
   }[];
   productCategories?: CategoryView[];
   device: { category: string; brand: string; series: string; model: string };
@@ -1379,12 +1579,20 @@ export function ItemsEditor({
       (created) => !products.some((product) => product.id === created.id),
     ),
   ];
+  const compatibleProducts = (project: string) =>
+    availableProducts.filter((product) =>
+      product.compatibilities?.some((compatibility) =>
+        matchesProductCompatibility(compatibility, device, project),
+      ),
+    );
   const [creatingPart, setCreatingPart] = useState<{
     index: number;
     query: string;
   } | null>(null);
   const [creatingPriceOptionRule, setCreatingPriceOptionRule] =
     useState<RuleView | null>(null);
+  const [creatingDraftPriceOptionIndex, setCreatingDraftPriceOptionIndex] =
+    useState<number | null>(null);
   const [projectQueries, setProjectQueries] = useState<Record<number, string>>(
     {},
   );
@@ -1523,8 +1731,7 @@ export function ItemsEditor({
     const next = items.map((item) => {
       const project = projects.find(
         (candidate) =>
-          candidate.toLocaleLowerCase("it") ===
-          item.project.trim().toLocaleLowerCase("it"),
+          normalizedProject(candidate) === normalizedProject(item.project),
       );
       const found = project ? matchRule(rules, device, project) : null;
       const option = defaultPriceOption(found?.rule);
@@ -1541,6 +1748,7 @@ export function ItemsEditor({
             requiredQuantity:
               option?.quantity ?? found.rule.requiredQuantity ?? 1,
             requiredProductRemoved: false,
+            draftPriceOption: undefined,
             suggestedAfterSwitch: undefined,
           }
         : {
@@ -1554,6 +1762,7 @@ export function ItemsEditor({
             requiredProductId: "",
             requiredQuantity: 1,
             requiredProductRemoved: false,
+            draftPriceOption: undefined,
             suggestedAfterSwitch: undefined,
           };
     });
@@ -1561,7 +1770,18 @@ export function ItemsEditor({
   }, [deviceKey, device, items, rules, onChange, projectPicker]);
   const update = (index: number, patch: Partial<ItemView>) => {
     const next = items.map((item, i) =>
-      i === index ? { ...item, ...patch } : item,
+      i === index
+        ? {
+            ...item,
+            ...patch,
+            ...(patch.project !== undefined &&
+            normalizedProject(patch.project) !==
+              normalizedProject(item.project) &&
+            !("draftPriceOption" in patch)
+              ? { draftPriceOption: undefined }
+              : {}),
+          }
+        : item,
     );
     const changed = next[index];
     if (
@@ -1622,8 +1842,59 @@ export function ItemsEditor({
         const projects = deviceProjects(rules, device);
         const match = matchRule(rules, device, item.project);
         const priceOptions =
-          match?.rule.options?.filter((option) => option.enabled) ?? [];
-        const selectedPriceOption = itemPriceOption(match?.rule, item);
+          match?.rule.options?.filter(
+            (option) =>
+              option.enabled &&
+              option.product.enabled !== false &&
+              (option.product.usage ?? "REPAIR") === "REPAIR" &&
+              (match.level !== "GENERIC" ||
+                option.product.compatibilities?.some((compatibility) =>
+                  matchesProductCompatibility(
+                    compatibility,
+                    device,
+                    item.project,
+                  ),
+                )),
+          ) ?? [];
+        const draftProduct = availableProducts.find(
+          (product) => product.id === item.draftPriceOption?.productId,
+        );
+        const draftPriceOptionView: PriceRuleOptionView | null =
+          item.draftPriceOption && draftProduct
+            ? {
+                id: `draft:${draftProduct.id}`,
+                productId: draftProduct.id,
+                name: item.draftPriceOption.name,
+                suggested: item.draftPriceOption.suggested,
+                cost: item.draftPriceOption.cost || null,
+                quantity: item.draftPriceOption.quantity,
+                minutes: item.draftPriceOption.minutes,
+                warrantyDays: item.draftPriceOption.warrantyDays,
+                enabled: true,
+                isDefault: item.draftPriceOption.isDefault ?? false,
+                notes: item.draftPriceOption.notes ?? "",
+                product: {
+                  id: draftProduct.id,
+                  name: draftProduct.name,
+                  category: draftProduct.category,
+                  stock: draftProduct.stock,
+                  reserved: draftProduct.reserved ?? 0,
+                  available: draftProduct.available ?? draftProduct.stock,
+                },
+              }
+            : null;
+        const pickerPriceOptions = [
+          ...priceOptions,
+          ...(draftPriceOptionView ? [draftPriceOptionView] : []),
+        ];
+        const pickerInventoryProducts = compatibleProducts(item.project).filter(
+          (product) =>
+            !pickerPriceOptions.some(
+              (option) => option.productId === product.id,
+            ),
+        );
+        const selectedPriceOption =
+          draftPriceOptionView ?? itemPriceOption(match?.rule, item);
         const projectQuery = projectQueries[index] ?? "";
         const drafts = temporaryProjects[index] ?? [];
         const normalizedQuery = normalizedProject(projectQuery);
@@ -1665,7 +1936,7 @@ export function ItemsEditor({
           Number(item.requiredQuantity ?? 1) >
             (selectedStock.available ?? selectedStock.stock);
         const switchPriceOption = (priceOptionId: string) => {
-          const option = priceOptions.find(
+          const option = pickerPriceOptions.find(
             (candidate) => candidate.id === priceOptionId,
           );
           if (!priceOptionId) {
@@ -1688,8 +1959,11 @@ export function ItemsEditor({
             (!!item.final.trim() &&
               numeric(item.final) !== numeric(previousSuggestion));
           update(index, {
-            priceOptionId: option.id,
+            priceOptionId: option.id.startsWith("draft:") ? "" : option.id,
             priceOptionName: option.name,
+            draftPriceOption: option.id.startsWith("draft:")
+              ? item.draftPriceOption
+              : undefined,
             suggested: option.suggested,
             requiredProductId: option.productId,
             requiredProductName: option.product.name,
@@ -1728,6 +2002,7 @@ export function ItemsEditor({
             requiredProductId: "",
             requiredQuantity: 1,
             requiredProductRemoved: false,
+            draftPriceOption: undefined,
           });
           if (focusedEdit) onFocusedEditComplete?.();
         };
@@ -1996,6 +2271,7 @@ export function ItemsEditor({
                         requiredQuantity:
                           option?.quantity ?? found?.rule.requiredQuantity ?? 1,
                         requiredProductRemoved: false,
+                        draftPriceOption: undefined,
                         suggestedAfterSwitch: undefined,
                       });
                     if (project) {
@@ -2026,18 +2302,8 @@ export function ItemsEditor({
                     )}
                     {match || projectPicker ? (
                       <PriceOptionPicker
-                        options={priceOptions}
-                        inventoryProducts={
-                          projectPicker && !priceOptions.length
-                            ? availableProducts
-                            : priceOptions.length
-                              ? []
-                              : ruleLinkedProducts(
-                                  availableProducts,
-                                  match?.rule,
-                                  item.requiredProductId,
-                                )
-                        }
+                        options={pickerPriceOptions}
+                        inventoryProducts={pickerInventoryProducts}
                         selected={selectedPriceOption}
                         customProduct={selectedProduct}
                         currentPrice={item.final}
@@ -2066,15 +2332,18 @@ export function ItemsEditor({
                             priceOptionId: "",
                             priceOptionName: "",
                             suggested: "",
+                            draftPriceOption: undefined,
                             suggestedAfterSwitch: undefined,
                           });
                           if (focusedEdit) onFocusedEditComplete?.();
                         }}
                         onRemove={() => switchPriceOption("")}
                         onAdd={
-                          match
-                            ? () => setCreatingPriceOptionRule(match.rule)
-                            : undefined
+                          projectPicker && item.saveRule
+                            ? () => setCreatingDraftPriceOptionIndex(index)
+                            : match
+                              ? () => setCreatingPriceOptionRule(match.rule)
+                              : undefined
                         }
                       />
                     ) : selectedProduct && !editingPart ? (
@@ -2590,7 +2859,7 @@ export function ItemsEditor({
                 clearable
                 groups={[
                   {
-                    options: availableProducts.map((product) => ({
+                    options: compatibleProducts(newProject).map((product) => ({
                       value: product.id,
                       label: product.name,
                       secondary: product.category,
@@ -2721,6 +2990,42 @@ export function ItemsEditor({
           />
         </FormDialog>
       )}
+      {creatingDraftPriceOptionIndex !== null &&
+        items[creatingDraftPriceOptionIndex] && (
+          <FormDialog
+            title={it.newPartOption}
+            onClose={() => setCreatingDraftPriceOptionIndex(null)}
+          >
+            <DraftPriceOptionForm
+              products={availableProducts}
+              initial={items[creatingDraftPriceOptionIndex].draftPriceOption}
+              defaultMinutes={
+                matchRule(
+                  rules,
+                  device,
+                  items[creatingDraftPriceOptionIndex].project,
+                )?.rule.minutes ?? 60
+              }
+              onCancel={() => setCreatingDraftPriceOptionIndex(null)}
+              onSave={(draftPriceOption) => {
+                const product = availableProducts.find(
+                  (entry) => entry.id === draftPriceOption.productId,
+                );
+                update(creatingDraftPriceOptionIndex, {
+                  draftPriceOption,
+                  priceOptionId: "",
+                  priceOptionName: draftPriceOption.name,
+                  suggested: draftPriceOption.suggested,
+                  requiredProductId: draftPriceOption.productId,
+                  requiredProductName: product?.name ?? "",
+                  requiredQuantity: draftPriceOption.quantity,
+                  requiredProductRemoved: false,
+                });
+                setCreatingDraftPriceOptionIndex(null);
+              }}
+            />
+          </FormDialog>
+        )}
     </div>
   );
 }

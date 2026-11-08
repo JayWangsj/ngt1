@@ -38,6 +38,7 @@ import {
   ItemsEditor,
   quoteItemsValid,
   type CategoryView,
+  type DraftPriceOption,
   type RuleView,
 } from "./forms";
 import { type FaultCatalogItem } from "./fault-catalog-manager";
@@ -66,6 +67,7 @@ type Item = {
   requiredProductId?: string;
   requiredQuantity?: number;
   requiredProductRemoved?: boolean;
+  draftPriceOption?: DraftPriceOption;
 };
 
 function safeCents(value: string) {
@@ -219,6 +221,12 @@ export function NewOrderWizard({
     stock: number;
     reserved: number;
     available: number;
+    compatibilities: {
+      category: string;
+      brand: string;
+      model: string;
+      project: string;
+    }[];
   }[];
   productCategories: CategoryView[];
 }) {

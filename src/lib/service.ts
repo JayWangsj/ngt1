@@ -11,6 +11,8 @@ import {
   decimal,
   isDiagnosticFault,
   matchRule,
+  matchesProductCompatibility,
+  normalizeRepairProject,
   romeDay,
   settlement,
   type Actor,
@@ -385,6 +387,235 @@ async function audit(
     },
   });
 }
+async function persistTemporaryPriceOptions(
+  tx: Tx,
+  actor: Actor,
+  device: { category: string; brand: string; series: string; model: string },
+  input: z.infer<typeof itemInput>[],
+) {
+  const groups = new Map<string, typeof input>();
+  for (const item of input) {
+    if (!item.saveRule) continue;
+    const project = normalizeRepairProject(item.project);
+    groups.set(project, [...(groups.get(project) ?? []), item]);
+  }
+  if (!groups.size) return;
+
+  const productIds = [
+    ...new Set(
+      [...groups.values()].flatMap((items) =>
+        items
+          .flatMap((item) => [
+            item.draftPriceOption?.productId,
+            item.requiredProductId,
+          ])
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  ];
+  const products = await tx.product.findMany({
+    where: { id: { in: productIds } },
+    include: { compatibilities: true },
+  });
+  const productsById = new Map(
+    products.map((product) => [product.id, product]),
+  );
+
+  for (const [project, items] of groups) {
+    const key = {
+      category: device.category,
+      brand: normalizeBrand(device.brand),
+      series: "",
+      model: normalizeDeviceModel(device.brand, device.model),
+      project,
+    };
+    await tx.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtext(${JSON.stringify(key)}))
+    `;
+    const options = new Map<
+      string,
+      {
+        product: (typeof products)[number];
+        name: string;
+        suggested: string;
+        cost: string | null;
+        quantity: number;
+        minutes: number;
+        warrantyDays: number;
+        notes: string;
+        isDefault: boolean;
+      }
+    >();
+    for (const item of items) {
+      const draft = item.draftPriceOption;
+      const productId = draft?.productId ?? item.requiredProductId;
+      if (!productId) continue;
+      const product = productsById.get(productId);
+      if (!product || !product.enabled || product.usage !== "REPAIR")
+        throw new BusinessError("Ricambio non disponibile.");
+      if (draft) {
+        const compatible = product.compatibilities.some((entry) =>
+          matchesProductCompatibility(entry, device, item.project),
+        );
+        if (!compatible) {
+          await tx.productCompatibility.create({
+            data: {
+              productId,
+              category: device.category,
+              brand: normalizeBrand(device.brand),
+              model: normalizeDeviceModel(device.brand, device.model),
+              project,
+            },
+          });
+          product.compatibilities.push({
+            id: "draft",
+            productId,
+            category: device.category,
+            brand: normalizeBrand(device.brand),
+            model: normalizeDeviceModel(device.brand, device.model),
+            project,
+          });
+        }
+      } else if (
+        !product.compatibilities.some((entry) =>
+          matchesProductCompatibility(entry, device, item.project),
+        )
+      ) {
+        throw new BusinessError(
+          "所选配件不适用于当前设备和维修项目，请刷新后重选。",
+        );
+      }
+      const proposed = {
+        product,
+        name: draft?.name ?? product.name,
+        suggested: draft?.suggested ?? item.final,
+        cost: draft
+          ? draft.cost || null
+          : (product.costPrice?.toString() ?? null),
+        quantity: draft?.quantity ?? item.requiredQuantity,
+        minutes: draft?.minutes ?? 60,
+        warrantyDays: draft?.warrantyDays ?? 0,
+        notes: draft?.notes ?? "",
+        isDefault: draft?.isDefault ?? false,
+      };
+      const previous = options.get(productId);
+      if (
+        previous &&
+        (previous.name !== proposed.name ||
+          cents(previous.suggested) !== cents(proposed.suggested) ||
+          (previous.cost === null) !== (proposed.cost === null) ||
+          (previous.cost !== null &&
+            proposed.cost !== null &&
+            cents(previous.cost) !== cents(proposed.cost)) ||
+          previous.quantity !== proposed.quantity ||
+          previous.minutes !== proposed.minutes ||
+          previous.warrantyDays !== proposed.warrantyDays ||
+          previous.notes !== proposed.notes ||
+          previous.isDefault !== proposed.isDefault)
+      )
+        throw new BusinessError(
+          "同一维修项目的配件方案内容冲突，请刷新后重选。",
+        );
+      options.set(productId, proposed);
+    }
+    if ([...options.values()].filter((option) => option.isDefault).length > 1)
+      throw new BusinessError("同一维修项目只能有一个默认配件方案。");
+    if (
+      options.size &&
+      ![...options.values()].some((option) => option.isDefault)
+    ) {
+      const first = options.values().next().value;
+      if (first) first.isDefault = true;
+    }
+
+    const firstItem = items[0];
+    const defaultOption = [...options.values()].find(
+      (option) => option.isDefault,
+    );
+    const ruleSuggested = defaultOption?.suggested ?? firstItem.final;
+    const ruleMinutes = defaultOption?.minutes ?? 60;
+    const existing = await tx.priceRule.findUnique({
+      where: { category_brand_series_model_project: key },
+      include: { options: true },
+    });
+    const desiredOptions = [...options.entries()];
+    if (existing) {
+      const optionsMatch =
+        existing.options.length === desiredOptions.length &&
+        desiredOptions.every(([productId, desired]) => {
+          const option = existing.options.find(
+            (candidate) => candidate.productId === productId,
+          );
+          return Boolean(
+            option &&
+            option.enabled &&
+            option.name === desired.name &&
+            cents(option.suggested.toString()) === cents(desired.suggested) &&
+            ((option.cost === null && desired.cost === null) ||
+              (option.cost !== null &&
+                desired.cost !== null &&
+                cents(option.cost.toString()) === cents(desired.cost))) &&
+            option.quantity === desired.quantity &&
+            option.minutes === desired.minutes &&
+            option.warrantyDays === desired.warrantyDays &&
+            option.notes === desired.notes &&
+            option.isDefault === desired.isDefault,
+          );
+        });
+      const ruleMatches =
+        existing.enabled &&
+        cents(existing.suggested.toString()) === cents(ruleSuggested) &&
+        existing.minutes === ruleMinutes &&
+        (!existing.requiredProductId ||
+          desiredOptions.some(
+            ([productId, option]) =>
+              productId === existing.requiredProductId &&
+              option.quantity === existing.requiredQuantity,
+          ));
+      if (!ruleMatches || !optionsMatch)
+        throw new BusinessError(
+          "该维修项目已有不同的配件报价方案，请刷新后重新选择。",
+        );
+      continue;
+    }
+
+    const rule = await tx.priceRule.create({
+      data: {
+        ...key,
+        suggested: ruleSuggested,
+        minutes: ruleMinutes,
+        requiredProductId: null,
+        requiredQuantity: 1,
+      },
+    });
+    await audit(tx, actor, rule.id, "PRICE_RULE_CREATED", {
+      after: ruleSuggested,
+      source: "ORDER_DRAFT",
+    });
+    for (const [productId, option] of desiredOptions) {
+      await tx.priceRuleOption.create({
+        data: {
+          ruleId: rule.id,
+          productId,
+          name: option.name,
+          suggested: option.suggested,
+          cost: option.cost,
+          quantity: option.quantity,
+          minutes: option.minutes,
+          warrantyDays: option.warrantyDays,
+          notes: option.notes,
+          isDefault: option.isDefault,
+        },
+      });
+      await audit(tx, actor, rule.id, "PRICE_RULE_OPTION_CREATED", {
+        productId,
+        name: option.name,
+        suggested: option.suggested,
+        source: "ORDER_DRAFT",
+      });
+    }
+  }
+}
 async function snapshots(
   tx: Tx,
   actor: Actor,
@@ -419,99 +650,10 @@ async function snapshots(
     },
     orderBy: { id: "asc" },
   });
-  const results = [];
-  const projectPrices = new Map<string, number>();
-  for (const item of input) {
-    const match = matchRule(rules, device, item.project);
-    const final = cents(item.final);
-    const projectKey = item.project.trim().toLowerCase();
-    if (
-      projectPrices.has(projectKey) &&
-      projectPrices.get(projectKey) !== final
-    )
-      throw new BusinessError(
-        "Prezzi diversi per lo stesso intervento: distingui la specifica del ricambio.",
-      );
-    projectPrices.set(projectKey, final);
-    const key = {
-      category: device.category,
-      brand: normalizeBrand(device.brand),
-      series: "",
-      model: normalizeDeviceModel(device.brand, device.model),
-      project: item.project.trim().toLowerCase(),
-    };
-    const oldItem = previousItems?.find(
-      (i) => i.project.trim().toLowerCase() === key.project,
-    );
-    let effectiveRule = match?.rule ?? null;
-    if (item.saveRule) {
-      const previous = await tx.priceRule.findUnique({
-        where: { category_brand_series_model_project: key },
-      });
-      const savedRule = await tx.priceRule.upsert({
-        where: { category_brand_series_model_project: key },
-        create: {
-          ...key,
-          suggested: decimal(final),
-          minutes: match?.rule.minutes ?? 60,
-          requiredProductId: item.saveRule
-            ? item.requiredProductId || null
-            : null,
-          requiredQuantity: item.saveRule ? item.requiredQuantity : 1,
-        },
-        update: {
-          suggested: decimal(final),
-          enabled: true,
-          requiredProductId: item.requiredProductId || null,
-          requiredQuantity: item.requiredQuantity,
-        },
-      });
-      await audit(
-        tx,
-        actor,
-        savedRule.id,
-        previous ? "PRICE_RULE_UPDATED" : "PRICE_RULE_CREATED",
-        {
-          before: previous?.suggested.toString() ?? null,
-          after: decimal(final),
-        },
-      );
-      if (item.requiredProductId) {
-        const product = await tx.product.findFirst({
-          where: { id: item.requiredProductId, enabled: true, usage: "REPAIR" },
-        });
-        if (!product) throw new BusinessError("Ricambio non disponibile.");
-        await tx.priceRuleOption.updateMany({
-          where: { ruleId: savedRule.id, isDefault: true },
-          data: { isDefault: false },
-        });
-        await tx.priceRuleOption.upsert({
-          where: {
-            ruleId_productId: {
-              ruleId: savedRule.id,
-              productId: product.id,
-            },
-          },
-          create: {
-            ruleId: savedRule.id,
-            productId: product.id,
-            name: product.name,
-            suggested: decimal(final),
-            cost: product.costPrice,
-            quantity: item.requiredQuantity,
-            minutes: savedRule.minutes,
-            isDefault: true,
-          },
-          update: {
-            suggested: decimal(final),
-            quantity: item.requiredQuantity,
-            enabled: true,
-            isDefault: true,
-          },
-        });
-      }
-      effectiveRule = await tx.priceRule.findUniqueOrThrow({
-        where: { id: savedRule.id },
+  await persistTemporaryPriceOptions(tx, actor, device, input);
+  const effectiveRules = input.some((item) => item.saveRule)
+    ? await tx.priceRule.findMany({
+        where: { enabled: true },
         include: {
           options: {
             where: { enabled: true },
@@ -523,8 +665,29 @@ async function snapshots(
             ],
           },
         },
-      });
-    }
+        orderBy: { id: "asc" },
+      })
+    : rules;
+  const results = [];
+  const projectPrices = new Map<string, number>();
+  for (const item of input) {
+    const match = matchRule(effectiveRules, device, item.project);
+    const final = cents(item.final);
+    const projectKey = normalizeRepairProject(item.project);
+    if (
+      projectPrices.has(projectKey) &&
+      projectPrices.get(projectKey) !== final
+    )
+      throw new BusinessError(
+        "Prezzi diversi per lo stesso intervento: distingui la specifica del ricambio.",
+      );
+    projectPrices.set(projectKey, final);
+    const oldItem = previousItems?.find(
+      (i) => normalizeRepairProject(i.project) === projectKey,
+    );
+    if (item.saveRule && !match)
+      throw new BusinessError("配件报价方案保存失败，请刷新后重试。");
+    const effectiveRule = match?.rule ?? null;
     const options = (effectiveRule?.options ?? []).filter(
       (option) => option.product.enabled && option.product.usage === "REPAIR",
     );
@@ -569,13 +732,17 @@ async function snapshots(
       throw new BusinessError("Selezione ricambio non valida.");
     let selectedOption = item.requiredProductRemoved
       ? null
-      : item.priceOptionId
-        ? options.find((option) => option.id === item.priceOptionId)
-        : item.requiredProductId
-          ? options.find(
-              (option) => option.productId === item.requiredProductId,
-            )
-          : (options.find((option) => option.isDefault) ?? options[0]);
+      : item.draftPriceOption
+        ? options.find(
+            (option) => option.productId === item.draftPriceOption?.productId,
+          )
+        : item.priceOptionId
+          ? options.find((option) => option.id === item.priceOptionId)
+          : item.requiredProductId
+            ? options.find(
+                (option) => option.productId === item.requiredProductId,
+              )
+            : (options.find((option) => option.isDefault) ?? options[0]);
     if (preservesHistoricalOption)
       selectedOption = historicalOption ?? undefined;
     else if (preservesHistoricalNoPart) selectedOption = null;
@@ -591,6 +758,8 @@ async function snapshots(
       throw new BusinessError(
         "Il ricambio non corrisponde all'opzione selezionata.",
       );
+    if (item.draftPriceOption && !selectedOption)
+      throw new BusinessError("临时配件方案保存失败，请刷新后重试。");
     const requiredProductId =
       item.requiredProductRemoved || preservesHistoricalNoPart
         ? null
@@ -608,6 +777,30 @@ async function snapshots(
           !preservesHistoricalSelection))
     )
       throw new BusinessError("Ricambio non disponibile.");
+    const requiresCompatibility = Boolean(
+      requiredProductId &&
+      !preservesHistoricalSelection &&
+      (!selectedOption || match?.level === "GENERIC"),
+    );
+    if (requiresCompatibility) {
+      const compatibleProduct = await tx.product.findFirst({
+        where: {
+          id: requiredProductId!,
+          enabled: true,
+          usage: "REPAIR",
+          compatibilities: { some: { category: device.category } },
+        },
+        include: { compatibilities: true },
+      });
+      if (
+        !compatibleProduct?.compatibilities.some((entry) =>
+          matchesProductCompatibility(entry, device, item.project),
+        )
+      )
+        throw new BusinessError(
+          "所选配件不适用于当前设备和维修项目，请刷新后重选。",
+        );
+    }
     results.push({
       project: item.project,
       final: decimal(final),
@@ -656,236 +849,251 @@ async function snapshots(
 }
 export async function createOrder(actorInput: Actor, raw: unknown) {
   const data = orderInput.parse(raw);
-  return transact(async (tx) => {
-    await assertDueDate(tx, data.dueDate);
-    const actor = await currentActor(tx, actorInput);
-    const previous = await tx.auditLog.findFirst({
-      where: {
-        action: "ORDER_CREATED",
-        context: { path: ["requestId"], equals: data.requestId },
-      },
-    });
-    if (previous)
-      return tx.workOrder.findUniqueOrThrow({
-        where: { id: previous.entityId },
-      });
-    let customer = await tx.customer.findFirst({
-      where: {
-        deletedAt: null,
-        OR: [
-          { phone: data.phone },
-          { phones: { some: { phone: data.phone } } },
-        ],
-      },
-    });
-    if (!customer) {
-      customer = await tx.customer.create({
-        data: {
-          name: data.customerName,
-          phone: data.phone,
-          consentAt: data.privacyConsent ? new Date() : null,
-          consentVersion: data.privacyConsent ? "1.0" : null,
-        },
-      });
-    } else if (data.privacyConsent && !customer.consentAt) {
-      customer = await tx.customer.update({
-        where: { id: customer.id },
-        data: { consentAt: new Date(), consentVersion: "1.0" },
-      });
-    }
-    if (customer.deletedAt)
-      throw new BusinessError("Cliente eliminato: usa un altro telefono.");
-    await syncPhones(
-      tx,
-      customer.id,
-      customer.phone,
-      data.additionalPhones,
-      true,
-    );
-    const device = data.deviceId
-      ? await tx.device.findFirst({
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await transact(async (tx) => {
+        await assertDueDate(tx, data.dueDate);
+        const actor = await currentActor(tx, actorInput);
+        const previous = await tx.auditLog.findFirst({
           where: {
-            id: data.deviceId,
-            customerId: customer.id,
-            deletedAt: null,
-          },
-        })
-      : await tx.device.create({
-          data: {
-            customerId: customer.id,
-            category: data.category,
-            brand: normalizeBrand(data.brand),
-            series: normalizeModel(data.series),
-            model: normalizeDeviceModel(data.brand, data.model),
-            imei: data.imei || null,
-            appearance: data.appearance,
-            accessories: data.accessories,
+            action: "ORDER_CREATED",
+            context: { path: ["requestId"], equals: data.requestId },
           },
         });
-    if (!device)
-      throw new BusinessError(
-        "Il dispositivo non appartiene al cliente selezionato.",
-      );
-    const diagnostic =
-      data.inspectionMode || isDiagnosticFault([...data.faults, data.fault]);
-    const items = diagnostic
-      ? []
-      : await snapshots(tx, actor, device, data.items);
-    const requiredParts = await requiredPartLines(tx, items);
-    const initialStatus = diagnostic
-      ? "DIAGNOSING"
-      : (await newLinesNeedParts(tx, requiredParts))
-        ? "PARTS_MISSING"
-        : "REPAIRING";
-    const quote = settlement(items, {
-      ...data,
-      inspectionFee: diagnostic ? data.diagnosticFee : "0",
-    });
-    if (cents(data.deposit) > quote.due)
-      throw new BusinessError("L'acconto supera il totale.");
-    const legacyFaults = [
-      ...new Map(
-        data.faults
-          .filter((name) => !isDiagnosticFault([name]))
-          .map((name) => [name.trim().toLowerCase(), name.trim()]),
-      ).values(),
-    ];
-    const selectedCatalog = await tx.faultOption.findMany({
-      where: {
-        id: { in: data.standardFaultIds },
-        category: device.category,
-        hidden: false,
-      },
-    });
-    if (selectedCatalog.length !== data.standardFaultIds.length)
-      throw new BusinessError(
-        "Uno dei problemi selezionati non è disponibile.",
-      );
-    for (const name of legacyFaults) {
-      const key = name.toLowerCase();
-      const fault = await tx.faultOption.upsert({
-        where: { category_key: { category: device.category, key } },
-        create: { category: device.category, name, key },
-        update: {},
-      });
-      if (!selectedCatalog.some((item) => item.id === fault.id))
-        selectedCatalog.push(fault);
-    }
-    const customFaults = [
-      ...new Set(data.customFaults.map((name) => name.trim())),
-    ];
-    const faultNote = data.faultNote || (data.inspectionMode ? data.fault : "");
-    if (
-      !diagnostic &&
-      !selectedCatalog.length &&
-      !customFaults.length &&
-      !data.fault
-    )
-      throw new BusinessError("Indica il problema segnalato.");
-    const faultSnapshot = diagnostic
-      ? "Da diagnosticare"
-      : [
-          ...selectedCatalog.map((item) => item.name),
-          ...customFaults,
-          data.fault,
-        ]
-          .filter(Boolean)
-          .join("; ");
-    const order = await tx.workOrder.create({
-      data: {
-        code: await nextDailyCode(tx, "order", await getBusinessDay(tx)),
-        deviceId: device.id,
-        customerName: customer.name,
-        fault: faultSnapshot,
-        faultNote,
-        inspectionMode: diagnostic,
-        inspectionFee: decimal(diagnostic ? cents(data.diagnosticFee) : 0),
-        orderDiscount: decimal(cents(data.orderDiscount)),
-        includeVat: data.includeVat,
-        appearance: data.appearance,
-        accessories: data.accessories,
-        dueDate: data.dueDate || null,
-        notes: data.notes,
-        status: initialStatus,
-        type: "REPAIR",
-        relatedDevices: { create: { deviceId: device.id } },
-        items: { create: items },
-        faults: diagnostic
-          ? undefined
-          : {
-              create: [
-                ...selectedCatalog.map((item) => ({
-                  catalogId: item.id,
-                  nameSnapshot: item.name,
-                  custom: false,
-                })),
-                ...customFaults.map((name) => ({
-                  nameSnapshot: name,
-                  custom: true,
-                })),
-              ],
-            },
-        products: requiredParts.length
-          ? {
-              create: requiredParts.map(({ product, quantity }) => ({
-                productId: product.id,
-                productName: product.name,
-                category: product.category,
-                kind: "REPAIR_PART" as const,
-                unitPrice: decimal(0),
-                quantity,
-              })),
-            }
-          : undefined,
-        history: {
-          create: {
-            to: initialStatus,
-            actorId: actor.id,
-            actorName: actor.name,
+        if (previous)
+          return tx.workOrder.findUniqueOrThrow({
+            where: { id: previous.entityId },
+          });
+        let customer = await tx.customer.findFirst({
+          where: {
+            deletedAt: null,
+            OR: [
+              { phone: data.phone },
+              { phones: { some: { phone: data.phone } } },
+            ],
           },
-        },
-        payments:
-          cents(data.deposit) > 0
-            ? {
-                create: {
-                  requestId: data.requestId,
-                  amount: decimal(cents(data.deposit)),
-                  method: data.method,
-                  kind:
-                    cents(data.deposit) === quote.due
-                      ? "BALANCE"
-                      : data.paymentKind,
-                  actorId: actor.id,
-                  actorName: actor.name,
-                  allocations: {
-                    create: {
-                      source: "REPAIR",
-                      amount: decimal(cents(data.deposit)),
-                    },
-                  },
+        });
+        if (!customer) {
+          customer = await tx.customer.create({
+            data: {
+              name: data.customerName,
+              phone: data.phone,
+              consentAt: data.privacyConsent ? new Date() : null,
+              consentVersion: data.privacyConsent ? "1.0" : null,
+            },
+          });
+        } else if (data.privacyConsent && !customer.consentAt) {
+          customer = await tx.customer.update({
+            where: { id: customer.id },
+            data: { consentAt: new Date(), consentVersion: "1.0" },
+          });
+        }
+        if (customer.deletedAt)
+          throw new BusinessError("Cliente eliminato: usa un altro telefono.");
+        await syncPhones(
+          tx,
+          customer.id,
+          customer.phone,
+          data.additionalPhones,
+          true,
+        );
+        const device = data.deviceId
+          ? await tx.device.findFirst({
+              where: {
+                id: data.deviceId,
+                customerId: customer.id,
+                deletedAt: null,
+              },
+            })
+          : await tx.device.create({
+              data: {
+                customerId: customer.id,
+                category: data.category,
+                brand: normalizeBrand(data.brand),
+                series: normalizeModel(data.series),
+                model: normalizeDeviceModel(data.brand, data.model),
+                imei: data.imei || null,
+                appearance: data.appearance,
+                accessories: data.accessories,
+              },
+            });
+        if (!device)
+          throw new BusinessError(
+            "Il dispositivo non appartiene al cliente selezionato.",
+          );
+        const diagnostic =
+          data.inspectionMode ||
+          isDiagnosticFault([...data.faults, data.fault]);
+        const items = diagnostic
+          ? []
+          : await snapshots(tx, actor, device, data.items);
+        const requiredParts = await requiredPartLines(tx, items);
+        const initialStatus = diagnostic
+          ? "DIAGNOSING"
+          : (await newLinesNeedParts(tx, requiredParts))
+            ? "PARTS_MISSING"
+            : "REPAIRING";
+        const quote = settlement(items, {
+          ...data,
+          inspectionFee: diagnostic ? data.diagnosticFee : "0",
+        });
+        if (cents(data.deposit) > quote.due)
+          throw new BusinessError("L'acconto supera il totale.");
+        const legacyFaults = [
+          ...new Map(
+            data.faults
+              .filter((name) => !isDiagnosticFault([name]))
+              .map((name) => [name.trim().toLowerCase(), name.trim()]),
+          ).values(),
+        ];
+        const selectedCatalog = await tx.faultOption.findMany({
+          where: {
+            id: { in: data.standardFaultIds },
+            category: device.category,
+            hidden: false,
+          },
+        });
+        if (selectedCatalog.length !== data.standardFaultIds.length)
+          throw new BusinessError(
+            "Uno dei problemi selezionati non è disponibile.",
+          );
+        for (const name of legacyFaults) {
+          const key = name.toLowerCase();
+          const fault = await tx.faultOption.upsert({
+            where: { category_key: { category: device.category, key } },
+            create: { category: device.category, name, key },
+            update: {},
+          });
+          if (!selectedCatalog.some((item) => item.id === fault.id))
+            selectedCatalog.push(fault);
+        }
+        const customFaults = [
+          ...new Set(data.customFaults.map((name) => name.trim())),
+        ];
+        const faultNote =
+          data.faultNote || (data.inspectionMode ? data.fault : "");
+        if (
+          !diagnostic &&
+          !selectedCatalog.length &&
+          !customFaults.length &&
+          !data.fault
+        )
+          throw new BusinessError("Indica il problema segnalato.");
+        const faultSnapshot = diagnostic
+          ? "Da diagnosticare"
+          : [
+              ...selectedCatalog.map((item) => item.name),
+              ...customFaults,
+              data.fault,
+            ]
+              .filter(Boolean)
+              .join("; ");
+        const order = await tx.workOrder.create({
+          data: {
+            code: await nextDailyCode(tx, "order", await getBusinessDay(tx)),
+            deviceId: device.id,
+            customerName: customer.name,
+            fault: faultSnapshot,
+            faultNote,
+            inspectionMode: diagnostic,
+            inspectionFee: decimal(diagnostic ? cents(data.diagnosticFee) : 0),
+            orderDiscount: decimal(cents(data.orderDiscount)),
+            includeVat: data.includeVat,
+            appearance: data.appearance,
+            accessories: data.accessories,
+            dueDate: data.dueDate || null,
+            notes: data.notes,
+            status: initialStatus,
+            type: "REPAIR",
+            relatedDevices: { create: { deviceId: device.id } },
+            items: { create: items },
+            faults: diagnostic
+              ? undefined
+              : {
+                  create: [
+                    ...selectedCatalog.map((item) => ({
+                      catalogId: item.id,
+                      nameSnapshot: item.name,
+                      custom: false,
+                    })),
+                    ...customFaults.map((name) => ({
+                      nameSnapshot: name,
+                      custom: true,
+                    })),
+                  ],
                 },
-              }
-            : undefined,
-      },
-    });
-    await audit(tx, actor, order.id, "ORDER_CREATED", {
-      requestId: data.requestId,
-      total: decimal(quote.due),
-      initialStatus,
-      inspectionMode: diagnostic,
-    });
-    if (diagnostic)
-      await audit(tx, actor, order.id, "INSPECTION_STARTED", {
-        fee: decimal(cents(data.diagnosticFee)),
+            products: requiredParts.length
+              ? {
+                  create: requiredParts.map(({ product, quantity }) => ({
+                    productId: product.id,
+                    productName: product.name,
+                    category: product.category,
+                    kind: "REPAIR_PART" as const,
+                    unitPrice: decimal(0),
+                    quantity,
+                  })),
+                }
+              : undefined,
+            history: {
+              create: {
+                to: initialStatus,
+                actorId: actor.id,
+                actorName: actor.name,
+              },
+            },
+            payments:
+              cents(data.deposit) > 0
+                ? {
+                    create: {
+                      requestId: data.requestId,
+                      amount: decimal(cents(data.deposit)),
+                      method: data.method,
+                      kind:
+                        cents(data.deposit) === quote.due
+                          ? "BALANCE"
+                          : data.paymentKind,
+                      actorId: actor.id,
+                      actorName: actor.name,
+                      allocations: {
+                        create: {
+                          source: "REPAIR",
+                          amount: decimal(cents(data.deposit)),
+                        },
+                      },
+                    },
+                  }
+                : undefined,
+          },
+        });
+        await audit(tx, actor, order.id, "ORDER_CREATED", {
+          requestId: data.requestId,
+          total: decimal(quote.due),
+          initialStatus,
+          inspectionMode: diagnostic,
+        });
+        if (diagnostic)
+          await audit(tx, actor, order.id, "INSPECTION_STARTED", {
+            fee: decimal(cents(data.diagnosticFee)),
+          });
+        if (cents(data.deposit) > 0)
+          await audit(tx, actor, order.id, "PAYMENT_ADDED", {
+            amount: decimal(cents(data.deposit)),
+            method: data.method,
+            kind:
+              cents(data.deposit) === quote.due ? "BALANCE" : data.paymentKind,
+          });
+        return order;
       });
-    if (cents(data.deposit) > 0)
-      await audit(tx, actor, order.id, "PAYMENT_ADDED", {
-        amount: decimal(cents(data.deposit)),
-        method: data.method,
-        kind: cents(data.deposit) === quote.due ? "BALANCE" : data.paymentKind,
-      });
-    return order;
-  });
+    } catch (error) {
+      if (
+        attempt === 2 ||
+        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== "P2002"
+      )
+        throw error;
+    }
+  }
+  throw new BusinessError("Riprovare l'operazione.");
 }
 export async function updateOrder(actorInput: Actor, id: string, raw: unknown) {
   const data = editInput.parse(raw);

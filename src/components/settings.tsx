@@ -11,7 +11,6 @@ import {
   Download,
   FlaskConical,
   Languages,
-  RefreshCw,
   Smartphone,
   Sparkles,
   Trash2,
@@ -23,7 +22,6 @@ import { LanguageSwitch, useMessages } from "./language";
 import { Button } from "./ui/button";
 import { DatePicker, SimpleSelect } from "./business-select";
 import { Field } from "./forms";
-import { useUpdateState } from "./update-state";
 import {
   FaultCatalogManager,
   type FaultCatalogItem,
@@ -105,7 +103,7 @@ function SettingsEntry({
   return (
     <Link
       href={href}
-      className={`panel padded settings-card ${settingsCardStyles.card} settings-entry ${settingsEntryStyles.entry} ${settingsEntryStyles.dashboardLink} dashboard-action-link ${className}`.trim()}
+      className={`settings-entry ${settingsEntryStyles.entry} ${settingsEntryStyles.dashboardLink} dashboard-action-link ${className}`.trim()}
     >
       <span
         className={`settings-entry-icon ${settingsEntryStyles.icon}`}
@@ -123,91 +121,83 @@ function SettingsEntry({
 }
 
 export function SettingsOverview({
-  currentVersion,
   testToolsEnabled,
 }: {
-  currentVersion: string;
   testToolsEnabled: boolean;
 }) {
   const it = useMessages();
-  const update = useUpdateState();
-  const updateDescription = update.info?.updateAvailable
-    ? update.check.phase === "failed"
-      ? it.updateCheckStale.replace(
-          "{version}",
-          update.info.latestVersion || "",
-        )
-      : it.updateAvailable.replace("{version}", update.info.latestVersion || "")
-    : update.check.phase === "not-installable"
-      ? it.updateNotInstallable
-      : update.task.phase === "running" || update.task.phase === "rolling-back"
-        ? it.updateInstalling
-        : ["failed", "rollback-failed", "interrupted"].includes(
-              update.task.phase,
-            )
-          ? it.updateFailed
-          : `${it.currentVersion}: ${update.currentVersion || currentVersion}`;
   return (
-    <div
-      className={`settings-grid settings-overview ${settingsEntryStyles.grid}`}
-    >
-      <SettingsEntry
-        href="/settings/language"
-        icon={<Languages size={20} />}
-        title={it.language}
-        description={it.languageSettingsHelp}
-      />
-      <SettingsEntry
-        href="/settings/interface-motion"
-        icon={<Sparkles size={20} />}
-        title={it.interfaceMotion}
-        description={it.interfaceMotionHelp}
-      />
+    <div className={settingsEntryStyles.overview}>
+      <section className={settingsEntryStyles.group}>
+        <h2>{it.settingsGroupInterface}</h2>
+        <div className={settingsEntryStyles.rows}>
+          <SettingsEntry
+            href="/settings/language"
+            icon={<Languages size={19} />}
+            title={it.language}
+            description={it.languageSettingsHelp}
+          />
+          <SettingsEntry
+            href="/settings/interface-motion"
+            icon={<Sparkles size={19} />}
+            title={it.interfaceMotion}
+            description={it.interfaceMotionHelp}
+          />
+        </div>
+      </section>
+      <section className={settingsEntryStyles.group}>
+        <h2>{it.settingsGroupBusiness}</h2>
+        <div className={settingsEntryStyles.rows}>
+          <SettingsEntry
+            href="/settings/business-date"
+            icon={<CalendarDays size={19} />}
+            title={it.businessDate}
+            description={it.businessDateHelp}
+          />
+          <SettingsEntry
+            href="/settings/quick-services"
+            icon={<Wrench size={19} />}
+            title={it.quickService.title}
+            description={it.quickService.description}
+          />
+          <SettingsEntry
+            href="/settings/device-models"
+            icon={<Smartphone size={19} />}
+            title={it.modelCatalog.title}
+            description={it.modelCatalog.description}
+          />
+          <SettingsEntry
+            href="/settings/fault-catalog"
+            icon={<CircleAlert size={19} />}
+            title={it.faultCatalog}
+            description={it.faultCatalogDescription}
+          />
+        </div>
+      </section>
+      <section className={settingsEntryStyles.group}>
+        <h2>{it.settingsGroupData}</h2>
+        <div className={settingsEntryStyles.rows}>
+          <SettingsEntry
+            href="/settings/data"
+            icon={<DatabaseBackup size={19} />}
+            title={it.dataManagement}
+            description={it.dataManagementHelp}
+          />
+        </div>
+      </section>
       {testToolsEnabled && (
-        <SettingsEntry
-          href="/settings/test-tools"
-          icon={<FlaskConical size={20} />}
-          title={it.testTools}
-          description={it.testToolsHelp}
-        />
+        <section className={settingsEntryStyles.group}>
+          <h2>{it.settingsGroupTesting}</h2>
+          <div className={settingsEntryStyles.rows}>
+            <SettingsEntry
+              href="/settings/test-tools"
+              icon={<FlaskConical size={19} />}
+              title={it.testTools}
+              description={it.testToolsHelp}
+            />
+          </div>
+        </section>
       )}
-      <SettingsEntry
-        href="/settings/business-date"
-        icon={<CalendarDays size={20} />}
-        title={it.businessDate}
-        description={it.businessDateHelp}
-      />
-      <SettingsEntry
-        href="/settings/system-update"
-        icon={<RefreshCw size={20} />}
-        title={it.systemUpdate}
-        description={updateDescription}
-        className="system-update-entry"
-      />
-      <SettingsEntry
-        href="/settings/quick-services"
-        icon={<Wrench size={20} />}
-        title={it.quickService.title}
-        description={it.quickService.description}
-      />
-      <SettingsEntry
-        href="/settings/device-models"
-        icon={<Smartphone size={20} />}
-        title={it.modelCatalog.title}
-        description={it.modelCatalog.description}
-      />
-      <SettingsEntry
-        href="/settings/fault-catalog"
-        icon={<CircleAlert size={20} />}
-        title={it.faultCatalog}
-        description={it.faultCatalogDescription}
-      />
-      <SettingsEntry
-        href="/settings/data"
-        icon={<DatabaseBackup size={20} />}
-        title={it.dataManagement}
-        description={it.dataManagementHelp}
-      />
     </div>
   );
 }

@@ -26,8 +26,7 @@
     box-shadow 150ms ease-out;
 }
 
-:where(.scope) :global(.status-dropdown-trigger:hover:not(:disabled)),
-:where(.scope) :global(.status-dropdown-trigger:focus-visible) {
+:where(.scope) :global(.status-dropdown-trigger:hover:not(:disabled)) {
   border-color: color-mix(in srgb, var(--status-color) 42%, white);
   background: var(--status-bg-hover);
   box-shadow: 0 3px 9px color-mix(in srgb, var(--status-color) 10%, transparent);
@@ -36,6 +35,10 @@
 :where(.scope) :global(.status-dropdown.is-open .status-dropdown-trigger) {
   border-color: color-mix(in srgb, var(--status-color) 48%, white);
   background: var(--status-bg-hover);
+}
+
+:where(.scope) :global(.status-dropdown-trigger:focus-visible) {
+  outline-color: var(--border-focus);
 }
 
 :where(.scope) :global(.status-dropdown-trigger:disabled) {

@@ -1,3 +1,5 @@
+import { normalizeBrand, normalizeDeviceModel } from "./catalog";
+
 export const statuses = [
   "RECEIVED",
   "DIAGNOSING",
@@ -233,7 +235,29 @@ export type MatchableRule = {
   project: string;
   enabled: boolean;
 };
-const norm = (s: string) => s.trim().toLocaleLowerCase("it");
+export const normalizeRepairProject = (value: string) =>
+  value.trim().replace(/\s+/g, " ").toLocaleLowerCase("it");
+const norm = normalizeRepairProject;
+export function matchesProductCompatibility(
+  compatibility: {
+    category: string;
+    brand: string;
+    model: string;
+    project: string;
+  },
+  device: { category: string; brand: string; model: string },
+  project: string,
+) {
+  return (
+    compatibility.category === device.category &&
+    norm(normalizeBrand(compatibility.brand)) ===
+      norm(normalizeBrand(device.brand)) &&
+    norm(normalizeDeviceModel(device.brand, compatibility.model)) ===
+      norm(normalizeDeviceModel(device.brand, device.model)) &&
+    (!compatibility.project.trim() ||
+      norm(compatibility.project) === norm(project))
+  );
+}
 export function matchRule<T extends MatchableRule>(
   rules: T[],
   device: { category: string; brand: string; series: string; model: string },
@@ -248,17 +272,19 @@ export function matchRule<T extends MatchableRule>(
   const exact = eligible.find(
     (r) =>
       r.model &&
-      norm(r.brand) === norm(device.brand) &&
-      norm(r.model) === norm(device.model),
+      norm(normalizeBrand(r.brand)) === norm(normalizeBrand(device.brand)) &&
+      norm(normalizeDeviceModel(device.brand, r.model)) ===
+        norm(normalizeDeviceModel(device.brand, device.model)),
   );
   if (exact) return { rule: exact, level: "MODEL" };
   const series = eligible.find(
     (r) =>
       !r.model &&
       r.brand &&
-      norm(r.brand) === norm(device.brand) &&
+      norm(normalizeBrand(r.brand)) === norm(normalizeBrand(device.brand)) &&
       r.series &&
-      norm(r.series) === norm(device.series),
+      norm(normalizeDeviceModel(device.brand, r.series)) ===
+        norm(normalizeDeviceModel(device.brand, device.series)),
   );
   if (series) return { rule: series, level: "SERIES" };
   const generic = eligible.find((r) => !r.brand && !r.series && !r.model);

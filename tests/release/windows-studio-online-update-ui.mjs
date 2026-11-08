@@ -215,12 +215,16 @@ async function verifyInstalledBrowser(channel) {
       );
       if (
         updateResponse?.status() !== 200 ||
-        new URL(page.url()).pathname !== "/settings/system-update"
+        new URL(page.url()).pathname !== "/" ||
+        new URL(page.url()).searchParams.has("open-update")
       ) {
         throw new Error(
-          `The completed update page did not load directly (HTTP ${updateResponse?.status()}, final URL ${page.url()}).`,
+          `The update card did not open from the version entry (HTTP ${updateResponse?.status()}, final URL ${page.url()}).`,
         );
       }
+      await page
+        .getByRole("dialog")
+        .waitFor({ state: "visible", timeout: 15_000 });
       const success = page.locator(".update-result-card.succeeded");
       await success.waitFor({ state: "visible", timeout: 15_000 });
       const summary = await success.innerText();

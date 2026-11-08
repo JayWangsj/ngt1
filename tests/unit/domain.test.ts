@@ -16,6 +16,7 @@ import {
   inventoryStatus,
   isDiagnosticFault,
   matchRule,
+  matchesProductCompatibility,
   normalizePhone,
   romeDay,
   promisedDate,
@@ -168,6 +169,42 @@ describe("quote matching", () => {
       matchRule(rules, { ...device, brand: "Samsung" }, "Display")?.rule.id,
     ).toBe("generic");
     expect(matchRule(rules, device, "Camera")).toBeNull();
+  });
+  it("normalizes model and project compatibility without matching other models", () => {
+    const compatible = {
+      category: "PHONE",
+      brand: " apple ",
+      model: "iPhone11",
+      project: " DISPLAY ",
+    };
+    expect(
+      matchesProductCompatibility(
+        compatible,
+        { ...device, model: "iPhone 11" },
+        "display",
+      ),
+    ).toBe(true);
+    expect(
+      matchesProductCompatibility(
+        compatible,
+        { ...device, model: "iPhone 12" },
+        "display",
+      ),
+    ).toBe(false);
+    expect(
+      matchesProductCompatibility(
+        { ...compatible, project: "Camera" },
+        device,
+        "display",
+      ),
+    ).toBe(false);
+    expect(
+      matchesProductCompatibility(
+        { ...compatible, project: "" },
+        { ...device, model: "iPhone 11" },
+        "display",
+      ),
+    ).toBe(true);
   });
 });
 describe("status and permissions", () => {

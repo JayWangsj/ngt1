@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   Wrench,
@@ -17,9 +18,12 @@ import {
   CircleAlert,
   LoaderCircle,
 } from "lucide-react";
+import { X } from "lucide-react";
 import { useMessages } from "./language";
 import { BrandLogo } from "./brand-logo";
 import { useUpdateState } from "./update-state";
+import { SystemUpdate } from "./system-update";
+import updatePopoverStyles from "./system-update-popover.module.css";
 import {
   applySidebarPreference,
   clampSidebarWidth,
@@ -35,6 +39,12 @@ export function Sidebar() {
   const { currentVersion, check, info, task } = useUpdateState();
   const [width, setWidth] = useState(240);
   const [collapsed, setCollapsed] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateExpanded, setUpdateExpanded] = useState(false);
+  const [updatePosition, setUpdatePosition] = useState({ left: 260, top: 12 });
+  const updateEntry = useRef<HTMLButtonElement>(null);
+  const updatePanel = useRef<HTMLElement>(null);
+  const updateClose = useRef<HTMLButtonElement>(null);
   const links = [
     { href: "/", label: it.nav.dashboard, icon: LayoutDashboard },
     { href: "/orders", label: it.nav.orders, icon: Wrench },
@@ -42,7 +52,6 @@ export function Sidebar() {
     { href: "/inventory", label: it.nav.inventory, icon: Package },
     { href: "/customers", label: it.nav.customers, icon: Users },
     { href: "/prices", label: it.nav.prices, icon: Tags },
-    { href: "/settings", label: it.nav.settings, icon: Settings },
   ];
 
   useEffect(() => {
@@ -54,6 +63,98 @@ export function Sidebar() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  const closeUpdatePanel = useCallback(() => {
+    setUpdateOpen(false);
+    setUpdateExpanded(false);
+    window.requestAnimationFrame(() => updateEntry.current?.focus());
+  }, []);
+
+  const positionUpdatePanel = useCallback(() => {
+    const button = updateEntry.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setUpdatePosition({
+        left: 12,
+        top: Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 300)),
+      });
+      return;
+    }
+    setUpdatePosition({
+      left: Math.max(12, Math.min(rect.right + 12, window.innerWidth - 372)),
+      top: Math.max(12, Math.min(rect.bottom - 250, window.innerHeight - 292)),
+    });
+  }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("open-update") !== "1") return;
+      setUpdateExpanded(true);
+      setUpdateOpen(true);
+      url.searchParams.delete("open-update");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!updateOpen) return;
+    positionUpdatePanel();
+    const frame = window.requestAnimationFrame(() =>
+      updateClose.current?.focus(),
+    );
+    window.addEventListener("resize", positionUpdatePanel);
+    window.addEventListener("scroll", positionUpdatePanel, true);
+    const onPointerDown = (event: PointerEvent) => {
+      if (updateExpanded) return;
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !updatePanel.current?.contains(target) &&
+        !updateEntry.current?.contains(target)
+      )
+        closeUpdatePanel();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeUpdatePanel();
+        return;
+      }
+      if (!updateExpanded || event.key !== "Tab") return;
+      const focusable = updatePanel.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    const previousOverflow = document.body.style.overflow;
+    if (updateExpanded) document.body.style.overflow = "hidden";
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", positionUpdatePanel);
+      window.removeEventListener("scroll", positionUpdatePanel, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [closeUpdatePanel, positionUpdatePanel, updateExpanded, updateOpen]);
 
   function toggleCollapsed() {
     const next = !collapsed;
@@ -184,7 +285,6 @@ export function Sidebar() {
     }
   })();
   const updateLabel = `${currentVersionLabel}: ${updateSummary}`;
-  const updateHref = "/settings/system-update";
   const UpdateIcon = updateFailed
     ? CircleAlert
     : updateRunning
@@ -226,12 +326,32 @@ export function Sidebar() {
             </Link>
           ))}
         </nav>
+      </div>
+      <div className="sidebar-utilities">
         <Link
-          href={updateHref}
-          className={`sidebar-update-entry${path.startsWith(updateHref) ? " active" : ""}`}
+          href="/settings"
+          className={`sidebar-settings-entry${path.startsWith("/settings") ? " active" : ""}`}
+          aria-label={it.nav.settings}
+          title={it.nav.settings}
+        >
+          <Settings size={19} aria-hidden="true" />
+          <span className="sidebar-settings-copy">{it.nav.settings}</span>
+        </Link>
+        <button
+          ref={updateEntry}
+          type="button"
+          className={`sidebar-update-entry${updateOpen ? " active" : ""}`}
           aria-label={updateLabel}
-          aria-current={path.startsWith(updateHref) ? "page" : undefined}
+          aria-expanded={updateOpen}
+          aria-haspopup="dialog"
           title={updateLabel}
+          onClick={() => {
+            if (updateOpen) closeUpdatePanel();
+            else {
+              setUpdateOpen(true);
+              positionUpdatePanel();
+            }
+          }}
         >
           <span className="sidebar-update-icon" aria-hidden="true">
             <UpdateIcon
@@ -254,7 +374,7 @@ export function Sidebar() {
             size={16}
             aria-hidden="true"
           />
-        </Link>
+        </button>
       </div>
       <div
         className="sidebar-resizer"
@@ -268,6 +388,46 @@ export function Sidebar() {
         onPointerDown={beginResize}
         onKeyDown={resizeFromKeyboard}
       />
+      {updateOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className={
+              updateExpanded ? updatePopoverStyles.backdrop : undefined
+            }
+          >
+            <section
+              ref={updatePanel}
+              className={`${updatePopoverStyles.panel} ${updateExpanded ? updatePopoverStyles.expanded : updatePopoverStyles.compact}`}
+              style={updateExpanded ? undefined : updatePosition}
+              role="dialog"
+              aria-modal={updateExpanded || undefined}
+              aria-labelledby="sidebar-update-title"
+            >
+              <header className={updatePopoverStyles.header}>
+                <div>
+                  <h2 id="sidebar-update-title">{it.systemUpdate}</h2>
+                  <span>{currentVersionLabel}</span>
+                </div>
+                <button
+                  ref={updateClose}
+                  type="button"
+                  className={updatePopoverStyles.close}
+                  aria-label={it.close}
+                  onClick={closeUpdatePanel}
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              <SystemUpdate
+                currentVersion={currentVersion}
+                expanded={updateExpanded}
+                onExpandedChange={setUpdateExpanded}
+              />
+            </section>
+          </div>,
+          document.body,
+        )}
     </aside>
   );
 }
