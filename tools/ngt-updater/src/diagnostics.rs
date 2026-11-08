@@ -1337,9 +1337,7 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
                     return Ok(());
                 }
                 let group_hash = event_group_hash(&event, &grouping_hasher);
-                let group = event_groups
-                    .entry(group_hash)
-                    .or_default();
+                let group = event_groups.entry(group_hash).or_default();
                 let event_index = if let Some((event_index, first)) = group
                     .iter_mut()
                     .enumerate()
