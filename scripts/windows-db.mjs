@@ -10,13 +10,14 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve, join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolvePostgresRuntime } from "./postgres-runtime.mjs";
 
 const require = createRequire(import.meta.url);
 const { Client } = require("pg");
 const { runtime, cache } = await resolvePostgresRuntime();
+const MAX_CAPTURE_BYTES = 64 * 1024;
 const workspace = resolve(process.env.NGT_RUNTIME_STATE ?? ".local");
 const readyFile = join(workspace, "database-ready.pid");
 const configuredDataRoot = process.env.NGT_DATA_ROOT?.trim();
@@ -80,6 +81,36 @@ try {
   await writeFile(secretsFile, JSON.stringify(secrets), { flag: "wx" });
 }
 console.log(`Using PostgreSQL runtime at ${runtime}.`);
+function safeErrorCode(error) {
+  const code = error && typeof error.code === "string" ? error.code : "UNKNOWN";
+  return /^[A-Z0-9_]{1,40}$/.test(code) ? code : "UNKNOWN";
+}
+function emitFailure(eventCode, phase, errorCode, extra = {}) {
+  process.stderr.write(
+    `NGT_DIAGNOSTIC:${JSON.stringify({
+      formatVersion: 1,
+      diagnosticId: randomUUID(),
+      component: "database",
+      severity: "error",
+      eventCode,
+      phase,
+      errorCode,
+      attempts:
+        Number.isInteger(extra.attempts) && extra.attempts >= 1
+          ? Math.min(extra.attempts, 1000)
+          : undefined,
+      elapsedMs:
+        Number.isInteger(extra.elapsedMs) && extra.elapsedMs >= 0
+          ? Math.min(extra.elapsedMs, 600_000)
+          : undefined,
+      droppedDetailBytes:
+        Number.isSafeInteger(extra.droppedDetailBytes) &&
+        extra.droppedDetailBytes > 0
+          ? Math.min(extra.droppedDetailBytes, 1_000_000_000_000)
+          : undefined,
+    })}\n`,
+  );
+}
 function run(exe, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(join(runtime, "bin", exe), args, {
@@ -88,11 +119,21 @@ function run(exe, args) {
     });
     let output = "";
     let error = "";
+    let outputBytes = 0;
+    let errorBytes = 0;
+    let capturedOutputBytes = 0;
+    let capturedErrorBytes = 0;
     child.stdout.on("data", (chunk) => {
-      output += chunk;
+      const remaining = Math.max(0, MAX_CAPTURE_BYTES - capturedOutputBytes);
+      output += chunk.subarray(0, remaining).toString("utf8");
+      capturedOutputBytes += Math.min(chunk.length, remaining);
+      outputBytes += chunk.length;
     });
     child.stderr.on("data", (chunk) => {
-      error += chunk;
+      const remaining = Math.max(0, MAX_CAPTURE_BYTES - capturedErrorBytes);
+      error += chunk.subarray(0, remaining).toString("utf8");
+      capturedErrorBytes += Math.min(chunk.length, remaining);
+      errorBytes += chunk.length;
     });
     child.on("error", reject);
     child.on("close", (code) => {
@@ -100,13 +141,16 @@ function run(exe, args) {
         resolve();
         return;
       }
-      reject(
-        new Error(
-          [`${exe} exited with code ${code}.`, output.trim(), error.trim()]
-            .filter(Boolean)
-            .join("\n"),
-        ),
+      const failure = new Error(
+        [`${exe} exited with code ${code}.`, output.trim(), error.trim()]
+          .filter(Boolean)
+          .join("\n"),
       );
+      failure.code = `${exe.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_EXIT_${code ?? "UNKNOWN"}`;
+      failure.droppedDetailBytes =
+        Math.max(0, outputBytes - capturedOutputBytes) +
+        Math.max(0, errorBytes - capturedErrorBytes);
+      reject(failure);
     });
   });
 }
@@ -116,16 +160,29 @@ if (!initialized) {
   await writeFile(passwordFile, secrets.password);
   try {
     console.log(`Initializing PostgreSQL data at ${initializingDataDir}.`);
-    await run("initdb.exe", [
-      "-D",
-      initializingDataDir,
-      "-U",
-      "ngt",
-      "--auth=scram-sha-256",
-      "--locale=C",
-      "--encoding=UTF8",
-      `--pwfile=${passwordFile}`,
-    ]);
+    try {
+      await run("initdb.exe", [
+        "-D",
+        initializingDataDir,
+        "-U",
+        "ngt",
+        "--auth=scram-sha-256",
+        "--locale=C",
+        "--encoding=UTF8",
+        `--pwfile=${passwordFile}`,
+      ]);
+    } catch (error) {
+      emitFailure(
+        "database.initialization.failed",
+        "initialization",
+        safeErrorCode(error),
+        { droppedDetailBytes: error.droppedDetailBytes },
+      );
+      await new Promise((resolve) =>
+        process.stderr.write("PostgreSQL initialization failed.\n", resolve),
+      );
+      throw error;
+    }
     await rename(initializingDataDir, dataDir);
   } finally {
     await unlink(passwordFile);
@@ -138,28 +195,56 @@ const postgres = spawn(
   { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] },
 );
 postgres.on("error", (error) => {
-  console.error(error.message);
-  process.exit(1);
+  emitFailure("database.postgres.start_failed", "spawn", safeErrorCode(error));
+  process.stderr.write("PostgreSQL process could not be started.\n", () =>
+    process.exit(1),
+  );
 });
 let ready = false;
+let stopping = false;
+let earlyExitCode;
 let postgresError = "";
+let postgresErrorBytes = 0;
+let postgresErrorCapturedBytes = 0;
 postgres.stderr.on("data", (chunk) => {
-  postgresError += String(chunk);
+  const remaining = Math.max(0, MAX_CAPTURE_BYTES - postgresErrorCapturedBytes);
+  postgresError += chunk.subarray(0, remaining).toString("utf8");
+  postgresErrorCapturedBytes += Math.min(chunk.length, remaining);
+  postgresErrorBytes += chunk.length;
 });
 postgres.on("exit", (code, signal) => {
-  if (!ready || code) {
-    const details = [
-      `postgres.exe exited with code ${code ?? "unknown"}${signal ? ` and signal ${signal}` : ""}.`,
-      postgresError.trim(),
-    ]
-      .filter(Boolean)
-      .join("\n");
-    process.stderr.write(`${details}\n`, () => process.exit(code || 1));
+  if (stopping) return;
+  const errorCode =
+    code === 0 ? "POSTGRES_EXIT_0" : `POSTGRES_EXIT_${code ?? "UNKNOWN"}`;
+  if (!ready) {
+    earlyExitCode = errorCode;
+    return;
   }
+  emitFailure("database.postgres.exited", "runtime", errorCode, {
+    droppedDetailBytes: postgresErrorBytes - postgresErrorCapturedBytes,
+  });
+  const details = [
+    `postgres.exe exited with code ${code ?? "unknown"}${signal ? ` and signal ${signal}` : ""}.`,
+    postgresErrorBytes > postgresErrorCapturedBytes
+      ? `postgres stderr truncated; droppedBytes=${postgresErrorBytes - postgresErrorCapturedBytes}.`
+      : "",
+    postgresError.trim(),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  process.stderr.write(`${details}\n`, () => process.exit(code || 1));
 });
 const connection = `postgresql://ngt:${secrets.password}@127.0.0.1:${databasePort}/`;
+const readinessStarted = Date.now();
+let readinessAttempts = 0;
+let lastConnectionCode = "DB_READY_TIMEOUT";
 for (let attempt = 0; attempt < 100; attempt++) {
-  const client = new Client({ connectionString: `${connection}postgres` });
+  if (earlyExitCode) break;
+  readinessAttempts = attempt + 1;
+  const client = new Client({
+    connectionString: `${connection}postgres`,
+    connectionTimeoutMillis: 500,
+  });
   try {
     await client.connect();
     const found = await client.query(
@@ -169,14 +254,40 @@ for (let attempt = 0; attempt < 100; attempt++) {
     await client.end();
     ready = true;
     break;
-  } catch {
+  } catch (error) {
+    lastConnectionCode = safeErrorCode(error);
     await client.end().catch(() => {});
+    if (earlyExitCode) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 if (!ready) {
+  const elapsedMs = Date.now() - readinessStarted;
+  const errorCode =
+    earlyExitCode ??
+    (lastConnectionCode === "UNKNOWN"
+      ? "DB_READY_TIMEOUT"
+      : lastConnectionCode);
+  emitFailure(
+    "database.readiness.failed",
+    earlyExitCode ? "early-exit" : "connection-check",
+    errorCode,
+    {
+      attempts: readinessAttempts,
+      elapsedMs,
+      droppedDetailBytes: postgresErrorBytes - postgresErrorCapturedBytes,
+    },
+  );
+  await new Promise((resolve) =>
+    process.stderr.write(
+      `Database readiness failed; attempts=${readinessAttempts}; elapsedMs=${elapsedMs}; errorCode=${errorCode}.\n${postgresError.trim()}\n`,
+      resolve,
+    ),
+  );
   postgres.kill();
-  throw new Error("Database did not start.");
+  throw new Error(
+    `Database did not start; attempts=${readinessAttempts}; elapsedMs=${elapsedMs}; errorCode=${errorCode}.`,
+  );
 }
 const env = (name) =>
   `DATABASE_URL="${connection}${name}?schema=public"\nAUTH_SECRET="${secrets.authSecret}"\nAUTH_URL="http://localhost:3000"\nAUTH_TRUST_HOST="true"\n`;
@@ -194,6 +305,7 @@ try {
 await writeFile(readyFile, String(process.pid));
 console.log(`Business PostgreSQL ready on 127.0.0.1:${databasePort}.`);
 async function stop() {
+  stopping = true;
   await unlink(readyFile).catch(() => {});
   await run("pg_ctl.exe", ["-D", dataDir, "-m", "fast", "stop"]);
   process.exit(0);

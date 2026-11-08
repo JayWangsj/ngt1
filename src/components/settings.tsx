@@ -49,6 +49,46 @@ import settingsActionStyles from "./settings-action.module.css";
 import motionSettingControlStyles from "./motion-setting-control.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 
+type SaveFile = {
+  createWritable: () => Promise<{
+    write: (value: Blob) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
+async function saveBlob(
+  blob: Blob,
+  filename: string,
+  description: string,
+  mimeType: string,
+  extension: string,
+) {
+  const picker = (
+    window as typeof window & {
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        types: { description: string; accept: Record<string, string[]> }[];
+      }) => Promise<SaveFile>;
+    }
+  ).showSaveFilePicker;
+  if (picker) {
+    const handle = await picker({
+      suggestedName: filename,
+      types: [{ description, accept: { [mimeType]: [extension] } }],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function SettingsEntry({
   href,
   icon,
@@ -419,40 +459,13 @@ export function DataSettings() {
       const disposition = response.headers.get("Content-Disposition") ?? "";
       const filename =
         disposition.match(/filename="([^"]+)"/)?.[1] ?? "ngt-backup.json";
-      const picker = (
-        window as typeof window & {
-          showSaveFilePicker?: (options: {
-            suggestedName: string;
-            types: { description: string; accept: Record<string, string[]> }[];
-          }) => Promise<{
-            createWritable: () => Promise<{
-              write: (value: Blob) => Promise<void>;
-              close: () => Promise<void>;
-            }>;
-          }>;
-        }
-      ).showSaveFilePicker;
-      if (picker) {
-        const handle = await picker({
-          suggestedName: filename,
-          types: [
-            {
-              description: "Backup JSON",
-              accept: { "application/json": [".json"] },
-            },
-          ],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-      } else {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        link.click();
-        URL.revokeObjectURL(url);
-      }
+      await saveBlob(
+        blob,
+        filename,
+        "Backup JSON",
+        "application/json",
+        ".json",
+      );
       setMessage(it.exportData);
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
@@ -462,22 +475,136 @@ export function DataSettings() {
     }
   }
 
+  async function exportDiagnostics() {
+    setPending(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/diagnostics/export");
+      if (!response.ok) {
+        const result = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          diagnosticId?: string;
+        };
+        throw new Error(
+          `${it.diagnosticsExportFailed}${result.diagnosticId ? ` ${it.diagnosticIdLabel}: ${result.diagnosticId}` : ""}`,
+        );
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/)?.[1] ??
+        "NGTManager-diagnostics.txt";
+      await saveBlob(
+        blob,
+        filename,
+        "NGTManager diagnostics",
+        "text/plain",
+        ".txt",
+      );
+      setMessage(it.diagnosticsExported);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setError(
+        cause instanceof Error ? cause.message : it.diagnosticsExportFailed,
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function reportClientFailure(
+    diagnosticId: string,
+    eventCode: "IMPORT_FILE_READ_FAILED" | "IMPORT_REQUEST_FAILED",
+  ) {
+    try {
+      const response = await fetch("/api/diagnostics/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diagnosticId, eventCode }),
+      });
+      if (!response.ok) return false;
+      const result: unknown = await response.json();
+      return (
+        !!result &&
+        typeof result === "object" &&
+        "accepted" in result &&
+        result.accepted === true
+      );
+    } catch {
+      // The originating failure remains visible even if its report cannot be sent.
+      return false;
+    }
+  }
+
   async function importFile(file: File) {
     setPending(true);
     setMessage("");
     setError("");
     try {
-      const response = await fetch("/api/data/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: await file.text(),
-      });
-      const result = (await response.json()) as {
+      let backupJson: string;
+      try {
+        backupJson = await file.text();
+      } catch {
+        const diagnosticId = crypto.randomUUID();
+        const recorded = await reportClientFailure(
+          diagnosticId,
+          "IMPORT_FILE_READ_FAILED",
+        );
+        throw new Error(
+          recorded
+            ? `${it.backupReadFailed} ${it.diagnosticIdLabel}: ${diagnosticId}`
+            : `${it.backupReadFailed} ${it.diagnosticNotRecorded}`,
+        );
+      }
+      const requestDiagnosticId = crypto.randomUUID();
+      let response: Response;
+      try {
+        response = await fetch("/api/data/import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-NGT-Diagnostic-Id": requestDiagnosticId,
+          },
+          body: backupJson,
+        });
+      } catch {
+        const recorded = await reportClientFailure(
+          requestDiagnosticId,
+          "IMPORT_REQUEST_FAILED",
+        );
+        throw new Error(
+          recorded
+            ? `${it.importRequestFailed} ${it.diagnosticIdLabel}: ${requestDiagnosticId}`
+            : `${it.importRequestFailed} ${it.diagnosticNotRecorded}`,
+        );
+      }
+      let result: {
         imported?: number;
         skipped?: number;
         error?: string;
+        diagnosticId?: string;
       };
-      if (!response.ok) throw new Error(result.error || it.connectionError);
+      try {
+        const payload: unknown = await response.json();
+        if (!payload || typeof payload !== "object" || Array.isArray(payload))
+          throw new Error("invalid_response");
+        result = payload as typeof result;
+      } catch {
+        const recorded = await reportClientFailure(
+          requestDiagnosticId,
+          "IMPORT_REQUEST_FAILED",
+        );
+        throw new Error(
+          recorded
+            ? `${it.importRequestFailed} ${it.diagnosticIdLabel}: ${requestDiagnosticId}`
+            : `${it.importRequestFailed} ${it.diagnosticNotRecorded}`,
+        );
+      }
+      if (!response.ok)
+        throw new Error(
+          `${result.error || it.connectionError}${result.diagnosticId ? ` (${it.diagnosticIdLabel}: ${result.diagnosticId})` : ""}`,
+        );
       setMessage(
         `${it.importSuccess} ${String(result.imported ?? 0)} / ${String(result.skipped ?? 0)}`,
       );
@@ -551,6 +678,21 @@ export function DataSettings() {
             if (file) void importFile(file);
           }}
         />
+      </div>
+      <div className={`settings-action ${settingsActionStyles.action}`}>
+        <div>
+          <strong>{it.exportDiagnostics}</strong>
+          <p>{it.exportDiagnosticsHelp}</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={() => void exportDiagnostics()}
+        >
+          <Download size={17} />
+          {it.exportDiagnostics}
+        </Button>
       </div>
       <div
         className={`settings-action danger-zone ${settingsActionStyles.action}`}

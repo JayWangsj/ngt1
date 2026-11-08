@@ -95,7 +95,8 @@ begin
   if (not Exec(ManagerPath, Parameters, PackagePath, SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
     (ResultCode <> 0) then
   begin
-    ResultMessage := 'No detailed error was written.';
+    ResultMessage := 'No detailed NGTManager error was written.' + #13#10 +
+      'Open %TEMP% and find the Inno Setup Log file matching this installation time.';
     if LoadStringsFromFile(ResultPath, ResultLines) and
       (GetArrayLength(ResultLines) > 1) then
     begin

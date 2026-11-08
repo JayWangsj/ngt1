@@ -709,6 +709,15 @@ export const it = {
   dataManagementHelp: "Esporta, importa o cancella i dati del sistema.",
   exportData: "Esporta dati",
   exportHelp: "Scarica un file compatibile con le versioni future.",
+  exportDiagnostics: "Esporta diagnostica",
+  exportDiagnosticsHelp:
+    "Crea un file diagnostico senza dati personali per analizzare i problemi di installazione, avvio e importazione.",
+  diagnosticsExported: "File diagnostico esportato.",
+  diagnosticsExportFailed: "Esportazione del file diagnostico non riuscita.",
+  backupReadFailed: "Impossibile leggere il file di backup.",
+  importRequestFailed: "Richiesta di importazione non riuscita.",
+  diagnosticNotRecorded: "Il codice diagnostico non è stato inviato.",
+  diagnosticIdLabel: "ID diagnostico",
   importData: "Importa dati",
   importHelp:
     "I dati esistenti restano invariati; i duplicati vengono ignorati.",

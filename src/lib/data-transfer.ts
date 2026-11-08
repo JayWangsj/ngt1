@@ -172,19 +172,45 @@ export type BackupFile = {
 };
 export type ImportSummary = { imported: number; skipped: number };
 
+export type BackupImportErrorCode =
+  | "BACKUP_FILE_INVALID"
+  | "BACKUP_FILE_TOO_LARGE"
+  | "BACKUP_REQUEST_READ_FAILED"
+  | "BACKUP_FORMAT_UNSUPPORTED"
+  | "BACKUP_REFERENCE_CONFLICT"
+  | "BACKUP_TARGET_NOT_EMPTY"
+  | "BACKUP_RECORD_CONFLICT"
+  | "SYSTEM_MAINTENANCE"
+  | "DATABASE_UNAVAILABLE"
+  | "BACKUP_IMPORT_FAILED";
+
+export class BackupImportError extends BusinessError {
+  constructor(
+    readonly code: BackupImportErrorCode,
+    readonly phase: "validation" | "preflight" | "transaction" | "request",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 function date(value: string | null | undefined) {
   return value ? new Date(value) : null;
 }
-function ensureBackup(value: unknown): BackupFile {
+function validateBackupShape(value: unknown): BackupFile {
   if (!value || typeof value !== "object")
     throw new BusinessError("File di backup non valido.");
   const candidate = value as Partial<BackupFile>;
+  if (candidate.format !== BACKUP_FORMAT)
+    throw new BusinessError("Formato di backup non supportato.");
   if (
-    candidate.format !== BACKUP_FORMAT ||
     typeof candidate.version !== "number" ||
-    !Number.isInteger(candidate.version) ||
-    candidate.version < 1 ||
-    candidate.version > BACKUP_VERSION ||
+    !Number.isInteger(candidate.version)
+  )
+    throw new BusinessError("File di backup non valido.");
+  if (candidate.version < 1 || candidate.version > BACKUP_VERSION)
+    throw new BusinessError("Formato di backup non supportato.");
+  if (
     typeof candidate.exportedAt !== "string" ||
     !Number.isFinite(Date.parse(candidate.exportedAt)) ||
     !candidate.data ||
@@ -381,6 +407,27 @@ function ensureBackup(value: unknown): BackupFile {
   validateBackupUniqueValues(normalized.data);
   validateBackupBusinessConstraints(normalized.data);
   return normalized;
+}
+
+function ensureBackup(value: unknown): BackupFile {
+  try {
+    return validateBackupShape(value);
+  } catch (error) {
+    if (!(error instanceof BusinessError)) throw error;
+    const message = error.message;
+    const code: BackupImportErrorCode = message.includes(
+      "Formato di backup non supportato",
+    )
+      ? "BACKUP_FORMAT_UNSUPPORTED"
+      : /riferimento/i.test(message)
+        ? "BACKUP_REFERENCE_CONFLICT"
+        : /duplicati|univoci|senza una sola origine|opzioni predefinite|numeri assegnati/i.test(
+              message,
+            )
+          ? "BACKUP_RECORD_CONFLICT"
+          : "BACKUP_FILE_INVALID";
+    throw new BackupImportError(code, "validation", message);
+  }
 }
 
 function validateBackupReferences(data: BackupData) {
@@ -693,6 +740,62 @@ export async function clearBusinessData(actor: Actor) {
   });
 }
 
+export function isDatabaseUnavailableError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; name?: unknown };
+  if (candidate.name === "PrismaClientInitializationError") return true;
+  if (typeof candidate.code !== "string") return false;
+  return [
+    "P1000",
+    "P1001",
+    "P1002",
+    "P1003",
+    "P1017",
+    "P2024",
+    "P5010",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTUNREACH",
+    "ENOTFOUND",
+    "ETIMEDOUT",
+    "EPIPE",
+  ].includes(candidate.code);
+}
+
+function mapBackupTransactionError(error: unknown): BackupImportError {
+  if (error instanceof BackupImportError) return error;
+  if (error instanceof BusinessError)
+    return new BackupImportError(
+      "BACKUP_RECORD_CONFLICT",
+      "transaction",
+      error.message,
+    );
+  const prismaCode =
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof error.code === "string"
+      ? error.code
+      : "";
+  if (isDatabaseUnavailableError(error))
+    return new BackupImportError(
+      "DATABASE_UNAVAILABLE",
+      "transaction",
+      "Il database non è disponibile. Nessun dato del backup è stato salvato.",
+    );
+  if (["P2002", "P2003", "P2025"].includes(prismaCode))
+    return new BackupImportError(
+      "BACKUP_RECORD_CONFLICT",
+      "transaction",
+      "Il backup contiene record in conflitto; nessun dato è stato salvato.",
+    );
+  return new BackupImportError(
+    "BACKUP_IMPORT_FAILED",
+    "transaction",
+    "Importazione non riuscita; nessun dato del backup è stato salvato.",
+  );
+}
+
 export async function importBusinessData(
   actorInput: Actor,
   value: unknown,
@@ -701,12 +804,14 @@ export async function importBusinessData(
   const backup = ensureBackup(value);
   let imported = 0;
   let skipped = 0;
-  await db.$transaction(async (tx) => {
+  const transaction = db.$transaction(async (tx) => {
     const existingImport = await tx.auditLog.findUnique({
       where: { id: LEGACY_IMPORT_MARKER_ID },
     });
     if (existingImport) {
-      throw new BusinessError(
+      throw new BackupImportError(
+        "BACKUP_TARGET_NOT_EMPTY",
+        "preflight",
         "Il ripristino di un backup è consentito una sola volta in un database vuoto.",
       );
     }
@@ -746,7 +851,9 @@ export async function importBusinessData(
       businessDataCounts.some((count) => count > 0) ||
       (targetFaults.length > 0 && !initialFaultCatalog)
     ) {
-      throw new BusinessError(
+      throw new BackupImportError(
+        "BACKUP_TARGET_NOT_EMPTY",
+        "preflight",
         "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
       );
     }
@@ -1734,7 +1841,9 @@ export async function importBusinessData(
       }
     }
     if (skipped > 0) {
-      throw new BusinessError(
+      throw new BackupImportError(
+        "BACKUP_RECORD_CONFLICT",
+        "transaction",
         "Il backup contiene righe non importabili; nessun dato è stato salvato.",
       );
     }
@@ -1764,6 +1873,9 @@ export async function importBusinessData(
         },
       },
     });
+  });
+  await transaction.catch((error: unknown) => {
+    throw mapBackupTransactionError(error);
   });
   return { imported, skipped };
 }

@@ -1,12 +1,14 @@
+use crate::diagnostics::{self, Component as DiagnosticComponent, LogOwner, LogSession};
 use fs2::available_space;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -277,10 +279,71 @@ fn write_transaction(root: &Path, transaction: &Transaction) -> Result<(), Strin
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
-        return Ok(());
+    } else {
+        fs::rename(&temporary, &destination)
+            .map_err(|error| format!("Unable to commit operation state: {error}"))?;
     }
+    #[cfg(not(windows))]
     fs::rename(&temporary, &destination)
-        .map_err(|error| format!("Unable to commit operation state: {error}"))
+        .map_err(|error| format!("Unable to commit operation state: {error}"))?;
+
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.set_operation_id(&transaction.operation_id);
+        let (component, event_code, severity, phase, error_code) = match &transaction.stage {
+            Stage::Committed => (
+                DiagnosticComponent::Installer,
+                "installer.operation.committed",
+                "info",
+                "activation",
+                "none",
+            ),
+            Stage::Migrated => (
+                DiagnosticComponent::Migration,
+                "database.migration.completed",
+                "info",
+                "migration-deploy",
+                "none",
+            ),
+            Stage::RollingBack | Stage::RolledBack => (
+                DiagnosticComponent::Installer,
+                "installer.recovery.stage",
+                "warning",
+                match &transaction.stage {
+                    Stage::RollingBack => "rolling-back",
+                    _ => "rolled-back",
+                },
+                "none",
+            ),
+            Stage::Failed => (
+                DiagnosticComponent::Installer,
+                "installer.recovery.failed",
+                "error",
+                "recovery",
+                "RECOVERY_FAILED",
+            ),
+            _ => (
+                DiagnosticComponent::Installer,
+                "installer.transaction.stage",
+                "info",
+                match &transaction.stage {
+                    Stage::Preparing => "preparing",
+                    Stage::Staged => "staged",
+                    Stage::Maintenance => "maintenance",
+                    Stage::BackupCreating => "backup-creating",
+                    Stage::BackupCreated => "backup-created",
+                    Stage::BackupVerifying => "backup-verifying",
+                    Stage::BackupVerified => "backup-verified",
+                    Stage::CandidateHealthy => "candidate-healthy",
+                    Stage::Switching => "switching",
+                    Stage::Uninstalling => "uninstalling",
+                    _ => "operation-state",
+                },
+                "none",
+            ),
+        };
+        logger.record(component, severity, event_code, phase, error_code);
+    }
+    Ok(())
 }
 
 fn is_lock_contention(error: &std::io::Error) -> bool {
@@ -904,22 +967,242 @@ fn ensure_port_available(port: u16) -> Result<(), String> {
     Ok(())
 }
 
-fn log_line(root: &Path, line: &str) {
-    let logs = root.join("logs");
-    if fs::create_dir_all(&logs).is_err() {
+static MANAGER_DIAGNOSTICS: OnceLock<Option<LogSession>> = OnceLock::new();
+
+fn initialize_manager_diagnostics(args: &[String]) {
+    let Some(root) = stable_root().ok() else {
         return;
+    };
+    let initial_operation = args
+        .windows(3)
+        .find(|window| window[0] == "update")
+        .map(|window| window[2].clone())
+        .or_else(|| {
+            read_transaction_if_exists(&root)
+                .ok()
+                .flatten()
+                .map(|transaction| transaction.operation_id)
+        })
+        .unwrap_or_else(|| "none".to_owned());
+    let version = candidate_package_version(args)
+        .or_else(|| {
+            read_config(&root)
+                .ok()
+                .flatten()
+                .map(|config| config.version)
+        })
+        .unwrap_or_else(|| "unknown".to_owned());
+    let _ = MANAGER_DIAGNOSTICS.get_or_init(|| {
+        LogSession::start(&root, &initial_operation, &version, LogOwner::Manager).ok()
+    });
+}
+
+fn candidate_package_version(args: &[String]) -> Option<String> {
+    if !args.first().is_some_and(|command| {
+        matches!(
+            command.as_str(),
+            "preflight" | "install" | "update" | "repair" | "verify-release"
+        )
+    }) {
+        return None;
     }
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logs.join("manager.log"))
-    {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let _ = writeln!(file, "{timestamp} {line}");
-        let _ = file.sync_all();
+    let manifest_path = Path::new(args.get(1)?).join("studio-release.json");
+    let file = File::open(manifest_path).ok()?;
+    let mut bytes = Vec::with_capacity(1024);
+    file.take(1024 * 1024 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 1024 * 1024 {
+        return None;
+    }
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    serde_json::from_slice::<ReleaseManifest>(bytes)
+        .ok()
+        .map(|manifest| manifest.version)
+}
+
+fn manager_diagnostics(root: &Path) -> Option<&'static LogSession> {
+    MANAGER_DIAGNOSTICS
+        .get()?
+        .as_ref()
+        .filter(|logger| logger.root() == root)
+}
+
+fn set_operation_id(root: &Path, operation_id: &str) {
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.set_operation_id(operation_id);
+    }
+}
+
+fn failure_code(message: &str) -> String {
+    for (marker, prefix) in [("(os error ", "WIN32_"), ("(exit ", "EXIT_")] {
+        if let Some(code) = message
+            .split_once(marker)
+            .and_then(|(_, suffix)| suffix.split_once(')'))
+            .map(|(digits, _)| digits)
+            .filter(|digits| {
+                !digits.is_empty()
+                    && digits.len() <= 5
+                    && digits.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        {
+            return format!("{prefix}{code}");
+        }
+    }
+    let message = message.to_ascii_lowercase();
+    if message.contains("port") && (message.contains("occupied") || message.contains("use")) {
+        "PORT_IN_USE"
+    } else if message.contains("permission") || message.contains("access is denied") {
+        "ACCESS_DENIED"
+    } else if message.contains("space") || message.contains("disk full") {
+        "DISK_SPACE_INSUFFICIENT"
+    } else if message.contains("migration") {
+        "DATABASE_MIGRATION_FAILED"
+    } else if message.contains("exited repeatedly") {
+        "RESTART_LIMIT_REACHED"
+    } else if message.contains("integrity") || message.contains("checksum") {
+        "PACKAGE_INTEGRITY_FAILED"
+    } else if message.contains("manifest") || message.contains("package") {
+        "PACKAGE_VALIDATION_FAILED"
+    } else if message.contains("not found") || message.contains("missing") {
+        "COMPONENT_MISSING"
+    } else if message.contains("database") || message.contains("postgres") {
+        "DATABASE_OPERATION_FAILED"
+    } else {
+        "MANAGER_OPERATION_FAILED"
+    }
+    .to_owned()
+}
+
+fn log_line(root: &Path, line: &str) {
+    let Some(logger) = manager_diagnostics(root) else {
+        return;
+    };
+    let lower = line.to_ascii_lowercase();
+    let (component, event_code, phase, error_code) = if lower.contains("database runtime") {
+        (
+            DiagnosticComponent::Database,
+            if lower.contains("started") {
+                "database.runtime.started"
+            } else {
+                "database.runtime.state"
+            },
+            "runtime-start",
+            "none",
+        )
+    } else if lower.contains("exited unexpectedly") {
+        (
+            DiagnosticComponent::Manager,
+            "runtime.restart.scheduled",
+            "supervision",
+            "none",
+        )
+    } else if lower.contains("runtime is healthy") {
+        (
+            DiagnosticComponent::Application,
+            "application.health_check.passed",
+            "http-status-version-db-select1-workorder-read",
+            "none",
+        )
+    } else if lower.contains("runtime stopped cleanly") {
+        (
+            DiagnosticComponent::Application,
+            "application.shutdown.completed",
+            "process-shutdown",
+            "none",
+        )
+    } else {
+        (
+            DiagnosticComponent::Manager,
+            "manager.state",
+            "runtime",
+            "none",
+        )
+    };
+    let severity = if error_code == "none" { "info" } else { "error" };
+    logger.record(component, severity, event_code, phase, error_code);
+}
+
+#[cfg(windows)]
+fn log_child_exit(
+    root: &Path,
+    component: DiagnosticComponent,
+    status: &std::process::ExitStatus,
+) {
+    let error_code = status
+        .code()
+        .map(|code| format!("EXIT_{code}"))
+        .unwrap_or_else(|| "EXIT_UNKNOWN".to_owned());
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.record(
+            component,
+            "error",
+            "runtime.child.exited",
+            "supervision",
+            &error_code,
+        );
+    }
+}
+
+fn record_command_failure(root: &Path, arguments: &[String], message: &str) {
+    if let Some(logger) = manager_diagnostics(root) {
+        let lower = message.to_ascii_lowercase();
+        let installer_command = arguments.first().is_some_and(|command| {
+            matches!(
+                command.as_str(),
+                "preflight"
+                    | "install"
+                    | "update"
+                    | "repair"
+                    | "uninstall"
+                    | "recover"
+                    | "verify-release"
+            )
+        });
+        let (component, event_code, phase) = if lower.contains("migration") {
+            (
+                DiagnosticComponent::Migration,
+                "database.migration.failed",
+                "migration-deploy",
+            )
+        } else if lower.contains("database") || lower.contains("postgres") {
+            (
+                DiagnosticComponent::Database,
+                "database.operation.failed",
+                "database-operation",
+            )
+        } else if installer_command {
+            (
+                DiagnosticComponent::Installer,
+                "installer.operation.failed",
+                arguments.first().map_or("command", String::as_str),
+            )
+        } else if lower.contains("exited repeatedly") {
+            (
+                DiagnosticComponent::Application,
+                "application.restart_limit_reached",
+                "supervision",
+            )
+        } else {
+            (
+                DiagnosticComponent::Manager,
+                "manager.command.failed",
+                "command",
+            )
+        };
+        let code = failure_code(message);
+        logger.record(component, "error", event_code, phase, &code);
+    } else {
+        // Keep a safe breadcrumb when the structured logger itself is unavailable.
+        if fs::create_dir_all(root.join("logs")).is_ok() {
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(root.join("logs/manager.log"))
+            {
+                if file.metadata().map_or(true, |metadata| metadata.len() < 1024 * 1024) {
+                    let _ = writeln!(file, "diagnostics unavailable: MANAGER_OPERATION_FAILED");
+                }
+            }
+        }
     }
 }
 
@@ -1025,6 +1308,7 @@ fn spawn_runtime_process(
     job: &RuntimeJob,
     command: &mut Command,
     root: &Path,
+    component: DiagnosticComponent,
 ) -> Result<Child, String> {
     let runtime_state = root.join("state").join("runtime");
     fs::create_dir_all(&runtime_state)
@@ -1036,6 +1320,7 @@ fn spawn_runtime_process(
         .create_new(true)
         .open(&gate)
         .map_err(|error| format!("Unable to create the runtime startup gate: {error}"))?;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Err(error) = gate_file
         .write_all(b"pending")
         .and_then(|_| gate_file.sync_all())
@@ -1054,6 +1339,26 @@ fn spawn_runtime_process(
             return Err(error);
         }
     };
+    let readers_ready = (|| {
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Unable to capture runtime standard output.".to_owned())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Unable to capture runtime standard error.".to_owned())?;
+        attach_runtime_reader(root, component, stdout, "stdout")?;
+        attach_runtime_reader(root, component, stderr, "stderr")
+    })();
+    if let Err(error) = readers_ready {
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(gate_file);
+        let _ = fs::remove_file(&gate);
+        return Err(error);
+    }
+    // The stdout/stderr readers must be running before the startup gate opens.
     drop(gate_file);
     if let Err(error) = fs::write(&gate, b"ready") {
         let _ = child.kill();
@@ -1102,6 +1407,34 @@ fn spawn_runtime_process(
     let _ = child.wait();
     let _ = fs::remove_file(&gate);
     Err("The runtime process did not acknowledge process-group assignment.".to_owned())
+}
+
+#[cfg(windows)]
+fn attach_runtime_reader<R: Read + Send + 'static>(
+    root: &Path,
+    component: DiagnosticComponent,
+    reader: R,
+    stream: &'static str,
+) -> Result<(), String> {
+    if let Some(logger) = manager_diagnostics(root) {
+        logger
+            .attach_reader(reader, component)
+            .map_err(|_| "Unable to start a runtime output reader.".to_owned())
+    } else {
+        let (started_sender, started_receiver) = std::sync::mpsc::sync_channel(0);
+        thread::Builder::new()
+            .name(format!("ngt-discard-{stream}"))
+            .spawn(move || {
+                let mut reader = reader;
+                let _ = started_sender.send(());
+                let _ = io::copy(&mut reader, &mut io::sink());
+            })
+            .map(|_| ())
+            .map_err(|_| "Unable to drain runtime output.".to_owned())?;
+        started_receiver
+            .recv()
+            .map_err(|_| "Unable to start a runtime output reader.".to_owned())
+    }
 }
 
 #[cfg(windows)]
@@ -1284,12 +1617,10 @@ fn spawn_pg_ctl(
         .arg("--require")
         .arg("./scripts/runtime-start-gate.cjs")
         .arg("./scripts/run-pg-ctl.mjs")
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .args(args);
     configure_runtime_command(&mut command, release, root, &temp);
     hide_console(&mut command);
-    spawn_runtime_process(job, &mut command, root)
+    spawn_runtime_process(job, &mut command, root, DiagnosticComponent::Database)
 }
 
 #[cfg(windows)]
@@ -1308,26 +1639,21 @@ fn start_database(job: &RuntimeJob, release: &Path, root: &Path) -> Result<Child
             ))
         }
     }
-    let log_path = root.join("logs").join("database.log");
-    if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Unable to create logs directory: {error}"))?;
-    }
-    let stdout =
-        File::create(&log_path).map_err(|error| format!("Unable to open database log: {error}"))?;
-    let stderr = stdout.try_clone().map_err(|error| error.to_string())?;
     let mut command = Command::new(release.join("runtime").join("node.exe"));
     command
         .args([
             "--require",
             "./scripts/runtime-start-gate.cjs",
             "./scripts/windows-db.mjs",
-        ])
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
+        ]);
     configure_runtime_command(&mut command, release, root, &temp);
     hide_console(&mut command);
-    let mut database = spawn_runtime_process(job, &mut command, root)?;
+    let mut database = spawn_runtime_process(
+        job,
+        &mut command,
+        root,
+        DiagnosticComponent::Database,
+    )?;
     for _ in 0..180 {
         let ready_process_id = fs::read_to_string(&ready)
             .ok()
@@ -1355,14 +1681,6 @@ fn start_database(job: &RuntimeJob, release: &Path, root: &Path) -> Result<Child
 #[cfg(windows)]
 fn start_application(job: &RuntimeJob, release: &Path, root: &Path) -> Result<Child, String> {
     let temp = ascii_temp_directory()?;
-    let log_path = root.join("logs").join("application.log");
-    if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Unable to create logs directory: {error}"))?;
-    }
-    let stdout = File::create(&log_path)
-        .map_err(|error| format!("Unable to open application log: {error}"))?;
-    let stderr = stdout.try_clone().map_err(|error| error.to_string())?;
     let mut command = Command::new(release.join("runtime").join("node.exe"));
     command
         .args([
@@ -1372,12 +1690,10 @@ fn start_application(job: &RuntimeJob, release: &Path, root: &Path) -> Result<Ch
         ])
         .env("APP_HOST", "127.0.0.1")
         .env("HOSTNAME", "127.0.0.1")
-        .env("PORT", APPLICATION_PORT.to_string())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
+        .env("PORT", APPLICATION_PORT.to_string());
     configure_runtime_command(&mut command, release, root, &temp);
     hide_console(&mut command);
-    spawn_runtime_process(job, &mut command, root)
+    spawn_runtime_process(job, &mut command, root, DiagnosticComponent::Application)
 }
 
 #[cfg(windows)]
@@ -1388,12 +1704,7 @@ fn run_migrations(
     operation_id: &str,
 ) -> Result<(), String> {
     let temp = ascii_temp_directory()?;
-    let log_path = root
-        .join("logs")
-        .join(format!("migration-{operation_id}.log"));
-    let stdout = File::create(&log_path)
-        .map_err(|error| format!("Unable to open migration log: {error}"))?;
-    let stderr = stdout.try_clone().map_err(|error| error.to_string())?;
+    set_operation_id(root, operation_id);
     let mut command = Command::new(release.join("runtime").join("node.exe"));
     command
         .arg("--require")
@@ -1403,19 +1714,21 @@ fn run_migrations(
             root.join("state").join("application.env").display()
         ))
         .arg("./node_modules/prisma/build/index.js")
-        .args(["migrate", "deploy"])
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
+        .args(["migrate", "deploy"]);
     configure_runtime_command(&mut command, release, root, &temp);
     hide_console(&mut command);
-    let status = spawn_runtime_process(job, &mut command, root)?
+    let status = spawn_runtime_process(
+        job,
+        &mut command,
+        root,
+        DiagnosticComponent::Migration,
+    )?
         .wait()
         .map_err(|error| format!("Unable to wait for database migration: {error}"))?;
     if !status.success() {
         return Err(format!(
-            "Database migration failed (exit {}). See {}.",
-            status_code(&status),
-            log_path.display()
+            "Database migration failed (exit {}). See the diagnostic export for safe details.",
+            status_code(&status)
         ));
     }
     Ok(())
@@ -1995,7 +2308,6 @@ fn install_package(
 
     match result {
         Ok(config) => {
-            log_line(&root, &format!("Committed NGTManager v{}.", config.version));
             drop(_operation_lock);
             launch_manager(&root, "run")?;
             Ok(format!(
@@ -2004,7 +2316,6 @@ fn install_package(
             ))
         }
         Err(error) => {
-            log_line(&root, &format!("Installation failed: {error}"));
             let recovery = rollback_transaction(&root, &mut transaction);
             if stage_created && candidate_stage.exists() {
                 let _ = remove_owned_directory(&root.join("releases"), &candidate_stage);
@@ -2831,6 +3142,12 @@ fn run_supervisor() -> Result<String, String> {
                 .application
                 .try_wait()
                 .map_err(|error| error.to_string())?;
+            if let Some(status) = database_exit.as_ref() {
+                log_child_exit(&root, DiagnosticComponent::Database, status);
+            }
+            if let Some(status) = application_exit.as_ref() {
+                log_child_exit(&root, DiagnosticComponent::Application, status);
+            }
             if database_exit.is_some() || application_exit.is_some() {
                 let result = stop_children(&job, &mut children, &config.active_release, &root);
                 drop(job);
@@ -3092,6 +3409,11 @@ fn run(args: &[String]) -> Result<String, String> {
             Ok("NGTManager was stopped. Business data and backups were retained.".to_owned())
         }
         [command] if command == "diagnose" => diagnose_json(&stable_root()?),
+        [command, output] if command == "diagnose-export" => {
+            diagnostics::export_diagnostics(&stable_root()?, Path::new(output))
+                .map_err(|_| "Unable to create the diagnostic export.".to_owned())?;
+            Ok("Diagnostic export created.".to_owned())
+        }
         [command, update_id] if command == "update-process" => {
             let root = stable_root()?;
             Ok(serde_json::json!({
@@ -3119,7 +3441,7 @@ fn run(args: &[String]) -> Result<String, String> {
             check_space(Path::new(path), required)?;
             Ok("Disk space check passed.".to_owned())
         }
-        _ => Err("Usage: NGTManager.exe status | preflight <package> | install <package> | update <package> | repair <package> | reserve-update <id> <version> | start-update <id> | clear-update-lock <id> <complete|retry> | run | open | stop | recover | diagnose | update-process <id> | uninstall | verify-release <path> | check-space <path> <bytes>".to_owned()),
+        _ => Err("Usage: NGTManager.exe status | preflight <package> | install <package> | update <package> | repair <package> | reserve-update <id> <version> | start-update <id> | clear-update-lock <id> <complete|retry> | run | open | stop | recover | diagnose | diagnose-export <outputPath> | update-process <id> | uninstall | verify-release <path> | check-space <path> <bytes>".to_owned()),
     }
 }
 
@@ -3154,7 +3476,16 @@ pub fn main() -> std::process::ExitCode {
             arguments.push(argument);
         }
     }
+    initialize_manager_diagnostics(&arguments);
     let result = run(&arguments);
+    if let Err(message) = &result {
+        if let Ok(root) = stable_root() {
+            if let Ok(Some(transaction)) = read_transaction_if_exists(&root) {
+                set_operation_id(&root, &transaction.operation_id);
+            }
+            record_command_failure(&root, &arguments, message);
+        }
+    }
     if let Some(path) = result_file {
         let contents = match &result {
             Ok(message) => format!("SUCCESS\n{message}"),
@@ -3162,9 +3493,20 @@ pub fn main() -> std::process::ExitCode {
         };
         if let Err(error) = fs::write(path, contents) {
             eprintln!("Unable to write the install result: {error}");
+            if let Ok(root) = stable_root() {
+                if let Some(logger) = manager_diagnostics(&root) {
+                    logger.record(
+                        DiagnosticComponent::Installer,
+                        "error",
+                        "installer.result_file_write_failed",
+                        "result-reporting",
+                        "RESULT_FILE_WRITE_FAILED",
+                    );
+                }
+            }
         }
     }
-    match result {
+    let exit_code = match result {
         Ok(message) => {
             println!("{message}");
             std::process::ExitCode::SUCCESS
@@ -3173,12 +3515,49 @@ pub fn main() -> std::process::ExitCode {
             eprintln!("{message}");
             std::process::ExitCode::FAILURE
         }
+    };
+    if let Ok(root) = stable_root() {
+        if let Some(logger) = manager_diagnostics(&root) {
+            logger.finish();
+        }
     }
+    exit_code
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_output_is_drained_before_startup_gate_release() {
+        let root = std::env::temp_dir().join(format!("ngt-pipe-flood-{}", unique_id()));
+        fs::create_dir_all(&root).unwrap();
+        let script = root.join("pipe-flood.cmd");
+        fs::write(
+            &script,
+            "@echo off\r\nfor /L %%N in (1,1,16000) do echo NGT-MANAGER-PIPE-FLOOD-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n:wait\r\nfindstr /x /c:ready \"%NGT_RUNTIME_START_GATE%\" >nul\r\nif errorlevel 1 goto wait\r\ndel \"%NGT_RUNTIME_START_GATE%\"\r\nexit /b 0\r\n",
+        )
+        .unwrap();
+        let logger = LogSession::start(&root, "pipe-flood-test", "test", LogOwner::Manager)
+            .unwrap();
+        assert!(MANAGER_DIAGNOSTICS.set(Some(logger)).is_ok());
+        let job = RuntimeJob::new().unwrap();
+        let mut command = Command::new("cmd.exe");
+        command.arg("/d").arg("/c").arg(script);
+        hide_console(&mut command);
+        let mut child = spawn_runtime_process(
+            &job,
+            &mut command,
+            &root,
+            DiagnosticComponent::Application,
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        drop(job);
+        manager_diagnostics(&root).unwrap().finish();
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn health_check_accepts_chunked_http_json() {

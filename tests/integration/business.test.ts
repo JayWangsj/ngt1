@@ -4625,9 +4625,12 @@ describe("versioned data backup import", () => {
       orderId: "missing-order",
       deviceId: "missing-device",
     } as never);
-    await expect(importBusinessData(owner, invalidReference)).rejects.toThrow(
-      "Il backup contiene un riferimento non valido.",
-    );
+    await expect(
+      importBusinessData(owner, invalidReference),
+    ).rejects.toMatchObject({
+      code: "BACKUP_REFERENCE_CONFLICT",
+      message: "Il backup contiene un riferimento non valido.",
+    });
 
     await saveCustomer(owner, null, {
       name: "Duplicate backup customer",
@@ -4639,13 +4642,19 @@ describe("versioned data backup import", () => {
     });
     await expect(
       importBusinessData(owner, duplicateUniqueValue),
-    ).rejects.toThrow("Il backup contiene valori univoci duplicati.");
+    ).rejects.toMatchObject({
+      code: "BACKUP_RECORD_CONFLICT",
+      message: "Il backup contiene valori univoci duplicati.",
+    });
 
     const invalidExportDate = await exportBusinessData();
     invalidExportDate.exportedAt = "invalid";
-    await expect(importBusinessData(owner, invalidExportDate)).rejects.toThrow(
-      "Formato di backup non supportato.",
-    );
+    await expect(
+      importBusinessData(owner, invalidExportDate),
+    ).rejects.toMatchObject({
+      code: "BACKUP_FORMAT_UNSUPPORTED",
+      message: "Formato di backup non supportato.",
+    });
   });
 
   it("continues to accept version 1 backups without inventory arrays", async () => {

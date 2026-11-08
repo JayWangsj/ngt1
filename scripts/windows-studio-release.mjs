@@ -1130,7 +1130,7 @@ async function main() {
         result.run.id +
         (ready
           ? "; Release Ready passed for run " + ready.id
-          : "; v2.0.23 uses the formal Draft acceptance gates") +
+          : "; non-version tags use the formal Draft acceptance gates") +
         ".",
     );
     return;
