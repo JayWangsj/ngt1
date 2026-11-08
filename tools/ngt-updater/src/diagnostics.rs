@@ -164,9 +164,22 @@ struct ExternalEvent {
 }
 
 enum Message {
-    Event(DiagnosticEvent),
+    Event(Box<DiagnosticEvent>),
     Detail { component: Component, bytes: Vec<u8> },
     Finish,
+}
+
+struct ReaderContext {
+    sender: SyncSender<Message>,
+    component: Component,
+    dropped_events: std::sync::Arc<AtomicU64>,
+    dropped_detail_bytes: std::sync::Arc<AtomicU64>,
+    writer_failed: std::sync::Arc<AtomicBool>,
+    run_id: String,
+    operation_id: std::sync::Arc<Mutex<String>>,
+    version: String,
+    sequence: std::sync::Arc<AtomicU64>,
+    started: Option<mpsc::SyncSender<()>>,
 }
 
 /// One bounded queue and one writer for the current manager or updater process.
@@ -240,28 +253,27 @@ impl LogSession {
                                         && !failed_detail_buckets.contains(&bucket)
                                         && event.dropped_detail_bytes.unwrap_or_default() == 0;
                                 if let Some(previous) = detail_targets.remove(&bucket) {
-                                    if previous != event.detail_ref {
-                                        if store.rotate_detail(&previous, &bucket).is_err() {
-                                            writer_error_state.store(true, Ordering::Relaxed);
-                                            failed_detail_buckets.insert(bucket.clone());
-                                            if let Some(previous_component) =
-                                                detail_components.get(&bucket).copied()
+                                    if previous != event.detail_ref
+                                        && store.rotate_detail(&previous, &bucket).is_err()
+                                    {
+                                        writer_error_state.store(true, Ordering::Relaxed);
+                                        failed_detail_buckets.insert(bucket.clone());
+                                        if let Some(previous_component) =
+                                            detail_components.get(&bucket).copied()
+                                        {
+                                            if record_detail_unavailable(
+                                                &mut store,
+                                                &previous,
+                                                previous_component,
+                                                &writer_run_id,
+                                                &writer_version,
+                                            )
+                                            .is_err()
                                             {
-                                                if record_detail_unavailable(
-                                                    &mut store,
-                                                    &previous,
-                                                    previous_component,
-                                                    &writer_run_id,
-                                                    &writer_version,
-                                                )
-                                                .is_err()
-                                                {
-                                                    writer_error_state
-                                                        .store(true, Ordering::Relaxed);
-                                                }
+                                                writer_error_state.store(true, Ordering::Relaxed);
                                             }
-                                            event.details_available = false;
                                         }
+                                        event.details_available = false;
                                     }
                                 }
                                 detail_targets.insert(bucket.clone(), event.detail_ref.clone());
@@ -454,7 +466,7 @@ impl LogSession {
     }
 
     fn send_event(&self, event: DiagnosticEvent) {
-        match self.sender.try_send(Message::Event(event)) {
+        match self.sender.try_send(Message::Event(Box::new(event))) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 self.dropped_events.fetch_add(1, Ordering::Relaxed);
@@ -498,16 +510,18 @@ impl LogSession {
             .spawn(move || {
                 drain_reader(
                     reader,
-                    sender,
-                    component,
-                    dropped_events,
-                    dropped_detail_bytes,
-                    writer_failed,
-                    run_id,
-                    operation_id,
-                    version,
-                    sequence,
-                    Some(started_sender),
+                    ReaderContext {
+                        sender,
+                        component,
+                        dropped_events,
+                        dropped_detail_bytes,
+                        writer_failed,
+                        run_id,
+                        operation_id,
+                        version,
+                        sequence,
+                        started: Some(started_sender),
+                    },
                 );
             })?;
         started_receiver
@@ -596,19 +610,19 @@ fn append_pending_detail(buffer: &mut VecDeque<u8>, bytes: &[u8]) -> u64 {
     dropped
 }
 
-fn drain_reader<R: Read>(
-    mut reader: R,
-    sender: SyncSender<Message>,
-    component: Component,
-    dropped_events: std::sync::Arc<AtomicU64>,
-    dropped_detail_bytes: std::sync::Arc<AtomicU64>,
-    writer_failed: std::sync::Arc<AtomicBool>,
-    run_id: String,
-    operation_id: std::sync::Arc<Mutex<String>>,
-    version: String,
-    sequence: std::sync::Arc<AtomicU64>,
-    mut started: Option<mpsc::SyncSender<()>>,
-) {
+fn drain_reader<R: Read>(mut reader: R, context: ReaderContext) {
+    let ReaderContext {
+        sender,
+        component,
+        dropped_events,
+        dropped_detail_bytes,
+        writer_failed,
+        run_id,
+        operation_id,
+        version,
+        sequence,
+        mut started,
+    } = context;
     let mut buffer = [0u8; READ_BUFFER_BYTES];
     let mut line = Vec::with_capacity(MESSAGE_BYTES);
     let mut line_overflow = false;
@@ -731,7 +745,7 @@ fn drain_reader<R: Read>(
 }
 
 fn try_event(sender: &SyncSender<Message>, dropped: &AtomicU64, event: DiagnosticEvent) {
-    if sender.try_send(Message::Event(event)).is_err() {
+    if sender.try_send(Message::Event(Box::new(event))).is_err() {
         dropped.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -757,6 +771,16 @@ struct Segment {
     path: PathBuf,
     file: File,
     bytes: u64,
+}
+
+struct SegmentSpec<'a> {
+    area: &'a str,
+    key: &'a str,
+    file_prefix: &'a str,
+    quota_prefix: &'a str,
+    extension: &'a str,
+    quota: u64,
+    segment_limit: u64,
 }
 
 struct SegmentStore {
@@ -829,14 +853,17 @@ impl SegmentStore {
             "application" => 3 * 1024 * 1024,
             _ => 2 * 1024 * 1024,
         };
+        let key = format!("events-{bucket}");
         self.append(
-            "events",
-            &format!("events-{bucket}"),
-            &format!("events-{bucket}"),
-            &format!("events-{bucket}"),
-            "jsonl",
-            quota,
-            EVENT_SEGMENT_LIMIT,
+            SegmentSpec {
+                area: "events",
+                key: &key,
+                file_prefix: &key,
+                quota_prefix: &key,
+                extension: "jsonl",
+                quota,
+                segment_limit: EVENT_SEGMENT_LIMIT,
+            },
             &bytes,
         )?;
         if matches!(event.severity.as_str(), "error" | "critical")
@@ -868,14 +895,18 @@ impl SegmentStore {
             _ => 10 * 1024 * 1024,
         };
         let source_prefix = format!("details-{bucket}");
+        let key = format!("details-{identifier}-{bucket}");
+        let file_prefix = format!("{source_prefix}-{identifier}");
         self.append(
-            "details",
-            &format!("details-{identifier}-{bucket}"),
-            &format!("{source_prefix}-{identifier}"),
-            &source_prefix,
-            "logseg",
-            quota,
-            DETAIL_SEGMENT_LIMIT,
+            SegmentSpec {
+                area: "details",
+                key: &key,
+                file_prefix: &file_prefix,
+                quota_prefix: &source_prefix,
+                extension: "logseg",
+                quota,
+                segment_limit: DETAIL_SEGMENT_LIMIT,
+            },
             bytes,
         )
     }
@@ -898,17 +929,16 @@ impl SegmentStore {
         Ok(())
     }
 
-    fn append(
-        &mut self,
-        area: &str,
-        key: &str,
-        file_prefix: &str,
-        quota_prefix: &str,
-        extension: &str,
-        quota: u64,
-        segment_limit: u64,
-        bytes: &[u8],
-    ) -> io::Result<()> {
+    fn append(&mut self, spec: SegmentSpec<'_>, bytes: &[u8]) -> io::Result<()> {
+        let SegmentSpec {
+            area,
+            key,
+            file_prefix,
+            quota_prefix,
+            extension,
+            quota,
+            segment_limit,
+        } = spec;
         if bytes.is_empty() {
             return Ok(());
         }
@@ -1623,7 +1653,7 @@ fn take_latest_candidates(
         .into_iter()
         .map(|Reverse(candidate)| candidate)
         .collect::<Vec<_>>();
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.sort_by_key(|candidate| Reverse(candidate.0));
     candidates
 }
 
@@ -1842,27 +1872,29 @@ fn valid_event(event: &DiagnosticEvent) -> bool {
         && event.version.len() <= 48
         && event.detail_ref.len() <= 128
         && (1..=1_000_000).contains(&event.occurrences)
-        && event.last_utc_time.as_deref().map_or(true, |value| {
+        && event.last_utc_time.as_deref().is_none_or(|value| {
             value.len() <= 40 && chrono::DateTime::parse_from_rfc3339(value).is_ok()
         })
         && event
             .dropped_event_count
-            .map_or(true, |value| value <= 1_000_000_000)
+            .is_none_or(|value| value <= 1_000_000_000)
         && event
             .dropped_detail_bytes
-            .map_or(true, |value| value <= 1_000_000_000_000)
-        && event.attempts.map_or(true, |value| (1..=1000).contains(&value))
-        && event.elapsed_ms.map_or(true, |value| value <= 600_000)
+            .is_none_or(|value| value <= 1_000_000_000_000)
+        && event
+            .attempts
+            .is_none_or(|value| (1..=1000).contains(&value))
+        && event.elapsed_ms.is_none_or(|value| value <= 600_000)
         && event.detail_ref.starts_with("details/")
         && !event.detail_ref.contains("..")
         && matches!(event.severity.as_str(), "info" | "warning" | "error" | "critical")
         && event
             .backup_format
             .as_deref()
-            .map_or(true, |format| matches!(format, "ngt-repair-data" | "unknown"))
+            .is_none_or(|format| matches!(format, "ngt-repair-data" | "unknown"))
         && event
             .backup_version
-            .map_or(true, |version| (1..=1000).contains(&version))
+            .is_none_or(|version| (1..=1000).contains(&version))
         && event.record_counts.len() <= BACKUP_SECTIONS.len()
         && event.record_counts.iter().all(|(section, count)| {
             BACKUP_SECTIONS.contains(&section.as_str()) && *count <= 25_000_000
@@ -2494,16 +2526,18 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(4);
         drain_reader(
             io::Cursor::new(json),
-            sender,
-            Component::Manager,
-            std::sync::Arc::new(AtomicU64::new(0)),
-            std::sync::Arc::new(AtomicU64::new(0)),
-            std::sync::Arc::new(AtomicBool::new(false)),
-            "run-1".to_owned(),
-            std::sync::Arc::new(Mutex::new("install-01".to_owned())),
-            "2.1.0".to_owned(),
-            std::sync::Arc::new(AtomicU64::new(1)),
-            None,
+            ReaderContext {
+                sender,
+                component: Component::Manager,
+                dropped_events: std::sync::Arc::new(AtomicU64::new(0)),
+                dropped_detail_bytes: std::sync::Arc::new(AtomicU64::new(0)),
+                writer_failed: std::sync::Arc::new(AtomicBool::new(false)),
+                run_id: "run-1".to_owned(),
+                operation_id: std::sync::Arc::new(Mutex::new("install-01".to_owned())),
+                version: "2.1.0".to_owned(),
+                sequence: std::sync::Arc::new(AtomicU64::new(1)),
+                started: None,
+            },
         );
         let Message::Event(event) = receiver.try_recv().unwrap() else {
             panic!("expected structured diagnostic event");
@@ -2757,16 +2791,18 @@ mod tests {
         let mut reader = io::Cursor::new(vec![b'x'; READ_BUFFER_BYTES * 4]);
         drain_reader(
             &mut reader,
-            sender,
-            Component::Application,
-            dropped_events.clone(),
-            dropped_detail.clone(),
-            std::sync::Arc::new(AtomicBool::new(false)),
-            "run".to_owned(),
-            std::sync::Arc::new(Mutex::new("op".to_owned())),
-            "1.0".to_owned(),
-            std::sync::Arc::new(AtomicU64::new(1)),
-            None,
+            ReaderContext {
+                sender,
+                component: Component::Application,
+                dropped_events: dropped_events.clone(),
+                dropped_detail_bytes: dropped_detail.clone(),
+                writer_failed: std::sync::Arc::new(AtomicBool::new(false)),
+                run_id: "run".to_owned(),
+                operation_id: std::sync::Arc::new(Mutex::new("op".to_owned())),
+                version: "1.0".to_owned(),
+                sequence: std::sync::Arc::new(AtomicU64::new(1)),
+                started: None,
+            },
         );
         assert_eq!(dropped_events.load(Ordering::Relaxed), 0);
         assert!(dropped_detail.load(Ordering::Relaxed) > 0);
