@@ -136,6 +136,8 @@ import {
   priceRuleOptionAction,
   warrantyAction,
   afterSalesAction,
+  afterSalesRefundAction,
+  cancelAfterSalesAction,
   updateReworkPartAction,
   refundAction,
   createProductAction,
@@ -145,6 +147,17 @@ import {
   focusComfortably,
   focusWithoutScrolling,
 } from "@/lib/comfortable-scroll";
+
+const warrantyDayOptions = [0, 7, 30, 60, 90, 180, 365];
+
+function warrantyOptions(current: number, it: ReturnType<typeof useMessages>) {
+  return [...new Set([...warrantyDayOptions, current])]
+    .sort((a, b) => a - b)
+    .map((days) => ({
+      value: String(days),
+      label: days ? String(days) + " " + it.warranty.days : it.warranty.none,
+    }));
+}
 
 export type RuleView = {
   id: string;
@@ -1047,6 +1060,7 @@ function PriceOptionPicker({
   onSelectProduct,
   onRemove,
   onAdd,
+  triggerLabel,
 }: {
   options: PriceRuleOptionView[];
   inventoryProducts?: CreatedProduct[];
@@ -1062,6 +1076,7 @@ function PriceOptionPicker({
   onSelectProduct?: (productId: string) => void;
   onRemove?: () => void;
   onAdd?: () => void;
+  triggerLabel?: string;
 }) {
   const it = useMessages();
   const product = selected?.product ?? customProduct;
@@ -1155,7 +1170,7 @@ function PriceOptionPicker({
           disabled={disabled}
           onClick={openPicker}
         >
-          <Plus size={18} /> {it.partPriceOptions}
+          <Plus size={18} /> {triggerLabel ?? it.partPriceOptions}
         </button>
       )}
       {open && (
@@ -2009,17 +2024,19 @@ export function ItemsEditor({
                           : `${it.requiredPart} (${it.optional})`}
                       </strong>
                     )}
-                    {match ? (
+                    {match || projectPicker ? (
                       <PriceOptionPicker
                         options={priceOptions}
                         inventoryProducts={
-                          priceOptions.length
-                            ? []
-                            : ruleLinkedProducts(
-                                availableProducts,
-                                match?.rule,
-                                item.requiredProductId,
-                              )
+                          projectPicker && !priceOptions.length
+                            ? availableProducts
+                            : priceOptions.length
+                              ? []
+                              : ruleLinkedProducts(
+                                  availableProducts,
+                                  match?.rule,
+                                  item.requiredProductId,
+                                )
                         }
                         selected={selectedPriceOption}
                         customProduct={selectedProduct}
@@ -2027,6 +2044,7 @@ export function ItemsEditor({
                         noneSelected={Boolean(item.requiredProductRemoved)}
                         open={Boolean(editingPart)}
                         ariaLabel={`${it.partPriceOption} ${index + 1}`}
+                        triggerLabel={projectPicker ? it.repairPart : undefined}
                         onOpenChange={(open, confirmed) => {
                           if (focusedEdit && !open && !confirmed)
                             onFocusedEditComplete?.();
@@ -2053,8 +2071,10 @@ export function ItemsEditor({
                           if (focusedEdit) onFocusedEditComplete?.();
                         }}
                         onRemove={() => switchPriceOption("")}
-                        onAdd={() =>
-                          setCreatingPriceOptionRule(match?.rule ?? null)
+                        onAdd={
+                          match
+                            ? () => setCreatingPriceOptionRule(match.rule)
+                            : undefined
                         }
                       />
                     ) : selectedProduct && !editingPart ? (
@@ -3825,12 +3845,7 @@ export function WarrantyForm({
                 }
                 placeholder={it.selectOption}
                 ariaLabel={`${it.warranty.duration} ${item.project}`}
-                options={[0, 7, 30, 60, 90, 180, 365].map((days) => ({
-                  value: String(days),
-                  label: days
-                    ? `${days} ${it.warranty.days}`
-                    : it.warranty.none,
-                }))}
+                options={warrantyOptions(item.days, it)}
               />
             </Field>
             <Field label={it.warranty.notes}>
@@ -4684,6 +4699,109 @@ export function AfterSalesForm({
         </FormDialog>
       )}
     </ActionForm>
+  );
+}
+
+export function AfterSalesSessionControls({
+  id,
+  sessionId,
+  received,
+}: {
+  id: string;
+  sessionId: string;
+  received: number;
+}) {
+  const it = useMessages();
+  const [dialog, setDialog] = useState<"refund" | "cancel" | null>(null);
+  const [requestId] = useState(() => crypto.randomUUID());
+  const [cancelRequestId] = useState(() => crypto.randomUUID());
+  const [method, setMethod] =
+    useState<(typeof creatablePaymentMethods)[number]>("CASH");
+  return (
+    <div className="after-sales-session-controls">
+      {received > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setDialog("refund")}
+        >
+          {it.afterSales.refundSession}
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="danger"
+        disabled={received !== 0}
+        onClick={() => setDialog("cancel")}
+      >
+        {it.afterSales.cancelSession}
+      </Button>
+      {received > 0 && (
+        <p className="message warning">{it.afterSales.refundBeforeCancel}</p>
+      )}
+      {dialog === "refund" && received > 0 && (
+        <FormDialog
+          title={it.afterSales.refundSession}
+          onClose={() => setDialog(null)}
+        >
+          <ActionForm
+            submit={it.afterSales.confirmRefund}
+            action={(data) =>
+              afterSalesRefundAction(id, {
+                requestId,
+                sessionId,
+                amount: decimal(received),
+                method,
+                reason: str(data, "reason"),
+              })
+            }
+          >
+            <Field label={it.afterSales.currentReceived}>
+              <input readOnly value={money(received)} />
+            </Field>
+            <Field label={it.afterSales.refundMethod}>
+              <SimpleSelect
+                value={method}
+                onChange={(value) =>
+                  setMethod(value as (typeof creatablePaymentMethods)[number])
+                }
+                placeholder={it.selectOption}
+                ariaLabel={it.afterSales.refundMethod}
+                options={creatablePaymentMethods.map((option) => ({
+                  value: option,
+                  label: it.methods[option],
+                }))}
+              />
+            </Field>
+            <Field label={it.afterSales.refundReason}>
+              <textarea name="reason" required maxLength={2000} />
+            </Field>
+          </ActionForm>
+        </FormDialog>
+      )}
+      {dialog === "cancel" && received === 0 && (
+        <FormDialog
+          title={it.afterSales.cancelSession}
+          subtitle={it.afterSales.cancelSessionSubtitle}
+          onClose={() => setDialog(null)}
+        >
+          <ActionForm
+            submit={it.afterSales.cancelSession}
+            closeOnSuccess
+            action={() =>
+              cancelAfterSalesAction(id, {
+                requestId: cancelRequestId,
+                sessionId,
+              })
+            }
+          >
+            <p className="message warning">
+              {it.afterSales.cancelSessionSubtitle}
+            </p>
+          </ActionForm>
+        </FormDialog>
+      )}
+    </div>
   );
 }
 
@@ -5726,11 +5844,12 @@ function PriceRuleOptionForm({
             />
           </Field>
           <Field label={it.warrantyDays}>
-            <input
-              type="number"
-              min={0}
-              value={warrantyDays}
-              onChange={(event) => setWarrantyDays(Number(event.target.value))}
+            <SimpleSelect
+              value={String(warrantyDays)}
+              onChange={(value) => setWarrantyDays(Number(value))}
+              placeholder={it.selectOption}
+              ariaLabel={it.warrantyDays}
+              options={warrantyOptions(warrantyDays, it)}
             />
           </Field>
         </div>

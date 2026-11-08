@@ -276,13 +276,20 @@ async function chooseRequiredPart(
     name: "Opzioni ricambio",
     exact: true,
   });
+  const repairPartAdd = scope.getByRole("button", {
+    name: "Ricambio",
+    exact: true,
+  });
   if (
     (await priceOptionSummary.first().isVisible()) ||
-    (await priceOptionAdd.first().isVisible())
+    (await priceOptionAdd.first().isVisible()) ||
+    (await repairPartAdd.first().isVisible())
   ) {
     if (await priceOptionSummary.first().isVisible())
       await priceOptionSummary.first().locator(".summary-action").click();
-    else await priceOptionAdd.first().click();
+    else if (await priceOptionAdd.first().isVisible())
+      await priceOptionAdd.first().click();
+    else await repairPartAdd.first().click();
     const picker = page
       .getByRole("dialog", { name: "Opzioni ricambio", exact: true })
       .last();
@@ -1386,13 +1393,20 @@ test("uses part-specific prices without overwriting a manual quote", async ({
 test("creates a repair part and quote option directly from a new order", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await fillOrder(page);
+  expect(
+    await page
+      .locator(".order-wizard")
+      .evaluate((element) => element.getBoundingClientRect().width),
+  ).toBeLessThanOrEqual(1120);
   const optionSummary = page.locator(".price-option-picker-summary");
   await optionSummary.locator(".summary-action").click();
   const optionPicker = page.getByRole("dialog", {
     name: "Opzioni ricambio",
     exact: true,
   });
+  expect((await optionPicker.boundingBox())!.width).toBeLessThanOrEqual(760);
   await optionPicker
     .getByRole("button", { name: "Opzione ricambio", exact: true })
     .click();
@@ -1400,6 +1414,7 @@ test("creates a repair part and quote option directly from a new order", async (
     name: "Nuova opzione ricambio",
     exact: true,
   });
+  expect((await newOption.boundingBox())!.width).toBeLessThanOrEqual(1000);
   const productName = `Ricambio ordine ${Date.now()}`;
   await newOption
     .getByRole("combobox", { name: "Ricambio richiesto", exact: true })
@@ -1427,6 +1442,12 @@ test("creates a repair part and quote option directly from a new order", async (
   await newOption
     .getByLabel("Prezzo suggerito (€)", { exact: true })
     .fill("127");
+  await chooseBusinessOption(
+    page,
+    "Giorni di garanzia",
+    "30 giorni",
+    newOption,
+  );
   await newOption.getByRole("button", { name: "Salva", exact: true }).click();
   await expect(newOption).toHaveCount(0);
   await expect(optionPicker).toBeVisible();
@@ -1451,6 +1472,11 @@ test("creates a repair part and quote option directly from a new order", async (
     }),
   ).toContainText("127,00");
   await save(page);
+  const warrantyCard = page.getByTestId("warranty-card");
+  await warrantyCard.locator(".order-card-heading").click();
+  await expect(warrantyCard.locator(".project-warranty-list")).toContainText(
+    "30 giorni",
+  );
 
   const details = page.getByTestId("details-card");
   await details.locator(".order-card-heading").click();
@@ -1469,6 +1495,85 @@ test("creates a repair part and quote option directly from a new order", async (
     .locator(".inventory-table tbody tr")
     .filter({ hasText: productName });
   await expect(productRow).toContainText("Apple / Telefono / iPhone 13");
+});
+
+test("new custom repair projects use the shared repair-part picker without quote options", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await fillOrder(page, { manual: true });
+  expect(
+    await page
+      .locator(".order-wizard")
+      .evaluate((element) => element.getBoundingClientRect().width),
+  ).toBeLessThanOrEqual(1120);
+  const partTrigger = page.locator(".quote-required-part-add");
+  await expect(partTrigger).toContainText("Ricambio");
+  await partTrigger.click();
+
+  const picker = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  expect((await picker.boundingBox())!.width).toBeLessThanOrEqual(760);
+  const inventoryPart = picker
+    .locator(".price-option-inventory")
+    .filter({ hasText: "Batteria Test" });
+  await expect(inventoryPart).toBeVisible();
+  await expect(picker.locator(".price-option-none")).toBeVisible();
+  await inventoryPart.click();
+  await picker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+  const partSummary = page.locator(".price-option-picker-summary");
+  await expect(partSummary).toContainText("Batteria Test");
+
+  await partSummary.locator(".summary-action").click();
+  await picker.locator(".price-option-none").click();
+  await picker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+  await expect(partSummary).toContainText("Nessun ricambio richiesto");
+});
+
+test("parts pending confirmation require the operator primary action", async ({
+  page,
+}) => {
+  await fillOrder(page);
+  await save(page);
+  const orderId = new URL(page.url()).pathname.split("/").pop();
+  if (!orderId) throw new Error("Created repair order has no identifier.");
+
+  const db = new PrismaClient();
+  try {
+    const owner = await db.user.findFirstOrThrow({ where: { role: "OWNER" } });
+    await db.workOrder.update({
+      where: { id: orderId },
+      data: { status: "PARTS_PENDING_CONFIRMATION" },
+    });
+    await db.statusHistory.create({
+      data: {
+        orderId,
+        from: "REPAIRING",
+        to: "PARTS_PENDING_CONFIRMATION",
+        actorId: owner.id,
+        actorName: owner.name,
+      },
+    });
+  } finally {
+    await db.$disconnect();
+  }
+
+  await page.reload();
+  await expect(
+    page.locator(".detail-status .status-dropdown-trigger"),
+  ).toHaveText(/conferma/i);
+  await page
+    .getByRole("button", { name: "Conferma avvio riparazione", exact: true })
+    .click();
+  await expect(
+    page.locator(".detail-status .status-dropdown-trigger"),
+  ).toContainText("In riparazione");
 });
 
 test("keeps a paid quote when its repair part is explicitly removed", async ({
@@ -2476,6 +2581,11 @@ test("manages one quick service for held service orders and retail checkout", as
   const serviceCode = (await page.locator("h1").innerText()).trim();
   expect(serviceCode).toMatch(/^S-\d{8}\d{3}$/);
   await expect(page.locator(".page-header p")).toContainText("Servizio rapido");
+  await expect(
+    page
+      .locator(".payments-card")
+      .getByRole("button", { name: "Correggi totale incassato", exact: true }),
+  ).toBeVisible();
   const statusAction = page.locator(
     ".detail-primary-actions .status-dropdown .status-dropdown-trigger",
   );
@@ -3783,6 +3893,30 @@ test("dashboard animates on entry and data changes while respecting reduced moti
     page.getByRole("button", { name: "Priorità", exact: true }),
   ).toContainText("In ritardo");
   await expect(page.locator('input[name="month"]')).toHaveValue("");
+});
+
+test("dashboard content fits a 1920 by 1080 viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator(".dashboard-kpis")).toBeVisible();
+  await expect(page.locator(".dashboard-lists > section")).toHaveCount(2);
+  await expect(page.locator(".dashboard-charts")).toBeVisible();
+  const layout = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    viewportHeight: window.innerHeight,
+    scrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+    bottoms: [".dashboard-kpis", ".dashboard-lists", ".dashboard-charts"].map(
+      (selector) =>
+        document.querySelector(selector)!.getBoundingClientRect().bottom,
+    ),
+  }));
+  expect(layout.scrollHeight).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth);
+  expect(
+    layout.bottoms.every((bottom) => bottom <= layout.viewportHeight),
+  ).toBe(true);
 });
 
 test("dashboard only emphasizes attention when issues exist", async ({
@@ -5168,7 +5302,7 @@ test("repair list exposes month, status, due-date and payment controls", async (
     localizedRow.locator(".order-due-cell .order-static-value"),
   ).toContainText("31/12/2099");
 });
-test("repair list separates explicit collection from payment correction", async ({
+test("repair list keeps collection and moves payment correction to details", async ({
   page,
 }) => {
   await fillOrder(page, { manual: true });
@@ -5191,21 +5325,149 @@ test("repair list separates explicit collection from payment correction", async 
   await expect(paymentDialog).toHaveCount(0);
   await expect(row.locator(".order-payment-values")).toContainText("15,00 €");
 
-  await row
+  await expect(
+    row.getByRole("button", { name: "Correggi totale incassato", exact: true }),
+  ).toHaveCount(0);
+  await page.goto(orderPath);
+  const paymentCard = page.locator(".payments-card");
+  await paymentCard
     .getByRole("button", { name: "Correggi totale incassato", exact: true })
     .click();
-  const paid = row.getByLabel("Incassato", { exact: true });
+  const paid = paymentCard.getByLabel("Incassato", { exact: true });
   await paid.fill("10");
   await paid.press("Tab");
-  await expect(row.locator(".inline-control-error")).toHaveCount(0);
-  await row
+  await expect(paymentCard.locator(".inline-control-error")).toHaveCount(0);
+  await paymentCard
+    .locator(".payment-correction")
     .getByLabel("Metodo di pagamento", { exact: true })
     .selectOption("CARD");
-  await row
+  await paymentCard
     .getByLabel("Motivo della modifica", { exact: true })
     .fill("Rettifica test");
-  await row.getByRole("button", { name: "Salva", exact: true }).click();
-  await expect(row.locator(".order-payment-values")).toContainText("10,00 €");
+  await paymentCard.getByRole("button", { name: "Salva", exact: true }).click();
+  await expect(page.locator(".balance-card")).toContainText(
+    "Incassato: 10,00 €",
+  );
+});
+
+test("after-sales receipt must be refunded before cancelling its session", async ({
+  page,
+}) => {
+  await fillOrder(page, { manual: true });
+  await chooseRequiredPart(page, "Batteria Test");
+  await openPayment(page);
+  await page
+    .getByLabel("Incasso alla creazione (€)", { exact: true })
+    .fill("75");
+  await save(page);
+
+  const warranty = page.getByTestId("warranty-card");
+  await warranty.hover();
+  await warranty
+    .getByRole("button", { name: "Modifica dati", exact: true })
+    .click();
+  const warrantyProject = await warranty
+    .locator(".project-warranty-editor section strong")
+    .textContent();
+  const duration = warranty.getByRole("button", {
+    name: `Durata garanzia ${warrantyProject}`,
+    exact: true,
+  });
+  await duration.click();
+  await page
+    .locator(".business-select-panel.is-entering")
+    .getByRole("option", { name: "90 giorni", exact: true })
+    .click();
+  await warranty.getByLabel("Note garanzia").fill("Test annullamento");
+  await warranty.getByRole("button", { name: "Salva" }).click();
+
+  await state(page, "READY");
+  await page.getByLabel("Nome di chi ritira", { exact: true }).fill("Cliente");
+  await page.getByRole("button", { name: /Conferma consegna/ }).click();
+  await expect(
+    page.locator(".detail-status .status-dropdown-trigger"),
+  ).toHaveText(/Consegnato/);
+
+  await page
+    .getByRole("button", { name: "Riparazione in garanzia", exact: true })
+    .click();
+  const startDialog = page.getByRole("dialog", {
+    name: "Apri riparazione post-vendita",
+  });
+  await startDialog
+    .getByRole("radio", { name: /Riparazione a pagamento/ })
+    .check();
+  await startDialog.locator(".selected-part-summary .summary-action").click();
+  const partOptions = page.getByRole("dialog", {
+    name: "Opzioni ricambio",
+    exact: true,
+  });
+  await partOptions
+    .getByRole("button", { name: /^Nessun ricambio richiesto/ })
+    .click();
+  await partOptions
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
+  await startDialog.getByLabel("Costo aggiuntivo (€)").fill("50");
+  await startDialog
+    .getByRole("button", { name: "Apri riparazione post-vendita", exact: true })
+    .click();
+
+  const payments = page.locator(".payments-card");
+  await page.getByLabel("Importo (€)", { exact: true }).fill("50");
+  await payments
+    .getByRole("button", { name: "Registra incasso", exact: true })
+    .click();
+  const cancelSession = payments.getByRole("button", {
+    name: "Annulla questa riparazione post-vendita",
+    exact: true,
+  });
+  await expect(cancelSession).toBeDisabled();
+  await expect(payments).toContainText(
+    "Rimborsa prima tutto l'incasso di questa riparazione.",
+  );
+  const status = page.locator(".detail-status .status-dropdown-trigger");
+  await status.click();
+  await expect(
+    page.getByRole("option", { name: "Annullato", exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await payments
+    .getByRole("button", {
+      name: "Rimborsa e chiudi questa riparazione",
+      exact: true,
+    })
+    .click();
+  const refundDialog = page.getByRole("dialog", {
+    name: "Rimborsa e chiudi questa riparazione",
+  });
+  await refundDialog.getByLabel("Motivo / note").fill("Rimborso test");
+  await refundDialog
+    .getByRole("button", { name: "Conferma rimborso totale", exact: true })
+    .click();
+  await expect(cancelSession).toBeEnabled();
+  await expect(payments).toContainText("-50,00 €");
+
+  await cancelSession.click();
+  const cancelDialog = page.getByRole("dialog", {
+    name: "Annulla questa riparazione post-vendita",
+  });
+  await cancelDialog
+    .getByRole("button", {
+      name: "Annulla questa riparazione post-vendita",
+      exact: true,
+    })
+    .click();
+  await expect(status).toHaveText(/Consegnato/);
+  await expect(page.locator(".balance-card")).toContainText(
+    "Incassato: 75,00 €",
+  );
+  await expect(payments).toContainText("75,00 €");
+  await expect(payments).toContainText("-50,00 €");
+  await expect(
+    page.getByRole("button", { name: "Riparazione in garanzia", exact: true }),
+  ).toBeVisible();
 });
 
 test("repair list animates a row reordered by a local status change", async ({
@@ -8171,7 +8433,13 @@ test("repair detail cards lock history and keep post-sale finance auditable", as
   const reworkReadyMenu = page.locator(".status-dropdown-menu");
   await expect(
     reworkReadyMenu.getByRole("option", { name: "Annullato", exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(
+    page.locator(".payments-card").getByRole("button", {
+      name: "Annulla questa riparazione post-vendita",
+      exact: true,
+    }),
+  ).toBeDisabled();
   await page.keyboard.press("Escape");
   await page
     .getByLabel("Nome di chi ritira", { exact: true })
@@ -9638,6 +9906,9 @@ test("customer detail adds a device from a dialog below existing devices", async
     name: "Dispositivo",
     exact: true,
   });
+  expect((await addDevice.boundingBox())!.width).toBeLessThan(
+    (await detailBody.boundingBox())!.width / 2,
+  );
   expect((await addDevice.boundingBox())!.y).toBeGreaterThan(
     (await deviceRow.boundingBox())!.y,
   );

@@ -12,7 +12,6 @@ import {
 import { useRouter } from "next/navigation";
 import { setPaidTotalAction } from "@/app/actions";
 import { dateOnly, decimal, money, type OrderStatus } from "@/lib/domain";
-import { translateError } from "@/lib/i18n";
 import {
   defaultOrderMotionSettings,
   normalizeOrderMotionSettings,
@@ -21,7 +20,6 @@ import {
   readOrderMotionSettings,
   readOrderViewportFollow,
 } from "@/lib/order-motion";
-import { useBusinessDay } from "./business-date";
 import { useMessages } from "./language";
 import {
   StatusDropdown,
@@ -29,7 +27,6 @@ import {
   type StatusDropdownOrder,
 } from "./status-dropdown";
 import { FormDialog, PaymentForm } from "./forms";
-import { DatePicker } from "./business-select";
 import { Button } from "./ui/button";
 
 export type OrderListRow = {
@@ -150,12 +147,56 @@ function PaymentControl({
   active: boolean;
 }) {
   const it = useMessages();
+  const [collecting, setCollecting] = useState(false);
+  const closed = ["COMPLETED", "REFUNDED", "CANCELLED"].includes(row.status);
+  const mayCollect = active && !closed && row.balance > 0;
+  return (
+    <div className="order-payment-values">
+      <span>
+        <small>{it.total}</small>
+        <strong>{money(row.due)}</strong>
+      </span>
+      <span>
+        <small>{it.paid}</small>
+        <strong>{money(row.paid)}</strong>
+      </span>
+      <span className="order-balance-value">
+        <small>{it.balance}</small>
+        <strong>{money(row.balance)}</strong>
+      </span>
+      {mayCollect && (
+        <Button
+          type="button"
+          variant="outline"
+          className="order-payment-action"
+          onClick={(event) => {
+            event.stopPropagation();
+            setCollecting(true);
+          }}
+        >
+          {it.addPayment}
+        </Button>
+      )}
+      {collecting && (
+        <FormDialog title={it.addPayment} onClose={() => setCollecting(false)}>
+          <PaymentForm id={row.id} remaining={row.balance} />
+        </FormDialog>
+      )}
+    </div>
+  );
+}
+
+export function PaymentCorrection({
+  row,
+}: {
+  row: Pick<OrderListRow, "id" | "due" | "paid" | "status" | "afterSalesOpen">;
+}) {
+  const it = useMessages();
   const router = useRouter();
   const [value, setValue] = useState(decimal(row.paid));
   const [method, setMethod] = useState<"" | "CASH" | "CARD" | "OTHER">("");
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [correcting, setCorrecting] = useState(false);
-  const [collecting, setCollecting] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const closed = ["COMPLETED", "REFUNDED", "CANCELLED"].includes(row.status);
@@ -180,54 +221,14 @@ function PaymentControl({
       router.refresh();
     });
   }
-  const mayCollect = active && !closed && row.balance > 0;
-  const mayCorrect = active && !closed && !row.afterSalesOpen;
+  if (closed || row.afterSalesOpen) return null;
   return (
-    <div className="order-payment-values">
-      <span>
-        <small>{it.total}</small>
-        <strong>{money(row.due)}</strong>
-      </span>
-      <span>
-        <small>{it.paid}</small>
-        {correcting && mayCorrect ? (
-          <input
-            aria-label={it.paid}
-            value={value}
-            inputMode="decimal"
-            disabled={pending}
-            onChange={(event) => {
-              setValue(event.target.value);
-              setError("");
-            }}
-          />
-        ) : (
-          <strong>{money(row.paid)}</strong>
-        )}
-      </span>
-      <span className="order-balance-value">
-        <small>{it.balance}</small>
-        <strong>{money(row.balance)}</strong>
-      </span>
-      {mayCollect && (
-        <Button
-          type="button"
-          variant="outline"
-          className="order-payment-action"
-          onClick={(event) => {
-            event.stopPropagation();
-            setCollecting(true);
-          }}
-        >
-          {it.addPayment}
-        </Button>
-      )}
-      {mayCorrect && !correcting && (
+    <div className="payment-correction">
+      {!correcting ? (
         <button
           type="button"
           className="order-payment-correction-toggle"
-          onClick={(event) => {
-            event.stopPropagation();
+          onClick={() => {
             setValue(decimal(row.paid));
             setCorrecting(true);
             setError("");
@@ -235,9 +236,21 @@ function PaymentControl({
         >
           {it.paymentCorrection}
         </button>
-      )}
-      {correcting && mayCorrect && (
+      ) : (
         <>
+          <label className="payment-correction-amount">
+            <span className="sr-only">{it.paid}</span>
+            <input
+              aria-label={it.paid}
+              value={value}
+              inputMode="decimal"
+              disabled={pending}
+              onChange={(event) => {
+                setValue(event.target.value);
+                setError("");
+              }}
+            />
+          </label>
           <div className="order-payment-adjustment">
             <label>
               <span className="sr-only">{it.paymentMethod}</span>
@@ -290,15 +303,9 @@ function PaymentControl({
         </>
       )}
       {error && <small className="inline-control-error">{error}</small>}
-      {collecting && (
-        <FormDialog title={it.addPayment} onClose={() => setCollecting(false)}>
-          <PaymentForm id={row.id} remaining={row.balance} />
-        </FormDialog>
-      )}
     </div>
   );
 }
-
 export function OrderListBody({
   rows,
   hideCustomer = false,

@@ -74,7 +74,16 @@ export default async function NewOrder({
         kind: "REPAIR_PART",
         consumedAt: null,
         stockTracked: true,
-        order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
+        order: {
+          status: {
+            in: [
+              "REPAIRING",
+              "PARTS_PENDING_CONFIRMATION",
+              "READY",
+              "REWORKING",
+            ],
+          },
+        },
       },
       _sum: { quantity: true },
     }),

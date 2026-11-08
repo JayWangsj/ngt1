@@ -394,6 +394,13 @@ export const refundInput = z.object({
   method: z.enum(["CASH", "CARD", "OTHER"]),
   reason: z.string().trim().min(1).max(2000),
 });
+export const afterSalesRefundInput = refundInput.extend({
+  sessionId: z.string().min(1).max(100),
+});
+export const afterSalesCancelInput = z.object({
+  requestId: z.string().uuid(),
+  sessionId: z.string().min(1).max(100),
+});
 export const ruleInput = z
   .object({
     category: z

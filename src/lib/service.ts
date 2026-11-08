@@ -42,6 +42,8 @@ import {
   afterSalesInput,
   businessClockInput,
   refundInput,
+  afterSalesRefundInput,
+  afterSalesCancelInput,
   userInput,
   quickServiceInput,
   quickServiceOrderInput,
@@ -106,7 +108,6 @@ export const orderInclude = {
     include: {
       requiredProduct: true,
       priceOption: true,
-      reworkItem: true,
       quickService: true,
     },
   },
@@ -221,10 +222,16 @@ const reservationStatuses = [
   "DIAGNOSING",
   "REPAIRING",
   "PARTS_MISSING",
+  "PARTS_PENDING_CONFIRMATION",
   "REWORKING",
   "READY",
 ] as const;
-const occupiedStockStatuses = ["REPAIRING", "READY", "REWORKING"] as const;
+const occupiedStockStatuses = [
+  "REPAIRING",
+  "PARTS_PENDING_CONFIRMATION",
+  "READY",
+  "REWORKING",
+] as const;
 
 async function newLinesNeedParts(
   tx: Tx,
@@ -291,17 +298,25 @@ async function orderNeedsParts(tx: Tx, orderId: string) {
 async function refreshPartStatuses(tx: Tx, actor: Actor, productId: string) {
   const orders = await tx.workOrder.findMany({
     where: {
-      status: { in: ["REPAIRING", "PARTS_MISSING"] },
+      status: {
+        in: [
+          "REPAIRING",
+          "REWORKING",
+          "PARTS_MISSING",
+          "PARTS_PENDING_CONFIRMATION",
+        ],
+      },
       products: { some: { productId, kind: "REPAIR_PART", consumedAt: null } },
     },
     include: { products: { include: { product: true } } },
   });
   for (const order of orders) {
-    const next = (await orderNeedsParts(tx, order.id))
+    const missing = await orderNeedsParts(tx, order.id);
+    const next = missing
       ? "PARTS_MISSING"
-      : order.afterSalesOpen
-        ? "REWORKING"
-        : "REPAIRING";
+      : order.status === "PARTS_MISSING"
+        ? "PARTS_PENDING_CONFIRMATION"
+        : order.status;
     if (next === order.status) continue;
     await tx.workOrder.update({
       where: { id: order.id },
@@ -1350,12 +1365,18 @@ export async function replaceQuote(
       }
       requiredPartContexts.set(product.id, contextKey);
     }
+    const missingParts = await newLinesNeedParts(tx, requiredParts, id);
     const nextStatus =
       order.status === "READY"
         ? "READY"
-        : (await newLinesNeedParts(tx, requiredParts, id))
+        : missingParts
           ? "PARTS_MISSING"
-          : "REPAIRING";
+          : order.status === "PARTS_PENDING_CONFIRMATION" ||
+              (order.status === "PARTS_MISSING" && requiredParts.length > 0)
+            ? "PARTS_PENDING_CONFIRMATION"
+            : order.afterSalesOpen
+              ? "REWORKING"
+              : "REPAIRING";
     await tx.workOrder.update({
       where: { id },
       data: {
@@ -1620,7 +1641,7 @@ export async function changeStatus(
     if (data.status === "REFUNDED")
       throw new BusinessError("Usa l'operazione post-vendita dedicata.");
     const resumeRework =
-      order.status === "READY" &&
+      ["READY", "PARTS_PENDING_CONFIRMATION"].includes(order.status) &&
       data.status === "REWORKING" &&
       order.afterSalesOpen;
     if (data.status === "REWORKING" && !resumeRework)
@@ -1675,10 +1696,38 @@ export async function changeStatus(
       }
     }
 
-    if (data.status === "REPAIRING" && (await orderNeedsParts(tx, id)))
-      throw new BusinessError(
-        "Ricambi insufficienti: rifornisci il magazzino prima di avviare la riparazione.",
-      );
+    if (["REPAIRING", "REWORKING"].includes(data.status)) {
+      const missingParts = await orderNeedsParts(tx, id);
+      if (missingParts && order.status === "PARTS_PENDING_CONFIRMATION") {
+        await tx.workOrder.update({
+          where: { id },
+          data: { status: "PARTS_MISSING" },
+        });
+        await tx.statusHistory.create({
+          data: {
+            orderId: id,
+            from: order.status,
+            to: "PARTS_MISSING",
+            actorId: actor.id,
+            actorName: actor.name,
+            note: "",
+          },
+        });
+        await audit(tx, actor, id, "STATUS_CHANGED", {
+          from: order.status,
+          to: "PARTS_MISSING",
+          reason: "INVENTORY_AVAILABILITY",
+        });
+        return tx.workOrder.findUniqueOrThrow({
+          where: { id },
+          include: { items: true, products: true, payments: true },
+        });
+      }
+      if (missingParts)
+        throw new BusinessError(
+          "Ricambi insufficienti: rifornisci il magazzino prima di avviare la riparazione.",
+        );
+    }
     if (data.status === "READY" && (await orderNeedsParts(tx, id)))
       throw new BusinessError(
         "Ricambi insufficienti: rifornisci il magazzino prima di completare la riparazione.",
@@ -2854,7 +2903,11 @@ export async function openAfterSales(
     const today = await getBusinessDay(tx);
     const order = await tx.workOrder.findUniqueOrThrow({
       where: { id },
-      include: { items: { include: { reworkItem: true } } },
+      include: {
+        items: {
+          include: { reworkItems: { include: { session: true } } },
+        },
+      },
     });
     if (order.status !== "COMPLETED")
       throw new BusinessError(
@@ -2865,7 +2918,7 @@ export async function openAfterSales(
         (candidate) => candidate.id === input.originalItemId,
       );
       if (!item) throw new BusinessError("Intervento non valido.");
-      if (item.reworkItem)
+      if (item.reworkItems.some((entry) => !entry.session.cancelledAt))
         throw new BusinessError(
           "Questo intervento ha già una riparazione post-vendita.",
         );
@@ -2979,7 +3032,9 @@ export async function updateReworkPart(
     });
     if (
       !order.afterSalesOpen ||
-      !["REWORKING", "PARTS_MISSING"].includes(order.status)
+      !["REWORKING", "PARTS_MISSING", "PARTS_PENDING_CONFIRMATION"].includes(
+        order.status,
+      )
     )
       throw new BusinessError(
         "La riparazione post-vendita non è modificabile.",
@@ -3025,13 +3080,28 @@ export async function updateReworkPart(
         requiredQuantity: data.quantity,
       },
     });
-    const nextStatus = (await orderNeedsParts(tx, orderId))
+    const missingParts = await orderNeedsParts(tx, orderId);
+    const nextStatus = missingParts
       ? "PARTS_MISSING"
-      : "REWORKING";
+      : order.status === "PARTS_MISSING" ||
+          order.status === "PARTS_PENDING_CONFIRMATION"
+        ? "PARTS_PENDING_CONFIRMATION"
+        : "REWORKING";
     await tx.workOrder.update({
       where: { id: orderId },
       data: { status: nextStatus },
     });
+    if (order.status !== nextStatus)
+      await tx.statusHistory.create({
+        data: {
+          orderId,
+          from: order.status,
+          to: nextStatus,
+          actorId: actor.id,
+          actorName: actor.name,
+          note: "",
+        },
+      });
     await audit(tx, actor, orderId, "AFTER_SALES_PART_CHANGED", {
       reworkItemId,
       beforeProductId: item.requiredProductId,
@@ -3043,6 +3113,188 @@ export async function updateReworkPart(
     for (const productId of new Set(
       [oldLine?.productId, product?.id].filter(Boolean) as string[],
     ))
+      await refreshPartStatuses(tx, actor, productId);
+  });
+}
+
+export async function refundAfterSales(
+  actorInput: Actor,
+  id: string,
+  raw: unknown,
+) {
+  const data = afterSalesRefundInput.parse(raw);
+  const refundAmount = cents(data.amount);
+  return transact(async (tx) => {
+    const actor = await currentActor(tx, actorInput);
+    const existing = await tx.payment.findUnique({
+      where: { requestId: data.requestId },
+    });
+    if (existing) {
+      if (
+        existing.orderId !== id ||
+        existing.reworkSessionId !== data.sessionId ||
+        existing.kind !== "REFUND"
+      )
+        throw new BusinessError("Richiesta di rimborso già utilizzata.");
+      return existing;
+    }
+    const order = await tx.workOrder.findUniqueOrThrow({
+      where: { id },
+      include: { payments: { include: { allocations: true } } },
+    });
+    if (!order.afterSalesOpen)
+      throw new BusinessError("La riparazione post-vendita non è attiva.");
+    const session = await tx.reworkSession.findFirst({
+      where: { id: data.sessionId, orderId: id, open: true },
+      include: { payments: { include: { allocations: true } } },
+    });
+    if (!session)
+      throw new BusinessError("La riparazione post-vendita non è attiva.");
+    const received = session.payments.reduce(
+      (sum, payment) => sum + cents(payment.amount),
+      0,
+    );
+    if (received <= 0 || refundAmount !== received)
+      throw new BusinessError(
+        "Per annullare il post-vendita occorre rimborsare tutto l'importo incassato per questa riparazione.",
+      );
+    const allocationTotals = new Map<string, number>();
+    for (const payment of session.payments)
+      for (const allocation of payment.allocations) {
+        const amount = cents(allocation.amount);
+        if (amount > 0)
+          allocationTotals.set(
+            allocation.source,
+            (allocationTotals.get(allocation.source) ?? 0) + amount,
+          );
+      }
+    const allocated = [...allocationTotals.entries()].map(
+      ([source, amount]) => ({
+        source: source as "REPAIR" | "RETAIL" | "QUICK_SERVICE",
+        amount,
+      }),
+    );
+    const allocatedTotal = allocated.reduce(
+      (sum, allocation) => sum + allocation.amount,
+      0,
+    );
+    if (allocatedTotal !== received)
+      throw new BusinessError(
+        "La ripartizione dell'incasso post-vendita non è valida.",
+      );
+    const payment = await tx.payment.create({
+      data: {
+        requestId: data.requestId,
+        orderId: id,
+        reworkSessionId: session.id,
+        amount: decimal(-received),
+        method: data.method,
+        kind: "REFUND",
+        actorId: actor.id,
+        actorName: actor.name,
+        allocations: {
+          create: allocated.map((allocation) => ({
+            source: allocation.source,
+            amount: decimal(-allocation.amount),
+          })),
+        },
+      },
+    });
+    await audit(tx, actor, id, "AFTER_SALES_REFUND_ISSUED", {
+      requestId: data.requestId,
+      sessionId: session.id,
+      paymentId: payment.id,
+      amount: decimal(received),
+      method: data.method,
+      reason: data.reason,
+    });
+    return payment;
+  });
+}
+
+export async function cancelAfterSales(
+  actorInput: Actor,
+  id: string,
+  raw: unknown,
+) {
+  const data = afterSalesCancelInput.parse(raw);
+  return transact(async (tx) => {
+    const actor = await currentActor(tx, actorInput);
+    const duplicate = await tx.auditLog.findFirst({
+      where: {
+        entityId: id,
+        action: "AFTER_SALES_CANCELLED",
+        context: { path: ["requestId"], equals: data.requestId },
+      },
+    });
+    if (duplicate) return;
+    const order = await tx.workOrder.findUniqueOrThrow({
+      where: { id },
+    });
+    if (
+      !order.afterSalesOpen ||
+      ![
+        "READY",
+        "REWORKING",
+        "PARTS_MISSING",
+        "PARTS_PENDING_CONFIRMATION",
+      ].includes(order.status)
+    )
+      throw new BusinessError("La riparazione post-vendita non è attiva.");
+    const session = await tx.reworkSession.findFirst({
+      where: { id: data.sessionId, orderId: id, open: true },
+      include: { items: true, payments: true },
+    });
+    if (!session)
+      throw new BusinessError("La riparazione post-vendita non è attiva.");
+    const received = session.payments.reduce(
+      (sum, payment) => sum + cents(payment.amount),
+      0,
+    );
+    if (received !== 0)
+      throw new BusinessError(
+        "Rimborsa prima tutti gli incassi di questa riparazione post-vendita.",
+      );
+    const fee = session.items.reduce((sum, item) => sum + cents(item.fee), 0);
+    await tx.reworkSession.update({
+      where: { id: session.id },
+      data: { open: false, cancelledAt: new Date() },
+    });
+    await tx.workOrder.update({
+      where: { id },
+      data: {
+        status: "COMPLETED",
+        afterSalesOpen: false,
+        afterSalesFee: { decrement: decimal(fee) },
+        afterSalesDueDate: null,
+      },
+    });
+    await tx.statusHistory.create({
+      data: {
+        orderId: id,
+        from: order.status,
+        to: "COMPLETED",
+        actorId: actor.id,
+        actorName: actor.name,
+        note: "After-sales repair cancelled.",
+      },
+    });
+    await audit(tx, actor, id, "AFTER_SALES_CANCELLED", {
+      requestId: data.requestId,
+      sessionId: session.id,
+      fee: decimal(fee),
+      from: order.status,
+      to: "COMPLETED",
+    });
+    const lines = await tx.workOrderProduct.findMany({
+      where: {
+        orderId: id,
+        contextKey: { in: session.items.map((item) => `REWORK:${item.id}`) },
+        kind: "REPAIR_PART",
+      },
+      select: { productId: true },
+    });
+    for (const productId of new Set(lines.map((line) => line.productId)))
       await refreshPartStatuses(tx, actor, productId);
   });
 }

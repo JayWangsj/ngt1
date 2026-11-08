@@ -147,7 +147,13 @@
 
 :where(.scope) :global(.status-dropdown-trigger.status-parts_missing),
 :where(.scope) :global(.status-action-trigger.status-parts_missing),
-:where(.scope) :global(.status-dropdown-option.status-parts_missing) {
+:where(.scope) :global(.status-dropdown-option.status-parts_missing),
+:where(.scope)
+  :global(.status-dropdown-trigger.status-parts_pending_confirmation),
+:where(.scope)
+  :global(.status-action-trigger.status-parts_pending_confirmation),
+:where(.scope)
+  :global(.status-dropdown-option.status-parts_pending_confirmation) {
   --status-color: #a9632f;
   --status-bg: #fbf3ec;
   --status-bg-hover: #f6e8db;

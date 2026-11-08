@@ -388,6 +388,21 @@ export async function afterSalesAction(id: string, input: unknown) {
     orderPaths(id),
   );
 }
+export async function afterSalesRefundAction(id: string, input: unknown) {
+  const actor = await requireActor();
+  return execute(
+    () => service.refundAfterSales(actor, id, input),
+    undefined,
+    orderPaths(id),
+  );
+}
+export async function cancelAfterSalesAction(id: string, input: unknown) {
+  const actor = await requireActor();
+  return execute(() => service.cancelAfterSales(actor, id, input), undefined, [
+    ...orderPaths(id),
+    "/inventory",
+  ]);
+}
 export async function updateReworkPartAction(
   id: string,
   itemId: string,

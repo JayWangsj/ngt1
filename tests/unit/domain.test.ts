@@ -187,7 +187,14 @@ describe("status and permissions", () => {
     expect(() => assertTransition("RECEIVED", "PARTS_MISSING")).toThrow();
     expect(() => assertTransition("PARTS_MISSING", "REPAIRING")).toThrow();
     expect(allowedTransitions("PARTS_MISSING", false)).toEqual(["CANCELLED"]);
-    expect(allowedTransitions("PARTS_MISSING", true)).toEqual(["CANCELLED"]);
+    expect(allowedTransitions("PARTS_MISSING", true)).toEqual([]);
+    expect(allowedTransitions("PARTS_PENDING_CONFIRMATION", false)).toEqual([
+      "REPAIRING",
+      "CANCELLED",
+    ]);
+    expect(allowedTransitions("PARTS_PENDING_CONFIRMATION", true)).toEqual([
+      "REWORKING",
+    ]);
     expect(allowedTransitions("READY", false)).toEqual([
       "REPAIRING",
       "COMPLETED",
@@ -195,10 +202,9 @@ describe("status and permissions", () => {
     expect(allowedTransitions("READY", true)).toEqual([
       "REWORKING",
       "COMPLETED",
-      "CANCELLED",
     ]);
     expect(() => assertTransition("READY", "REWORKING", true)).not.toThrow();
-    expect(() => assertTransition("READY", "CANCELLED", true)).not.toThrow();
+    expect(() => assertTransition("READY", "CANCELLED", true)).toThrow();
     expect(() => assertTransition("READY", "REPAIRING", true)).toThrow();
     expect(() => assertTransition("DIAGNOSING", "REPAIRING")).toThrow();
     expect(() => assertTransition("DIAGNOSING", "READY")).toThrow();

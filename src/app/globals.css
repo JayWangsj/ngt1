@@ -1149,6 +1149,11 @@ small {
   --status-bg: #fbf3ec;
   --status-bg-hover: #f6e8db;
 }
+.status-parts_pending_confirmation {
+  --status-color: #80631c;
+  --status-bg: #fdf8e9;
+  --status-bg-hover: #f9f0d2;
+}
 .status-completed {
   --status-color: #377b50;
   --status-bg: #eff8f2;
@@ -1292,6 +1297,9 @@ small {
 .status-dot.status-parts_missing {
   background: #cf3d3d;
 }
+.status-dot.status-parts_pending_confirmation {
+  background: #d7a11e;
+}
 .status-dot.status-waiting_approval {
   background: #d4a04e;
 }
@@ -1428,6 +1436,10 @@ td small {
 .badge.status-parts_missing {
   color: #b42323;
   background: #fde8e8;
+}
+.badge.status-parts_pending_confirmation {
+  color: #80631c;
+  background: #fdf4d6;
 }
 .badge.status-cancelled {
   color: #a26868;
@@ -4328,6 +4340,8 @@ details.secondary-actions {
   grid-template-columns: minmax(0, 1fr) 250px;
   gap: 18px;
   align-items: start;
+  max-width: 1368px;
+  margin-inline: auto;
 }
 .new-order-layout > .service-order-form-column {
   grid-column: 1;
@@ -6882,8 +6896,9 @@ summary.record-icon::-webkit-details-marker {
   line-height: 1.5;
   text-align: center;
 }
-.customer-detail-add-device {
-  width: calc(100% - 32px);
+.customer-detail-dialog .customer-detail-add-device {
+  width: fit-content;
+  max-width: calc(100% - 32px);
   margin: 16px;
 }
 .order-project-summary {

@@ -3,6 +3,7 @@ export const statuses = [
   "DIAGNOSING",
   "REPAIRING",
   "PARTS_MISSING",
+  "PARTS_PENDING_CONFIRMATION",
   "READY",
   "COMPLETED",
   "REWORKING",
@@ -135,6 +136,7 @@ export const transitions: Record<OrderStatus, OrderStatus[]> = {
   DIAGNOSING: ["CANCELLED"],
   REPAIRING: ["READY", "CANCELLED"],
   PARTS_MISSING: ["CANCELLED"],
+  PARTS_PENDING_CONFIRMATION: ["REPAIRING", "CANCELLED"],
   READY: ["REPAIRING", "COMPLETED"],
   COMPLETED: [],
   REWORKING: ["READY", "CANCELLED"],
@@ -145,8 +147,12 @@ export function allowedTransitions(
   from: OrderStatus,
   afterSalesOpen = false,
 ): OrderStatus[] {
-  if (from === "READY" && afterSalesOpen)
-    return ["REWORKING", "COMPLETED", "CANCELLED"];
+  if (afterSalesOpen) {
+    if (from === "READY") return ["REWORKING", "COMPLETED"];
+    if (from === "PARTS_PENDING_CONFIRMATION") return ["REWORKING"];
+    if (from === "REWORKING") return ["READY"];
+    return [];
+  }
   return transitions[from];
 }
 export function assertTransition(

@@ -49,6 +49,9 @@ import {
   updateWarranty,
   updateBusinessClock,
   openAfterSales,
+  updateReworkPart,
+  refundAfterSales,
+  cancelAfterSales,
   refundOrder,
   deleteInventoryCategory,
   deleteDeviceCatalogOption,
@@ -1382,7 +1385,7 @@ describe("PostgreSQL workflow", () => {
       }),
     ).toBe(1);
   });
-  it("shares one rework flow, restores rework status after parts arrive and keeps one chance per item", async () => {
+  it("requires confirmation when after-sales parts arrive and cancels only that session", async () => {
     const part = await createProduct(staff, {
       requestId: randomUUID(),
       name: "Display rework",
@@ -1430,6 +1433,9 @@ describe("PostgreSQL workflow", () => {
     expect(
       await db.reworkSession.count({ where: { orderId: created.id } }),
     ).toBe(1);
+    const session = await db.reworkSession.findFirstOrThrow({
+      where: { orderId: created.id, open: true },
+    });
     await expect(
       changeStatus(staff, created.id, { status: "REWORKING" }),
     ).rejects.toThrow("post-vendita");
@@ -1439,6 +1445,11 @@ describe("PostgreSQL workflow", () => {
       type: "STOCK_IN",
       note: "",
     });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: created.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, created.id, { status: "REWORKING" });
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: created.id } }))
         .status,
@@ -1452,21 +1463,391 @@ describe("PostgreSQL workflow", () => {
       await db.reworkSession.count({ where: { orderId: created.id } }),
     ).toBe(1);
     await changeStatus(staff, created.id, { status: "READY" });
-    await changeStatus(staff, created.id, {
-      status: "CANCELLED",
-      note: "Cliente rinuncia al ritiro",
+    await expect(
+      changeStatus(staff, created.id, {
+        status: "CANCELLED",
+        note: "Cliente rinuncia al ritiro",
+      }),
+    ).rejects.toThrow("Cambio di stato");
+    await cancelAfterSales(staff, created.id, {
+      requestId: randomUUID(),
+      sessionId: session.id,
     });
     const cancelled = await db.workOrder.findUniqueOrThrow({
       where: { id: created.id },
       include: { history: { orderBy: { createdAt: "desc" } } },
     });
-    expect(cancelled.status).toBe("CANCELLED");
+    expect(cancelled.status).toBe("COMPLETED");
     expect(cancelled.history[0]).toMatchObject({
       from: "READY",
-      to: "CANCELLED",
-      note: "Cliente rinuncia al ritiro",
+      to: "COMPLETED",
+      note: "After-sales repair cancelled.",
     });
+    expect(
+      await db.reworkSession.findUniqueOrThrow({ where: { id: session.id } }),
+    ).toMatchObject({ open: false, cancelledAt: expect.any(Date) });
   });
+  it("requires operator confirmation after parts arrive and rechecks stock at confirmation", async () => {
+    const part = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio conferma test",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 0,
+      minStock: 0,
+    });
+    await savePriceRule(owner, null, {
+      brand: "Apple",
+      model: "iPhone 13",
+      project: "Pending confirmation test",
+      suggested: "40",
+      minutes: 30,
+      enabled: true,
+      requiredProductId: part.id,
+      requiredQuantity: 1,
+    });
+    const first = await createOrder(
+      staff,
+      input({
+        phone: "3331111121",
+        deposit: "0",
+        items: [{ project: "Pending confirmation test", final: "40" }],
+      }),
+    );
+    expect(first.status).toBe("PARTS_MISSING");
+
+    await adjustInventory(staff, part.id, {
+      requestId: randomUUID(),
+      quantity: 1,
+      type: "STOCK_IN",
+      note: "",
+    });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: first.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+
+    const second = await createOrder(
+      staff,
+      input({
+        phone: "3331111122",
+        deposit: "0",
+        items: [{ project: "Pending confirmation test", final: "40" }],
+      }),
+    );
+    expect(second.status).toBe("PARTS_MISSING");
+    expect(
+      await db.workOrderProduct.aggregate({
+        where: {
+          productId: part.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+          order: {
+            status: {
+              in: [
+                "REPAIRING",
+                "PARTS_PENDING_CONFIRMATION",
+                "READY",
+                "REWORKING",
+              ],
+            },
+          },
+        },
+        _sum: { quantity: true },
+      }),
+    ).toMatchObject({ _sum: { quantity: 1 } });
+
+    await db.product.update({
+      where: { id: part.id },
+      data: { stockQuantity: 0 },
+    });
+    const returnedToMissing = await changeStatus(staff, first.id, {
+      status: "REPAIRING",
+    });
+    expect(returnedToMissing.status).toBe("PARTS_MISSING");
+    expect(
+      await db.statusHistory.findFirstOrThrow({
+        where: {
+          orderId: first.id,
+          from: "PARTS_PENDING_CONFIRMATION",
+          to: "PARTS_MISSING",
+        },
+      }),
+    ).toBeTruthy();
+
+    await adjustInventory(staff, part.id, {
+      requestId: randomUUID(),
+      quantity: 1,
+      type: "STOCK_IN",
+      note: "",
+    });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: first.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    expect(
+      (await changeStatus(staff, first.id, { status: "REPAIRING" })).status,
+    ).toBe("REPAIRING");
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: second.id } }))
+        .status,
+    ).toBe("PARTS_MISSING");
+  });
+
+  it("records status history when after-sales part changes require confirmation", async () => {
+    const created = await createOrder(staff, input({ deposit: "100" }));
+    const originalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: created.id },
+    });
+    await updateWarranty(staff, created.id, {
+      items: [{ id: originalItem.id, days: 30, notes: "" }],
+    });
+    const unavailable = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio indisponibile rework history",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 0,
+      minStock: 0,
+    });
+    const available = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio disponibile rework history",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 1,
+      minStock: 0,
+    });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+    await openAfterSales(staff, created.id, {
+      items: [
+        {
+          originalItemId: originalItem.id,
+          treatment: "WARRANTY",
+          fee: "0",
+          requiredProductId: unavailable.id,
+          requiredQuantity: 1,
+        },
+      ],
+      notes: "",
+      dueDate: "2099-12-31",
+    });
+    const reworkItem = await db.reworkItem.findFirstOrThrow({
+      where: { session: { orderId: created.id, open: true } },
+    });
+    await updateReworkPart(staff, created.id, reworkItem.id, {
+      productId: available.id,
+      quantity: 1,
+    });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: created.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    expect(
+      await db.statusHistory.findFirstOrThrow({
+        where: {
+          orderId: created.id,
+          from: "PARTS_MISSING",
+          to: "PARTS_PENDING_CONFIRMATION",
+        },
+      }),
+    ).toBeTruthy();
+    expect(
+      (await changeStatus(staff, created.id, { status: "REWORKING" })).status,
+    ).toBe("REWORKING");
+  });
+
+  it("refunds and cancels only the current after-sales session, then preserves repeated history in backups", async () => {
+    const created = await createOrder(staff, input({ deposit: "100" }));
+    const originalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: created.id },
+    });
+    const part = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio annullamento test",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 1,
+      minStock: 0,
+    });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+    await openAfterSales(staff, created.id, {
+      items: [
+        {
+          originalItemId: originalItem.id,
+          treatment: "PAID",
+          fee: "50",
+          requiredProductId: part.id,
+          requiredQuantity: 1,
+        },
+      ],
+      notes: "",
+      dueDate: "2099-12-31",
+    });
+    const firstSession = await db.reworkSession.findFirstOrThrow({
+      where: { orderId: created.id, open: true },
+    });
+    await addPayment(staff, created.id, {
+      requestId: randomUUID(),
+      amount: "20",
+      method: "CARD",
+      kind: "BALANCE",
+    });
+    await expect(
+      cancelAfterSales(staff, created.id, {
+        requestId: randomUUID(),
+        sessionId: firstSession.id,
+      }),
+    ).rejects.toThrow("Rimborsa prima");
+
+    const refundRequestId = randomUUID();
+    const refundInput = {
+      requestId: refundRequestId,
+      sessionId: firstSession.id,
+      amount: "20",
+      method: "CASH",
+      reason: "Rimborso test",
+    };
+    await refundAfterSales(staff, created.id, refundInput);
+    await refundAfterSales(staff, created.id, refundInput);
+    const refund = await db.payment.findUniqueOrThrow({
+      where: { requestId: refundRequestId },
+    });
+    expect(refund).toMatchObject({
+      orderId: created.id,
+      reworkSessionId: firstSession.id,
+      kind: "REFUND",
+    });
+
+    await cancelAfterSales(staff, created.id, {
+      requestId: randomUUID(),
+      sessionId: firstSession.id,
+    });
+    const cancelledOrder = await db.workOrder.findUniqueOrThrow({
+      where: { id: created.id },
+      include: { payments: true },
+    });
+    expect(cancelledOrder).toMatchObject({
+      status: "COMPLETED",
+      afterSalesOpen: false,
+      afterSalesDueDate: null,
+    });
+    expect(cancelledOrder.afterSalesFee.toString()).toBe("0");
+    expect(
+      cancelledOrder.payments
+        .filter((payment) => payment.reworkSessionId === null)
+        .reduce((sum, payment) => sum + Number(payment.amount), 0),
+    ).toBe(100);
+    expect(
+      await db.reworkSession.findUniqueOrThrow({
+        where: { id: firstSession.id },
+      }),
+    ).toMatchObject({ open: false, cancelledAt: expect.any(Date) });
+    expect(
+      await db.auditLog.count({
+        where: {
+          entityId: created.id,
+          action: "AFTER_SALES_CANCELLED",
+        },
+      }),
+    ).toBe(1);
+
+    await openAfterSales(staff, created.id, {
+      items: [
+        {
+          originalItemId: originalItem.id,
+          treatment: "PAID",
+          fee: "10",
+          requiredProductId: "",
+          requiredQuantity: 1,
+        },
+      ],
+      notes: "Second after-sales session",
+      dueDate: "2099-12-31",
+    });
+    const secondSession = await db.reworkSession.findFirstOrThrow({
+      where: { orderId: created.id, open: true },
+    });
+    expect(secondSession.id).not.toBe(firstSession.id);
+    await addPayment(staff, created.id, {
+      requestId: randomUUID(),
+      amount: "10",
+      method: "CARD",
+      kind: "BALANCE",
+    });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+    await expect(
+      openAfterSales(staff, created.id, {
+        items: [
+          {
+            originalItemId: originalItem.id,
+            treatment: "PAID",
+            fee: "10",
+            requiredProductId: "",
+            requiredQuantity: 1,
+          },
+        ],
+        notes: "",
+        dueDate: "",
+      }),
+    ).rejects.toThrow("già una riparazione");
+
+    const backup = await exportBusinessData();
+    expect(backup.data.reworkSessions).toHaveLength(2);
+    expect(
+      backup.data.reworkSessions.find(
+        (session) => session.id === firstSession.id,
+      )?.cancelledAt,
+    ).toBeTruthy();
+    await clearBusinessData(owner);
+    await importBusinessData(owner, backup);
+    const restored = await db.reworkSession.findMany({
+      where: { orderId: created.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(restored).toHaveLength(2);
+    expect(restored[0].cancelledAt).toBeInstanceOf(Date);
+    expect(restored[1]).toMatchObject({ open: false, cancelledAt: null });
+
+    const legacy = structuredClone(backup) as unknown as {
+      version: number;
+      data: { reworkSessions: { cancelledAt?: Date | null }[] };
+    };
+    for (const session of legacy.data.reworkSessions)
+      delete session.cancelledAt;
+    await clearBusinessData(owner);
+    await importBusinessData(owner, legacy);
+    expect(
+      await db.reworkSession.findMany({
+        where: { orderId: created.id },
+        orderBy: { createdAt: "asc" },
+      }),
+    ).toMatchObject([
+      { open: false, cancelledAt: null },
+      { open: false, cancelledAt: null },
+    ]);
+  });
+
   it("refunds the full received amount without deleting original payments", async () => {
     const created = await createOrder(staff, input({ deposit: "100" }));
     await changeStatus(staff, created.id, { status: "REPAIRING" });
@@ -1777,6 +2158,11 @@ describe("PostgreSQL workflow", () => {
       type: "STOCK_IN",
       note: "",
     });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: order.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, order.id, { status: "REPAIRING" });
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: order.id } }))
         .status,
@@ -2968,7 +3354,16 @@ describe("work order products and combined checkout", () => {
           productId: part.id,
           kind: "REPAIR_PART",
           consumedAt: null,
-          order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
+          order: {
+            status: {
+              in: [
+                "REPAIRING",
+                "PARTS_PENDING_CONFIRMATION",
+                "READY",
+                "REWORKING",
+              ],
+            },
+          },
         },
         _sum: { quantity: true },
       }),
@@ -2991,7 +3386,8 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: second.id } }))
         .status,
-    ).toBe("REPAIRING");
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, second.id, { status: "REPAIRING" });
 
     await changeStatus(staff, second.id, { status: "READY" });
     expect(
@@ -3113,7 +3509,8 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: second.id } }))
         .status,
-    ).toBe("REPAIRING");
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, second.id, { status: "REPAIRING" });
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
         .stockQuantity,

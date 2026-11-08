@@ -17,6 +17,7 @@ enum Status {
   DIAGNOSING
   REPAIRING
   PARTS_MISSING
+  PARTS_PENDING_CONFIRMATION
   READY
   COMPLETED
   REWORKING
@@ -252,7 +253,7 @@ model WorkOrderItem {
   warrantyDays        Int              @default(0)
   warrantyExpiresAt   DateTime?        @db.Timestamptz(3)
   warrantyNotes       String           @default("")
-  reworkItem          ReworkItem?
+  reworkItems         ReworkItem[]
 
   @@index([orderId])
   @@index([requiredProductId])
@@ -295,17 +296,18 @@ model Payment {
 }
 
 model ReworkSession {
-  id         String       @id @default(cuid())
-  orderId    String
-  order      WorkOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  receivedAt DateTime     @default(now()) @db.Timestamptz(3)
-  dueDate    String?
-  notes      String       @default("")
-  open       Boolean      @default(true)
-  createdAt  DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt  DateTime     @updatedAt @db.Timestamptz(3)
-  items      ReworkItem[]
-  payments   Payment[]
+  id          String       @id @default(cuid())
+  orderId     String
+  order       WorkOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  receivedAt  DateTime     @default(now()) @db.Timestamptz(3)
+  dueDate     String?
+  notes       String       @default("")
+  open        Boolean      @default(true)
+  cancelledAt DateTime?    @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+  items       ReworkItem[]
+  payments    Payment[]
 
   @@index([orderId, createdAt])
 }
@@ -314,7 +316,7 @@ model ReworkItem {
   id                String          @id @default(cuid())
   sessionId         String
   session           ReworkSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  originalItemId    String          @unique
+  originalItemId    String
   originalItem      WorkOrderItem   @relation(fields: [originalItemId], references: [id], onDelete: Restrict)
   warrantyState     String
   treatment         ReworkTreatment
@@ -324,6 +326,7 @@ model ReworkItem {
   requiredQuantity  Int             @default(1)
 
   @@index([sessionId])
+  @@index([originalItemId])
   @@index([requiredProductId])
 }
 

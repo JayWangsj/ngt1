@@ -1506,6 +1506,7 @@ export async function importBusinessData(
             dueDate: source.dueDate,
             notes: source.notes,
             open: source.open,
+            cancelledAt: date(source.cancelledAt),
             createdAt: date(source.createdAt) ?? new Date(),
             updatedAt: date(source.updatedAt) ?? new Date(),
           },
