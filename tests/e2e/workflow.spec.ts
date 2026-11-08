@@ -3347,13 +3347,13 @@ test("settings action rows keep shared layout and responsive behavior", async ({
 
   await page.goto("/settings/data");
   const actions = page.locator(".settings-action");
-  await expect(actions).toHaveCount(3);
+  await expect(actions).toHaveCount(4);
   const row = actions.first();
   await expect(row).toHaveCSS("gap", "24px");
   await expect(row).toHaveCSS("padding-top", "18px");
   await expect(row.locator("p")).toHaveCSS("margin-top", "5px");
 
-  const clearRow = actions.nth(2);
+  const clearRow = actions.nth(3);
   const clearButton = clearRow.locator(".button-danger");
   await expect(clearButton).toHaveCSS("opacity", "0");
   await expect(clearButton).toHaveCSS("pointer-events", "none");
@@ -11044,8 +11044,9 @@ test("settings exports data and refuses import into a non-empty database", async
     data: backup,
     headers: sameOriginHeaders,
   });
-  expect(imported.status()).toBe(400);
+  expect(imported.status()).toBe(409);
   expect(await imported.json()).toMatchObject({
+    errorCode: "BACKUP_TARGET_NOT_EMPTY",
     error:
       "Importa il backup solo dopo aver installato il sistema e prima di inserire dati aziendali.",
   });
