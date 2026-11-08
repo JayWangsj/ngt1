@@ -1304,7 +1304,7 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
         events.sort_by(|a, b| a.name.cmp(&b.name));
         let mut event_groups: HashMap<u64, Vec<DiagnosticEvent>> = HashMap::new();
         let grouping_hasher = std::collections::hash_map::RandomState::new();
-        let mut seen_diagnostic_ids = HashSet::new();
+        let mut seen_diagnostic_ids: HashMap<String, (u64, usize)> = HashMap::new();
         let mut unavailable_detail_ids = HashSet::new();
         for snapshot in events {
             let source = snapshot.name.clone();
@@ -1324,20 +1324,35 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
                     unavailable_detail_ids.insert(event.diagnostic_id);
                     return Ok(());
                 }
-                if !seen_diagnostic_ids.insert(event.diagnostic_id.clone()) {
+                let diagnostic_id = event.diagnostic_id.clone();
+                if let Some((group_hash, event_index)) =
+                    seen_diagnostic_ids.get(&diagnostic_id).copied()
+                {
+                    if let Some(first) = event_groups
+                        .get_mut(&group_hash)
+                        .and_then(|group| group.get_mut(event_index))
+                    {
+                        merge_repeated_event(first, &event);
+                    }
                     return Ok(());
                 }
+                let group_hash = event_group_hash(&event, &grouping_hasher);
                 let group = event_groups
-                    .entry(event_group_hash(&event, &grouping_hasher))
+                    .entry(group_hash)
                     .or_default();
-                if let Some(first) = group
+                let event_index = if let Some((event_index, first)) = group
                     .iter_mut()
-                    .find(|first| same_event_group(first, &event))
+                    .enumerate()
+                    .find(|(_, first)| same_event_group(first, &event))
                 {
                     merge_repeated_event(first, &event);
+                    event_index
                 } else {
+                    let event_index = group.len();
                     group.push(event);
-                }
+                    event_index
+                };
+                seen_diagnostic_ids.insert(diagnostic_id, (group_hash, event_index));
                 Ok(())
             });
             match visited {
@@ -1354,6 +1369,7 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
                 event.details_available = false;
             }
             if !event.details_available {
+                budget.note_omitted_detail(&format!("reference-{}", event.diagnostic_id), 1);
                 continue;
             }
             let reference = format!(
@@ -1928,7 +1944,10 @@ fn valid_event(event: &DiagnosticEvent) -> bool {
 }
 
 fn merge_repeated_event(first: &mut DiagnosticEvent, next: &DiagnosticEvent) {
-    let occurrences = first.occurrences.saturating_add(next.occurrences.max(1));
+    let occurrences = first
+        .occurrences
+        .saturating_add(next.occurrences.max(1))
+        .min(1_000_000);
     let next_last = next.last_utc_time.as_deref().unwrap_or(&next.utc_time);
     let first_last = first.last_utc_time.as_deref().unwrap_or(&first.utc_time);
     let last_utc_time = next_last.max(first_last).to_owned();
@@ -2526,7 +2545,7 @@ mod tests {
         assert!(!event.details_available);
         assert!(contents.contains("diagnostics.recording_incomplete"));
         assert!(contents.contains("Detail lines withheld or unavailable:"));
-        assert!(contents.contains("Detail sources:"));
+        assert!(contents.contains("Detail sources with withheld or missing content:"));
 
         let _ = fs::remove_file(output);
         let _ = fs::remove_dir_all(root);

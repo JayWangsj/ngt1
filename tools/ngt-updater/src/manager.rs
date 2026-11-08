@@ -1409,7 +1409,7 @@ fn spawn_runtime_process(
     let _ = child.kill();
     let _ = child.wait();
     let _ = fs::remove_file(&gate);
-    Err("The runtime process did not acknowledge process-group assignment.".to_owned())
+    Err("The runtime process did not acknowledge the startup gate.".to_owned())
 }
 
 #[cfg(windows)]
@@ -3529,7 +3529,7 @@ mod tests {
         let script = root.join("pipe-flood.cmd");
         fs::write(
             &script,
-            "@echo off\r\nfor /L %%N in (1,1,16000) do echo NGT-MANAGER-PIPE-FLOOD-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n:wait\r\nfindstr /x /c:ready \"%NGT_RUNTIME_START_GATE%\" >nul\r\nif errorlevel 1 goto wait\r\ndel \"%NGT_RUNTIME_START_GATE%\"\r\nexit /b 0\r\n",
+            "@echo off\r\nfor /L %%N in (1,1,2048) do echo NGT-MANAGER-PIPE-FLOOD-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n:wait\r\nfindstr /x /c:ready \"%NGT_RUNTIME_START_GATE%\" >nul\r\nif errorlevel 1 goto wait\r\ndel \"%NGT_RUNTIME_START_GATE%\"\r\nexit /b 0\r\n",
         )
         .unwrap();
         let logger =
