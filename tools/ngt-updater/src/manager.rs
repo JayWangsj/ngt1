@@ -1117,16 +1117,16 @@ fn log_line(root: &Path, line: &str) {
             "none",
         )
     };
-    let severity = if error_code == "none" { "info" } else { "error" };
+    let severity = if error_code == "none" {
+        "info"
+    } else {
+        "error"
+    };
     logger.record(component, severity, event_code, phase, error_code);
 }
 
 #[cfg(windows)]
-fn log_child_exit(
-    root: &Path,
-    component: DiagnosticComponent,
-    status: &std::process::ExitStatus,
-) {
+fn log_child_exit(root: &Path, component: DiagnosticComponent, status: &std::process::ExitStatus) {
     let error_code = status
         .code()
         .map(|code| format!("EXIT_{code}"))
@@ -1198,7 +1198,10 @@ fn record_command_failure(root: &Path, arguments: &[String], message: &str) {
                 .append(true)
                 .open(root.join("logs/manager.log"))
             {
-                if file.metadata().map_or(true, |metadata| metadata.len() < 1024 * 1024) {
+                if file
+                    .metadata()
+                    .map_or(true, |metadata| metadata.len() < 1024 * 1024)
+                {
                     let _ = writeln!(file, "diagnostics unavailable: MANAGER_OPERATION_FAILED");
                 }
             }
@@ -1640,20 +1643,15 @@ fn start_database(job: &RuntimeJob, release: &Path, root: &Path) -> Result<Child
         }
     }
     let mut command = Command::new(release.join("runtime").join("node.exe"));
-    command
-        .args([
-            "--require",
-            "./scripts/runtime-start-gate.cjs",
-            "./scripts/windows-db.mjs",
-        ]);
+    command.args([
+        "--require",
+        "./scripts/runtime-start-gate.cjs",
+        "./scripts/windows-db.mjs",
+    ]);
     configure_runtime_command(&mut command, release, root, &temp);
     hide_console(&mut command);
-    let mut database = spawn_runtime_process(
-        job,
-        &mut command,
-        root,
-        DiagnosticComponent::Database,
-    )?;
+    let mut database =
+        spawn_runtime_process(job, &mut command, root, DiagnosticComponent::Database)?;
     for _ in 0..180 {
         let ready_process_id = fs::read_to_string(&ready)
             .ok()
@@ -1717,12 +1715,7 @@ fn run_migrations(
         .args(["migrate", "deploy"]);
     configure_runtime_command(&mut command, release, root, &temp);
     hide_console(&mut command);
-    let status = spawn_runtime_process(
-        job,
-        &mut command,
-        root,
-        DiagnosticComponent::Migration,
-    )?
+    let status = spawn_runtime_process(job, &mut command, root, DiagnosticComponent::Migration)?
         .wait()
         .map_err(|error| format!("Unable to wait for database migration: {error}"))?;
     if !status.success() {
@@ -3539,20 +3532,16 @@ mod tests {
             "@echo off\r\nfor /L %%N in (1,1,16000) do echo NGT-MANAGER-PIPE-FLOOD-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n:wait\r\nfindstr /x /c:ready \"%NGT_RUNTIME_START_GATE%\" >nul\r\nif errorlevel 1 goto wait\r\ndel \"%NGT_RUNTIME_START_GATE%\"\r\nexit /b 0\r\n",
         )
         .unwrap();
-        let logger = LogSession::start(&root, "pipe-flood-test", "test", LogOwner::Manager)
-            .unwrap();
+        let logger =
+            LogSession::start(&root, "pipe-flood-test", "test", LogOwner::Manager).unwrap();
         assert!(MANAGER_DIAGNOSTICS.set(Some(logger)).is_ok());
         let job = RuntimeJob::new().unwrap();
         let mut command = Command::new("cmd.exe");
         command.arg("/d").arg("/c").arg(script);
         hide_console(&mut command);
-        let mut child = spawn_runtime_process(
-            &job,
-            &mut command,
-            &root,
-            DiagnosticComponent::Application,
-        )
-        .unwrap();
+        let mut child =
+            spawn_runtime_process(&job, &mut command, &root, DiagnosticComponent::Application)
+                .unwrap();
         assert!(child.wait().unwrap().success());
         drop(job);
         manager_diagnostics(&root).unwrap().finish();

@@ -165,7 +165,10 @@ struct ExternalEvent {
 
 enum Message {
     Event(Box<DiagnosticEvent>),
-    Detail { component: Component, bytes: Vec<u8> },
+    Detail {
+        component: Component,
+        bytes: Vec<u8>,
+    },
     Finish,
 }
 
@@ -310,10 +313,8 @@ impl LogSession {
                             let length = bytes.len() as u64;
                             let bucket = component.detail_bucket().to_owned();
                             let detail_ref = detail_targets.get(&bucket).cloned();
-                            let target_component = detail_components
-                                .get(&bucket)
-                                .copied()
-                                .unwrap_or(component);
+                            let target_component =
+                                detail_components.get(&bucket).copied().unwrap_or(component);
                             let result = if writer_error_state.load(Ordering::Relaxed)
                                 || failed_detail_buckets.contains(&bucket)
                             {
@@ -336,9 +337,9 @@ impl LogSession {
                                     }
                                 }
                             } else {
-                                let pending = pending_details.entry(bucket).or_insert_with(|| {
-                                    VecDeque::with_capacity(READ_BUFFER_BYTES)
-                                });
+                                let pending = pending_details
+                                    .entry(bucket)
+                                    .or_insert_with(|| VecDeque::with_capacity(READ_BUFFER_BYTES));
                                 let dropped = append_pending_detail(pending, &bytes);
                                 if dropped > 0 {
                                     writer_dropped_detail_bytes
@@ -356,8 +357,7 @@ impl LogSession {
                             }
                         }
                         Message::Finish => {
-                            let dropped_events =
-                                writer_dropped_events.load(Ordering::Relaxed);
+                            let dropped_events = writer_dropped_events.load(Ordering::Relaxed);
                             let dropped_detail_bytes =
                                 writer_dropped_detail_bytes.load(Ordering::Relaxed);
                             let recording_failed = writer_error_state.load(Ordering::Relaxed);
@@ -827,13 +827,8 @@ impl SegmentStore {
             LogOwner::Updater => UPDATER_SEGMENT_QUOTAS.as_slice(),
         };
         for &(area, prefix, extension, quota) in quotas {
-            if let Err(error) = cleanup_segments(
-                &self.root.join(area),
-                prefix,
-                extension,
-                quota,
-                0,
-            ) {
+            if let Err(error) = cleanup_segments(&self.root.join(area), prefix, extension, quota, 0)
+            {
                 first_error.get_or_insert(error);
             }
         }
@@ -845,7 +840,10 @@ impl SegmentStore {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         bytes.push(b'\n');
         if bytes.len() > MAX_EVENT_BYTES {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "event too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "event too large",
+            ));
         }
         let bucket = event.component.event_bucket();
         let quota = match bucket {
@@ -975,7 +973,10 @@ impl SegmentStore {
         let capacity = quota.saturating_sub(current);
         let write_len = bytes.len().min(capacity as usize);
         if write_len == 0 {
-            return Err(io::Error::new(io::ErrorKind::WriteZero, "diagnostic quota reached"));
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "diagnostic quota reached",
+            ));
         }
         cleanup_segments(&directory, quota_prefix, extension, quota, write_len as u64)?;
         let segment = self.active.get_mut(key).expect("active segment");
@@ -989,7 +990,10 @@ impl SegmentStore {
         }
         segment.bytes += write_len as u64;
         if write_len < bytes.len() {
-            return Err(io::Error::new(io::ErrorKind::WriteZero, "diagnostic quota reached"));
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "diagnostic quota reached",
+            ));
         }
         Ok(())
     }
@@ -1057,7 +1061,10 @@ fn cleanup_segments(
         }
     }
     if used.saturating_add(incoming) > quota {
-        return Err(io::Error::new(io::ErrorKind::WriteZero, "diagnostic quota reached"));
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "diagnostic quota reached",
+        ));
     }
     Ok(())
 }
@@ -1203,11 +1210,9 @@ fn detail_identifier(detail_ref: &str, bucket: &str) -> io::Result<String> {
         .and_then(|name| name.strip_prefix(prefix.as_str()))
         .filter(|name| {
             !name.is_empty()
-                && name
-                    .chars()
-                    .all(|character| {
-                        character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
-                    })
+                && name.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+                })
         })
         .map(str::to_owned)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid detail reference"))
@@ -1343,10 +1348,7 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
                 Err(_) => budget.note_omitted_event(&source, 1),
             }
         }
-        let mut grouped_events = event_groups
-            .into_values()
-            .flatten()
-            .collect::<Vec<_>>();
+        let mut grouped_events = event_groups.into_values().flatten().collect::<Vec<_>>();
         for event in &mut grouped_events {
             if unavailable_detail_ids.contains(&event.diagnostic_id) {
                 event.details_available = false;
@@ -1354,7 +1356,10 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
             if !event.details_available {
                 continue;
             }
-            let reference = format!("details-{}-", event.detail_ref.trim_start_matches("details/"));
+            let reference = format!(
+                "details-{}-",
+                event.detail_ref.trim_start_matches("details/")
+            );
             let found = details.iter().any(|snapshot| {
                 snapshot.name.starts_with(&reference)
                     && snapshot.length > 0
@@ -1451,11 +1456,20 @@ fn validate_output_path(root: &Path, output: &Path) -> io::Result<PathBuf> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let name = output.file_name().filter(|name| !name.is_empty()).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "output filename is required")
-    })?;
-    if !Path::new(name).components().all(|part| matches!(part, std::path::Component::Normal(_))) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid output filename"));
+    let name = output
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "output filename is required")
+        })?;
+    if !Path::new(name)
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid output filename",
+        ));
     }
     let parent = fs::canonicalize(parent)?;
     for protected in [root.join("data"), root.join("backups")] {
@@ -1523,14 +1537,7 @@ fn capture_log_snapshot(root: &Path) -> (Vec<SnapshotFile>, Vec<SnapshotFile>, S
                     || name.starts_with("migration-")
                     || name.starts_with("update-")
                 {
-                    retain_latest_path(
-                        &mut legacy,
-                        entry.path(),
-                        name,
-                        16,
-                        "legacy",
-                        &mut gaps,
-                    );
+                    retain_latest_path(&mut legacy, entry.path(), name, 16, "legacy", &mut gaps);
                 }
             }
         }
@@ -1541,7 +1548,11 @@ fn capture_log_snapshot(root: &Path) -> (Vec<SnapshotFile>, Vec<SnapshotFile>, S
         if let Some(snapshot) = snapshot_file(&path, 1024 * 1024) {
             details.push(snapshot);
         } else {
-            note_snapshot_gap(&mut gaps, false, &format!("legacy:{}", safe_source_label(&name)));
+            note_snapshot_gap(
+                &mut gaps,
+                false,
+                &format!("legacy:{}", safe_source_label(&name)),
+            );
         }
     }
     let updater_logs = logs.join("updater");
@@ -1564,14 +1575,7 @@ fn capture_log_snapshot(root: &Path) -> (Vec<SnapshotFile>, Vec<SnapshotFile>, S
                 if name.starts_with("update-")
                     && entry.path().extension().is_some_and(|ext| ext == "log")
                 {
-                    retain_latest_path(
-                        &mut updater,
-                        entry.path(),
-                        name,
-                        16,
-                        "updater",
-                        &mut gaps,
-                    );
+                    retain_latest_path(&mut updater, entry.path(), name, 16, "updater", &mut gaps);
                 }
             }
             for (_, path, name) in take_latest_candidates(updater) {
@@ -1595,10 +1599,18 @@ fn capture_log_snapshot(root: &Path) -> (Vec<SnapshotFile>, Vec<SnapshotFile>, S
 fn note_snapshot_gap(gaps: &mut SnapshotGaps, is_event: bool, source: &str) {
     if is_event {
         gaps.missing_events = gaps.missing_events.saturating_add(1);
-        add_bounded_source(&mut gaps.event_sources, &mut gaps.more_event_sources, source);
+        add_bounded_source(
+            &mut gaps.event_sources,
+            &mut gaps.more_event_sources,
+            source,
+        );
     } else {
         gaps.missing_details = gaps.missing_details.saturating_add(1);
-        add_bounded_source(&mut gaps.detail_sources, &mut gaps.more_detail_sources, source);
+        add_bounded_source(
+            &mut gaps.detail_sources,
+            &mut gaps.more_detail_sources,
+            source,
+        );
     }
 }
 
@@ -1624,9 +1636,7 @@ fn retain_latest_path(
         candidates.push(candidate);
     } else if candidates
         .peek()
-        .is_some_and(|oldest| {
-            candidate.0.0.cmp(&oldest.0.0) == std::cmp::Ordering::Greater
-        })
+        .is_some_and(|oldest| candidate.0 .0.cmp(&oldest.0 .0) == std::cmp::Ordering::Greater)
     {
         if let Some(Reverse((_, _, evicted_name))) = candidates.pop() {
             note_snapshot_gap(
@@ -1640,7 +1650,7 @@ fn retain_latest_path(
         note_snapshot_gap(
             gaps,
             false,
-            &format!("{kind}:{}", safe_source_label(&candidate.0.2)),
+            &format!("{kind}:{}", safe_source_label(&candidate.0 .2)),
         );
     }
 }
@@ -1728,16 +1738,14 @@ fn snapshot_directory(
             candidates.push(candidate);
         } else if candidates
             .peek()
-            .is_some_and(|oldest| {
-                candidate.0.0.cmp(&oldest.0.0) == std::cmp::Ordering::Greater
-            })
+            .is_some_and(|oldest| candidate.0 .0.cmp(&oldest.0 .0) == std::cmp::Ordering::Greater)
         {
             if let Some(Reverse((_, _, evicted_name))) = candidates.pop() {
                 note_snapshot_gap(gaps, is_event, &format!("{kind}:{evicted_name}"));
             }
             candidates.push(candidate);
         } else {
-            note_snapshot_gap(gaps, is_event, &format!("{kind}:{}", candidate.0.2));
+            note_snapshot_gap(gaps, is_event, &format!("{kind}:{}", candidate.0 .2));
         }
     }
     let mut total_bytes = 0u64;
@@ -1887,7 +1895,10 @@ fn valid_event(event: &DiagnosticEvent) -> bool {
         && event.elapsed_ms.is_none_or(|value| value <= 600_000)
         && event.detail_ref.starts_with("details/")
         && !event.detail_ref.contains("..")
-        && matches!(event.severity.as_str(), "info" | "warning" | "error" | "critical")
+        && matches!(
+            event.severity.as_str(),
+            "info" | "warning" | "error" | "critical"
+        )
         && event
             .backup_format
             .as_deref()
@@ -1917,9 +1928,7 @@ fn valid_event(event: &DiagnosticEvent) -> bool {
 }
 
 fn merge_repeated_event(first: &mut DiagnosticEvent, next: &DiagnosticEvent) {
-    let occurrences = first
-        .occurrences
-        .saturating_add(next.occurrences.max(1));
+    let occurrences = first.occurrences.saturating_add(next.occurrences.max(1));
     let next_last = next.last_utc_time.as_deref().unwrap_or(&next.utc_time);
     let first_last = first.last_utc_time.as_deref().unwrap_or(&first.utc_time);
     let last_utc_time = next_last.max(first_last).to_owned();
@@ -2017,7 +2026,9 @@ fn is_snapshot_segment(name: &str, is_event: bool) -> bool {
         stem.strip_prefix(prefix).is_some_and(|suffix| {
             suffix.split('-').count() >= 3
                 && suffix.split('-').all(|part| !part.is_empty())
-                && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
     })
 }
@@ -2048,7 +2059,8 @@ fn safe_source_label(value: &str) -> String {
     if value.starts_with("reference-") {
         return "event detail reference".to_owned();
     }
-    if value.starts_with("legacy:") || value.starts_with("manager.log")
+    if value.starts_with("legacy:")
+        || value.starts_with("manager.log")
         || value.starts_with("database.log")
         || value.starts_with("application.log")
     {
@@ -2348,8 +2360,8 @@ mod tests {
     #[test]
     fn export_omits_info_events_but_keeps_warnings_and_failures() {
         let root = temp_root("event-severity");
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         let logs = LogSession::start(&root, "operation-1", "2.1.0", LogOwner::Manager).unwrap();
         logs.record(
             Component::Manager,
@@ -2387,8 +2399,8 @@ mod tests {
     #[test]
     fn export_groups_repeat_failures_and_preserves_the_first_event_id() {
         let root = temp_root("repeat");
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         let logs = LogSession::start(&root, "operation-1", "2.1.0", LogOwner::Manager).unwrap();
         let first_id = logs.record(
             Component::Database,
@@ -2428,8 +2440,8 @@ mod tests {
     #[test]
     fn duplicate_diagnostic_ids_keep_the_first_event_and_increment_occurrences() {
         let root = temp_root("duplicate-id");
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         let logs = LogSession::start(&root, "operation-1", "2.1.0", LogOwner::Manager).unwrap();
         let lines = b"NGT_DIAGNOSTIC:{\"formatVersion\":1,\"diagnosticId\":\"12345678-1234-1234-1234-123456789abc\",\"component\":\"backup-import\",\"severity\":\"error\",\"eventCode\":\"backup_import.failed\",\"phase\":\"transaction\",\"errorCode\":\"BACKUP_IMPORT_FAILED\"}\nNGT_DIAGNOSTIC:{\"formatVersion\":1,\"diagnosticId\":\"12345678-1234-1234-1234-123456789abc\",\"component\":\"backup-import\",\"severity\":\"error\",\"eventCode\":\"backup_import.client_failed\",\"phase\":\"request\",\"errorCode\":\"IMPORT_REQUEST_FAILED\"}\n";
         logs.attach_reader(io::Cursor::new(lines), Component::Application)
@@ -2454,8 +2466,8 @@ mod tests {
     #[test]
     fn failure_details_are_linked_by_diagnostic_id_and_raw_text_is_withheld() {
         let root = temp_root("detail-link");
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         let logs = LogSession::start(&root, "operation-1", "2.1.0", LogOwner::Manager).unwrap();
         logs.detail(Component::Database, b"listen EADDRINUSE password=secret\n");
         let id = logs.record(
@@ -2487,8 +2499,8 @@ mod tests {
     #[test]
     fn detail_write_failure_marks_the_related_event_unavailable() {
         let root = temp_root("detail-write-failure");
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         let logs = LogSession::start(&root, "operation-1", "2.1.0", LogOwner::Manager).unwrap();
         let id = logs.record(
             Component::Database,
@@ -2559,8 +2571,8 @@ mod tests {
             "password=private-value\nlisten EADDRINUSE\n",
         )
         .unwrap();
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         export_diagnostics(&root, &output).unwrap();
         let result = fs::read_to_string(&output).unwrap();
         assert!(result.contains("PORT_IN_USE"));
@@ -2573,8 +2585,10 @@ mod tests {
 
     #[test]
     fn export_limit_footer_names_detail_sources_without_raw_content() {
-        let path = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-limit-{}.txt", unique_test_id()));
+        let path = std::env::temp_dir().join(format!(
+            "NGTManager-diagnostics-limit-{}.txt",
+            unique_test_id()
+        ));
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -2594,7 +2608,10 @@ mod tests {
         };
 
         budget
-            .append_detail("details-application-run-000001.logseg", b"private raw output")
+            .append_detail(
+                "details-application-run-000001.logseg",
+                b"private raw output",
+            )
             .unwrap();
         budget.append_footer().unwrap();
         drop(budget);
@@ -2616,8 +2633,8 @@ mod tests {
             b"{\"broken\":",
         )
         .unwrap();
-        let output = std::env::temp_dir()
-            .join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
         export_diagnostics(&root, &output).unwrap();
         let result = fs::read_to_string(&output).unwrap();
         assert!(result.contains("Missing, corrupt, or export-omitted event records: 1"));
@@ -2642,12 +2659,11 @@ mod tests {
             .unwrap();
 
         let mut lines = Vec::new();
-        let (count, incomplete) =
-            visit_lines(snapshot, |line| {
-                lines.push(String::from_utf8_lossy(line).into_owned());
-                Ok(())
-            })
-            .unwrap();
+        let (count, incomplete) = visit_lines(snapshot, |line| {
+            lines.push(String::from_utf8_lossy(line).into_owned());
+            Ok(())
+        })
+        .unwrap();
         assert_eq!(count, 1);
         assert!(!incomplete);
         assert_eq!(lines, vec!["first line".to_owned()]);
@@ -2708,13 +2724,11 @@ mod tests {
             .set_len(3 * 1024 * 1024)
             .unwrap();
 
-        let manager =
-            LogSession::start(&root, "manager-test", "2.1.0", LogOwner::Manager).unwrap();
+        let manager = LogSession::start(&root, "manager-test", "2.1.0", LogOwner::Manager).unwrap();
         manager.finish();
         assert!(updater_segment.exists());
 
-        let updater =
-            LogSession::start(&root, "updater-test", "2.1.0", LogOwner::Updater).unwrap();
+        let updater = LogSession::start(&root, "updater-test", "2.1.0", LogOwner::Updater).unwrap();
         updater.finish();
         assert!(!updater_segment.exists());
 
@@ -2730,14 +2744,7 @@ mod tests {
         let sealed = open.with_extension("jsonl");
         fs::write(&open, b"{\"unfinished\":").unwrap();
 
-        cleanup_segments(
-            &events,
-            "events-manager-db",
-            "jsonl",
-            5 * 1024 * 1024,
-            0,
-        )
-        .unwrap();
+        cleanup_segments(&events, "events-manager-db", "jsonl", 5 * 1024 * 1024, 0).unwrap();
 
         assert!(!open.exists());
         assert_eq!(fs::read(&sealed).unwrap(), b"{\"unfinished\":");
@@ -2773,7 +2780,11 @@ mod tests {
             record_counts: BTreeMap::new(),
         };
         let mut first = make_event("later", "2026-11-07T10:00:00Z", "details/database-later");
-        let earlier = make_event("earlier", "2026-11-07T09:00:00Z", "details/database-earlier");
+        let earlier = make_event(
+            "earlier",
+            "2026-11-07T09:00:00Z",
+            "details/database-earlier",
+        );
 
         merge_repeated_event(&mut first, &earlier);
 
@@ -2847,7 +2858,10 @@ mod tests {
     #[test]
     fn pending_detail_context_keeps_only_the_most_recent_bounded_bytes() {
         let mut pending = VecDeque::new();
-        assert_eq!(append_pending_detail(&mut pending, &vec![b'a'; READ_BUFFER_BYTES]), 0);
+        assert_eq!(
+            append_pending_detail(&mut pending, &vec![b'a'; READ_BUFFER_BYTES]),
+            0
+        );
         assert_eq!(append_pending_detail(&mut pending, b"last"), 4);
         assert_eq!(pending.len(), READ_BUFFER_BYTES);
         let tail = pending

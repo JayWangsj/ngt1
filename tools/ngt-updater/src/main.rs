@@ -1,8 +1,8 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use chrono::{SecondsFormat, Utc};
-use ngt_updater::diagnostics::{Component as DiagnosticComponent, LogOwner, LogSession};
 use fs2::{available_space, FileExt};
+use ngt_updater::diagnostics::{Component as DiagnosticComponent, LogOwner, LogSession};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
@@ -148,9 +148,8 @@ fn main() -> ExitCode {
                 .map(PathBuf::from)
                 .map(|path| path.join("NGTManager"));
             if let Some(root) = root {
-                let _ = UPDATER_DIAGNOSTICS.set(
-                    LogSession::start(&root, "none", "unknown", LogOwner::Updater).ok(),
-                );
+                let _ = UPDATER_DIAGNOSTICS
+                    .set(LogSession::start(&root, "none", "unknown", LogOwner::Updater).ok());
                 record_updater_failure(&error);
                 finish_updater_diagnostics();
             }
@@ -225,7 +224,10 @@ fn record_updater_failure(error: &UpdateError) {
             })
             .map(|code| format!("WIN32_{code}"))
             .unwrap_or_else(|| {
-                format!("UPDATER_{}", error.stage.to_ascii_uppercase().replace('-', "_"))
+                format!(
+                    "UPDATER_{}",
+                    error.stage.to_ascii_uppercase().replace('-', "_")
+                )
             });
         logger.record(
             DiagnosticComponent::Updater,
@@ -1613,11 +1615,9 @@ fn append_log(path: &Path, message: &str) -> Result<()> {
 }
 
 fn append_bounded_update_log(path: &Path, line: &[u8]) -> std::io::Result<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing log directory")
-        })?;
+    let directory = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing log directory")
+    })?;
     fs::create_dir_all(directory)?;
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => {}
@@ -1675,12 +1675,18 @@ fn cleanup_update_logs(directory: &Path, current: &Path, incoming: u64) -> std::
             Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => metadata,
             _ => continue,
         };
-        files.push((metadata.modified().unwrap_or(UNIX_EPOCH), metadata.len(), path));
+        files.push((
+            metadata.modified().unwrap_or(UNIX_EPOCH),
+            metadata.len(),
+            path,
+        ));
     }
     files.sort_by_key(|(modified, _, _)| *modified);
     let mut total = files.iter().map(|(_, size, _)| *size).sum::<u64>();
     total = total.saturating_add(
-        fs::metadata(current).map(|metadata| metadata.len()).unwrap_or(0),
+        fs::metadata(current)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0),
     );
     for (modified, size, path) in files {
         let expired = now
@@ -2078,8 +2084,7 @@ mod tests {
             .set_len(1024 * 1024)
             .unwrap();
 
-        cleanup_update_logs(&root, &root.join("update-current.log"), 4 * 1024 * 1024)
-            .unwrap();
+        cleanup_update_logs(&root, &root.join("update-current.log"), 4 * 1024 * 1024).unwrap();
 
         assert!(!owned.exists());
         assert!(unrelated.exists());
