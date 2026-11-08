@@ -1,9 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-mod diagnostics;
-
 use chrono::{SecondsFormat, Utc};
-use diagnostics::{Component as DiagnosticComponent, LogOwner, LogSession};
+use ngt_updater::diagnostics::{Component as DiagnosticComponent, LogOwner, LogSession};
 use fs2::{available_space, FileExt};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
@@ -1635,7 +1633,6 @@ fn append_bounded_update_log(path: &Path, line: &[u8]) -> std::io::Result<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .read(true)
-        .write(true)
         .append(true)
         .open(path)?;
     file.try_lock_exclusive()?;
