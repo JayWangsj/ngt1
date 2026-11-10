@@ -23,7 +23,79 @@
 }
 
 .compact {
-  padding: 0 16px 16px;
+  overflow: visible;
+  padding: 0 16px 12px;
+}
+
+.compact::before,
+.compact::after {
+  position: absolute;
+  z-index: 2;
+  content: "";
+  pointer-events: none;
+}
+
+.compact[data-placement="right"]::before,
+.compact[data-placement="right"]::after {
+  top: var(--anchor-offset);
+  transform: translateY(-50%);
+  clip-path: polygon(100% 0, 100% 100%, 0 50%);
+}
+
+.compact[data-placement="right"]::before {
+  left: -8px;
+  width: 8px;
+  height: 16px;
+  background: var(--line);
+}
+
+.compact[data-placement="right"]::after {
+  left: -6px;
+  width: 8px;
+  height: 12px;
+  background: var(--surface);
+}
+
+.compact[data-placement="below"]::before,
+.compact[data-placement="below"]::after,
+.compact[data-placement="above"]::before,
+.compact[data-placement="above"]::after {
+  left: var(--anchor-offset);
+  transform: translateX(-50%);
+  clip-path: polygon(0 100%, 100% 100%, 50% 0);
+}
+
+.compact[data-placement="below"]::before {
+  top: -8px;
+  width: 16px;
+  height: 8px;
+  background: var(--line);
+}
+
+.compact[data-placement="below"]::after {
+  top: -6px;
+  width: 12px;
+  height: 8px;
+  background: var(--surface);
+}
+
+.compact[data-placement="above"]::before,
+.compact[data-placement="above"]::after {
+  transform: translateX(-50%) rotate(180deg);
+}
+
+.compact[data-placement="above"]::before {
+  top: calc(100% - 1px);
+  width: 16px;
+  height: 8px;
+  background: var(--line);
+}
+
+.compact[data-placement="above"]::after {
+  top: calc(100% - 1px);
+  width: 12px;
+  height: 8px;
+  background: var(--surface);
 }
 
 .expanded {
@@ -94,7 +166,38 @@
 }
 
 .compact :global(.system-update-compact-content) {
-  padding-top: 15px;
+  display: grid;
+  min-height: 0;
+  gap: 12px;
+  overflow-y: auto;
+  padding-top: 12px;
+  overscroll-behavior: contain;
+}
+
+.compact :global(.system-update-compact-status) {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.compact :global(.update-primary-actions) {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.compact :global(.update-check-action) {
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+@media (max-width: 900px) {
+  .compact :global(.update-check-action) {
+    min-height: 44px;
+  }
 }
 
 @media (max-width: 900px) {

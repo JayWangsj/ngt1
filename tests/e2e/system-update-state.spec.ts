@@ -1367,3 +1367,230 @@ test("sidebar version entry hover stays contained and collapses cleanly", async 
     ),
   });
 });
+
+test("anchors the compact update panel to its version entry", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ngt-auto-update-check", "false");
+    window.localStorage.removeItem("ngt-sidebar-width");
+    window.localStorage.removeItem("ngt-sidebar-collapsed");
+    window.sessionStorage.clear();
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockIdleTask(page);
+
+  let releaseInitialCheck = () => {};
+  const initialCheckBlocked = new Promise<void>((resolve) => {
+    releaseInitialCheck = resolve;
+  });
+  let checks = 0;
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.route("**/api/system-update", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    if (checks++ === 0) await initialCheckBlocked;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        checks === 1
+          ? {
+              installed: true,
+              currentVersion: "2.0.9",
+              authRequired: false,
+              updateAvailable: false,
+              latestVersion: "2.0.9",
+            }
+          : availableRelease(),
+      ),
+    });
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const entry = page.locator(".sidebar-update-entry");
+  const panel = page.locator('[aria-labelledby="sidebar-update-title"]');
+  await entry.click();
+  await expect(panel).toBeVisible();
+  await expect(entry).toHaveClass(/active/);
+  await expect(entry).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".sidebar-update-copy small")).toHaveText(
+    "正在检查…",
+  );
+
+  const expectPlacement = async (placement: "right" | "below" | "above") => {
+    const readGeometry = () =>
+      panel.evaluate((element) => {
+        const trigger = document
+          .querySelector(".sidebar-update-entry")!
+          .getBoundingClientRect();
+        const card = element.getBoundingClientRect();
+        const arrow = getComputedStyle(element, "::before");
+        const direction = element.getAttribute("data-placement");
+        return {
+          placement: direction,
+          gap:
+            direction === "right"
+              ? card.left - trigger.right
+              : direction === "below"
+                ? card.top - trigger.bottom
+                : trigger.top - card.bottom,
+          left: card.left,
+          right: card.right,
+          top: card.top,
+          bottom: card.bottom,
+          width: window.innerWidth,
+          height: window.innerHeight,
+          arrowOffset: Number.parseFloat(
+            getComputedStyle(element).getPropertyValue("--anchor-offset"),
+          ),
+          targetOffset:
+            direction === "right"
+              ? trigger.top + trigger.height / 2 - card.top
+              : trigger.left + trigger.width / 2 - card.left,
+          arrowClipPath: arrow.clipPath,
+        };
+      });
+    await expect
+      .poll(async () => {
+        const current = await readGeometry();
+        return (
+          current.placement === placement &&
+          Math.abs(current.gap - 8) <= 1 &&
+          current.left >= 11 &&
+          current.right <= current.width - 11 &&
+          current.top >= 11 &&
+          current.bottom <= current.height - 11 &&
+          Math.abs(current.arrowOffset - current.targetOffset) <= 1
+        );
+      })
+      .toBe(true);
+    const geometry = await readGeometry();
+    expect(geometry.gap).toBeCloseTo(8, 0);
+    expect(geometry.left).toBeGreaterThanOrEqual(11);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.width - 11);
+    expect(geometry.top).toBeGreaterThanOrEqual(11);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.height - 11);
+    expect(
+      Math.abs(geometry.arrowOffset - geometry.targetOffset),
+    ).toBeLessThanOrEqual(1);
+    expect(geometry.arrowClipPath).not.toBe("none");
+  };
+
+  await expectPlacement("right");
+  await expect
+    .poll(() => page.locator(".sidebar-resizer").getAttribute("aria-valuenow"))
+    .toBe("240");
+  const resizer = page.locator(".sidebar-resizer");
+  await resizer.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(resizer).toHaveAttribute("aria-valuenow", "248");
+  await expectPlacement("right");
+  const resizerBounds = await resizer.boundingBox();
+  expect(resizerBounds).not.toBeNull();
+  const resizerX = resizerBounds!.x + resizerBounds!.width / 2;
+  const resizerY = resizerBounds!.y + resizerBounds!.height / 2;
+  await page.mouse.move(resizerX, resizerY);
+  await page.mouse.down();
+  await page.mouse.move(resizerX + 12, resizerY, { steps: 3 });
+  await page.mouse.up();
+  await expect(resizer).toHaveAttribute("aria-valuenow", "260");
+  await expectPlacement("right");
+
+  await page.locator(".sidebar-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-sidebar-collapsed",
+    "true",
+  );
+  await expect(panel).toBeVisible();
+  await expectPlacement("right");
+  await page.locator(".sidebar-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-sidebar-collapsed",
+    "false",
+  );
+  await expectPlacement("right");
+
+  releaseInitialCheck();
+  await expect(page.locator(".sidebar-update-copy small")).toHaveText(
+    "已是最新",
+  );
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expectPlacement("below");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectPlacement("below");
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expectPlacement("below");
+  await page.setViewportSize({ width: 320, height: 210 });
+  await expectPlacement("below");
+  await expect(panel.locator("header button")).toBeVisible();
+  await expect(panel.locator(".system-update-compact-content")).toHaveCSS(
+    "overflow-y",
+    "auto",
+  );
+  expect(
+    await panel.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(false);
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(entry).toBeFocused();
+  await entry.click();
+  await expect(panel).toBeVisible();
+  await expectPlacement("below");
+  await page.locator("main").click({ position: { x: 4, y: 4 } });
+  await expect(panel).toHaveCount(0);
+  await expect(entry).toBeFocused();
+
+  await entry.click();
+  await expect(panel).toBeVisible();
+  const checkButton = panel.getByRole("button", {
+    name: "检查更新",
+    exact: true,
+  });
+  await checkButton.click();
+  await expect(panel.locator(".update-release-card")).toBeVisible();
+  await expect(panel).toHaveAttribute("aria-modal", "true");
+  const expandedGeometry = await panel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      width: rect.width,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(
+    Math.abs(
+      expandedGeometry.left +
+        expandedGeometry.width / 2 -
+        expandedGeometry.viewportWidth / 2,
+    ),
+  ).toBeLessThanOrEqual(5);
+  const expandedCheck = panel
+    .locator(".update-overview")
+    .getByRole("button", { name: "检查更新", exact: true });
+  const releaseCard = panel.locator(".update-release-card");
+  const checkWidth = (await expandedCheck.boundingBox())?.width ?? 0;
+  const releaseWidth = (await releaseCard.boundingBox())?.width ?? 0;
+  expect(checkWidth).toBeGreaterThan(0);
+  expect(checkWidth).toBeLessThan(releaseWidth / 2);
+  await expect(expandedCheck).toHaveClass(/button-outline/);
+  await expect(
+    releaseCard.getByRole("button", { name: "现在更新", exact: true }),
+  ).toHaveClass(/button-primary/);
+
+  await page.mouse.click(4, 4);
+  await expect(panel).toBeVisible();
+  await panel.locator("header button").click();
+  await expect(panel).toHaveCount(0);
+  await expect(entry).toBeFocused();
+  await entry.click();
+  await expect(panel).toHaveAttribute("aria-modal", "true");
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(entry).toBeFocused();
+});

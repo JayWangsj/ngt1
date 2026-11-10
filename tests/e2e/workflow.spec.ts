@@ -3468,6 +3468,9 @@ test("desktop sidebar resizes, collapses and restores its saved width", async ({
 });
 
 test("settings cards use one scoped layout", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.removeItem("ngt-motion-preference");
+  });
   await page.goto("/settings/language");
   const languageCard = page.locator(".settings-card");
   await expect(languageCard).toHaveCSS("display", "grid");
@@ -3501,9 +3504,98 @@ test("settings cards use one scoped layout", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 844 });
 
   await page.goto("/settings");
+  await page.evaluate(() => {
+    document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
+  });
+  await page.reload();
   const settingsEntry = page.locator(".settings-entry").first();
+  const settingsLabel = settingsEntry.locator(".settings-entry-label");
+  await expect(settingsLabel).toHaveText("语言");
   await expect(settingsEntry).toHaveCSS("display", "grid");
-  await expect(settingsEntry).toHaveCSS("gap", "18px");
+  await expect(settingsEntry).toHaveCSS("gap", "12px");
+  await settingsEntry.hover();
+  await expect
+    .poll(() =>
+      settingsLabel.evaluate(
+        (element) => getComputedStyle(element, "::after").opacity,
+      ),
+    )
+    .toBe("1");
+  const chineseUnderlineWidth = await settingsLabel.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element, "::after").width),
+  );
+  const chineseLabelWidth = await settingsLabel.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  expect(chineseUnderlineWidth).toBeCloseTo(chineseLabelWidth, 1);
+
+  await page.evaluate(() => {
+    document.cookie = "ngt-locale=it; Path=/; SameSite=Lax";
+  });
+  await page.reload();
+  await page.setViewportSize({ width: 320, height: 720 });
+  const italianFaultEntry = page.locator(
+    'a.settings-entry[href="/settings/fault-catalog"]',
+  );
+  const italianFaultLabel = italianFaultEntry.locator(".settings-entry-label");
+  await expect(italianFaultLabel).toHaveText("Archivio problemi");
+  await italianFaultEntry.hover();
+  await expect
+    .poll(() =>
+      italianFaultLabel.evaluate(
+        (element) => getComputedStyle(element, "::after").opacity,
+      ),
+    )
+    .toBe("1");
+  const italianUnderlineWidth = await italianFaultLabel.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element, "::after").width),
+  );
+  const italianLabelWidth = await italianFaultLabel.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  expect(italianUnderlineWidth).toBeCloseTo(italianLabelWidth, 1);
+  await italianFaultLabel.evaluate((element) => {
+    element.style.maxWidth = "60px";
+  });
+  expect(
+    await italianFaultLabel
+      .locator("span")
+      .evaluate((element) => element.scrollWidth > element.clientWidth),
+  ).toBe(true);
+  const clippedUnderlineWidth = await italianFaultLabel.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element, "::after").width),
+  );
+  const clippedLabelWidth = await italianFaultLabel.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  expect(clippedUnderlineWidth).toBeCloseTo(clippedLabelWidth, 1);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await italianFaultEntry.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(italianFaultEntry).toBeFocused();
+  await expect
+    .poll(() =>
+      italianFaultLabel.evaluate(
+        (element) => getComputedStyle(element, "::after").transform,
+      ),
+    )
+    .toBe("none");
+  await expect(italianFaultLabel).toHaveCSS("transition-duration", "0s");
+  await expect
+    .poll(() =>
+      italianFaultLabel.evaluate(
+        (element) => getComputedStyle(element, "::after").opacity,
+      ),
+    )
+    .toBe("1");
+  expect(
+    await italianFaultEntry.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(1);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 1280, height: 844 });
 
   await page.goto("/settings/test-tools");
   const testToolsCard = page.locator(".test-tools-settings");
@@ -10710,6 +10802,54 @@ test("hides managed faults without changing historical records", async ({
   expect(sharedColumns[0]).toBe(sharedColumns[1]);
   await expect(dialog.locator(".fault-drag-hint")).toBeVisible();
   const faultSearch = dialog.locator(".fault-search");
+  const searchInput = faultSearch.locator("input");
+  const assertFaultSearchFocus = async () => {
+    await expect(searchInput).toBeFocused();
+    const focusStyle = await faultSearch.evaluate((element) => {
+      const outer = getComputedStyle(element);
+      const input = getComputedStyle(element.querySelector("input")!);
+      return {
+        outlineWidth: outer.outlineWidth,
+        outlineStyle: outer.outlineStyle,
+        outlineColor: outer.outlineColor,
+        borderColor: outer.borderTopColor,
+        inputOutline: input.outlineStyle,
+        inputShadow: input.boxShadow,
+        width: element.getBoundingClientRect().width,
+        height: element.getBoundingClientRect().height,
+      };
+    });
+    expect(focusStyle).toMatchObject({
+      outlineWidth: "2px",
+      outlineStyle: "solid",
+      outlineColor: "rgb(70, 82, 77)",
+      inputOutline: "none",
+      inputShadow: "none",
+      height: 42,
+    });
+    expect(focusStyle.borderColor).not.toBe("rgb(201, 185, 111)");
+    return { width: focusStyle.width, height: focusStyle.height };
+  };
+  const autoFocusedSize = await assertFaultSearchFocus();
+  await searchInput.evaluate((input: HTMLInputElement) => input.blur());
+  const unfocusedSize = await faultSearch.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  });
+  await faultSearch.hover();
+  await searchInput.click();
+  const mouseFocusedSize = await assertFaultSearchFocus();
+  expect(mouseFocusedSize).toEqual(unfocusedSize);
+  expect(autoFocusedSize).toEqual(unfocusedSize);
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(searchInput).toBeFocused();
+  await expect
+    .poll(() =>
+      searchInput.evaluate((input) => input.matches(":focus-visible")),
+    )
+    .toBe(true);
+  expect(await assertFaultSearchFocus()).toEqual(unfocusedSize);
   const addFault = dialog.getByRole("button", {
     name: "Aggiungi problema",
     exact: true,
@@ -10788,7 +10928,6 @@ test("hides managed faults without changing historical records", async ({
     .filter({ hasText: "Display rotto" });
   await expect(row.locator(".fault-enabled-switch input")).not.toBeChecked();
   const createdName = `Problema inline ${Date.now()}`;
-  const searchInput = dialog.locator(".fault-search input");
   await expect(dialog.locator(".fault-manager")).toHaveCSS(
     "overflow-y",
     "visible",

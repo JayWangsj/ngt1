@@ -605,6 +605,8 @@ export function SystemUpdate({
         <div className="update-primary-actions">
           <Button
             type="button"
+            variant="outline"
+            className="update-check-action"
             disabled={checkPhase === "checking"}
             onClick={() => void checkForUpdates()}
           >
@@ -647,6 +649,8 @@ export function SystemUpdate({
         <div className="update-primary-actions">
           <Button
             type="button"
+            variant="outline"
+            className="update-check-action"
             disabled={checkPhase === "checking"}
             onClick={() => void checkForUpdates()}
           >

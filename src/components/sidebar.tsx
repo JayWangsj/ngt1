@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   LayoutDashboard,
   Wrench,
@@ -33,6 +34,14 @@ import {
   writeSidebarPreference,
 } from "@/lib/sidebar-preference";
 
+type UpdatePopoverPosition = {
+  left: number;
+  top: number;
+  maxHeight: number;
+  placement: "right" | "below" | "above";
+  anchorOffset: number;
+};
+
 export function Sidebar() {
   const it = useMessages();
   const path = usePathname();
@@ -41,7 +50,13 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updateExpanded, setUpdateExpanded] = useState(false);
-  const [updatePosition, setUpdatePosition] = useState({ left: 260, top: 12 });
+  const [updatePosition, setUpdatePosition] = useState<UpdatePopoverPosition>({
+    left: 260,
+    top: 12,
+    maxHeight: 600,
+    placement: "right",
+    anchorOffset: 32,
+  });
   const updateEntry = useRef<HTMLButtonElement>(null);
   const updatePanel = useRef<HTMLElement>(null);
   const updateClose = useRef<HTMLButtonElement>(null);
@@ -72,20 +87,93 @@ export function Sidebar() {
 
   const positionUpdatePanel = useCallback(() => {
     const button = updateEntry.current;
-    if (!button) return;
+    const panel = updatePanel.current;
+    if (!button || !panel || updateExpanded) return;
     const rect = button.getBoundingClientRect();
+    const margin = 12;
+    const gap = 8;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const panelWidth = panel.getBoundingClientRect().width || 360;
+    const desiredHeight = Math.min(
+      panel.scrollHeight,
+      640,
+      viewportHeight * 0.8,
+      viewportHeight - margin * 2,
+    );
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(Math.max(value, min), Math.max(min, max));
+    let next: UpdatePopoverPosition;
     if (window.matchMedia("(max-width: 900px)").matches) {
-      setUpdatePosition({
-        left: 12,
-        top: Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 300)),
-      });
-      return;
+      const below = viewportHeight - rect.bottom - gap - margin;
+      const above = rect.top - gap - margin;
+      const placement =
+        below >= desiredHeight || below >= above ? "below" : "above";
+      const available = placement === "below" ? below : above;
+      const minHeight = Math.min(96, viewportHeight - margin * 2);
+      const maxHeight = Math.max(minHeight, Math.min(desiredHeight, available));
+      const top =
+        placement === "below"
+          ? clamp(
+              rect.bottom + gap,
+              margin,
+              viewportHeight - maxHeight - margin,
+            )
+          : clamp(
+              rect.top - gap - maxHeight,
+              margin,
+              viewportHeight - maxHeight - margin,
+            );
+      const left = clamp(
+        rect.right - panelWidth,
+        margin,
+        viewportWidth - panelWidth - margin,
+      );
+      next = {
+        left,
+        top,
+        maxHeight,
+        placement,
+        anchorOffset: clamp(
+          rect.left + rect.width / 2 - left,
+          16,
+          panelWidth - 16,
+        ),
+      };
+    } else {
+      const maxHeight = Math.min(desiredHeight, viewportHeight - margin * 2);
+      const left = clamp(
+        rect.right + gap,
+        margin,
+        viewportWidth - panelWidth - margin,
+      );
+      const top = clamp(
+        rect.top + rect.height / 2 - maxHeight / 2,
+        margin,
+        viewportHeight - maxHeight - margin,
+      );
+      next = {
+        left,
+        top,
+        maxHeight,
+        placement: "right",
+        anchorOffset: clamp(
+          rect.top + rect.height / 2 - top,
+          16,
+          maxHeight - 16,
+        ),
+      };
     }
-    setUpdatePosition({
-      left: Math.max(12, Math.min(rect.right + 12, window.innerWidth - 372)),
-      top: Math.max(12, Math.min(rect.bottom - 250, window.innerHeight - 292)),
-    });
-  }, []);
+    setUpdatePosition((current) =>
+      Object.keys(next).every(
+        (key) =>
+          current[key as keyof UpdatePopoverPosition] ===
+          next[key as keyof UpdatePopoverPosition],
+      )
+        ? current
+        : next,
+    );
+  }, [updateExpanded]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -105,15 +193,31 @@ export function Sidebar() {
 
   useEffect(() => {
     if (!updateOpen) return;
-    positionUpdatePanel();
-    const frame = window.requestAnimationFrame(() =>
-      updateClose.current?.focus(),
-    );
+    const frame = window.requestAnimationFrame(() => {
+      positionUpdatePanel();
+      updateClose.current?.focus();
+    });
+    const button = updateEntry.current;
+    const panel = updatePanel.current;
+    const resizeObserver = new ResizeObserver(positionUpdatePanel);
+    if (!updateExpanded) {
+      if (button) resizeObserver.observe(button);
+      const sidebar = button?.closest(".sidebar");
+      if (sidebar) resizeObserver.observe(sidebar);
+      if (panel) resizeObserver.observe(panel);
+    }
     window.addEventListener("resize", positionUpdatePanel);
     window.addEventListener("scroll", positionUpdatePanel, true);
+    window.visualViewport?.addEventListener("resize", positionUpdatePanel);
+    window.visualViewport?.addEventListener("scroll", positionUpdatePanel);
     const onPointerDown = (event: PointerEvent) => {
       if (updateExpanded) return;
       const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(".sidebar-toggle, .sidebar-resizer")
+      )
+        return;
       if (
         target instanceof Node &&
         !updatePanel.current?.contains(target) &&
@@ -148,8 +252,11 @@ export function Sidebar() {
     if (updateExpanded) document.body.style.overflow = "hidden";
     return () => {
       window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", positionUpdatePanel);
       window.removeEventListener("scroll", positionUpdatePanel, true);
+      window.visualViewport?.removeEventListener("resize", positionUpdatePanel);
+      window.visualViewport?.removeEventListener("scroll", positionUpdatePanel);
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.style.overflow = previousOverflow;
@@ -347,10 +454,7 @@ export function Sidebar() {
           title={updateLabel}
           onClick={() => {
             if (updateOpen) closeUpdatePanel();
-            else {
-              setUpdateOpen(true);
-              positionUpdatePanel();
-            }
+            else setUpdateOpen(true);
           }}
         >
           <span className="sidebar-update-icon" aria-hidden="true">
@@ -399,7 +503,17 @@ export function Sidebar() {
             <section
               ref={updatePanel}
               className={`${updatePopoverStyles.panel} ${updateExpanded ? updatePopoverStyles.expanded : updatePopoverStyles.compact}`}
-              style={updateExpanded ? undefined : updatePosition}
+              data-placement={updatePosition.placement}
+              style={
+                updateExpanded
+                  ? undefined
+                  : ({
+                      left: updatePosition.left,
+                      top: updatePosition.top,
+                      maxHeight: updatePosition.maxHeight,
+                      "--anchor-offset": `${updatePosition.anchorOffset}px`,
+                    } as CSSProperties)
+              }
               role="dialog"
               aria-modal={updateExpanded || undefined}
               aria-labelledby="sidebar-update-title"

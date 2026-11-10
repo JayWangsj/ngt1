@@ -112,7 +112,9 @@ function SettingsEntry({
         {icon}
       </span>
       <span className={`settings-entry-copy ${settingsEntryStyles.copy}`}>
-        <strong className="dashboard-link-label">{title}</strong>
+        <strong className={`settings-entry-label ${settingsEntryStyles.label}`}>
+          <span>{title}</span>
+        </strong>
         <small>{description}</small>
       </span>
       <ChevronRight size={20} aria-hidden="true" />

@@ -978,6 +978,7 @@ small {
   color: #625d4c;
 }
 .sidebar-update-entry.active {
+  background: var(--soft);
   color: var(--teal);
 }
 .sidebar-update-icon {
@@ -4707,6 +4708,11 @@ details.secondary-actions {
   box-shadow: none;
   padding-inline: 0;
 }
+.fault-search input:focus {
+  outline: 0;
+  outline-offset: 0;
+  box-shadow: none;
+}
 .fault-manager-list {
   max-height: 47vh;
   overflow: auto;
@@ -5587,6 +5593,10 @@ details.secondary-actions {
 }
 .update-primary-actions .button {
   width: 100%;
+}
+.update-primary-actions > .update-check-action {
+  width: fit-content;
+  justify-self: start;
 }
 .system-update-feedback {
   display: grid;
