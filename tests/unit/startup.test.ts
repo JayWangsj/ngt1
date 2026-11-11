@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +9,8 @@ describe("Windows persistent startup", () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     expect(manager).toContain("fn start_supervised_runtime(");
     expect(manager).toContain("RuntimeJob::new()?");
-    expect(manager).toContain("start_database(&job");
-    expect(manager).toContain("start_application(&job");
+    expect(manager).toMatch(/start_database\(\s*&job/);
+    expect(manager).toMatch(/start_application\(\s*&application_job/);
     expect(manager).toContain("wait_for_health(&mut application");
     expect(manager).toContain("fn stop_children(");
     const databaseStop = manager.slice(
@@ -20,8 +20,29 @@ describe("Windows persistent startup", () => {
         manager.indexOf("fn stop_database_launcher("),
       ),
     );
-    expect(databaseStop).toContain("spawn_pg_ctl(job");
+    expect(databaseStop).toContain("spawn_pg_ctl_until(");
+    expect(databaseStop).toContain(
+      "session_shutdown_deadline(deadline, 4_000)",
+    );
+    expect(databaseStop).toContain('std::ffi::OsString::from("fast")');
+    expect(databaseStop).toContain('write_all(b"shutdown\\n")');
     expect(databaseStop).not.toContain("Command::new");
+    const stopChildren = manager.slice(
+      manager.indexOf("fn stop_children("),
+      manager.indexOf(
+        "struct StopOutcome",
+        manager.indexOf("fn stop_children("),
+      ),
+    );
+    expect(stopChildren.indexOf("stop_application(")).toBeLessThan(
+      stopChildren.indexOf("stop_database_launcher("),
+    );
+    expect(stopChildren).toContain("application-stop-unconfirmed");
+    expect(stopChildren).toContain("database-stop-unconfirmed");
+    expect(stopChildren).toContain('run_state.source == "runtime-exit"');
+    expect(stopChildren).toContain("runtime.shutdown.restart_cleanup");
+    expect(manager).toContain("fn session_shutdown_deadline(");
+    expect(manager).toContain("WINDOWS_SESSION_END_TICK");
     expect(manager).toContain("let mut restarts = 0;");
     expect(manager).toContain("if restarts >= 3");
     expect(manager).not.toContain("D:\\NGT");
@@ -32,18 +53,33 @@ describe("Windows persistent startup", () => {
     const supervisor = manager.slice(
       manager.indexOf("fn start_supervised_runtime("),
       manager.indexOf(
-        "fn start_application(",
+        "fn run_supervisor(",
         manager.indexOf("fn start_supervised_runtime("),
       ),
     );
     const database = await readFile("scripts/windows-db.mjs", "utf8");
-    expect(supervisor.indexOf("start_database(&job")).toBeLessThan(
-      supervisor.indexOf("start_application(&job"),
+    expect(
+      supervisor.indexOf("let mut database = start_database("),
+    ).toBeLessThan(
+      supervisor.search(/let mut application\s*=\s*match start_application\(/),
     );
     expect(manager).toContain('join("database-ready.pid")');
     expect(manager).toContain("ready_process_id == Some(database.id())");
+    expect(manager).toContain("fn stop_application(");
+    expect(manager).toContain('write_all(b"shutdown\\n")');
+    expect(manager).toContain("&children.application_job,");
+    expect(manager).toContain("return ensure_legacy_runtime_confirmed(root)");
+    expect(manager).toContain("resolvePostgresRuntime");
+    expect(manager).toContain("pg_controldata.exe");
+    expect(manager).toContain("postgres_cluster_is_clean");
     expect(database).toContain('join(workspace, "database-ready.pid")');
     expect(database).toContain("String(process.pid)");
+    expect(database).toContain('process.stdin.on("data"');
+    expect(database).toContain("shutdownFromManager = true");
+    expect(database).toContain("if (shutdownFromManager)");
+    expect(database.indexOf('process.stdin.on("data"')).toBeLessThan(
+      database.indexOf("await resolvePostgresRuntime()"),
+    );
   });
 
   it("holds bundled Node processes until the manager releases the startup gate", async () => {
@@ -104,6 +140,76 @@ describe("Windows persistent startup", () => {
           new Promise((resolve) => setTimeout(resolve, 1000)),
         ]);
       }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("relays manager shutdown to the Next server process", async () => {
+    const bootstrap = await readFile("scripts/start.mjs", "utf8");
+    expect(bootstrap).toContain('child.send({ type: "ngt:shutdown" })');
+    expect(bootstrap).toContain(
+      'stdio: ["inherit", "inherit", "inherit", "ipc"]',
+    );
+    const directory = await mkdtemp(join(tmpdir(), "ngt-runtime-shutdown-"));
+    const fixture = join(directory, "shutdown-fixture.cjs");
+    const bridge = join(process.cwd(), "scripts/next-shutdown-bridge.cjs");
+    await writeFile(
+      fixture,
+      'process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000);',
+    );
+    const child = fork(fixture, [], {
+      execArgv: ["--require", bridge],
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    const closed = new Promise<number | null>((resolve) => {
+      child.once("close", (code) => resolve(code));
+    });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 3000);
+    child.send({ type: "ngt:shutdown" });
+    try {
+      const code = await closed;
+      expect(code).toBe(0);
+    } finally {
+      clearTimeout(timeout);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards manager shutdown over IPC to the Next process handler", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ngt-next-shutdown-"));
+    const childScript = join(directory, "child.cjs");
+    await writeFile(
+      childScript,
+      'process.on("SIGTERM", () => { process.send({ type: "closed" }); process.exit(0); });\n',
+    );
+    const child = fork(childScript, [], {
+      cwd: process.cwd(),
+      execArgv: [
+        "--require",
+        join(process.cwd(), "scripts/next-shutdown-bridge.cjs"),
+      ],
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Shutdown timed out.")),
+          3000,
+        );
+        child.once("message", (message) => {
+          clearTimeout(timeout);
+          expect(message).toEqual({ type: "closed" });
+          resolve();
+        });
+        child.once("error", (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+        child.send({ type: "ngt:shutdown" });
+      });
+    } finally {
+      if (child.exitCode === null) child.kill();
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -195,6 +301,7 @@ describe("Windows persistent startup", () => {
       "utf8",
     );
     expect(packager).toContain('"start.mjs"');
+    expect(packager).toContain('"next-shutdown-bridge.cjs"');
     expect(packager).toContain('"verify-windows-studio-static-assets.mjs"');
     expect(packager).toContain('"windows-db.mjs"');
     expect(packager).toContain('"postgres-runtime.mjs"');
@@ -204,6 +311,17 @@ describe("Windows persistent startup", () => {
     expect(packager).not.toContain('"windows-studio-launcher.vbs"');
     expect(packager).not.toContain('"install-windows-startup.ps1"');
     expect(packager).not.toContain('"verify-windows-studio-runtime.ps1"');
+  });
+
+  it("keeps the actual Next server alive until the manager requests graceful shutdown", async () => {
+    const start = await readFile("scripts/start.mjs", "utf8");
+    const bridge = await readFile("scripts/next-shutdown-bridge.cjs", "utf8");
+    expect(start).toContain("fork(");
+    expect(start).toContain('process.stdin.on("data"');
+    expect(start).toContain('child.send({ type: "ngt:shutdown" })');
+    expect(start).not.toContain('child.kill("SIGTERM")');
+    expect(bridge).toContain('process.listenerCount("SIGTERM")');
+    expect(bridge).toContain('process.emit("SIGTERM")');
   });
 
   it("keeps the isolated test preview on a fixed restart-safe port", async () => {
@@ -306,6 +424,22 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("fn restore_database");
     expect(manager).toContain("fn spawn_pg_ctl(");
     expect(manager).toContain("fn spawn_runtime_process(");
+    expect(manager).toContain("fn inspect_postgres_directory(");
+    expect(manager).toContain("database_initialization_owned");
+    expect(manager).toContain(
+      "fn cleanup_initial_database(root: &Path, transaction: &Transaction)",
+    );
+    expect(manager).toContain("NGT_PROGRESS|");
+    expect(manager).toContain("installer.phase.completed");
+    expect(manager).toContain("installer.phase.failed");
+    expect(manager).toContain("installer.install.failed");
+    expect(manager).toContain("fn validate_result_file_path");
+    expect(manager).toContain(
+      "fn write_setup_result(path: &Path, contents: &str)",
+    );
+    expect(manager).toContain("installer.package.extracted");
+    expect(manager).toContain("record-installer-registration");
+    expect(manager).toContain("NGT_DB_INIT_OPERATION_ID");
     expect(manager).toContain('"./scripts/run-pg-ctl.mjs"');
     expect(manager).toContain('"./scripts/runtime-start-gate.cjs"');
     const preflight = manager.slice(
@@ -313,11 +447,14 @@ describe("Windows persistent startup", () => {
       manager.indexOf("fn required_space(", manager.indexOf("fn preflight(")),
     );
     expect(preflight.indexOf("check_windows_build()?")).toBeLessThan(
-      preflight.indexOf("validate_runtime(source)?"),
+      preflight.indexOf("validate_runtime(source, progress)?"),
     );
     expect(preflight).toContain("ascii_temp_directory()");
     expect(preflight).toContain(
       "check_space(&temporary, postgres_runtime_size)",
+    );
+    expect(preflight).toContain(
+      "PostgresDirectoryState::Empty | PostgresDirectoryState::Missing",
     );
     expect(database).toContain("process.env.NGT_DATA_ROOT");
     expect(database).toContain('from "./postgres-runtime.mjs"');
@@ -328,6 +465,24 @@ describe("Windows persistent startup", () => {
     expect(postgresRuntime).toContain('"runtime.fingerprint"');
     expect(database).toContain('join(persistentRoot, "postgres")');
     expect(database).toContain('join(workspace, "database-ready.pid")');
+    expect(database).toContain("NGT_DB_INIT_ONLY");
+    expect(database).toContain("managerManaged && !initialized");
+    expect(installer).toContain(
+      "function PrepareToInstall(var NeedsRestart: Boolean): String",
+    );
+    expect(installer).toContain("ExecAndLogOutput(ManagerPath");
+    expect(installer).toContain("CreateOutputMarqueeProgressPage(");
+    expect(installer).toContain("--package-extract-ms ");
+    expect(installer).toContain("--package-file-count ");
+    expect(installer).toContain("record-installer-registration ");
+    expect(installer).toContain(
+      "Cancellation will wait for the current safe step",
+    );
+    expect(installer).toContain("WizardForm.CancelButton.Enabled := True");
+    expect(installer).toContain("WizardForm.CancelButton.Enabled := False");
+    expect(installer).not.toContain(
+      "RaiseException('NGTManager installation failed.",
+    );
     expect(database).toContain(
       "Database directory is incomplete; existing data was preserved.",
     );
@@ -373,9 +528,11 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("fn restore_database");
     expect(manager).toContain("fn recover_transaction");
     expect(manager).toContain("fn atomic_write");
-    expect(install.indexOf("preflight(source)?")).toBeLessThan(
-      install.indexOf("backup_database("),
-    );
+    expect(
+      install.indexOf(
+        "preflight(source, requested_operation, Some(&progress))?",
+      ),
+    ).toBeLessThan(install.indexOf("backup_database("));
     expect(install.indexOf("backup_database(")).toBeLessThan(
       install.indexOf("validate_candidate("),
     );
@@ -392,7 +549,10 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("Operation := 'install'");
     expect(installer).toContain("Operation := 'update'");
     expect(installer).toContain("NGTUpdateId");
-    expect(installer).toContain("RaiseException");
+    expect(installer).toContain(
+      "function PrepareToInstall(var NeedsRestart: Boolean): String",
+    );
+    expect(installer).not.toContain("RaiseException");
     expect(packager).toContain("cargo build --release --bins");
     expect(packager).toContain('"NGTManager.exe"');
     expect(packager).toContain('"NGTUpdater.exe"');
@@ -474,11 +634,12 @@ describe("Windows persistent startup", () => {
     expect(icon.readUInt16LE(2)).toBe(1);
   });
 
-  it("surfaces Rust manager failures in the Inno installer", async () => {
+  it("shows Rust manager errors in one Inno preparation message", async () => {
     const installer = await readFile("installer/windows-studio.iss", "utf8");
+    expect(installer).toContain("function ReadManagerError: String");
     expect(installer).toContain("LoadStringsFromFile(ResultPath, ResultLines)");
-    expect(installer).toContain("ResultMessage := ResultLines[1]");
-    expect(installer).toContain("NGTManager installation failed.");
-    expect(installer).toContain("RaiseException");
+    expect(installer).toContain("Result := Copy(ResultLines[1], 1, 512)");
+    expect(installer).toContain("if (not Started) or (ResultCode <> 0) then");
+    expect(installer).not.toContain("RaiseException");
   });
 });

@@ -215,6 +215,7 @@ Copy-Item -LiteralPath $managerBinary -Destination (Join-Path $stageTools "NGTMa
 
 $runtimeScripts = @(
   "start.mjs",
+  "next-shutdown-bridge.cjs",
   "verify-windows-studio-static-assets.mjs",
   "windows-db.mjs",
   "postgres-runtime.mjs",

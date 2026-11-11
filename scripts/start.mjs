@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { fork } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 import { verifyWindowsStudioStaticAssets } from "./verify-windows-studio-static-assets.mjs";
 try {
@@ -39,8 +39,12 @@ await verifyWindowsStudioStaticAssets({
   standaloneBuildDirectory,
   standaloneRoot,
 });
-const child = spawn(process.execPath, [".next/standalone/server.js"], {
-  stdio: "inherit",
+const child = fork(".next/standalone/server.js", [], {
+  execArgv: [
+    "--require",
+    join(projectRoot, "scripts/next-shutdown-bridge.cjs"),
+  ],
+  stdio: ["inherit", "inherit", "inherit", "ipc"],
   windowsHide: true,
   env: {
     ...process.env,
@@ -48,10 +52,30 @@ const child = spawn(process.execPath, [".next/standalone/server.js"], {
     NGT_STUDIO_ROOT: process.cwd(),
   },
 });
+let shutdownRequested = false;
+
+function requestShutdown() {
+  if (shutdownRequested) return;
+  shutdownRequested = true;
+  if (child.connected) child.send({ type: "ngt:shutdown" });
+}
+
+let controlInput = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  controlInput = `${controlInput}${chunk}`.slice(-128);
+  const newline = controlInput.indexOf("\n");
+  if (newline < 0) return;
+  const command = controlInput.slice(0, newline).trim();
+  controlInput = controlInput.slice(newline + 1);
+  if (command === "shutdown") requestShutdown();
+});
 child.on("error", (error) => {
   console.error(error);
   process.exit(1);
 });
-child.on("exit", (code) => process.exit(code ?? 1));
-process.on("SIGINT", () => child.kill("SIGINT"));
-process.on("SIGTERM", () => child.kill("SIGTERM"));
+child.on("exit", (code) => {
+  process.exitCode = code ?? (shutdownRequested ? 0 : 1);
+});
+process.on("SIGINT", requestShutdown);
+process.on("SIGTERM", requestShutdown);

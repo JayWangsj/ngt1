@@ -34,6 +34,7 @@ try {
     "scripts/run-pg-ctl.mjs",
     "runtime/node.exe",
     "runtime/postgres/bin/postgres.exe",
+    "runtime/postgres/bin/pg_controldata.exe",
     "tools/NGTManager.exe",
     "tools/NGTUpdater.exe",
     "scripts/check-windows-credential-store.ps1",

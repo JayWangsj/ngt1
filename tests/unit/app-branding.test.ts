@@ -26,7 +26,7 @@ describe("NGTManager naming", () => {
     for (const location of ["autodesktop", "autoprograms"]) {
       expect(installer).toContain(`Name: "{${location}}\\{#AppName}";`);
       expect(installer).toContain(
-        `Type: files; Name: "{${location}}\\NGT 工作室管理系统.url"`,
+        `DeleteFile(ExpandConstant('{${location}}\\NGT 工作室管理系统.url'))`,
       );
     }
     expect(installer).toContain("DefaultDirName={localappdata}\\NGTManager");

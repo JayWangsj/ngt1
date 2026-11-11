@@ -117,6 +117,10 @@ pub struct DiagnosticEvent {
     pub attempts: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_item_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dropped_event_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,6 +157,10 @@ struct ExternalEvent {
     attempts: Option<u16>,
     #[serde(default)]
     elapsed_ms: Option<u64>,
+    #[serde(default)]
+    phase_item_count: Option<u32>,
+    #[serde(default)]
+    phase_bytes: Option<u64>,
     #[serde(default)]
     dropped_detail_bytes: Option<u64>,
     #[serde(default)]
@@ -388,6 +396,8 @@ impl LogSession {
                                     last_utc_time: None,
                                     attempts: None,
                                     elapsed_ms: None,
+                                    phase_item_count: None,
+                                    phase_bytes: None,
                                     dropped_event_count: Some(dropped_events),
                                     dropped_detail_bytes: Some(dropped_detail_bytes),
                                     log_writer_failed: Some(recording_failed),
@@ -432,6 +442,22 @@ impl LogSession {
         phase: &str,
         error_code: &str,
     ) -> String {
+        self.record_with_metrics(
+            component, severity, event_code, phase, error_code, None, None, None,
+        )
+    }
+
+    pub fn record_with_metrics(
+        &self,
+        component: Component,
+        severity: &str,
+        event_code: &str,
+        phase: &str,
+        error_code: &str,
+        elapsed_ms: Option<u64>,
+        phase_item_count: Option<u32>,
+        phase_bytes: Option<u64>,
+    ) -> String {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let event = DiagnosticEvent {
             format_version: FORMAT_VERSION,
@@ -452,7 +478,9 @@ impl LogSession {
             occurrences: 1,
             last_utc_time: None,
             attempts: None,
-            elapsed_ms: None,
+            elapsed_ms: elapsed_ms.filter(|value| *value <= 86_400_000),
+            phase_item_count,
+            phase_bytes,
             dropped_event_count: None,
             dropped_detail_bytes: None,
             log_writer_failed: None,
@@ -660,6 +688,8 @@ fn drain_reader<R: Read>(mut reader: R, context: ReaderContext) {
                     last_utc_time: None,
                     attempts: None,
                     elapsed_ms: None,
+                    phase_item_count: None,
+                    phase_bytes: None,
                     dropped_event_count: None,
                     dropped_detail_bytes: None,
                     log_writer_failed: None,
@@ -714,6 +744,10 @@ fn drain_reader<R: Read>(mut reader: R, context: ReaderContext) {
                             last_utc_time: None,
                             attempts: json.attempts.filter(|value| (1..=1000).contains(value)),
                             elapsed_ms: json.elapsed_ms.filter(|value| *value <= 600_000),
+                            phase_item_count: json.phase_item_count,
+                            phase_bytes: json
+                                .phase_bytes
+                                .filter(|value| *value <= 1_000_000_000_000),
                             dropped_event_count: None,
                             dropped_detail_bytes: json
                                 .dropped_detail_bytes
@@ -1251,6 +1285,8 @@ fn record_detail_unavailable(
         last_utc_time: None,
         attempts: None,
         elapsed_ms: None,
+        phase_item_count: None,
+        phase_bytes: None,
         dropped_event_count: None,
         dropped_detail_bytes: None,
         log_writer_failed: None,
@@ -1317,7 +1353,15 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
                     budget.note_omitted_event(&source, 1);
                     return Ok(());
                 }
-                if event.severity == "info" {
+                let installer_timing = event.component == Component::Installer
+                    && matches!(
+                        event.event_code.as_str(),
+                        "installer.package.extracted"
+                            | "installer.phase.completed"
+                            | "installer.install.completed"
+                            | "installer.registration.completed"
+                    );
+                if event.severity == "info" && !installer_timing {
                     return Ok(());
                 }
                 if event.event_code == "diagnostics.detail.unavailable" {
@@ -1906,7 +1950,13 @@ fn valid_event(event: &DiagnosticEvent) -> bool {
         && event
             .attempts
             .is_none_or(|value| (1..=1000).contains(&value))
-        && event.elapsed_ms.is_none_or(|value| value <= 600_000)
+        && event.elapsed_ms.is_none_or(|value| value <= 86_400_000)
+        && event
+            .phase_item_count
+            .is_none_or(|value| value <= 1_000_000)
+        && event
+            .phase_bytes
+            .is_none_or(|value| value <= 1_000_000_000_000)
         && event.detail_ref.starts_with("details/")
         && !event.detail_ref.contains("..")
         && matches!(
@@ -2353,16 +2403,24 @@ mod tests {
     fn structured_events_are_bounded_and_fields_are_sanitized() {
         let root = temp_root("event");
         let logs = LogSession::start(&root, "install-01", "2.1.0", LogOwner::Manager).unwrap();
-        let id = logs.record(
+        let id = logs.record_with_metrics(
             Component::Manager,
             "error",
             "install.failed; C:\\secret\\user",
             "candidate-validation",
             "WIN32_5",
+            Some(2_500),
+            Some(12),
+            Some(4096),
         );
         drop(logs);
         let (events, _, _) = capture_log_snapshot(&root);
         assert_eq!(events.len(), 1);
+        let event: DiagnosticEvent =
+            serde_json::from_reader(events[0].file.try_clone().unwrap()).unwrap();
+        assert_eq!(event.elapsed_ms, Some(2_500));
+        assert_eq!(event.phase_item_count, Some(12));
+        assert_eq!(event.phase_bytes, Some(4096));
         drop(events);
         assert!(id.ends_with("-1"));
         let paths = fs::read_dir(root.join("logs/diagnostics/events")).unwrap();
@@ -2387,6 +2445,16 @@ mod tests {
             "runtime",
             "none",
         );
+        logs.record_with_metrics(
+            Component::Installer,
+            "info",
+            "installer.phase.completed",
+            "disk-usage-scan",
+            "none",
+            Some(1250),
+            Some(40),
+            Some(8192),
+        );
         logs.record(
             Component::Manager,
             "warning",
@@ -2406,9 +2474,34 @@ mod tests {
         export_diagnostics(&root, &output).unwrap();
         let contents = fs::read_to_string(&output).unwrap();
         assert!(!contents.contains("manager.state"));
+        assert!(contents.contains("installer.phase.completed"));
+        assert!(contents.contains("\"phaseBytes\":8192"));
         assert!(contents.contains("diagnostics.recording_incomplete"));
         assert!(contents.contains("manager.operation.failed"));
 
+        let _ = fs::remove_file(output);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn export_includes_the_last_unconfirmed_runtime_shutdown_phase() {
+        let root = temp_root("runtime-shutdown");
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        let logs = LogSession::start(&root, "run-01", "2.1.0", LogOwner::Manager).unwrap();
+        logs.record(
+            Component::Manager,
+            "warning",
+            "runtime.shutdown.unconfirmed",
+            "database-stop-requested",
+            "WINDOWS_SESSION_END_UNCONFIRMED",
+        );
+        drop(logs);
+        export_diagnostics(&root, &output).unwrap();
+        let report = fs::read_to_string(&output).unwrap();
+        assert!(report.contains("runtime.shutdown.unconfirmed"));
+        assert!(report.contains("database-stop-requested"));
+        assert!(report.contains("WINDOWS_SESSION_END_UNCONFIRMED"));
         let _ = fs::remove_file(output);
         let _ = fs::remove_dir_all(root);
     }
@@ -2789,6 +2882,8 @@ mod tests {
             last_utc_time: None,
             attempts: None,
             elapsed_ms: None,
+            phase_item_count: None,
+            phase_bytes: None,
             dropped_event_count: None,
             dropped_detail_bytes: None,
             log_writer_failed: None,

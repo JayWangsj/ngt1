@@ -68,6 +68,7 @@ foreach ($requiredFile in @(
   "tools/NGTUpdater.exe",
   "runtime/node.exe",
   "runtime/postgres/bin/postgres.exe",
+  "runtime/postgres/bin/pg_controldata.exe",
   "prisma/schema.prisma"
 )) {
   if (-not (Test-Path -LiteralPath (Join-Path $root $requiredFile.Replace("/", "\")) -PathType Leaf)) {
