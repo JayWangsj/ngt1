@@ -47,6 +47,13 @@ pub enum LogOwner {
     Updater,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct EventMetrics {
+    pub elapsed_ms: Option<u64>,
+    pub phase_item_count: Option<u32>,
+    pub phase_bytes: Option<u64>,
+}
+
 impl Component {
     fn event_bucket(self) -> &'static str {
         match self {
@@ -443,7 +450,12 @@ impl LogSession {
         error_code: &str,
     ) -> String {
         self.record_with_metrics(
-            component, severity, event_code, phase, error_code, None, None, None,
+            component,
+            severity,
+            event_code,
+            phase,
+            error_code,
+            EventMetrics::default(),
         )
     }
 
@@ -454,9 +466,7 @@ impl LogSession {
         event_code: &str,
         phase: &str,
         error_code: &str,
-        elapsed_ms: Option<u64>,
-        phase_item_count: Option<u32>,
-        phase_bytes: Option<u64>,
+        metrics: EventMetrics,
     ) -> String {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let event = DiagnosticEvent {
@@ -478,9 +488,9 @@ impl LogSession {
             occurrences: 1,
             last_utc_time: None,
             attempts: None,
-            elapsed_ms: elapsed_ms.filter(|value| *value <= 86_400_000),
-            phase_item_count,
-            phase_bytes,
+            elapsed_ms: metrics.elapsed_ms.filter(|value| *value <= 86_400_000),
+            phase_item_count: metrics.phase_item_count,
+            phase_bytes: metrics.phase_bytes,
             dropped_event_count: None,
             dropped_detail_bytes: None,
             log_writer_failed: None,
@@ -2409,9 +2419,11 @@ mod tests {
             "install.failed; C:\\secret\\user",
             "candidate-validation",
             "WIN32_5",
-            Some(2_500),
-            Some(12),
-            Some(4096),
+            EventMetrics {
+                elapsed_ms: Some(2_500),
+                phase_item_count: Some(12),
+                phase_bytes: Some(4096),
+            },
         );
         drop(logs);
         let (events, _, _) = capture_log_snapshot(&root);
@@ -2451,9 +2463,11 @@ mod tests {
             "installer.phase.completed",
             "disk-usage-scan",
             "none",
-            Some(1250),
-            Some(40),
-            Some(8192),
+            EventMetrics {
+                elapsed_ms: Some(1250),
+                phase_item_count: Some(40),
+                phase_bytes: Some(8192),
+            },
         );
         logs.record(
             Component::Manager,

@@ -871,21 +871,26 @@ impl MemorySamplingSupervisor {
                     Ok(pending) => active.pending_sample = Some(pending),
                     Err(error_code) => {
                         let sample_id = active.next_sample + 1;
-                        if sample_from_collection(
-                            &self.root,
-                            &mut active,
+                        let summary = SampleSummary {
                             sample_id,
                             planned_seconds,
-                            now_utc(),
-                            0,
-                            Vec::new(),
-                            &error_code,
-                        )
-                        .is_err()
-                        {
+                            actual_time_utc: Some(now_utc()),
+                            discovered_processes: 0,
+                            read_processes: 0,
+                            working_set_bytes: 0,
+                            private_bytes: 0,
+                            complete: false,
+                            missing_reason: Some(error_code),
+                        };
+                        if append_record(&self.root, &mut active, summary, Vec::new()).is_err() {
                             self.fail_recording(active);
                             return;
                         }
+                        active.status.recorded_samples += 1;
+                        active.status.incomplete_samples += 1;
+                        active.status.updated_at_utc = now_utc();
+                        let _ = save_status(&self.root, &active.status);
+                        active.next_sample += 1;
                     }
                 }
             }
@@ -1224,49 +1229,6 @@ fn append_record(
         .and_then(|_| file.write_all(b"\n"))
         .and_then(|_| file.sync_data())
         .map_err(|_| ())
-}
-
-#[cfg(windows)]
-fn sample_from_collection(
-    root: &Path,
-    active: &mut ActiveTask,
-    sample_id: usize,
-    planned_seconds: u64,
-    actual_time_utc: String,
-    discovered: usize,
-    processes: Vec<ProcessReading>,
-    error_code: &str,
-) -> Result<(), ()> {
-    let read_processes = processes
-        .iter()
-        .filter(|process| process.read_status == "ok")
-        .count();
-    let working_set_bytes = processes
-        .iter()
-        .filter_map(|process| process.working_set_bytes)
-        .sum();
-    let private_bytes = processes
-        .iter()
-        .filter_map(|process| process.private_bytes)
-        .sum();
-    let summary = SampleSummary {
-        sample_id,
-        planned_seconds,
-        actual_time_utc: Some(actual_time_utc),
-        discovered_processes: discovered,
-        read_processes,
-        working_set_bytes,
-        private_bytes,
-        complete: false,
-        missing_reason: Some(error_code.to_owned()),
-    };
-    append_record(root, active, summary, processes)?;
-    active.status.recorded_samples += 1;
-    active.status.incomplete_samples += 1;
-    active.status.updated_at_utc = now_utc();
-    let _ = save_status(root, &active.status);
-    active.next_sample += 1;
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -2422,7 +2384,7 @@ fn median(values: &[u64]) -> Option<u64> {
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
     let middle = sorted.len() / 2;
-    Some(if sorted.len() % 2 == 0 {
+    Some(if sorted.len().is_multiple_of(2) {
         sorted[middle - 1] / 2
             + sorted[middle] / 2
             + (sorted[middle - 1] % 2 + sorted[middle] % 2) / 2

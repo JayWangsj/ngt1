@@ -2158,9 +2158,10 @@ fn log_shutdown_phase(
             event_code,
             phase,
             error,
-            Some(elapsed_ms),
-            None,
-            None,
+            diagnostics::EventMetrics {
+                elapsed_ms: Some(elapsed_ms),
+                ..Default::default()
+            },
         );
     }
 }
@@ -3482,9 +3483,11 @@ impl InstallProgress {
                     event_code,
                     &completed_name,
                     error_code,
-                    Some(elapsed_ms),
-                    completed_count,
-                    completed_bytes,
+                    diagnostics::EventMetrics {
+                        elapsed_ms: Some(elapsed_ms),
+                        phase_item_count: completed_count,
+                        phase_bytes: completed_bytes,
+                    },
                 );
             }
         }
@@ -3549,9 +3552,10 @@ impl InstallProgress {
                     "installer.install.completed",
                     "complete",
                     "none",
-                    Some(self.total_elapsed_ms()),
-                    None,
-                    None,
+                    diagnostics::EventMetrics {
+                        elapsed_ms: Some(self.total_elapsed_ms()),
+                        ..Default::default()
+                    },
                 );
             } else {
                 logger.record_with_metrics(
@@ -3568,9 +3572,10 @@ impl InstallProgress {
                     } else {
                         "INSTALL_FAILED"
                     },
-                    Some(self.total_elapsed_ms()),
-                    None,
-                    None,
+                    diagnostics::EventMetrics {
+                        elapsed_ms: Some(self.total_elapsed_ms()),
+                        ..Default::default()
+                    },
                 );
             }
         }
@@ -3593,9 +3598,10 @@ impl InstallProgress {
                 "installer.recovery.failed",
                 outcome,
                 "RECOVERY_FAILED",
-                Some(self.total_elapsed_ms()),
-                None,
-                None,
+                diagnostics::EventMetrics {
+                    elapsed_ms: Some(self.total_elapsed_ms()),
+                    ..Default::default()
+                },
             );
         }
         *self
@@ -3624,9 +3630,11 @@ impl InstallProgress {
                 "installer.package.extracted",
                 "package-extraction",
                 "none",
-                Some(*elapsed_ms),
-                Some(*item_count),
-                None,
+                diagnostics::EventMetrics {
+                    elapsed_ms: Some(*elapsed_ms),
+                    phase_item_count: Some(*item_count),
+                    ..Default::default()
+                },
             );
         }
     }
@@ -3673,9 +3681,13 @@ impl Drop for InstallProgress {
                     "installer.phase.failed",
                     &current.name,
                     "INSTALL_PHASE_FAILED",
-                    Some(current.started.elapsed().as_millis().min(u64::MAX as u128) as u64),
-                    current.item_count,
-                    current.bytes,
+                    diagnostics::EventMetrics {
+                        elapsed_ms: Some(
+                            current.started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                        ),
+                        phase_item_count: current.item_count,
+                        phase_bytes: current.bytes,
+                    },
                 );
                 logger.record_with_metrics(
                     DiagnosticComponent::Installer,
@@ -3683,9 +3695,10 @@ impl Drop for InstallProgress {
                     "installer.install.failed",
                     &current.name,
                     "INSTALL_FAILED",
-                    Some(self.total_elapsed_ms()),
-                    None,
-                    None,
+                    diagnostics::EventMetrics {
+                        elapsed_ms: Some(self.total_elapsed_ms()),
+                        ..Default::default()
+                    },
                 );
             }
         }
@@ -5569,9 +5582,10 @@ fn run(args: &[String]) -> Result<String, String> {
                     event_code,
                     "inno-registration",
                     error_code,
-                    Some(elapsed_ms),
-                    None,
-                    None,
+                    diagnostics::EventMetrics {
+                        elapsed_ms: Some(elapsed_ms),
+                        ..Default::default()
+                    },
                 );
             }
             Ok("Installer registration result was recorded.".to_owned())
