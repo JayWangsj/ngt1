@@ -11,7 +11,7 @@ export default async function NewOrder({
   searchParams: Promise<{ type?: string }>;
 }) {
   const it = await getMessages();
-  await requireActor();
+  const actor = await requireActor();
   const query = await searchParams;
   const rules = await db.priceRule.findMany({
     where: { enabled: true },
@@ -131,6 +131,7 @@ export default async function NewOrder({
         }))}
         repairForm={
           <NewOrderWizard
+            owner={actor.role === "OWNER"}
             faultOptions={faultOptions.map(({ _count, ...fault }) => ({
               ...fault,
               usageCount: _count.orders,

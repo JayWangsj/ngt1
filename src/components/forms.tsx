@@ -138,6 +138,7 @@ import {
   deleteDeviceAction,
   deleteRulesAction,
   priceRuleOptionAction,
+  priceRuleOptionStateAction,
   warrantyAction,
   afterSalesAction,
   afterSalesRefundAction,
@@ -199,6 +200,7 @@ export type PriceRuleOptionView = {
     category: string;
     enabled?: boolean;
     usage?: string;
+    costPrice?: string;
     stock: number;
     reserved: number;
     available: number;
@@ -1237,10 +1239,6 @@ function PriceOptionPicker({
                       <strong>{option.quantity}</strong>
                     </span>
                     <span>
-                      <small>{it.durationMinutes}</small>
-                      <strong>{option.minutes}</strong>
-                    </span>
-                    <span>
                       <small>{it.warrantyDays}</small>
                       <strong>{option.warrantyDays}</strong>
                     </span>
@@ -1318,10 +1316,7 @@ function PriceOptionPicker({
                 type="button"
                 className={`quick-service-picker-add price-option-add ${quickServiceActionStyles.pickerAdd}`}
                 disabled={disabled}
-                onClick={() => {
-                  onOpenChange(false, true);
-                  onAdd();
-                }}
+                onClick={onAdd}
               >
                 <Plus size={16} /> {it.addPartOption}
               </button>
@@ -1356,184 +1351,12 @@ function PriceOptionPicker({
   );
 }
 
-function DraftPriceOptionForm({
-  products,
-  initial,
-  defaultMinutes,
-  onCancel,
-  onSave,
-}: {
-  products: CreatedProduct[];
-  initial?: DraftPriceOption;
-  defaultMinutes: number;
-  onCancel: () => void;
-  onSave: (value: DraftPriceOption) => void;
-}) {
-  const it = useMessages();
-  const [productId, setProductId] = useState(initial?.productId ?? "");
-  const [name, setName] = useState(initial?.name ?? "");
-  const [suggested, setSuggested] = useState(initial?.suggested ?? "");
-  const [cost, setCost] = useState(initial?.cost ?? "");
-  const [quantity, setQuantity] = useState(initial?.quantity ?? 1);
-  const [minutes, setMinutes] = useState(initial?.minutes ?? defaultMinutes);
-  const [warrantyDays, setWarrantyDays] = useState(initial?.warrantyDays ?? 0);
-  const [notes, setNotes] = useState(initial?.notes ?? "");
-  const [isDefault, setIsDefault] = useState(initial?.isDefault ?? false);
-  const [error, setError] = useState("");
-  const selected = products.find((product) => product.id === productId);
-  const selectProduct = (value: string) => {
-    setProductId(value);
-    const product = products.find((entry) => entry.id === value);
-    if (!product) return;
-    if (!name.trim()) setName(product.name);
-    if (!cost.trim() && product.costPrice) setCost(product.costPrice);
-  };
-  return (
-    <>
-      <DialogBody className="dialog-form">
-        <Field label={`${it.requiredPart} *`}>
-          <SearchableCombobox
-            value={productId}
-            onChange={selectProduct}
-            ariaLabel={it.requiredPart}
-            placeholder={it.selectOption}
-            searchPlaceholder={it.searchInventoryPart}
-            emptyText={it.noMatches}
-            groups={[
-              {
-                options: products.map((product) => ({
-                  value: product.id,
-                  label: product.name,
-                  secondary: product.category,
-                })),
-              },
-            ]}
-          />
-        </Field>
-        <div className="form-grid two">
-          <Field label={`${it.partOptionName} *`}>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={120}
-              required
-            />
-          </Field>
-          <Field label={`${it.suggested} (€) *`}>
-            <input
-              inputMode="decimal"
-              value={suggested}
-              onChange={(event) => setSuggested(event.target.value)}
-              required
-            />
-          </Field>
-          <Field label={`${it.cost} (€)`}>
-            <input
-              inputMode="decimal"
-              value={cost}
-              onChange={(event) => setCost(event.target.value)}
-            />
-          </Field>
-          <Field label={`${it.quantity} *`}>
-            <QuantityStepper
-              ariaLabel={it.quantity}
-              min={1}
-              max={999}
-              value={quantity}
-              onValueChange={(value) => setQuantity(Number(value))}
-            />
-          </Field>
-          <Field label={`${it.durationMinutes} *`}>
-            <input
-              type="number"
-              min={0}
-              max={10000}
-              step={1}
-              value={minutes}
-              onChange={(event) => setMinutes(Number(event.target.value))}
-              required
-            />
-          </Field>
-          <Field label={it.warrantyDays}>
-            <SimpleSelect
-              value={String(warrantyDays)}
-              onChange={(value) => setWarrantyDays(Number(value))}
-              placeholder={it.selectOption}
-              ariaLabel={it.warrantyDays}
-              options={warrantyOptions(warrantyDays, it)}
-            />
-          </Field>
-        </div>
-        <Field label={it.notes}>
-          <textarea
-            rows={2}
-            maxLength={2000}
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        </Field>
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={isDefault}
-            onChange={(event) => setIsDefault(event.target.checked)}
-          />
-          {it.defaultRecommended}
-        </label>
-        {error && (
-          <p className="field-error" role="alert">
-            {error}
-          </p>
-        )}
-      </DialogBody>
-      <DialogFooter>
-        <Button type="button" variant="cancel" onClick={onCancel}>
-          {it.cancel}
-        </Button>
-        <Button
-          type="button"
-          disabled={
-            !selected ||
-            !name.trim() ||
-            !validPositiveAmount(suggested) ||
-            (cost.trim() && !validAmount(cost)) ||
-            !Number.isInteger(quantity) ||
-            quantity < 1 ||
-            quantity > 999 ||
-            !Number.isInteger(minutes) ||
-            minutes < 0 ||
-            minutes > 10000 ||
-            !Number.isInteger(warrantyDays) ||
-            warrantyDays < 0 ||
-            warrantyDays > 3650
-          }
-          onClick={() => {
-            if (!selected) return setError(it.requiredPart);
-            onSave({
-              productId,
-              name: name.trim(),
-              suggested,
-              cost,
-              quantity,
-              minutes,
-              warrantyDays,
-              notes: notes.trim(),
-              isDefault,
-            });
-          }}
-        >
-          {it.save}
-        </Button>
-      </DialogFooter>
-    </>
-  );
-}
-
 export function ItemsEditor({
   items,
   onChange,
   rules,
   device,
+  owner = false,
   products = [],
   productCategories = [],
   discounts = false,
@@ -2339,10 +2162,10 @@ export function ItemsEditor({
                         }}
                         onRemove={() => switchPriceOption("")}
                         onAdd={
-                          projectPicker && item.saveRule
-                            ? () => setCreatingDraftPriceOptionIndex(index)
-                            : match
-                              ? () => setCreatingPriceOptionRule(match.rule)
+                          match && owner
+                            ? () => setCreatingPriceOptionRule(match.rule)
+                            : projectPicker && item.saveRule && !match
+                              ? () => setCreatingDraftPriceOptionIndex(index)
                               : undefined
                         }
                       />
@@ -2996,32 +2819,40 @@ export function ItemsEditor({
             title={it.newPartOption}
             onClose={() => setCreatingDraftPriceOptionIndex(null)}
           >
-            <DraftPriceOptionForm
-              products={availableProducts}
-              initial={items[creatingDraftPriceOptionIndex].draftPriceOption}
-              defaultMinutes={
-                matchRule(
-                  rules,
-                  device,
-                  items[creatingDraftPriceOptionIndex].project,
-                )?.rule.minutes ?? 60
-              }
-              onCancel={() => setCreatingDraftPriceOptionIndex(null)}
-              onSave={(draftPriceOption) => {
-                const product = availableProducts.find(
-                  (entry) => entry.id === draftPriceOption.productId,
-                );
-                update(creatingDraftPriceOptionIndex, {
-                  draftPriceOption,
-                  priceOptionId: "",
-                  priceOptionName: draftPriceOption.name,
-                  suggested: draftPriceOption.suggested,
-                  requiredProductId: draftPriceOption.productId,
-                  requiredProductName: product?.name ?? "",
-                  requiredQuantity: draftPriceOption.quantity,
-                  requiredProductRemoved: false,
-                });
-                setCreatingDraftPriceOptionIndex(null);
+            <PriceRuleOptionForm
+              products={compatibleProducts(
+                items[creatingDraftPriceOptionIndex].project,
+              ).map((product) => ({
+                id: product.id,
+                name: product.name,
+                category: product.category,
+                stockQuantity: product.stock,
+                costPrice: product.costPrice,
+              }))}
+              draft={{
+                initial: items[creatingDraftPriceOptionIndex].draftPriceOption,
+                defaultMinutes:
+                  matchRule(
+                    rules,
+                    device,
+                    items[creatingDraftPriceOptionIndex].project,
+                  )?.rule.minutes ?? 60,
+                onSave: (draftPriceOption) => {
+                  const product = availableProducts.find(
+                    (entry) => entry.id === draftPriceOption.productId,
+                  );
+                  update(creatingDraftPriceOptionIndex, {
+                    draftPriceOption,
+                    priceOptionId: "",
+                    priceOptionName: draftPriceOption.name,
+                    suggested: draftPriceOption.suggested,
+                    requiredProductId: draftPriceOption.productId,
+                    requiredProductName: product?.name ?? "",
+                    requiredQuantity: draftPriceOption.quantity,
+                    requiredProductRemoved: false,
+                  });
+                  setCreatingDraftPriceOptionIndex(null);
+                },
               }}
             />
           </FormDialog>
@@ -3032,6 +2863,7 @@ export function ItemsEditor({
 
 export function NewOrderForm({
   rules,
+  owner = false,
   faultOptions,
   devices,
   customers,
@@ -3565,6 +3397,7 @@ export function NewOrderForm({
               model: values.model,
             }}
             discounts
+            owner={owner}
           />
         )}
         <div className="quote-adjustments">
@@ -3707,6 +3540,7 @@ function ActionForm({
   changeKey = "",
   className = "",
   closeOnSuccess = false,
+  refreshOnSuccess = true,
   saveRef,
 }: {
   action: (data: FormData) => Promise<ActionResult>;
@@ -3720,6 +3554,7 @@ function ActionForm({
   changeKey?: string;
   className?: string;
   closeOnSuccess?: boolean;
+  refreshOnSuccess?: boolean;
   saveRef?: { current: (() => Promise<boolean>) | null };
 }) {
   const it = useMessages();
@@ -3788,7 +3623,7 @@ function ActionForm({
           if (disableUnchangedSave) setUnchanged(true);
           setSuccess(true);
           onSuccess?.(result);
-          router.refresh();
+          if (refreshOnSuccess) router.refresh();
           return true;
         } catch {
           setError("Connessione non disponibile. Riprova.");
@@ -3806,6 +3641,7 @@ function ActionForm({
       changeKey,
       disableUnchangedSave,
       onSuccess,
+      refreshOnSuccess,
       registerSave,
       router,
       snapshot,
@@ -4381,6 +4217,7 @@ export function ReworkPartEditor({
   productCategories,
   device,
   project,
+  owner,
   options = [],
   rule,
 }: {
@@ -4391,6 +4228,7 @@ export function ReworkPartEditor({
   productCategories: CategoryView[];
   device: { category: string; brand: string; model: string };
   project: string;
+  owner: boolean;
   options?: PriceRuleOptionView[];
   rule?: RuleView;
 }) {
@@ -4463,7 +4301,7 @@ export function ReworkPartEditor({
           }}
           onSelectProduct={(productId) => select(productId, false)}
           onRemove={() => select("", false)}
-          onAdd={rule ? () => setCreatingPriceOption(true) : undefined}
+          onAdd={owner && rule ? () => setCreatingPriceOption(true) : undefined}
         />
       ) : editing ? (
         <SearchableCombobox
@@ -4575,6 +4413,7 @@ export function AfterSalesForm({
   productCategories,
   device,
   rules,
+  owner,
   onSuccess,
 }: {
   id: string;
@@ -4583,6 +4422,7 @@ export function AfterSalesForm({
   productCategories: CategoryView[];
   device: { category: string; brand: string; series: string; model: string };
   rules: RuleView[];
+  owner: boolean;
   onSuccess?: () => void;
 }) {
   const it = useMessages();
@@ -4818,7 +4658,7 @@ export function AfterSalesForm({
                           }));
                         }}
                         onAdd={
-                          rule
+                          owner && rule
                             ? () => setCreatingPriceOptionRule(rule)
                             : undefined
                         }
@@ -5171,6 +5011,7 @@ export function EditQuoteForm({
   device,
   products = [],
   productCategories = [],
+  owner,
   onSuccess,
   mode = "all",
 }: {
@@ -5218,6 +5059,7 @@ export function EditQuoteForm({
             discounts
             products={products}
             productCategories={productCategories}
+            owner={owner}
             showEmptyPartSummary
           />
         </>
@@ -5541,91 +5383,54 @@ export function RuleForm({
                 <div className="price-option-card-heading">
                   <div className="price-option-card-title">
                     <div className="price-option-card-title-row">
-                      <strong>{option.name}</strong>
-                      <div className="price-option-actions">
-                        {option.enabled && (
-                          <button
-                            type="button"
-                            className={`price-option-default-action${option.isDefault ? " is-default" : ""}`}
-                            disabled={optionPending || option.isDefault}
-                            onClick={async () => {
-                              setOptionPending(true);
-                              setOptionError("");
-                              try {
-                                const result = await priceRuleOptionAction(
-                                  optionRule.id,
-                                  option.id,
-                                  {
-                                    ...option,
-                                    isDefault: true,
-                                    cost: option.cost ?? "",
-                                  },
-                                );
-                                if (!result.ok) setOptionError(result.error);
-                                else {
-                                  onOptionSaved?.();
-                                  router.refresh();
-                                }
-                              } catch {
-                                setOptionError(
-                                  "Connessione non disponibile. Riprova.",
-                                );
-                              } finally {
-                                setOptionPending(false);
-                              }
-                            }}
-                          >
-                            <Star
-                              size={14}
-                              fill="currentColor"
-                              aria-hidden="true"
-                            />
-                            {option.isDefault
-                              ? it.defaultRecommended
-                              : it.setDefault}
-                          </button>
-                        )}
-                        <ToggleSwitch
-                          className="price-option-enabled-switch"
-                          role="switch"
-                          checked={option.enabled}
-                          enabledLabel={it.enabledState}
-                          disabledLabel={it.disabledState}
-                          ariaLabel={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
-                          title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
-                          disabled={optionPending}
-                          onToggle={async (enabled) => {
-                            setOptionPending(true);
-                            setOptionError("");
-                            try {
-                              const result = await priceRuleOptionAction(
-                                optionRule.id,
-                                option.id,
-                                {
-                                  ...option,
-                                  enabled,
-                                  isDefault: enabled ? option.isDefault : false,
-                                  cost: option.cost ?? "",
-                                },
-                              );
-                              if (!result.ok) {
-                                setOptionError(result.error);
-                                return false;
-                              }
+                      <button
+                        type="button"
+                        className={`price-option-default-action${option.enabled ? " is-enabled" : ""}${option.isDefault ? " is-default" : ""}`}
+                        aria-label={
+                          option.isDefault
+                            ? it.partOptionDefault
+                            : it.setPartOptionDefault
+                        }
+                        aria-pressed={option.isDefault}
+                        aria-hidden={!option.enabled}
+                        data-tooltip={
+                          option.isDefault
+                            ? it.partOptionDefault
+                            : it.setPartOptionDefault
+                        }
+                        disabled={!option.enabled || optionPending}
+                        onClick={async () => {
+                          if (option.isDefault) return;
+                          setOptionPending(true);
+                          setOptionError("");
+                          try {
+                            const result = await priceRuleOptionStateAction(
+                              optionRule.id,
+                              option.id,
+                              { action: "default" },
+                            );
+                            if (!result.ok) setOptionError(result.error);
+                            else {
                               onOptionSaved?.();
                               router.refresh();
-                              return true;
-                            } catch {
-                              setOptionError(
-                                "Connessione non disponibile. Riprova.",
-                              );
-                              return false;
-                            } finally {
-                              setOptionPending(false);
                             }
-                          }}
+                          } catch {
+                            setOptionError(
+                              "Connessione non disponibile. Riprova.",
+                            );
+                          } finally {
+                            setOptionPending(false);
+                          }
+                        }}
+                      >
+                        <Star
+                          className="revealable-icon"
+                          size={14}
+                          fill={option.isDefault ? "currentColor" : "none"}
+                          aria-hidden="true"
                         />
-                      </div>
+                      </button>
+                      <strong>{option.name}</strong>
                     </div>
                     <small>{option.product.name}</small>
                   </div>
@@ -5652,10 +5457,6 @@ export function RuleForm({
                     <strong>{option.quantity}</strong>
                   </span>
                   <span>
-                    <small>{it.durationMinutes}</small>
-                    <strong>{option.minutes}</strong>
-                  </span>
-                  <span>
                     <small>{it.warrantyDays}</small>
                     <strong>{option.warrantyDays}</strong>
                   </span>
@@ -5665,6 +5466,41 @@ export function RuleForm({
                       {option.product.available} / {option.product.stock}
                     </strong>
                   </span>
+                </div>
+                <div className="price-option-card-controls">
+                  <ToggleSwitch
+                    className="price-option-enabled-switch"
+                    role="switch"
+                    checked={option.enabled}
+                    enabledLabel={it.enabledState}
+                    disabledLabel={it.disabledState}
+                    ariaLabel={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                    title={`${option.name}: ${option.enabled ? it.disabled : it.enabled}`}
+                    disabled={optionPending}
+                    onToggle={async (enabled) => {
+                      setOptionPending(true);
+                      setOptionError("");
+                      try {
+                        const result = await priceRuleOptionStateAction(
+                          optionRule.id,
+                          option.id,
+                          { action: "enabled", enabled },
+                        );
+                        if (!result.ok) {
+                          setOptionError(result.error);
+                          return false;
+                        }
+                        onOptionSaved?.();
+                        router.refresh();
+                        return true;
+                      } catch {
+                        setOptionError("Connessione non disponibile. Riprova.");
+                        return false;
+                      } finally {
+                        setOptionPending(false);
+                      }
+                    }}
+                  />
                 </div>
               </article>
             ))}
@@ -6010,9 +5846,10 @@ function PriceRuleOptionForm({
   products,
   productCategories = [],
   compatibility,
+  draft,
   onSuccess,
 }: {
-  rule: RuleView;
+  rule?: RuleView;
   option?: PriceRuleOptionView;
   products: {
     id: string;
@@ -6023,7 +5860,12 @@ function PriceRuleOptionForm({
   }[];
   productCategories?: CategoryView[];
   compatibility?: ProductCompatibilityDraft;
-  onSuccess: () => void;
+  draft?: {
+    initial?: DraftPriceOption;
+    defaultMinutes: number;
+    onSave: (value: DraftPriceOption) => void;
+  };
+  onSuccess?: () => void;
 }) {
   const it = useMessages();
   const [createdProducts, setCreatedProducts] = useState<
@@ -6042,57 +5884,108 @@ function PriceRuleOptionForm({
       (created) => !products.some((product) => product.id === created.id),
     ),
   ];
-  const [productId, setProductId] = useState(option?.productId ?? "");
+  const initialProductId = option?.productId ?? draft?.initial?.productId ?? "";
+  const initialProduct = availableProducts.find(
+    (product) => product.id === initialProductId,
+  );
+  const [productId, setProductId] = useState(initialProductId);
   const selected = availableProducts.find(
     (product) => product.id === productId,
   );
-  const [name, setName] = useState(option?.name ?? "");
-  const [suggested, setSuggested] = useState(option?.suggested ?? "");
-  const [cost, setCost] = useState(option?.cost ?? "");
-  const [quantity, setQuantity] = useState(option?.quantity ?? 1);
-  const minutes = option?.minutes ?? rule.minutes;
-  const [warrantyDays, setWarrantyDays] = useState(option?.warrantyDays ?? 0);
-  const [enabled, setEnabled] = useState(option?.enabled ?? true);
-  const [isDefault, setIsDefault] = useState(option?.isDefault ?? false);
-  const [notes, setNotes] = useState(option?.notes ?? "");
+  const initialName = option?.name ?? draft?.initial?.name ?? "";
+  const initialCost = option?.cost ?? draft?.initial?.cost ?? "";
+  const [name, setName] = useState(initialName);
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(
+    Boolean((option || draft?.initial) && initialName !== initialProduct?.name),
+  );
+  const [suggested, setSuggested] = useState(
+    option?.suggested ?? draft?.initial?.suggested ?? "",
+  );
+  const [cost, setCost] = useState(initialCost);
+  const [costManuallyEdited, setCostManuallyEdited] = useState(
+    Boolean(
+      (option?.cost != null || draft?.initial) &&
+      initialCost !== (initialProduct?.costPrice ?? ""),
+    ),
+  );
+  const [quantity, setQuantity] = useState(
+    option?.quantity ?? draft?.initial?.quantity ?? 1,
+  );
+  const minutes =
+    option?.minutes ??
+    draft?.initial?.minutes ??
+    rule?.minutes ??
+    draft?.defaultMinutes ??
+    60;
+  const [warrantyDays, setWarrantyDays] = useState(
+    option?.warrantyDays ?? draft?.initial?.warrantyDays ?? 0,
+  );
+  const [isDefault, setIsDefault] = useState(
+    option?.isDefault ?? draft?.initial?.isDefault ?? false,
+  );
+  const [notes, setNotes] = useState(
+    option?.notes ?? draft?.initial?.notes ?? "",
+  );
+  const canCreateProduct = Boolean(rule);
+  const changeKey = JSON.stringify([
+    productId,
+    name,
+    suggested,
+    cost,
+    quantity,
+    warrantyDays,
+    isDefault,
+    notes,
+  ]);
   const selectProduct = (value: string) => {
     setProductId(value);
     const product = availableProducts.find((entry) => entry.id === value);
     if (!product) return;
-    if (!option || !name.trim()) setName(product.name);
-    if (!cost.trim() && product.costPrice) setCost(product.costPrice);
+    if (!nameManuallyEdited) setName(product.name);
+    if (!costManuallyEdited) setCost(product.costPrice ?? "");
   };
+  const draftValue = (): DraftPriceOption => ({
+    productId,
+    name: name.trim() || selected?.name || "",
+    suggested,
+    cost,
+    quantity,
+    minutes,
+    warrantyDays,
+    notes: notes.trim(),
+    isDefault,
+  });
   return (
     <>
       <ActionForm
         submit={it.save}
-        disableUnchangedSave={Boolean(option)}
-        changeKey={JSON.stringify([
-          productId,
-          name,
-          suggested,
-          cost,
-          quantity,
-          warrantyDays,
-          enabled,
-          isDefault,
-          notes,
-        ])}
-        onSuccess={onSuccess}
-        action={() =>
-          priceRuleOptionAction(rule.id, option?.id ?? null, {
-            productId,
-            name: name.trim() || selected?.name || "",
-            suggested,
-            cost,
-            quantity,
-            minutes,
-            warrantyDays,
-            enabled,
-            isDefault,
-            notes,
-          })
+        disabled={
+          !selected ||
+          !name.trim() ||
+          !validAmount(suggested) ||
+          (Boolean(draft) && !validPositiveAmount(suggested)) ||
+          (cost.trim() && !validAmount(cost)) ||
+          !Number.isInteger(quantity) ||
+          quantity < 1 ||
+          quantity > 999 ||
+          !Number.isInteger(warrantyDays) ||
+          warrantyDays < 0 ||
+          warrantyDays > 3650
         }
+        disableUnchangedSave={Boolean(option)}
+        changeKey={changeKey}
+        refreshOnSuccess={!draft}
+        onSuccess={onSuccess}
+        action={async () => {
+          if (draft) {
+            draft.onSave(draftValue());
+            return { ok: true };
+          }
+          if (!rule) return { ok: false, error: "Operazione non riuscita." };
+          return priceRuleOptionAction(rule.id, option?.id ?? null, {
+            ...draftValue(),
+          });
+        }}
       >
         <Field label={it.requiredPart}>
           <SearchableCombobox
@@ -6112,20 +6005,31 @@ function PriceRuleOptionForm({
                 })),
               },
             ]}
-            customLabel={it.repairPart}
-            onCustom={setCreatingProduct}
-            creationControls="no-match"
+            {...(canCreateProduct
+              ? {
+                  customLabel: it.repairPart,
+                  onCustom: setCreatingProduct,
+                  creationControls: "no-match" as const,
+                }
+              : {})}
           />
         </Field>
-        <div className="form-grid two">
-          <Field label={it.partOptionName}>
+        <div className="form-grid two price-option-form-grid">
+          <Field
+            label={`${it.partOptionName} *`}
+            className="price-option-form-full"
+          >
             <input
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => {
+                setName(event.target.value);
+                setNameManuallyEdited(true);
+              }}
+              maxLength={120}
               required
             />
           </Field>
-          <Field label={`${it.suggested} (€)`}>
+          <Field label={`${it.suggested} (€) *`}>
             <input
               value={suggested}
               inputMode="decimal"
@@ -6137,13 +6041,17 @@ function PriceRuleOptionForm({
             <input
               value={cost}
               inputMode="decimal"
-              onChange={(event) => setCost(event.target.value)}
+              onChange={(event) => {
+                setCost(event.target.value);
+                setCostManuallyEdited(true);
+              }}
             />
           </Field>
-          <Field label={it.quantity}>
+          <Field label={`${it.quantity} *`}>
             <QuantityStepper
               ariaLabel={it.quantity}
               min={1}
+              max={999}
               value={quantity}
               onValueChange={(value) => setQuantity(Number(value))}
             />
@@ -6158,23 +6066,16 @@ function PriceRuleOptionForm({
             />
           </Field>
         </div>
-        <Field label={it.notes}>
+        <Field label={it.notes} className="price-option-form-full">
           <textarea
             rows={2}
+            maxLength={2000}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
           />
         </Field>
-        <div className="form-row price-option-flags">
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(event) => setEnabled(event.target.checked)}
-            />
-            {it.enabled}
-          </label>
-          <label className="checkbox">
+        {!option && (
+          <label className="checkbox price-option-form-full">
             <input
               type="checkbox"
               checked={isDefault}
@@ -6182,9 +6083,9 @@ function PriceRuleOptionForm({
             />
             {it.defaultRecommended}
           </label>
-        </div>
+        )}
       </ActionForm>
-      {creatingProduct !== null && (
+      {rule && creatingProduct !== null && (
         <FormDialog
           title={it.newRepairPart}
           onClose={() => setCreatingProduct(null)}
@@ -6214,8 +6115,8 @@ function PriceRuleOptionForm({
               };
               setCreatedProducts((current) => [...current, created]);
               setProductId(created.id);
-              setName(created.name);
-              if (created.costPrice) setCost(created.costPrice);
+              if (!nameManuallyEdited) setName(created.name);
+              if (!costManuallyEdited) setCost(created.costPrice ?? "");
             }}
           />
         </FormDialog>

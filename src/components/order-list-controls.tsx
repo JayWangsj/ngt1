@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -193,6 +194,13 @@ export function PaymentCorrection({
 }) {
   const it = useMessages();
   const router = useRouter();
+  const panelId = useId();
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const requestId = useRef<string | null>(null);
+  const submitting = useRef(false);
+  const restoreFocus = useRef(false);
+  const focusPaidTarget = useRef<number | null>(null);
+  const [expectedPaidCents, setExpectedPaidCents] = useState(row.paid);
   const [value, setValue] = useState(decimal(row.paid));
   const [method, setMethod] = useState<"" | "CASH" | "CARD" | "OTHER">("");
   const [adjustmentReason, setAdjustmentReason] = useState("");
@@ -200,44 +208,114 @@ export function PaymentCorrection({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const closed = ["COMPLETED", "REFUNDED", "CANCELLED"].includes(row.status);
+  const baselineChanged = expectedPaidCents !== row.paid;
+  useEffect(() => {
+    if (
+      !correcting &&
+      !pending &&
+      restoreFocus.current &&
+      (focusPaidTarget.current === null || row.paid === focusPaidTarget.current)
+    ) {
+      toggleRef.current?.focus();
+      restoreFocus.current = false;
+      focusPaidTarget.current = null;
+    }
+  }, [correcting, pending, row.paid]);
   const parsed = Number(value.replace(",", "."));
   const changed =
-    !Number.isFinite(parsed) || Math.round(parsed * 100) !== row.paid;
+    !Number.isFinite(parsed) || Math.round(parsed * 100) !== expectedPaidCents;
+  function closeCorrection() {
+    setValue(decimal(row.paid));
+    setExpectedPaidCents(row.paid);
+    setMethod("");
+    setAdjustmentReason("");
+    restoreFocus.current = true;
+    focusPaidTarget.current = null;
+    setCorrecting(false);
+    setError("");
+    requestId.current = null;
+  }
   function save() {
+    if (submitting.current) return;
+    if (baselineChanged) return;
     if (!changed) return;
     if (!method || !adjustmentReason.trim()) {
       setError(it.paymentAdjustmentDetailsRequired);
       return;
     }
+    submitting.current = true;
+    const currentRequestId = requestId.current ?? crypto.randomUUID();
+    requestId.current = currentRequestId;
     startTransition(async () => {
-      const result = await setPaidTotalAction(row.id, {
-        requestId: crypto.randomUUID(),
-        amount: value,
-        method,
-        adjustmentReason,
-      });
-      if (!result.ok) return setError(result.error);
-      setError("");
-      router.refresh();
+      try {
+        const result = await setPaidTotalAction(row.id, {
+          requestId: currentRequestId,
+          expectedPaidCents,
+          amount: value,
+          method,
+          adjustmentReason,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          if (result.errorCode === "PAID_TOTAL_CHANGED") {
+            requestId.current = null;
+            router.refresh();
+          }
+          return;
+        }
+        const paid = Math.round(parsed * 100);
+        setExpectedPaidCents(paid);
+        setValue(decimal(paid));
+        setMethod("");
+        setAdjustmentReason("");
+        setError("");
+        restoreFocus.current = true;
+        focusPaidTarget.current = paid;
+        setCorrecting(false);
+        requestId.current = null;
+        router.refresh();
+      } catch {
+        setError(it.connectionError);
+      } finally {
+        submitting.current = false;
+      }
     });
   }
   if (closed || row.afterSalesOpen) return null;
   return (
     <div className="payment-correction">
-      {!correcting ? (
-        <button
-          type="button"
-          className="order-payment-correction-toggle"
-          onClick={() => {
-            setValue(decimal(row.paid));
-            setCorrecting(true);
-            setError("");
-          }}
-        >
+      <button
+        ref={toggleRef}
+        type="button"
+        className="order-payment-correction-toggle"
+        aria-expanded={correcting}
+        aria-controls={panelId}
+        disabled={pending}
+        onClick={() => {
+          if (correcting) {
+            closeCorrection();
+            return;
+          }
+          setValue(decimal(row.paid));
+          setExpectedPaidCents(row.paid);
+          setMethod("");
+          setAdjustmentReason("");
+          setError("");
+          requestId.current = null;
+          setCorrecting(true);
+        }}
+      >
+        <span className="order-payment-correction-label">
           {it.paymentCorrection}
-        </button>
-      ) : (
-        <>
+        </span>
+        {correcting ? (
+          <ChevronUp size={13} aria-hidden="true" />
+        ) : (
+          <ChevronDown size={13} aria-hidden="true" />
+        )}
+      </button>
+      {correcting && (
+        <div className="payment-correction-fields" id={panelId}>
           <label className="payment-correction-amount">
             <span className="sr-only">{it.paid}</span>
             <input
@@ -247,7 +325,8 @@ export function PaymentCorrection({
               disabled={pending}
               onChange={(event) => {
                 setValue(event.target.value);
-                setError("");
+                requestId.current = null;
+                if (!baselineChanged) setError("");
               }}
             />
           </label>
@@ -260,7 +339,8 @@ export function PaymentCorrection({
                 disabled={pending}
                 onChange={(event) => {
                   setMethod(event.target.value as typeof method);
-                  setError("");
+                  requestId.current = null;
+                  if (!baselineChanged) setError("");
                 }}
               >
                 <option value="">{it.choosePaymentMethod}</option>
@@ -278,7 +358,8 @@ export function PaymentCorrection({
                 disabled={pending}
                 onChange={(event) => {
                   setAdjustmentReason(event.target.value);
-                  setError("");
+                  requestId.current = null;
+                  if (!baselineChanged) setError("");
                 }}
               />
             </label>
@@ -288,21 +369,45 @@ export function PaymentCorrection({
               type="button"
               variant="cancel"
               disabled={pending}
-              onClick={() => {
-                setValue(decimal(row.paid));
-                setCorrecting(false);
-                setError("");
-              }}
+              onClick={closeCorrection}
             >
               {it.cancel}
             </Button>
-            <Button type="button" disabled={pending || !changed} onClick={save}>
+            <Button
+              type="button"
+              disabled={pending || !changed || baselineChanged}
+              onClick={save}
+            >
               {pending ? it.saving : it.save}
             </Button>
           </div>
-        </>
+        </div>
       )}
-      {error && <small className="inline-control-error">{error}</small>}
+      {baselineChanged ? (
+        <div className="payment-correction-conflict" role="status">
+          <span>
+            {it.paymentCorrectionChanged.replace("{amount}", money(row.paid))}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending}
+            onClick={() => {
+              setExpectedPaidCents(row.paid);
+              requestId.current = null;
+              setError("");
+            }}
+          >
+            {it.paymentCorrectionConfirmLatest}
+          </Button>
+        </div>
+      ) : (
+        error && (
+          <small className="inline-control-error" role="status">
+            {error}
+          </small>
+        )
+      )}
     </div>
   );
 }

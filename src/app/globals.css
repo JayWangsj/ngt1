@@ -1852,6 +1852,12 @@ label {
 .form-grid.three {
   grid-template-columns: repeat(3, 1fr);
 }
+.price-option-form-grid {
+  row-gap: 14px;
+}
+.price-option-form-grid > .price-option-form-full {
+  grid-column: 1 / -1;
+}
 .order-form {
   max-width: 1000px;
   margin-top: 28px;
@@ -4362,21 +4368,21 @@ details.secondary-actions {
   white-space: nowrap;
   cursor: pointer;
 }
-.retail-service-price-display svg,
-.retail-discount-display svg {
+.revealable-icon {
   width: 0;
   opacity: 0;
   margin-left: 0;
+  margin-right: 0;
   overflow: hidden;
   transition:
     width 150ms ease-out,
-    margin-left 150ms ease-out,
+    margin 150ms ease-out,
     opacity 150ms ease-out;
 }
-.retail-service-price-display:hover svg,
-.retail-service-price-display:focus-visible svg,
-.retail-discount-display:hover svg,
-.retail-discount-display:focus-visible svg {
+.retail-service-price-display:hover .revealable-icon,
+.retail-service-price-display:focus-visible .revealable-icon,
+.retail-discount-display:hover .revealable-icon,
+.retail-discount-display:focus-visible .revealable-icon {
   width: 14px;
   margin-left: 7px;
   opacity: 1;
@@ -5201,8 +5207,10 @@ details.secondary-actions {
   color: #765900;
 }
 @media (prefers-reduced-motion: reduce) {
-  .retail-service-price-display svg,
-  .retail-discount-display svg {
+  .revealable-icon {
+    transition: none;
+  }
+  .order-payment-correction-label::after {
     transition: none;
   }
 }
@@ -7357,7 +7365,16 @@ summary.record-icon::-webkit-details-marker {
   padding: 4px 8px;
   font-size: 11px;
 }
+.payment-correction {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 16px;
+}
 .order-payment-correction-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   justify-self: start;
   padding: 0;
   border: 0;
@@ -7365,14 +7382,77 @@ summary.record-icon::-webkit-details-marker {
   color: var(--muted);
   font: inherit;
   font-size: 11px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
   cursor: pointer;
+}
+.order-payment-correction-toggle:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--border-focus);
+  outline-offset: 4px;
+}
+.order-payment-correction-label {
+  position: relative;
+}
+.order-payment-correction-label::after {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  left: 0;
+  height: 1px;
+  background: currentColor;
+  content: "";
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 150ms ease-out;
+}
+.order-payment-correction-toggle:hover .order-payment-correction-label::after,
+.order-payment-correction-toggle:focus-visible
+  .order-payment-correction-label::after {
+  transform: scaleX(1);
+}
+.payment-correction-fields {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 8px;
+}
+.payment-correction-fields > label {
+  display: grid;
+  gap: 4px;
+}
+.payment-correction-fields .payment-correction-amount input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
 }
 .order-payment-correction-actions {
   display: flex;
   justify-content: flex-end;
+  width: 100%;
   gap: 6px;
+}
+.payment-correction-conflict {
+  display: flex;
+  align-items: center;
+  max-width: min(100%, 420px);
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.payment-correction-conflict > span {
+  flex: 1;
+}
+.payment-correction-conflict .button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.payment-correction > .inline-control-error {
+  max-width: 100%;
 }
 .order-balance-value {
   color: var(--muted);

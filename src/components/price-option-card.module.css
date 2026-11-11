@@ -26,7 +26,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 0;
 }
 
 .card :global(small) {
@@ -44,7 +44,7 @@
 
 .card :global(.price-option-data) {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -63,13 +63,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.card :global(.price-option-actions) {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-left: 0;
-}
-
 .card :global(.price-option-enabled-switch) {
   justify-self: auto;
   gap: 5px;
@@ -83,36 +76,80 @@
 
 .card :global(.price-option-default-action) {
   display: inline-flex;
-  min-height: 28px;
+  position: relative;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
   background: transparent;
   color: #806000;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
+  line-height: 1;
   cursor: pointer;
 }
 
-.card :global(.price-option-default-action:hover:not(:disabled)),
-.card :global(.price-option-default-action:focus-visible) {
-  border-color: transparent;
-  background: #fff7d6;
+.card :global(.price-option-default-action .revealable-icon) {
+  flex: 0 0 auto;
+  width: 0;
+  height: 14px;
+  margin-right: 0;
+  opacity: 0;
+  overflow: hidden;
 }
 
-.card :global(.price-option-default-action:disabled:not(.is-default)) {
-  cursor: default;
-  opacity: 0.58;
+.card :global(.price-option-default-action.is-enabled .revealable-icon) {
+  width: 14px;
+  margin-right: 7px;
+  opacity: 1;
+}
+
+.card :global(.price-option-default-action:hover),
+.card :global(.price-option-default-action:focus-visible) {
+  color: #5e4a15;
+}
+
+.card :global(.price-option-default-action:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 3px;
 }
 
 .card :global(.price-option-default-action.is-default) {
   color: #806000;
-  opacity: 1;
   cursor: default;
+}
+
+.card :global(.price-option-default-action[data-tooltip]::after) {
+  position: absolute;
+  z-index: 4;
+  bottom: calc(100% + 8px);
+  left: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.card :global(.price-option-default-action:hover::after),
+.card :global(.price-option-default-action:focus-visible::after) {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.card :global(.price-option-card-controls) {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .disabled {
@@ -134,5 +171,11 @@
   .card :global(.price-option-data),
   .card :global(.price-option-data.price-option-inventory-data) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card :global(.price-option-default-action[data-tooltip]::after) {
+    transition: none;
   }
 }

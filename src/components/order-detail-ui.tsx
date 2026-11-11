@@ -403,6 +403,7 @@ export function CustomerDetailLink({
 export function AfterSalesActions({
   orderId,
   received,
+  owner,
   originalProjects,
   products,
   productCategories,
@@ -411,6 +412,7 @@ export function AfterSalesActions({
 }: {
   orderId: string;
   received: number;
+  owner: boolean;
   originalProjects: AfterSalesProject[];
   products: import("./forms").CreatedProduct[];
   productCategories: import("./forms").CategoryView[];
@@ -447,6 +449,7 @@ export function AfterSalesActions({
             productCategories={productCategories}
             device={device}
             rules={rules}
+            owner={owner}
             onSuccess={() => setDialog(null)}
           />
         </FormDialog>

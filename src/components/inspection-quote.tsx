@@ -33,6 +33,7 @@ export function CompleteInspectionButton({
   initialFaultIds,
   products,
   productCategories,
+  owner,
 }: {
   orderId: string;
   inspectionFee: string;
@@ -49,6 +50,7 @@ export function CompleteInspectionButton({
     available: number;
   }[];
   productCategories: CategoryView[];
+  owner: boolean;
 }) {
   const today = useBusinessDay();
   const it = useMessages();
@@ -164,6 +166,7 @@ export function CompleteInspectionButton({
                     discounts
                     products={products}
                     productCategories={productCategories}
+                    owner={owner}
                     progressive
                     projectPicker
                   />

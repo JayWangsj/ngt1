@@ -219,6 +219,7 @@ export default async function Detail({
     order.type === "REPAIR" && order.status === "DIAGNOSING" ? (
       <CompleteInspectionButton
         orderId={id}
+        owner={actor.role === "OWNER"}
         inspectionFee={order.inspectionFee.toString()}
         device={{
           category: order.device.category,
@@ -1083,6 +1084,7 @@ export default async function Detail({
                         <ReworkPartEditor
                           orderId={id}
                           itemId={activeRework.id}
+                          owner={actor.role === "OWNER"}
                           value={activeRework.requiredProductId ?? ""}
                           products={repairProducts.map((product) => ({
                             id: product.id,
@@ -1246,6 +1248,7 @@ export default async function Detail({
           {order.status === "COMPLETED" && (
             <AfterSalesActions
               orderId={id}
+              owner={actor.role === "OWNER"}
               received={receivedTotal}
               originalProjects={order.items.map((item) => ({
                 id: item.id,

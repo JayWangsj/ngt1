@@ -57,6 +57,7 @@ export function priceRuleViews(
           id: product.id,
           name: product.name,
           category: product.category,
+          costPrice: product.costPrice.toString(),
           enabled: product.enabled,
           usage: product.usage,
           stock: product.stockQuantity,

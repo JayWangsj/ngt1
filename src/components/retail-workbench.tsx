@@ -475,7 +475,11 @@ export function RetailWorkbench({
                         onClick={() => setEditingServicePrice(item.id)}
                       >
                         <span>{money(item.priceCents)}</span>
-                        <Pencil size={14} aria-hidden="true" />
+                        <Pencil
+                          className="revealable-icon"
+                          size={14}
+                          aria-hidden="true"
+                        />
                       </button>
                     )}
                   </div>
@@ -513,7 +517,11 @@ export function RetailWorkbench({
                   onClick={() => setEditingDiscount(true)}
                 >
                   <span>{money(discountCents)}</span>
-                  <Pencil size={14} aria-hidden="true" />
+                  <Pencil
+                    className="revealable-icon"
+                    size={14}
+                    aria-hidden="true"
+                  />
                 </button>
               )}
             </div>

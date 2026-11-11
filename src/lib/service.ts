@@ -39,6 +39,7 @@ import {
   checkoutInput,
   ruleInput,
   priceRuleOptionInput,
+  priceRuleOptionStateInput,
   statusInput,
   warrantyInput,
   afterSalesInput,
@@ -430,7 +431,10 @@ async function persistTemporaryPriceOptions(
       project,
     };
     await tx.$queryRaw`
-      SELECT pg_advisory_xact_lock(hashtext(${JSON.stringify(key)}))
+      WITH lock AS MATERIALIZED (
+        SELECT pg_advisory_xact_lock(hashtext(${JSON.stringify(key)}))
+      )
+      SELECT TRUE FROM lock
     `;
     const options = new Map<
       string,
@@ -453,30 +457,7 @@ async function persistTemporaryPriceOptions(
       const product = productsById.get(productId);
       if (!product || !product.enabled || product.usage !== "REPAIR")
         throw new BusinessError("Ricambio non disponibile.");
-      if (draft) {
-        const compatible = product.compatibilities.some((entry) =>
-          matchesProductCompatibility(entry, device, item.project),
-        );
-        if (!compatible) {
-          await tx.productCompatibility.create({
-            data: {
-              productId,
-              category: device.category,
-              brand: normalizeBrand(device.brand),
-              model: normalizeDeviceModel(device.brand, device.model),
-              project,
-            },
-          });
-          product.compatibilities.push({
-            id: "draft",
-            productId,
-            category: device.category,
-            brand: normalizeBrand(device.brand),
-            model: normalizeDeviceModel(device.brand, device.model),
-            project,
-          });
-        }
-      } else if (
+      if (
         !product.compatibilities.some((entry) =>
           matchesProductCompatibility(entry, device, item.project),
         )
@@ -614,6 +595,7 @@ async function persistTemporaryPriceOptions(
         source: "ORDER_DRAFT",
       });
     }
+    await syncLegacyDefaultPriceOption(tx, rule.id);
   }
 }
 async function snapshots(
@@ -1746,13 +1728,30 @@ export async function setPaidTotal(
   const target = cents(data.amount);
   return transact(async (tx) => {
     const actor = await currentActor(tx, actorInput);
-    const existing = await tx.auditLog.findFirst({
-      where: {
-        action: "PAYMENT_TOTAL_SET",
-        context: { path: ["requestId"], equals: data.requestId },
-      },
+    const existingPayment = await tx.payment.findUnique({
+      where: { requestId: data.requestId },
     });
-    if (existing) return;
+    if (existingPayment) {
+      const existing = await tx.auditLog.findFirst({
+        where: {
+          entityId: id,
+          action: "PAYMENT_TOTAL_SET",
+          context: { path: ["requestId"], equals: data.requestId },
+        },
+      });
+      const context = existing?.context as Prisma.JsonObject | undefined;
+      if (
+        existingPayment.orderId !== id ||
+        existingPayment.kind !== "OTHER" ||
+        !context ||
+        cents(String(context.before)) !== data.expectedPaidCents ||
+        String(context.after) !== decimal(target) ||
+        context.method !== data.method ||
+        context.reason !== data.adjustmentReason
+      )
+        throw new BusinessError("La richiesta di rettifica è già stata usata.");
+      return;
+    }
     const order = await tx.workOrder.findUniqueOrThrow({
       where: { id },
       include: {
@@ -1763,12 +1762,16 @@ export async function setPaidTotal(
     });
     if (originalOrderLocked(order))
       throw new BusinessError("La scheda è chiusa.");
-    const due = settlement(order.items, order).due;
-    if (target > due) throw new BusinessError("L'incassato supera il totale.");
     const current = order.payments.reduce(
       (sum, payment) => sum + cents(payment.amount),
       0,
     );
+    if (current !== data.expectedPaidCents)
+      throw new BusinessError(
+        "L'incassato è cambiato. Verifica il nuovo totale e riprova.",
+      );
+    const due = settlement(order.items, order).due;
+    if (target > due) throw new BusinessError("L'incassato supera il totale.");
     const delta = target - current;
     if (!delta) return;
     const buckets = paymentBuckets(order);
@@ -2187,79 +2190,171 @@ export async function savePriceRuleOption(
   raw: unknown,
 ) {
   const input = priceRuleOptionInput.parse(raw);
+  try {
+    return await transact(async (tx) => {
+      const actor = await currentActor(tx, actorInput);
+      assertOwner(actor);
+      const [rule, product, existingCount] = await Promise.all([
+        tx.priceRule.findUniqueOrThrow({ where: { id: ruleId } }),
+        tx.product.findFirst({
+          where: { id: input.productId, enabled: true, usage: "REPAIR" },
+        }),
+        tx.priceRuleOption.count({ where: { ruleId, enabled: true } }),
+      ]);
+      if (!product) throw new BusinessError("Ricambio non disponibile.");
+      const before = id
+        ? await tx.priceRuleOption.findFirstOrThrow({ where: { id, ruleId } })
+        : null;
+      if (before && before.productId !== product.id) {
+        const usedByWorkOrders = await tx.workOrderItem.count({
+          where: {
+            OR: [
+              { priceOptionId: before.id },
+              {
+                ruleId,
+                priceOptionId: null,
+                requiredProductId: before.productId,
+              },
+            ],
+          },
+        });
+        if (usedByWorkOrders)
+          throw new BusinessError(
+            "Non puoi cambiare il ricambio di un'opzione già usata in una scheda. Crea una nuova opzione.",
+          );
+      }
+      const isDefault = before
+        ? before.isDefault
+        : input.isDefault || existingCount === 0;
+      const enabled = before?.enabled ?? true;
+      if (isDefault)
+        await tx.priceRuleOption.updateMany({
+          where: {
+            ruleId,
+            isDefault: true,
+            ...(id ? { id: { not: id } } : {}),
+          },
+          data: { isDefault: false },
+        });
+      const data = {
+        productId: product.id,
+        name: input.name,
+        suggested: decimal(cents(input.suggested)),
+        cost: input.cost ? decimal(cents(input.cost)) : product.costPrice,
+        quantity: input.quantity,
+        minutes: input.minutes,
+        warrantyDays: input.warrantyDays,
+        enabled,
+        isDefault,
+        notes: input.notes,
+      };
+      const option = id
+        ? await tx.priceRuleOption.update({ where: { id }, data })
+        : await tx.priceRuleOption.create({
+            data: {
+              ...data,
+              ruleId,
+              sortOrder: await tx.priceRuleOption.count({ where: { ruleId } }),
+            },
+          });
+      await syncPriceOptionCompatibility(tx, rule, product.id);
+      await syncLegacyDefaultPriceOption(tx, ruleId);
+      await audit(
+        tx,
+        actor,
+        option.id,
+        before ? "PRICE_RULE_OPTION_UPDATED" : "PRICE_RULE_OPTION_CREATED",
+        {
+          ruleId,
+          before: before ? JSON.parse(JSON.stringify(before)) : null,
+          after: data,
+        },
+      );
+      return option;
+    });
+  } catch (error) {
+    const target =
+      error instanceof Prisma.PrismaClientKnownRequestError
+        ? error.meta?.target
+        : undefined;
+    const duplicateOption =
+      (Array.isArray(target) &&
+        target.includes("ruleId") &&
+        target.includes("productId")) ||
+      (typeof target === "string" &&
+        target.includes("PriceRuleOption_ruleId_productId_key"));
+    if (
+      !id &&
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002" &&
+      duplicateOption
+    )
+      throw new BusinessError(
+        "L'opzione per questo progetto esiste già. Controlla il listino e riattivala se è disattivata.",
+      );
+    throw error;
+  }
+}
+
+export async function setPriceRuleOptionState(
+  actorInput: Actor,
+  ruleId: string,
+  id: string,
+  raw: unknown,
+) {
+  const input = priceRuleOptionStateInput.parse(raw);
   return transact(async (tx) => {
     const actor = await currentActor(tx, actorInput);
     assertOwner(actor);
-    const [rule, product, existingCount] = await Promise.all([
-      tx.priceRule.findUniqueOrThrow({ where: { id: ruleId } }),
-      tx.product.findFirst({
-        where: { id: input.productId, enabled: true, usage: "REPAIR" },
-      }),
-      tx.priceRuleOption.count({ where: { ruleId, enabled: true } }),
-    ]);
-    if (!product) throw new BusinessError("Ricambio non disponibile.");
-    const before = id
-      ? await tx.priceRuleOption.findFirstOrThrow({ where: { id, ruleId } })
-      : null;
-    if (before && before.productId !== product.id) {
-      const usedByWorkOrders = await tx.workOrderItem.count({
-        where: {
-          OR: [
-            { priceOptionId: before.id },
-            {
-              ruleId,
-              priceOptionId: null,
-              requiredProductId: before.productId,
-            },
-          ],
-        },
-      });
-      if (usedByWorkOrders)
-        throw new BusinessError(
-          "Non puoi cambiare il ricambio di un'opzione già usata in una scheda. Crea una nuova opzione.",
-        );
-    }
-    const isDefault = input.isDefault || existingCount === 0;
-    if (isDefault)
-      await tx.priceRuleOption.updateMany({
-        where: { ruleId, isDefault: true, ...(id ? { id: { not: id } } : {}) },
-        data: { isDefault: false },
-      });
-    const data = {
-      productId: product.id,
-      name: input.name,
-      suggested: decimal(cents(input.suggested)),
-      cost: input.cost ? decimal(cents(input.cost)) : product.costPrice,
-      quantity: input.quantity,
-      minutes: input.minutes,
-      warrantyDays: input.warrantyDays,
-      enabled: input.enabled,
-      isDefault,
-      notes: input.notes,
+    const option = await tx.priceRuleOption.findFirstOrThrow({
+      where: { id, ruleId },
+      include: { product: true },
+    });
+    const before = {
+      enabled: option.enabled,
+      isDefault: option.isDefault,
     };
-    const option = id
-      ? await tx.priceRuleOption.update({ where: { id }, data })
-      : await tx.priceRuleOption.create({
+    if (input.action === "default") {
+      if (
+        !option.enabled ||
+        !option.product.enabled ||
+        option.product.usage !== "REPAIR"
+      )
+        throw new BusinessError("Attiva prima l'opzione ricambio.");
+      if (!option.isDefault) {
+        await tx.priceRuleOption.updateMany({
+          where: { ruleId, isDefault: true, id: { not: id } },
+          data: { isDefault: false },
+        });
+        await tx.priceRuleOption.update({
+          where: { id },
+          data: { isDefault: true },
+        });
+      }
+    } else {
+      if (
+        input.enabled &&
+        (!option.product.enabled || option.product.usage !== "REPAIR")
+      )
+        throw new BusinessError("Ricambio non disponibile.");
+      if (option.enabled !== input.enabled)
+        await tx.priceRuleOption.update({
+          where: { id },
           data: {
-            ...data,
-            ruleId,
-            sortOrder: await tx.priceRuleOption.count({ where: { ruleId } }),
+            enabled: input.enabled,
+            ...(!input.enabled ? { isDefault: false } : {}),
           },
         });
-    await syncPriceOptionCompatibility(tx, rule, product.id);
+    }
     await syncLegacyDefaultPriceOption(tx, ruleId);
-    await audit(
-      tx,
-      actor,
-      option.id,
-      before ? "PRICE_RULE_OPTION_UPDATED" : "PRICE_RULE_OPTION_CREATED",
-      {
-        ruleId,
-        before: before ? JSON.parse(JSON.stringify(before)) : null,
-        after: data,
-      },
-    );
-    return option;
+    const after = await tx.priceRuleOption.findUniqueOrThrow({
+      where: { id },
+    });
+    await audit(tx, actor, id, "PRICE_RULE_OPTION_UPDATED", {
+      ruleId,
+      before,
+      after: { enabled: after.enabled, isDefault: after.isDefault },
+    });
   });
 }
 

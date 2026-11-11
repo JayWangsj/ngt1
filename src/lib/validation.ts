@@ -267,10 +267,15 @@ export const productUpdateInput = z
   });
 export const paidTotalInput = z.object({
   requestId: z.string().uuid(),
+  expectedPaidCents: z.number().int().min(0).max(9_999_999_999),
   amount: amountInput,
   method: z.enum(["CASH", "CARD", "OTHER"]).default("CASH"),
   adjustmentReason: z.string().trim().min(1).max(200),
 });
+export const priceRuleOptionStateInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("enabled"), enabled: z.boolean() }),
+  z.object({ action: z.literal("default") }),
+]);
 export const inventoryAdjustmentInput = z.object({
   requestId: z.string().uuid(),
   quantity: z.coerce
@@ -484,7 +489,6 @@ export const priceRuleOptionInput = z.object({
   quantity: z.coerce.number().int().min(1).max(999).default(1),
   minutes: z.coerce.number().int().min(0).max(10000).default(60),
   warrantyDays: z.coerce.number().int().min(0).max(3650).default(0),
-  enabled: z.boolean().default(true),
   isDefault: z.boolean().default(false),
   notes: text,
 });

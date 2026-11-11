@@ -800,6 +800,9 @@ export const it = {
   paymentAdjustmentReason: "Motivo della modifica",
   paymentAdjustmentDetailsRequired: "Seleziona il metodo e indica il motivo.",
   paymentCorrection: "Correggi totale incassato",
+  paymentCorrectionChanged:
+    "Il totale incassato è cambiato ed è ora {amount}. Verifica e salva di nuovo.",
+  paymentCorrectionConfirmLatest: "Conferma il nuovo totale",
   balance: "Da pagare",
   dueDate: "Consegna prevista",
   diagnosticFee: "Costo diagnosi (€)",
@@ -1098,10 +1101,11 @@ export const it = {
     "Nessun ricambio associato: viene usato il prezzo base dell'intervento.",
   partOptionName: "Nome opzione",
   quantity: "Quantità ricambio",
-  durationMinutes: "Tempo previsto (minuti)",
   warrantyDays: "Giorni di garanzia",
   defaultRecommended: "Opzione consigliata predefinita",
   setDefault: "Imposta predefinita",
+  setPartOptionDefault: "Imposta come opzione predefinita",
+  partOptionDefault: "Opzione predefinita attuale",
   ruleHelp:
     "Per modello: marca + modello. Per serie: marca + serie. Per una regola generica, lascia vuoti tutti i campi dispositivo.",
   reportDescription:

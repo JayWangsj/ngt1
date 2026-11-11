@@ -668,6 +668,9 @@ export const zh: typeof it = {
   paymentAdjustmentReason: "调整原因",
   paymentAdjustmentDetailsRequired: "请选择付款方式并填写调整原因。",
   paymentCorrection: "纠正累计已收",
+  paymentCorrectionChanged:
+    "累计已收已变化，当前为 {amount}。请核对后再次保存。",
+  paymentCorrectionConfirmLatest: "已核对，采用最新金额",
   balance: "待收余额",
   dueDate: "预计交付日期",
   diagnosticFee: "检测费用（€）",
@@ -947,10 +950,11 @@ export const zh: typeof it = {
   noPartOptions: "此项目未关联配件，使用基础维修报价。",
   partOptionName: "方案名称",
   quantity: "配件数量",
-  durationMinutes: "预计工时（分钟）",
   warrantyDays: "保修天数",
   defaultRecommended: "默认推荐方案",
   setDefault: "设为默认",
+  setPartOptionDefault: "设为默认方案",
+  partOptionDefault: "当前默认方案",
   ruleHelp:
     "具体型号填写品牌和型号；系列填写品牌和系列；通用报价留空设备信息。",
   reportDescription: "查看每日收款和维修情况。",

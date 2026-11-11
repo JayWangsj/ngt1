@@ -210,6 +210,7 @@ export function NewOrderWizard({
   customers,
   products,
   productCategories,
+  owner,
 }: {
   rules: RuleView[];
   faultOptions: FaultCatalogItem[];
@@ -229,6 +230,7 @@ export function NewOrderWizard({
     }[];
   }[];
   productCategories: CategoryView[];
+  owner: boolean;
 }) {
   const it = useMessages();
   const { locale } = useLanguage();
@@ -793,6 +795,7 @@ export function NewOrderWizard({
                 discounts
                 products={products}
                 productCategories={productCategories}
+                owner={owner}
                 progressive
                 projectPicker
               />

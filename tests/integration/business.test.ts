@@ -40,11 +40,13 @@ import {
   replaceQuote,
   savePriceRule,
   savePriceRuleOption,
+  setPriceRuleOptionState,
   deletePriceRuleOption,
   setPaidTotal,
   removeWorkOrderProduct,
   setUserEnabled,
   updateOrder,
+  updatePriceRuleFields,
   updateDueDate,
   updateWarranty,
   updateBusinessClock,
@@ -570,9 +572,13 @@ describe("PostgreSQL workflow", () => {
       quantity: 1,
       minutes: 40,
       warrantyDays: 0,
-      enabled: false,
       isDefault: false,
       notes: "",
+    });
+    expect(disabledOption.enabled).toBe(true);
+    await setPriceRuleOptionState(owner, rule.id, disabledOption.id, {
+      action: "enabled",
+      enabled: false,
     });
     const updateCompatibility = (product: typeof lcd, models: string[]) =>
       updateProduct(owner, product.id, {
@@ -638,6 +644,9 @@ describe("PostgreSQL workflow", () => {
       enabled: true,
       isDefault: true,
       notes: "",
+    });
+    await setPriceRuleOptionState(owner, rule.id, oledOption.id, {
+      action: "default",
     });
     expect(
       await db.priceRuleOption.findUniqueOrThrow({
@@ -718,9 +727,13 @@ describe("PostgreSQL workflow", () => {
       quantity: 1,
       minutes: 60,
       warrantyDays: 90,
-      enabled: false,
+      enabled: true,
       isDefault: true,
       notes: "",
+    });
+    await setPriceRuleOptionState(owner, rule.id, lcdOption.id, {
+      action: "enabled",
+      enabled: false,
     });
     await updateCompatibility(lcd, ["iPhone 16"]);
     expect(
@@ -736,6 +749,128 @@ describe("PostgreSQL workflow", () => {
         await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
       ).suggested.toString(),
     ).toBe("100");
+  });
+
+  it("preserves the latest enabled and default state when an older option edit saves", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "Concurrent option edit",
+    );
+    const secondProduct = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Concurrent option default",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "18",
+      salePrice: "0",
+      initialStock: 3,
+      minStock: 0,
+    });
+    const secondOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: secondProduct.id,
+      name: secondProduct.name,
+      suggested: "89",
+      cost: "18",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 0,
+      enabled: true,
+      isDefault: false,
+      notes: "",
+    });
+
+    await setPriceRuleOptionState(owner, rule.id, secondOption.id, {
+      action: "default",
+    });
+    await setPriceRuleOptionState(owner, rule.id, option.id, {
+      action: "enabled",
+      enabled: false,
+    });
+    await savePriceRuleOption(owner, rule.id, option.id, {
+      productId: product.id,
+      name: "Edited from an older form",
+      suggested: "81",
+      cost: "32",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 30,
+      enabled: true,
+      isDefault: true,
+      notes: "",
+    });
+
+    const editedOption = await db.priceRuleOption.findUniqueOrThrow({
+      where: { id: option.id },
+    });
+    expect(editedOption).toMatchObject({
+      name: "Edited from an older form",
+      enabled: false,
+      isDefault: false,
+    });
+    expect(editedOption.suggested.toString()).toBe("81");
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: secondOption.id },
+      }),
+    ).toMatchObject({ enabled: true, isDefault: true });
+    await expect(
+      savePriceRuleOption(owner, rule.id, null, {
+        productId: product.id,
+        name: product.name,
+        suggested: "80",
+        cost: "32",
+        quantity: 1,
+        minutes: 60,
+        warrantyDays: 0,
+        notes: "",
+      }),
+    ).rejects.toThrow("esiste già");
+  });
+
+  it("keeps exactly one default when two options are recommended concurrently", async () => {
+    const { rule } = await configureRepairOption("Concurrent default race");
+    const options: { id: string }[] = [];
+    for (const name of ["Concurrent default A", "Concurrent default B"]) {
+      const product = await createProduct(owner, {
+        requestId: randomUUID(),
+        name,
+        category: "Ricambi",
+        usage: "REPAIR",
+        costPrice: "18",
+        salePrice: "0",
+        initialStock: 3,
+        minStock: 0,
+      });
+      options.push(
+        await savePriceRuleOption(owner, rule.id, null, {
+          productId: product.id,
+          name: product.name,
+          suggested: "89",
+          cost: "18",
+          quantity: 1,
+          minutes: 60,
+          warrantyDays: 0,
+          isDefault: false,
+          notes: "",
+        }),
+      );
+    }
+
+    await Promise.all(
+      options.map((option) =>
+        setPriceRuleOptionState(owner, rule.id, option.id, {
+          action: "default",
+        }),
+      ),
+    );
+
+    const defaults = await db.priceRuleOption.findMany({
+      where: { ruleId: rule.id, enabled: true, isDefault: true },
+    });
+    expect(defaults).toHaveLength(1);
+    const updatedRule = await db.priceRule.findUniqueOrThrow({
+      where: { id: rule.id },
+    });
+    expect(updatedRule.requiredProductId).toBe(defaults[0].productId);
   });
 
   it("keeps an explicit no-part choice after saving and allows a later selection", async () => {
@@ -791,6 +926,14 @@ describe("PostgreSQL workflow", () => {
       salePrice: "0",
       initialStock: 3,
       minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "Display",
+        },
+      ],
     });
     await replaceQuote(staff, order.id, {
       items: [
@@ -1209,6 +1352,7 @@ describe("PostgreSQL workflow", () => {
     ).toBe("READY");
     await setPaidTotal(staff, created.id, {
       requestId: randomUUID(),
+      expectedPaidCents: 2000,
       amount: "100",
       method: "OTHER",
       adjustmentReason: "Saldo saldato manualmente",
@@ -1242,6 +1386,7 @@ describe("PostgreSQL workflow", () => {
 
     await setPaidTotal(staff, order.id, {
       requestId: randomUUID(),
+      expectedPaidCents: 0,
       amount: "110",
       method: "CARD",
       adjustmentReason: "Pagamento parziale registrato",
@@ -1266,6 +1411,39 @@ describe("PostgreSQL workflow", () => {
     expect(audit.context).toMatchObject({
       reason: "Pagamento parziale registrato",
     });
+  });
+  it("replays a payment correction once and rejects a stale paid-total baseline", async () => {
+    const order = await createOrder(staff, input({ deposit: "0" }));
+    const correction = {
+      requestId: randomUUID(),
+      expectedPaidCents: 0,
+      amount: "50",
+      method: "CARD" as const,
+      adjustmentReason: "Rettifica idempotente",
+    };
+
+    await setPaidTotal(staff, order.id, correction);
+    await setPaidTotal(staff, order.id, correction);
+    expect(await db.payment.count({ where: { orderId: order.id } })).toBe(1);
+    expect(
+      await db.auditLog.count({
+        where: { entityId: order.id, action: "PAYMENT_TOTAL_SET" },
+      }),
+    ).toBe(1);
+
+    await expect(
+      setPaidTotal(staff, order.id, {
+        ...correction,
+        requestId: randomUUID(),
+      }),
+    ).rejects.toThrow("è cambiato");
+    await expect(
+      setPaidTotal(staff, order.id, {
+        ...correction,
+        adjustmentReason: "Contenuto diverso con la stessa richiesta",
+      }),
+    ).rejects.toThrow("già stata usata");
+    expect(await db.payment.count({ where: { orderId: order.id } })).toBe(1);
   });
   it("locks delivered history and adds paid or free post-sale repairs independently", async () => {
     const created = await createOrder(staff, input({ deposit: "100" }));
@@ -2178,6 +2356,14 @@ describe("PostgreSQL workflow", () => {
       salePrice: "0",
       initialStock: 2,
       minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "Sostituzione scheda madre",
+        },
+      ],
     });
     await createOrder(
       staff,
@@ -2416,11 +2602,18 @@ describe("PostgreSQL workflow", () => {
   });
   it("does not replace newer list prices when only editing an old order discount", async () => {
     const old = await createOrder(owner, input({ deposit: "0" }));
+    const rule = await db.priceRule.findFirstOrThrow({
+      where: { project: "display" },
+    });
+    await updatePriceRuleFields(owner, rule.id, {
+      project: rule.project,
+      suggested: "120",
+    });
     await createOrder(
       owner,
       input({
         deposit: "0",
-        items: [{ project: "Display", final: "120", saveRule: true }],
+        items: [{ project: "Display", final: "120" }],
       }),
     );
     await replaceQuote(owner, old.id, {
@@ -3062,9 +3255,13 @@ describe("unified product inventory", () => {
       quantity: 1,
       minutes: 40,
       warrantyDays: 0,
-      enabled: false,
       isDefault: false,
       notes: "",
+    });
+    expect(disabledOption.enabled).toBe(true);
+    await setPriceRuleOptionState(owner, rule.id, disabledOption.id, {
+      action: "enabled",
+      enabled: false,
     });
     const order = await createOrder(
       staff,
@@ -3590,6 +3787,14 @@ describe("work order products and combined checkout", () => {
       salePrice: "0",
       initialStock: 2,
       minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "READY ricambio",
+        },
+      ],
     });
     await savePriceRule(owner, null, {
       brand: "Apple",
@@ -3848,6 +4053,7 @@ describe("work order products and combined checkout", () => {
     });
     await setPaidTotal(staff, order.id, {
       requestId: randomUUID(),
+      expectedPaidCents: 0,
       amount: "120",
       method: "CASH",
       adjustmentReason: "Pagamento completo",
