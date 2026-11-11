@@ -2,7 +2,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { CSSProperties } from "react";
 import {
   LayoutDashboard,
@@ -38,7 +44,7 @@ type UpdatePopoverPosition = {
   left: number;
   top: number;
   maxHeight: number;
-  placement: "right" | "below" | "above";
+  placement: "right" | "below" | "above" | "overlay";
   anchorOffset: number;
 };
 
@@ -60,6 +66,7 @@ export function Sidebar() {
   const updateEntry = useRef<HTMLButtonElement>(null);
   const updatePanel = useRef<HTMLElement>(null);
   const updateClose = useRef<HTMLButtonElement>(null);
+  const positionFrame = useRef<number | null>(null);
   const links = [
     { href: "/", label: it.nav.dashboard, icon: LayoutDashboard },
     { href: "/orders", label: it.nav.orders, icon: Wrench },
@@ -89,79 +96,121 @@ export function Sidebar() {
     const button = updateEntry.current;
     const panel = updatePanel.current;
     if (!button || !panel || updateExpanded) return;
-    const rect = button.getBoundingClientRect();
-    const margin = 12;
-    const gap = 8;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const panelWidth = panel.getBoundingClientRect().width || 360;
-    const desiredHeight = Math.min(
-      panel.scrollHeight,
-      640,
-      viewportHeight * 0.8,
-      viewportHeight - margin * 2,
+    const header = panel.querySelector<HTMLElement>("header");
+    const content = panel.querySelector<HTMLElement>(
+      ".system-update-compact-content",
     );
+    if (!header || !content) return;
+
+    const rect = button.getBoundingClientRect();
+    const gap = 8;
+    const visibleViewport = window.visualViewport;
+    const viewportLeft = visibleViewport?.offsetLeft ?? 0;
+    const viewportTop = visibleViewport?.offsetTop ?? 0;
+    const viewportWidth = visibleViewport?.width ?? window.innerWidth;
+    const viewportHeight = visibleViewport?.height ?? window.innerHeight;
+    const previousOverflowY = content.style.overflowY;
+    content.style.overflowY = "hidden";
+    const panelStyle = window.getComputedStyle(panel);
+    const naturalHeight = Math.ceil(
+      header.getBoundingClientRect().height +
+        content.scrollHeight +
+        Number.parseFloat(panelStyle.paddingTop) +
+        Number.parseFloat(panelStyle.paddingBottom) +
+        Number.parseFloat(panelStyle.borderTopWidth) +
+        Number.parseFloat(panelStyle.borderBottomWidth),
+    );
+    content.style.overflowY = previousOverflowY;
+
+    const panelWidth = panel.getBoundingClientRect().width || 360;
     const clamp = (value: number, min: number, max: number) =>
       Math.min(Math.max(value, min), Math.max(min, max));
+    const verticalMargin = Math.max(
+      4,
+      Math.min(12, Math.floor((viewportHeight - naturalHeight) / 2)),
+    );
+    const minTop = viewportTop + verticalMargin;
+    const maxHeight = Math.max(
+      1,
+      Math.min(naturalHeight, viewportHeight - verticalMargin * 2),
+    );
+    const maxTop = viewportTop + viewportHeight - verticalMargin - maxHeight;
     let next: UpdatePopoverPosition;
     if (window.matchMedia("(max-width: 900px)").matches) {
-      const below = viewportHeight - rect.bottom - gap - margin;
-      const above = rect.top - gap - margin;
-      const placement =
-        below >= desiredHeight || below >= above ? "below" : "above";
-      const available = placement === "below" ? below : above;
-      const minHeight = Math.min(96, viewportHeight - margin * 2);
-      const maxHeight = Math.max(minHeight, Math.min(desiredHeight, available));
-      const top =
-        placement === "below"
-          ? clamp(
-              rect.bottom + gap,
-              margin,
-              viewportHeight - maxHeight - margin,
-            )
-          : clamp(
-              rect.top - gap - maxHeight,
-              margin,
-              viewportHeight - maxHeight - margin,
-            );
+      const belowTop = rect.bottom + gap;
+      const aboveBottom = rect.top - gap;
+      const below = viewportTop + viewportHeight - verticalMargin - belowTop;
+      const above = aboveBottom - minTop;
+      let placement: UpdatePopoverPosition["placement"];
+      let top: number;
+      if (below >= naturalHeight) {
+        placement = "below";
+        top = belowTop;
+      } else if (above >= naturalHeight) {
+        placement = "above";
+        top = aboveBottom - naturalHeight;
+      } else if (naturalHeight <= viewportHeight - verticalMargin * 2) {
+        placement = "overlay";
+        top = clamp(
+          rect.top + rect.height / 2 - naturalHeight / 2,
+          minTop,
+          maxTop,
+        );
+      } else {
+        placement = below >= above ? "below" : "above";
+        top =
+          placement === "below"
+            ? clamp(belowTop, minTop, maxTop)
+            : clamp(aboveBottom - maxHeight, minTop, maxTop);
+        if (
+          (placement === "below" && top < belowTop) ||
+          (placement === "above" && top + maxHeight > aboveBottom)
+        )
+          placement = "overlay";
+      }
       const left = clamp(
         rect.right - panelWidth,
-        margin,
-        viewportWidth - panelWidth - margin,
+        viewportLeft + 12,
+        viewportLeft + viewportWidth - panelWidth - 12,
       );
+      const anchorOffset = rect.left + rect.width / 2 - left;
+      if (
+        placement !== "overlay" &&
+        (anchorOffset < 16 || anchorOffset > panelWidth - 16)
+      )
+        placement = "overlay";
       next = {
         left,
         top,
         maxHeight,
         placement,
-        anchorOffset: clamp(
-          rect.left + rect.width / 2 - left,
-          16,
-          panelWidth - 16,
-        ),
+        anchorOffset: clamp(anchorOffset, 16, panelWidth - 16),
       };
     } else {
-      const maxHeight = Math.min(desiredHeight, viewportHeight - margin * 2);
-      const left = clamp(
-        rect.right + gap,
-        margin,
-        viewportWidth - panelWidth - margin,
-      );
+      const desiredLeft = rect.right + gap;
+      const rightFits =
+        desiredLeft + panelWidth <= viewportLeft + viewportWidth - 12;
+      const placement = rightFits ? "right" : "overlay";
+      const left = rightFits
+        ? desiredLeft
+        : clamp(
+            rect.left + rect.width / 2 - panelWidth / 2,
+            viewportLeft + 12,
+            viewportLeft + viewportWidth - panelWidth - 12,
+          );
       const top = clamp(
         rect.top + rect.height / 2 - maxHeight / 2,
-        margin,
-        viewportHeight - maxHeight - margin,
+        minTop,
+        maxTop,
       );
+      const targetOffset = rect.top + rect.height / 2 - top;
+      const validArrow = targetOffset >= 16 && targetOffset <= maxHeight - 16;
       next = {
         left,
         top,
         maxHeight,
-        placement: "right",
-        anchorOffset: clamp(
-          rect.top + rect.height / 2 - top,
-          16,
-          maxHeight - 16,
-        ),
+        placement: placement === "right" && validArrow ? "right" : "overlay",
+        anchorOffset: clamp(targetOffset, 16, maxHeight - 16),
       };
     }
     setUpdatePosition((current) =>
@@ -174,6 +223,14 @@ export function Sidebar() {
         : next,
     );
   }, [updateExpanded]);
+
+  const scheduleUpdatePosition = useCallback(() => {
+    if (positionFrame.current !== null) return;
+    positionFrame.current = window.requestAnimationFrame(() => {
+      positionFrame.current = null;
+      positionUpdatePanel();
+    });
+  }, [positionUpdatePanel]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -191,25 +248,32 @@ export function Sidebar() {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!updateOpen) return;
-    const frame = window.requestAnimationFrame(() => {
-      positionUpdatePanel();
+    positionUpdatePanel();
+    const focusFrame = window.requestAnimationFrame(() => {
       updateClose.current?.focus();
     });
     const button = updateEntry.current;
     const panel = updatePanel.current;
-    const resizeObserver = new ResizeObserver(positionUpdatePanel);
+    const resizeObserver = new ResizeObserver(scheduleUpdatePosition);
     if (!updateExpanded) {
       if (button) resizeObserver.observe(button);
       const sidebar = button?.closest(".sidebar");
       if (sidebar) resizeObserver.observe(sidebar);
-      if (panel) resizeObserver.observe(panel);
+      const header = panel?.querySelector("header");
+      const content = panel?.querySelector<HTMLElement>(
+        ".system-update-compact-content",
+      );
+      const status = content?.querySelector(".system-update-compact-status");
+      const actions = content?.querySelector(".update-primary-actions");
+      for (const target of [panel, header, content, status, actions])
+        if (target) resizeObserver.observe(target);
     }
-    window.addEventListener("resize", positionUpdatePanel);
-    window.addEventListener("scroll", positionUpdatePanel, true);
-    window.visualViewport?.addEventListener("resize", positionUpdatePanel);
-    window.visualViewport?.addEventListener("scroll", positionUpdatePanel);
+    window.addEventListener("resize", scheduleUpdatePosition);
+    window.addEventListener("scroll", scheduleUpdatePosition, true);
+    window.visualViewport?.addEventListener("resize", scheduleUpdatePosition);
+    window.visualViewport?.addEventListener("scroll", scheduleUpdatePosition);
     const onPointerDown = (event: PointerEvent) => {
       if (updateExpanded) return;
       const target = event.target;
@@ -251,17 +315,33 @@ export function Sidebar() {
     const previousOverflow = document.body.style.overflow;
     if (updateExpanded) document.body.style.overflow = "hidden";
     return () => {
-      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(focusFrame);
+      if (positionFrame.current !== null) {
+        window.cancelAnimationFrame(positionFrame.current);
+        positionFrame.current = null;
+      }
       resizeObserver.disconnect();
-      window.removeEventListener("resize", positionUpdatePanel);
-      window.removeEventListener("scroll", positionUpdatePanel, true);
-      window.visualViewport?.removeEventListener("resize", positionUpdatePanel);
-      window.visualViewport?.removeEventListener("scroll", positionUpdatePanel);
+      window.removeEventListener("resize", scheduleUpdatePosition);
+      window.removeEventListener("scroll", scheduleUpdatePosition, true);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        scheduleUpdatePosition,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        scheduleUpdatePosition,
+      );
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.style.overflow = previousOverflow;
     };
-  }, [closeUpdatePanel, positionUpdatePanel, updateExpanded, updateOpen]);
+  }, [
+    closeUpdatePanel,
+    positionUpdatePanel,
+    scheduleUpdatePosition,
+    updateExpanded,
+    updateOpen,
+  ]);
 
   function toggleCollapsed() {
     const next = !collapsed;
@@ -517,6 +597,14 @@ export function Sidebar() {
               role="dialog"
               aria-modal={updateExpanded || undefined}
               aria-labelledby="sidebar-update-title"
+              onFocusCapture={(event) => {
+                if (
+                  !updateExpanded &&
+                  event.target instanceof HTMLElement &&
+                  event.target.matches(".update-check-action")
+                )
+                  event.target.scrollIntoView({ block: "nearest" });
+              }}
             >
               <header className={updatePopoverStyles.header}>
                 <div>

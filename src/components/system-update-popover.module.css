@@ -24,6 +24,7 @@
 
 .compact {
   overflow: visible;
+  max-height: none;
   padding: 0 16px 12px;
 }
 
@@ -96,6 +97,11 @@
   width: 12px;
   height: 8px;
   background: var(--surface);
+}
+
+.compact[data-placement="overlay"]::before,
+.compact[data-placement="overlay"]::after {
+  display: none;
 }
 
 .expanded {
@@ -172,6 +178,12 @@
   overflow-y: auto;
   padding-top: 12px;
   overscroll-behavior: contain;
+  scrollbar-width: none;
+  scroll-padding-block: 8px;
+}
+
+.compact :global(.system-update-compact-content)::-webkit-scrollbar {
+  display: none;
 }
 
 .compact :global(.system-update-compact-status) {
@@ -191,12 +203,30 @@
 
 .compact :global(.update-check-action) {
   min-height: 36px;
+  max-width: 100%;
   padding: 7px 12px;
+  scroll-margin-block: 8px;
 }
 
 @media (max-width: 900px) {
   .compact :global(.update-check-action) {
     min-height: 44px;
+  }
+}
+
+@media (max-height: 420px) {
+  .compact {
+    padding-bottom: 8px;
+  }
+
+  .compact .header {
+    min-height: 50px;
+    padding-block: 8px;
+  }
+
+  .compact :global(.system-update-compact-content) {
+    gap: 8px;
+    padding-top: 8px;
   }
 }
 

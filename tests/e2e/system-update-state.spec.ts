@@ -1392,20 +1392,28 @@ test("anchors the compact update panel to its version entry", async ({
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.route("**/api/system-update", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
-    if (checks++ === 0) await initialCheckBlocked;
+    const requestNumber = checks++;
+    if (requestNumber === 0) await initialCheckBlocked;
     return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        checks === 1
+        requestNumber === 0
           ? {
-              installed: true,
+              installed: false,
               currentVersion: "2.0.9",
               authRequired: false,
               updateAvailable: false,
-              latestVersion: "2.0.9",
             }
-          : availableRelease(),
+          : requestNumber === 1
+            ? {
+                installed: true,
+                currentVersion: "2.0.9",
+                authRequired: false,
+                updateAvailable: false,
+                latestVersion: "2.0.9",
+              }
+            : availableRelease(),
       ),
     });
   });
@@ -1420,7 +1428,10 @@ test("anchors the compact update panel to its version entry", async ({
     "正在检查…",
   );
 
-  const expectPlacement = async (placement: "right" | "below" | "above") => {
+  const expectPlacement = async (
+    placement: "right" | "below" | "above" | "overlay",
+    minMargin = 11,
+  ) => {
     const readGeometry = () =>
       panel.evaluate((element) => {
         const trigger = document
@@ -1443,6 +1454,7 @@ test("anchors the compact update panel to its version entry", async ({
           bottom: card.bottom,
           width: window.innerWidth,
           height: window.innerHeight,
+          arrowDisplay: getComputedStyle(element, "::before").display,
           arrowOffset: Number.parseFloat(
             getComputedStyle(element).getPropertyValue("--anchor-offset"),
           ),
@@ -1456,27 +1468,33 @@ test("anchors the compact update panel to its version entry", async ({
     await expect
       .poll(async () => {
         const current = await readGeometry();
-        return (
+        const valid =
           current.placement === placement &&
-          Math.abs(current.gap - 8) <= 1 &&
-          current.left >= 11 &&
-          current.right <= current.width - 11 &&
-          current.top >= 11 &&
-          current.bottom <= current.height - 11 &&
-          Math.abs(current.arrowOffset - current.targetOffset) <= 1
-        );
+          (placement === "overlay" || Math.abs(current.gap - 8) <= 1) &&
+          current.left >= minMargin &&
+          current.right <= current.width - minMargin &&
+          current.top >= minMargin &&
+          current.bottom <= current.height - minMargin &&
+          (placement === "overlay"
+            ? current.arrowDisplay === "none"
+            : Math.abs(current.arrowOffset - current.targetOffset) <= 1);
+        return valid ? true : JSON.stringify(current);
       })
       .toBe(true);
     const geometry = await readGeometry();
-    expect(geometry.gap).toBeCloseTo(8, 0);
-    expect(geometry.left).toBeGreaterThanOrEqual(11);
-    expect(geometry.right).toBeLessThanOrEqual(geometry.width - 11);
-    expect(geometry.top).toBeGreaterThanOrEqual(11);
-    expect(geometry.bottom).toBeLessThanOrEqual(geometry.height - 11);
-    expect(
-      Math.abs(geometry.arrowOffset - geometry.targetOffset),
-    ).toBeLessThanOrEqual(1);
-    expect(geometry.arrowClipPath).not.toBe("none");
+    expect(geometry.left).toBeGreaterThanOrEqual(minMargin);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.width - minMargin);
+    expect(geometry.top).toBeGreaterThanOrEqual(minMargin);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.height - minMargin);
+    if (placement === "overlay") {
+      expect(geometry.arrowDisplay).toBe("none");
+    } else {
+      expect(geometry.gap).toBeCloseTo(8, 0);
+      expect(
+        Math.abs(geometry.arrowOffset - geometry.targetOffset),
+      ).toBeLessThanOrEqual(1);
+      expect(geometry.arrowClipPath).not.toBe("none");
+    }
   };
 
   await expectPlacement("right");
@@ -1515,21 +1533,93 @@ test("anchors the compact update panel to its version entry", async ({
 
   releaseInitialCheck();
   await expect(page.locator(".sidebar-update-copy small")).toHaveText(
-    "已是最新",
+    "更新不可用",
   );
+  await expect(panel.locator(".system-update-compact-status")).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "检查更新", exact: true }),
+  ).toBeVisible();
   await page.setViewportSize({ width: 900, height: 700 });
   await expectPlacement("below");
   await page.setViewportSize({ width: 390, height: 844 });
   await expectPlacement("below");
+  await entry.evaluate((node) => {
+    node.style.position = "fixed";
+    node.style.top = "auto";
+    node.style.bottom = "12px";
+    node.style.left = "12px";
+    node.style.zIndex = "1300";
+    window.dispatchEvent(new Event("resize"));
+  });
+  await expectPlacement("above");
+  await entry.evaluate((node) => {
+    node.removeAttribute("style");
+    window.dispatchEvent(new Event("resize"));
+  });
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expectPlacement("below");
+  const naturalHeight = await panel.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  const overlayHeight = Math.ceil(naturalHeight + 24);
+  await entry.evaluate((node) => {
+    node.style.position = "fixed";
+    node.style.top = "calc(50% - 21px)";
+    node.style.bottom = "auto";
+    node.style.left = "12px";
+    node.style.zIndex = "1300";
+  });
+  await page.setViewportSize({ width: 320, height: overlayHeight });
+  await expectPlacement("overlay");
+  await entry.evaluate((node) => node.removeAttribute("style"));
   await page.setViewportSize({ width: 320, height: 720 });
   await expectPlacement("below");
+  const readCompactContent = () =>
+    panel.evaluate((element) => {
+      const content = element.querySelector<HTMLElement>(
+        ".system-update-compact-content",
+      )!;
+      const status = content.querySelector<HTMLElement>(
+        ".system-update-compact-status",
+      )!;
+      const check = content.querySelector<HTMLElement>(".update-check-action")!;
+      const contentBounds = content.getBoundingClientRect();
+      const statusBounds = status.getBoundingClientRect();
+      const checkBounds = check.getBoundingClientRect();
+      return {
+        panelHeight: element.getBoundingClientRect().height,
+        scrollHeight: content.scrollHeight,
+        clientHeight: content.clientHeight,
+        scrollbarWidth: content.offsetWidth - content.clientWidth,
+        scrollTop: content.scrollTop,
+        statusVisible:
+          statusBounds.top >= contentBounds.top - 1 &&
+          statusBounds.bottom <= contentBounds.bottom + 1,
+        checkVisible:
+          checkBounds.top >= contentBounds.top - 1 &&
+          checkBounds.bottom <= contentBounds.bottom + 1,
+      };
+    });
   await page.setViewportSize({ width: 320, height: 210 });
-  await expectPlacement("below");
+  await expectPlacement("overlay");
   await expect(panel.locator("header button")).toBeVisible();
-  await expect(panel.locator(".system-update-compact-content")).toHaveCSS(
-    "overflow-y",
-    "auto",
+  const initialCompactContent = await readCompactContent();
+  expect(initialCompactContent.scrollHeight).toBeLessThanOrEqual(
+    initialCompactContent.clientHeight + 1,
   );
+  expect(initialCompactContent.statusVisible).toBe(true);
+  expect(initialCompactContent.checkVisible).toBe(true);
+  const measuredHeights: number[] = [];
+  for (let measurement = 0; measurement < 5; measurement += 1) {
+    await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+    await expect
+      .poll(async () => (await readCompactContent()).panelHeight)
+      .toBeCloseTo(initialCompactContent.panelHeight, 0);
+    measuredHeights.push((await readCompactContent()).panelHeight);
+  }
+  expect(
+    new Set(measuredHeights.map((height) => Math.round(height))).size,
+  ).toBe(1);
   expect(
     await panel.evaluate(
       (element) => element.scrollWidth > element.clientWidth,
@@ -1541,7 +1631,34 @@ test("anchors the compact update panel to its version entry", async ({
   await expect(entry).toBeFocused();
   await entry.click();
   await expect(panel).toBeVisible();
-  await expectPlacement("below");
+  await expectPlacement("overlay");
+  await page.setViewportSize({ width: 320, height: 120 });
+  await expect
+    .poll(async () => {
+      const content = await readCompactContent();
+      return content.scrollHeight > content.clientHeight;
+    })
+    .toBe(true);
+  expect((await readCompactContent()).scrollbarWidth).toBe(0);
+  await expect(panel.locator("header button")).toBeVisible();
+  const scrollCheckButton = panel.getByRole("button", {
+    name: "检查更新",
+    exact: true,
+  });
+  await panel.locator("header button").focus();
+  await page.keyboard.press("Tab");
+  await expect(scrollCheckButton).toBeFocused();
+  await expect
+    .poll(async () => (await readCompactContent()).checkVisible)
+    .toBe(true);
+  expect((await readCompactContent()).scrollTop).toBeGreaterThan(0);
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expect
+    .poll(async () => {
+      const content = await readCompactContent();
+      return content.scrollHeight <= content.clientHeight + 1;
+    })
+    .toBe(true);
   await page.locator("main").click({ position: { x: 4, y: 4 } });
   await expect(panel).toHaveCount(0);
   await expect(entry).toBeFocused();
@@ -1552,6 +1669,13 @@ test("anchors the compact update panel to its version entry", async ({
     name: "检查更新",
     exact: true,
   });
+  await checkButton.click();
+  await expect(page.locator(".sidebar-update-copy small")).toHaveText(
+    "已是最新",
+  );
+  await expect(panel.locator(".system-update-compact-status")).toContainText(
+    "已是最新",
+  );
   await checkButton.click();
   await expect(panel.locator(".update-release-card")).toBeVisible();
   await expect(panel).toHaveAttribute("aria-modal", "true");
