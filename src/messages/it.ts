@@ -720,6 +720,42 @@ export const it = {
   exportDiagnostics: "Esporta diagnostica",
   exportDiagnosticsHelp:
     "Crea un file diagnostico senza dati personali per analizzare i problemi di installazione, avvio e importazione.",
+  sampleMemory: "Campiona memoria",
+  memorySampleRetry: "Riprova campionamento",
+  memorySampleRetrySave: "Riprova a salvare il rapporto",
+  memorySampleExpired:
+    "La richiesta di campionamento è scaduta o non è più disponibile. Avviala di nuovo.",
+  sampleMemoryHelp:
+    "Riscaldamento di 2 minuti, poi un campione ogni 2 secondi per 10 minuti.",
+  memorySampleQueued: "In coda, in attesa della verifica dell'ambiente.",
+  memorySamplePreparing: "Preparazione del campionamento.",
+  memorySampleWarmup:
+    "Riscaldamento in corso. Lascia aperta la pagina o usa normalmente il sistema.",
+  memorySampleProgress: "Campionamento",
+  memorySampleCounts: "Completi / incompleti / saltati",
+  memorySampleSaving: "Campionamento completato; salvataggio del rapporto.",
+  memorySampleComplete: "Rapporto di memoria salvato.",
+  memorySamplePartial:
+    "Rapporto salvato, ma i campioni completi non bastano per confrontare le versioni.",
+  memorySampleFailed: "Il campionamento della memoria non è riuscito.",
+  memorySampleSaveFailed:
+    "Salvataggio del rapporto non riuscito. I dati raccolti sono conservati e puoi riprovare.",
+  memorySampleUnavailable:
+    "Impossibile leggere temporaneamente lo stato; nuova connessione in corso.",
+  memorySampleStartFailed:
+    "Impossibile avviare il campionamento. Verifica che il sistema sia in esecuzione e riprova.",
+  memorySamplePath: "Percorso del rapporto",
+  memorySampleExpectedPath: "Percorso previsto del rapporto",
+  copyPath: "Copia percorso",
+  pathCopied: "Percorso copiato.",
+  copyPathFailed:
+    "Impossibile copiare il percorso; selezionalo e copialo manualmente.",
+  memorySampleNoCompletePoints: "Nessun campione completo in questa sessione.",
+  memorySampleMoved: "Il file del rapporto è stato spostato o eliminato.",
+  memorySampleDirectoryUnavailable:
+    "La cartella Documenti non è disponibile; riprova più tardi.",
+  memorySampleRetryHint:
+    "I dati del campionamento sono conservati; puoi riprovare a salvare il rapporto.",
   diagnosticsExported: "File diagnostico esportato.",
   diagnosticsExportFailed: "Esportazione del file diagnostico non riuscita.",
   backupReadFailed: "Impossibile leggere il file di backup.",

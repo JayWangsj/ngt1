@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   ChevronRight,
   CircleAlert,
+  Copy,
   DatabaseBackup,
   Download,
+  Activity,
   FlaskConical,
   Languages,
   Smartphone,
@@ -46,6 +54,17 @@ import businessDateStyles from "./business-date-settings.module.css";
 import settingsActionStyles from "./settings-action.module.css";
 import motionSettingControlStyles from "./motion-setting-control.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
+
+const memorySampleSaveRetryCodes = new Set([
+  "REPORT_SAVE_FAILED",
+  "SAVE_UNCONFIRMED",
+  "SAVE_UNAVAILABLE",
+  "DOCUMENTS_NOT_WRITABLE",
+  "DOCUMENTS_FOLDER_UNAVAILABLE",
+  "REPORT_TEMP_CREATE_FAILED",
+  "REPORT_WRITE_FAILED",
+  "REPORT_PUBLISH_FAILED",
+]);
 
 type SaveFile = {
   createWritable: () => Promise<{
@@ -436,9 +455,220 @@ export function DataSettings() {
   const it = useMessages();
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
+  const sampleRequestId = useRef<string | null>(null);
+  const sampleRequestAccepted = useRef(false);
+  const reportPathInput = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
+  const [sampleStatus, setSampleStatus] = useState<{
+    requestId: string;
+    taskId?: string | null;
+    phase: string;
+    elapsedSeconds: number;
+    recordedSamples: number;
+    completeSamples: number;
+    incompleteSamples: number;
+    missedSamples: number;
+    reportPath?: string | null;
+    expectedReportPath?: string | null;
+    reportAvailability?: "available" | "moved" | "unavailable";
+    errorCode?: string | null;
+  } | null>(null);
+  const [sampleError, setSampleError] = useState("");
+  const [sampleMessage, setSampleMessage] = useState("");
+  const [sampleStarting, setSampleStarting] = useState(false);
+  const [retryRequestId, setRetryRequestId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const refreshMemorySample = useCallback(
+    async (requestId?: string) => {
+      const query = new URLSearchParams({ mode: "memory-sample" });
+      if (requestId) query.set("requestId", requestId);
+      const response = await fetch(`/api/diagnostics/export?${query}`, {
+        cache: "no-store",
+      });
+      if (response.status === 404) {
+        if (!requestId) setSampleStatus(null);
+        else if (sampleRequestAccepted.current) {
+          sampleRequestAccepted.current = false;
+          setSampleStatus(null);
+          setRetryRequestId(null);
+          setSampleError(it.memorySampleExpired);
+        }
+        return false;
+      }
+      if (!response.ok) throw new Error("memory_sample_status_unavailable");
+      const result = (await response.json()) as {
+        status?: typeof sampleStatus;
+      };
+      if (!result.status) throw new Error("memory_sample_status_invalid");
+      setSampleStatus(result.status);
+      sampleRequestAccepted.current = true;
+      setRetryRequestId(null);
+      setSampleError("");
+      sampleRequestId.current = requestId ?? result.status.requestId;
+      return ["queued", "preparing", "warmup", "sampling", "saving"].includes(
+        result.status.phase,
+      );
+    },
+    [it.memorySampleExpired],
+  );
+
+  async function sendMemorySampleStart(requestId: string) {
+    const response = await fetch("/api/diagnostics/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start-memory-sample", requestId }),
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      errorCode?: string;
+      status?: typeof sampleStatus;
+    };
+    if (!response.ok)
+      throw new Error(result.errorCode ?? "memory_sample_start_failed");
+    if (result.status) setSampleStatus(result.status);
+    sampleRequestAccepted.current = true;
+    setRetryRequestId(null);
+    setSampleError("");
+  }
+
+  async function sendMemorySampleSaveRetry(requestId: string) {
+    const response = await fetch("/api/diagnostics/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "retry-memory-sample-save", requestId }),
+    });
+    if (!response.ok) throw new Error("memory_sample_save_failed");
+    const result = (await response.json()) as { status?: typeof sampleStatus };
+    if (result.status) setSampleStatus(result.status);
+    setRetryRequestId(null);
+    setSampleError("");
+  }
+
+  async function startMemorySample() {
+    const saveRetry =
+      sampleStatus?.phase === "failed" &&
+      memorySampleSaveRetryCodes.has(sampleStatus.errorCode ?? "");
+    const requestId = saveRetry
+      ? sampleStatus.requestId
+      : (retryRequestId ?? crypto.randomUUID());
+    sampleRequestId.current = requestId;
+    sampleRequestAccepted.current = saveRetry || retryRequestId !== null;
+    setSampleStarting(true);
+    setSampleError("");
+    setSampleMessage("");
+    setSampleStatus((current) =>
+      current?.requestId === requestId
+        ? current
+        : {
+            requestId,
+            phase: "preparing",
+            elapsedSeconds: 0,
+            recordedSamples: 0,
+            completeSamples: 0,
+            incompleteSamples: 0,
+            missedSamples: 0,
+          },
+    );
+    try {
+      if (saveRetry) await sendMemorySampleSaveRetry(requestId);
+      else await sendMemorySampleStart(requestId);
+    } catch (cause) {
+      const errorCode = cause instanceof Error ? cause.message : "";
+      const documentsUnavailable =
+        errorCode === "DOCUMENTS_NOT_WRITABLE" ||
+        errorCode === "DOCUMENTS_FOLDER_UNAVAILABLE";
+      const requestExpired = errorCode === "REQUEST_EXPIRED";
+      setRetryRequestId(requestExpired ? null : requestId);
+      if (requestExpired) {
+        sampleRequestId.current = null;
+        sampleRequestAccepted.current = false;
+      }
+      setSampleError(
+        requestExpired
+          ? it.memorySampleExpired
+          : documentsUnavailable
+            ? it.memorySampleDirectoryUnavailable
+            : it.memorySampleStartFailed,
+      );
+      void refreshMemorySample(requestId)
+        .then((active) => {
+          if (!active && !sampleRequestAccepted.current)
+            setSampleStatus((current) =>
+              current?.requestId === requestId ? null : current,
+            );
+        })
+        .catch(() => {
+          if (!documentsUnavailable) setSampleError(it.memorySampleUnavailable);
+        });
+    } finally {
+      setSampleStarting(false);
+    }
+  }
+
+  async function copyMemorySamplePath() {
+    const path = sampleStatus?.reportPath ?? sampleStatus?.expectedReportPath;
+    if (!path) return;
+    try {
+      await navigator.clipboard.writeText(path);
+      setSampleMessage(it.pathCopied);
+    } catch {
+      reportPathInput.current?.focus();
+      reportPathInput.current?.select();
+      setSampleMessage(it.copyPathFailed);
+    }
+  }
+
+  const sampleActive =
+    !!sampleStatus &&
+    ["queued", "preparing", "warmup", "sampling", "saving"].includes(
+      sampleStatus.phase,
+    );
+  const expectedReportPathVisible =
+    sampleStatus?.phase === "failed" &&
+    memorySampleSaveRetryCodes.has(sampleStatus.errorCode ?? "");
+  const displayReportPath =
+    sampleStatus?.reportPath ??
+    (expectedReportPathVisible ? sampleStatus?.expectedReportPath : null);
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (sampleRequestId.current && !sampleRequestAccepted.current) return;
+      try {
+        const active = await refreshMemorySample(
+          sampleRequestId.current ?? undefined,
+        );
+        if (
+          !disposed &&
+          document.visibilityState === "visible" &&
+          (active || sampleActive)
+        )
+          timer = setTimeout(poll, 2000);
+      } catch {
+        setSampleError(it.memorySampleUnavailable);
+        if (!disposed && sampleActive) timer = setTimeout(poll, 2000);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void poll();
+      else if (timer) clearTimeout(timer);
+    };
+    void poll();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [
+    it.memorySampleUnavailable,
+    refreshMemorySample,
+    sampleActive,
+    sampleStatus?.phase,
+    sampleStatus?.requestId,
+  ]);
 
   async function exportFile() {
     setPending(true);
@@ -686,6 +916,113 @@ export function DataSettings() {
           {it.exportDiagnostics}
         </Button>
       </div>
+      <div className={`settings-action ${settingsActionStyles.action}`}>
+        <div>
+          <strong>{it.sampleMemory}</strong>
+          <p>{it.sampleMemoryHelp}</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={sampleStarting || sampleActive}
+          onClick={() => void startMemorySample()}
+        >
+          <Activity size={17} />
+          {sampleStatus?.phase === "failed" &&
+          memorySampleSaveRetryCodes.has(sampleStatus.errorCode ?? "")
+            ? it.memorySampleRetrySave
+            : retryRequestId
+              ? it.memorySampleRetry
+              : it.sampleMemory}
+        </Button>
+      </div>
+      {sampleStatus && (
+        <div
+          className={settingsActionStyles.memorySampleResult}
+          role="status"
+          aria-live="polite"
+        >
+          <p>
+            {sampleStatus.phase === "queued"
+              ? it.memorySampleQueued
+              : sampleStatus.phase === "preparing"
+                ? it.memorySamplePreparing
+                : sampleStatus.phase === "warmup"
+                  ? `${it.memorySampleWarmup} ${Math.max(0, 120 - sampleStatus.elapsedSeconds)}s`
+                  : sampleStatus.phase === "sampling"
+                    ? `${it.memorySampleProgress} · ${sampleStatus.recordedSamples}/300`
+                    : sampleStatus.phase === "saving"
+                      ? it.memorySampleSaving
+                      : sampleStatus.phase === "complete"
+                        ? sampleStatus.completeSamples >= 270 &&
+                          sampleStatus.incompleteSamples +
+                            sampleStatus.missedSamples ===
+                            0
+                          ? it.memorySampleComplete
+                          : it.memorySamplePartial
+                        : sampleStatus.errorCode === "REQUEST_EXPIRED"
+                          ? it.memorySampleExpired
+                          : sampleStatus.errorCode === "NO_COMPLETE_SAMPLES"
+                            ? it.memorySampleNoCompletePoints
+                            : sampleStatus.errorCode ===
+                                  "DOCUMENTS_NOT_WRITABLE" ||
+                                sampleStatus.errorCode ===
+                                  "DOCUMENTS_FOLDER_UNAVAILABLE"
+                              ? it.memorySampleDirectoryUnavailable
+                              : memorySampleSaveRetryCodes.has(
+                                    sampleStatus.errorCode ?? "",
+                                  )
+                                ? it.memorySampleSaveFailed
+                                : it.memorySampleFailed}
+          </p>
+          {sampleStatus.phase === "sampling" && (
+            <p>
+              {it.memorySampleCounts}: {sampleStatus.completeSamples} /{" "}
+              {sampleStatus.incompleteSamples} / {sampleStatus.missedSamples}
+            </p>
+          )}
+          {displayReportPath && (
+            <div className={settingsActionStyles.memorySamplePath}>
+              <label htmlFor="memory-sample-report-path">
+                {sampleStatus.reportPath
+                  ? it.memorySamplePath
+                  : it.memorySampleExpectedPath}
+              </label>
+              <div>
+                <input
+                  ref={reportPathInput}
+                  id="memory-sample-report-path"
+                  type="text"
+                  readOnly
+                  value={displayReportPath}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void copyMemorySamplePath()}
+                >
+                  <Copy size={16} />
+                  {it.copyPath}
+                </Button>
+              </div>
+            </div>
+          )}
+          {sampleStatus.reportAvailability === "moved" && (
+            <p>{it.memorySampleMoved}</p>
+          )}
+          {sampleStatus.reportAvailability === "unavailable" && (
+            <p>{it.memorySampleDirectoryUnavailable}</p>
+          )}
+          {retryRequestId && <p>{it.memorySampleRetryHint}</p>}
+          {sampleMessage && <p>{sampleMessage}</p>}
+          {sampleError && (
+            <p className="message error" role="alert">
+              {sampleError}
+            </p>
+          )}
+        </div>
+      )}
       <div
         className={`settings-action danger-zone ${settingsActionStyles.action}`}
       >

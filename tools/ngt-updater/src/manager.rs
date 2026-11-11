@@ -1,4 +1,5 @@
 use crate::diagnostics::{self, Component as DiagnosticComponent, LogOwner, LogSession};
+use crate::memory_sample;
 use fs2::available_space;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -5032,6 +5033,7 @@ fn run_supervisor() -> Result<String, String> {
     WINDOWS_SESSION_END_TICK.store(0, Ordering::SeqCst);
     let _session_notifier = SessionEndNotifier::start()?;
     report_unconfirmed_previous_run(&root);
+    let mut memory_sampler = memory_sample::MemorySamplingSupervisor::new(&root);
     let mut restarts = 0;
     loop {
         let mut run_state = RuntimeRunRecord::new(unique_id(), "supervised-runtime");
@@ -5056,6 +5058,7 @@ fn run_supervisor() -> Result<String, String> {
         loop {
             if unsafe { WaitForSingleObject(stop.0, 250) } == WAIT_OBJECT_0 {
                 let shutdown_started = Instant::now();
+                memory_sampler.interrupt_for_shutdown();
                 run_state.source = runtime_stop_source(&root).to_owned();
                 let result = stop_children(
                     &job,
@@ -5098,6 +5101,7 @@ fn run_supervisor() -> Result<String, String> {
                     } else {
                         "runtime-monitor-error".to_owned()
                     };
+                    memory_sampler.interrupt_for_shutdown();
                     let stop_result = stop_children(
                         &job,
                         &mut children,
@@ -5125,6 +5129,7 @@ fn run_supervisor() -> Result<String, String> {
             }
             if database_exit.is_some() || application_exit.is_some() {
                 let shutdown_started = Instant::now();
+                memory_sampler.interrupt_for_shutdown();
                 run_state.source = if stop.is_signaled() {
                     runtime_stop_source(&root).to_owned()
                 } else {
@@ -5155,6 +5160,7 @@ fn run_supervisor() -> Result<String, String> {
                 }
                 break;
             }
+            memory_sampler.tick(job.0, children.application_job.0, &config.version);
         }
     }
 }
@@ -5200,6 +5206,40 @@ fn stop_supervisor(root: &Path) -> Result<String, String> {
 #[cfg(not(windows))]
 fn stop_supervisor(_root: &Path) -> Result<String, String> {
     Err("Runtime control is supported only on Windows x64.".to_owned())
+}
+
+fn start_memory_sample(root: &Path, request_id: &str) -> Result<String, String> {
+    if !memory_sample::valid_request_id(request_id) {
+        return Err("Memory-sampling request ID is invalid.".to_owned());
+    }
+    #[cfg(windows)]
+    {
+        if let Some(mut status) = memory_sample::read_status(root, Some(request_id))? {
+            if status.phase == "queued" {
+                memory_sample::enqueue(root, request_id)?;
+                status = memory_sample::read_status(root, Some(request_id))?.unwrap_or(status);
+            }
+            return Ok(serde_json::to_string(&status).unwrap_or_default());
+        }
+        if !runtime_is_active(root)? {
+            return Err("NGTManager must be running before memory sampling can start.".to_owned());
+        }
+        let config = read_config(root)?.ok_or_else(|| "NGTManager is not installed.".to_owned())?;
+        if config.maintenance
+            || root.join("state/update-maintenance.json").exists()
+            || !health_matches(&health_client()?, &config.version)
+        {
+            return Err("Memory sampling requires a healthy, non-maintenance runtime.".to_owned());
+        }
+        memory_sample::probe_documents()?;
+        memory_sample::enqueue(root, request_id)?;
+        Ok("Memory-sampling request accepted.".to_owned())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = root;
+        Err("Memory sampling is supported only on Windows x64.".to_owned())
+    }
 }
 
 #[cfg(windows)]
@@ -5428,6 +5468,48 @@ fn run(args: &[String]) -> Result<String, String> {
                 .map_err(|_| "Unable to create the diagnostic export.".to_owned())?;
             Ok("Diagnostic export created.".to_owned())
         }
+        [command, request_id] if command == "memory-sample-start" => {
+            start_memory_sample(&stable_root()?, request_id)
+        }
+        [command, request_id, task_id] if command == "memory-sample-save" => {
+            let path = memory_sample::save_report(&stable_root()?, request_id, task_id)?;
+            serde_json::to_string(&path.to_string_lossy().to_string())
+                .map_err(|_| "Unable to encode memory-sampling report path.".to_owned())
+        }
+        [command, request_id] if command == "memory-sample-retry-save" => {
+            let status = memory_sample::retry_save(&stable_root()?, request_id)?;
+            serde_json::to_string(&status)
+                .map_err(|_| "Unable to encode memory-sampling status.".to_owned())
+        }
+        [command, root_pid, output, warmup, duration, interval]
+            if command == "memory-sample-external" =>
+        {
+            let root_pid = root_pid
+                .parse::<u32>()
+                .map_err(|_| "External sample root PID is invalid.".to_owned())?;
+            let warmup = warmup
+                .parse::<u64>()
+                .map_err(|_| "External sample warmup is invalid.".to_owned())?;
+            let duration = duration
+                .parse::<u64>()
+                .map_err(|_| "External sample duration is invalid.".to_owned())?;
+            let interval = interval
+                .parse::<u64>()
+                .map_err(|_| "External sample interval is invalid.".to_owned())?;
+            let root = stable_root()?;
+            let version = read_config(&root)?
+                .map(|config| config.version)
+                .unwrap_or_else(|| "unknown".to_owned());
+            memory_sample::run_external(
+                root_pid,
+                Path::new(output),
+                warmup,
+                duration,
+                interval,
+                &root.join("tools").join("NGTManager.exe"),
+                &version,
+            )
+        }
         [command, update_id] if command == "update-process" => {
             let root = stable_root()?;
             Ok(serde_json::json!({
@@ -5494,7 +5576,7 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             Ok("Installer registration result was recorded.".to_owned())
         }
-        _ => Err("Usage: NGTManager.exe status | preflight <package> | install <package> [operationId] | update <package> [operationId] | repair <package> | reserve-update <id> <version> | start-update <id> | clear-update-lock <id> <complete|retry> | run | open | stop | recover | diagnose | diagnose-export <outputPath> | update-process <id> | uninstall | verify-release <path> | check-space <path> <bytes> | record-installer-registration <id> <elapsedMs> <complete|incomplete>".to_owned()),
+        _ => Err("Usage: NGTManager.exe status | preflight <package> | install <package> [operationId] | update <package> [operationId] | repair <package> | reserve-update <id> <version> | start-update <id> | clear-update-lock <id> <complete|retry> | run | open | stop | recover | diagnose | diagnose-export <outputPath> | memory-sample-start <requestId> | memory-sample-save <requestId> <taskId> | memory-sample-retry-save <requestId> | memory-sample-external <rootPid> <outputDirectory> <warmupSeconds> <durationSeconds> <intervalSeconds> | update-process <id> | uninstall | verify-release <path> | check-space <path> <bytes> | record-installer-registration <id> <elapsedMs> <complete|incomplete>".to_owned()),
     }
 }
 

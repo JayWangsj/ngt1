@@ -17,6 +17,45 @@
   flex: 0 0 auto;
 }
 
+.memorySampleResult {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.memorySampleResult p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.memorySamplePath > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.memorySamplePath input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .memorySamplePath > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .updatePreference {
   padding-bottom: 0;
 }

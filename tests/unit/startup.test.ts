@@ -48,6 +48,70 @@ describe("Windows persistent startup", () => {
     expect(manager).not.toContain("D:\\NGT");
   });
 
+  it("keeps memory collection off the runtime control loop with one bounded worker", async () => {
+    const sampling = await readFile(
+      "tools/ngt-updater/src/memory_sample.rs",
+      "utf8",
+    );
+    const diagnosticRoute = await readFile(
+      "src/app/api/diagnostics/export/route.ts",
+      "utf8",
+    );
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    const tick = sampling.slice(
+      sampling.indexOf("pub fn tick("),
+      sampling.indexOf(
+        "pub fn interrupt_for_shutdown(",
+        sampling.indexOf("pub fn tick("),
+      ),
+    );
+    const interrupt = sampling.slice(
+      sampling.indexOf("pub fn interrupt_for_shutdown("),
+      sampling.indexOf(
+        "fn start_task(",
+        sampling.indexOf("pub fn interrupt_for_shutdown("),
+      ),
+    );
+    expect(tick).not.toContain("collect_job_processes(");
+    expect(tick).toContain("start_pending_sample(");
+    expect(tick).toContain("if sample_ms >= SAMPLE_SECONDS * 1000");
+    expect(tick).not.toContain("|| active.next_sample == PLANNED_SAMPLES");
+    expect(sampling).toContain("sync_channel(MAX_PROCESSES_PER_POINT + 2)");
+    expect(sampling).toContain('then_some("SAMPLE_BUDGET_EXCEEDED")');
+    expect(sampling).toContain("for job in [database_job, application_job]");
+    expect(sampling).toContain("IsProcessInJob(");
+    expect(manager).toContain(
+      "memory_sampler.tick(job.0, children.application_job.0, &config.version)",
+    );
+    expect(interrupt).toContain(
+      "pending.cancelled.store(true, Ordering::Relaxed)",
+    );
+    expect(interrupt).not.toContain("append_record(");
+    expect(sampling).toContain("if status.ended_reason.is_none()");
+    expect(sampling).toContain("status.expires_at_utc = expiry_time();");
+    expect(sampling).toContain("MAX_REPORT_BYTES.saturating_sub(12 * 1024)");
+    expect(sampling).toContain("processes={} (sample IDs {})");
+    expect(sampling).toContain('open(base.join("enqueue.lock"))');
+    expect(sampling).toContain("current.request_id != request_id");
+    expect(sampling).toContain('"RECORDING_FAILED"');
+    expect(sampling).toContain(
+      "metadata.file_type().is_symlink() || metadata.len() > MAX_REPORT_BYTES",
+    );
+    expect(diagnosticRoute).toContain(
+      'if (requestId && typeof status.taskId === "string")',
+    );
+    expect(diagnosticRoute).toContain('"REQUEST_EXPIRED"');
+    expect(
+      diagnosticRoute.indexOf(
+        "const expiresAtUtc = status.expiresAtUtc;",
+      ),
+    ).toBeGreaterThan(
+      diagnosticRoute.indexOf(
+        'if (requestId && typeof status.taskId === "string")',
+      ),
+    );
+  });
+
   it("waits for database initialization before starting the application", async () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const supervisor = manager.slice(
@@ -322,6 +386,19 @@ describe("Windows persistent startup", () => {
     expect(start).not.toContain('child.kill("SIGTERM")');
     expect(bridge).toContain('process.listenerCount("SIGTERM")');
     expect(bridge).toContain('process.emit("SIGTERM")');
+  });
+
+  it("provides a PowerShell 5.1 wrapper for the shared external Rust sampler", async () => {
+    const script = await readFile("scripts/measure-runtime-memory.ps1", "utf8");
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    expect(script).toContain("[uint32]$RootPid");
+    expect(script).toContain("[string]$OutputRoot");
+    expect(script).toContain("[uint32]$WarmupSeconds = 120");
+    expect(script).toContain("[uint32]$DurationSeconds = 600");
+    expect(script).toContain("[uint32]$IntervalSeconds = 2");
+    expect(script).toContain("$target.CommandLine -notmatch");
+    expect(script).toContain("memory-sample-external");
+    expect(manager).toContain("memory_sample::run_external(");
   });
 
   it("keeps the isolated test preview on a fixed restart-safe port", async () => {
