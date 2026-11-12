@@ -1530,7 +1530,16 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   page,
 }) => {
   const pageErrors: string[] = [];
+  const serverActionEvents: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("request", (request) => {
+    if (request.headers()["next-action"])
+      serverActionEvents.push(`request ${request.method()}`);
+  });
+  page.on("response", (response) => {
+    if (response.request().headers()["next-action"])
+      serverActionEvents.push(`response ${response.status()}`);
+  });
   const suffix = Date.now();
   const projectName = `Temporary compatibility ${suffix}`;
   const productName = `iPhone 15 display fixture ${suffix}`;
@@ -1681,7 +1690,10 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       exact: true,
     });
     const [message, footer, disabled, fieldErrors] = await Promise.all([
-      page.getByRole("alert").textContent().catch(() => null),
+      page
+        .getByRole("alert")
+        .textContent()
+        .catch(() => null),
       page
         .locator(".sticky-order-actions")
         .innerText()
@@ -1690,7 +1702,7 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       page.locator(".field-error").allTextContents(),
     ]);
     throw new Error(
-      `Repair order creation failed: message=${message?.trim() || "none"}; buttonDisabled=${disabled}; footer=${footer.replace(/\s+/g, " ")}; fieldErrors=${fieldErrors.join(" | ") || "none"}; pageErrors=${pageErrors.join(" | ") || "none"}`,
+      `Repair order creation failed: message=${message?.trim() || "none"}; buttonDisabled=${disabled}; footer=${footer.replace(/\s+/g, " ")}; fieldErrors=${fieldErrors.join(" | ") || "none"}; pageErrors=${pageErrors.join(" | ") || "none"}; serverActions=${serverActionEvents.join(", ") || "none"}`,
       { cause },
     );
   }
