@@ -130,6 +130,28 @@ if ($AuthMatrixOnly) {
 }
 
 if ($Child) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class NgtAcceptanceChildHandles
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
+}
+'@
+  foreach ($stdHandleId in @(-11, -12)) {
+    $stdHandle = [NgtAcceptanceChildHandles]::GetStdHandle($stdHandleId)
+    if ($stdHandle -eq [IntPtr]::Zero -or $stdHandle.ToInt64() -eq -1) { continue }
+    if (-not [NgtAcceptanceChildHandles]::SetHandleInformation($stdHandle, 1, 0)) {
+      throw "Could not isolate standard-user acceptance output handles."
+    }
+  }
+
   $request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
   foreach ($name in @("GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")) {
     Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
