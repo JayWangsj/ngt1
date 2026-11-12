@@ -94,6 +94,7 @@ $installerLog = Join-Path $env:RUNNER_TEMP "installer.log"
 $managerLog = Join-Path $installRoot "logs\manager.log"
 $previousTestApiUrl = $env:NGT_TEST_RELEASE_API_URL
 $updateServerProcess = $null
+$managerUninstallFailure = $null
 $businessSnapshotPath = Join-Path $env:RUNNER_TEMP "ngt-manager-online-update-business.json"
 try {
   if ($OnlineUpdateAcceptance -and $ProductionUpdaterAcceptance) {
@@ -386,9 +387,11 @@ try {
     $uninstallDetails = [regex]::Replace($uninstallDetails, "[`r`n]+", " ").Trim()
     if ($uninstallDetails.Length -gt 400) { $uninstallDetails = $uninstallDetails.Substring(0, 400) }
     if ($uninstallDetails) {
-      throw "NGTManager safe-uninstall command failed with exit code $($managerUninstall.ExitCode): $uninstallDetails"
+      $managerUninstallFailure = "exit code $($managerUninstall.ExitCode): $uninstallDetails"
+      throw "NGTManager safe-uninstall command failed with $managerUninstallFailure"
     }
-    throw "NGTManager safe-uninstall command failed with exit code $($managerUninstall.ExitCode) and produced no diagnostic text."
+    $managerUninstallFailure = "exit code $($managerUninstall.ExitCode), no diagnostic text"
+    throw "NGTManager safe-uninstall command failed with $managerUninstallFailure"
   }
 
   Write-Output "NGTManager safe-uninstall command passed."
@@ -484,6 +487,10 @@ try {
       $cleanupProblems.Add("missing-uninstaller")
       Write-Warning "Installer acceptance could not find its uninstaller; retained the isolated installation."
     }
+  }
+  if ($managerUninstallFailure) {
+    $cleanupSafe = $false
+    $cleanupProblems.Add("manager safe-uninstall: $managerUninstallFailure")
   }
   if ($cleanupSafe) {
     foreach ($port in @(3000, 55432, 55433)) {
