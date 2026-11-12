@@ -1529,6 +1529,8 @@ test("creates a repair part and quote option directly from a new order", async (
 test("temporary iPhone 11 projects hide other-model schemes and save drafts on submit", async ({
   page,
 }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   const suffix = Date.now();
   const projectName = `Temporary compatibility ${suffix}`;
   const productName = `iPhone 15 display fixture ${suffix}`;
@@ -1674,12 +1676,18 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   try {
     await save(page);
   } catch (cause) {
-    const message = await page
-      .getByRole("alert")
-      .textContent()
-      .catch(() => null);
+    const button = page.getByRole("button", {
+      name: "Crea scheda di servizio",
+      exact: true,
+    });
+    const [message, footer, disabled, fieldErrors] = await Promise.all([
+      page.getByRole("alert").textContent().catch(() => null),
+      page.locator(".sticky-order-actions").innerText().catch(() => "unavailable"),
+      button.isDisabled().catch(() => true),
+      page.locator(".field-error").allTextContents(),
+    ]);
     throw new Error(
-      `Repair order creation failed: ${message?.trim() || "no visible error"}`,
+      `Repair order creation failed: message=${message?.trim() || "none"}; buttonDisabled=${disabled}; footer=${footer.replace(/\s+/g, " ")}; fieldErrors=${fieldErrors.join(" | ") || "none"}; pageErrors=${pageErrors.join(" | ") || "none"}`,
       { cause },
     );
   }
