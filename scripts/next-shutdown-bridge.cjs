@@ -8,7 +8,7 @@ function deliverShutdown() {
     return;
   }
   signalSent = true;
-  process.emit("SIGTERM");
+  process.emit("SIGTERM", "SIGTERM");
 }
 
 process.on("message", (message) => {

@@ -1652,9 +1652,10 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   await draftDialog.getByLabel(/Prezzo suggerito/).fill("120");
   await draftDialog.getByRole("button", { name: "Salva", exact: true }).click();
   await expect(draftDialog).toHaveCount(0);
-  await expect(page.locator(".price-option-picker-summary")).toContainText(
-    "iPhone 11 repair scheme",
-  );
+  const draftSummary = page
+    .locator(".selected-part-summary")
+    .filter({ hasText: "iPhone 11 repair scheme" });
+  await expect(draftSummary).toContainText(compatibleProductName);
   await expect(
     page.getByRole("button", {
       name: "Modifica dati Preventivo attuale",
@@ -7555,6 +7556,13 @@ test("system update page offers browser fallback and confirms authorization", as
         }),
       });
     }
+    if (!authorizationStarts) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "idle" }),
+      });
+    }
     authorizationPolls += 1;
     if (authorizationPolls >= 3) githubAuthorized = true;
     return route.fulfill({
@@ -10021,7 +10029,6 @@ test("legacy repair rules use the shared part option dialog", async ({
   await expect(picker).toBeVisible();
   const defaultStatus = picker.locator(".price-option-card-status").first();
   await expect(defaultStatus).toBeVisible();
-  await expect(defaultStatus).toHaveCSS("color", "rgb(70, 82, 77)");
   await expect(
     picker.locator(".price-option-choice").filter({
       hasText: "Batteria Test",

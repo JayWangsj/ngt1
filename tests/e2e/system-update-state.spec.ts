@@ -568,7 +568,8 @@ test("keeps queued task stages separate from the installed version", async ({
     document.cookie = "ngt-locale=zh; Path=/; SameSite=Lax";
   });
   await page.reload();
-  await page.locator(".sidebar-update-entry").click();
+  const updateEntry = page.locator(".sidebar-update-entry");
+  await expect(updateEntry).toHaveAttribute("aria-expanded", "true");
   const version = page.locator(".update-version-block strong");
   await expect(version).toHaveText("v2.0.15");
   await expect(page.locator(".update-task-compact")).toContainText(

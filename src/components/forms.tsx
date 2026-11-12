@@ -2223,8 +2223,11 @@ export function ItemsEditor({
                           <Package size={18} aria-hidden="true" />
                         </span>
                         <div className="selection-summary-copy">
-                          <strong>{selectedProduct.name}</strong>
+                          <strong>{item.draftPriceOption?.name ?? selectedProduct.name}</strong>
                           <small>
+                            {item.draftPriceOption && (
+                              <>{selectedProduct.name} · </>
+                            )}
                             {selectedProduct.category} · {it.actualStock}{" "}
                             {selectedProduct.stock} · {it.reservedStock}{" "}
                             {selectedProduct.reserved ?? 0} ·{" "}
