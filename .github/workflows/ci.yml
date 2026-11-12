@@ -54,6 +54,8 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm lint
+      - name: Show forms Prettier diff
+        run: pnpm exec prettier src/components/forms.tsx | diff -u src/components/forms.tsx - || true
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
