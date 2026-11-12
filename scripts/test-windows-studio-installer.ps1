@@ -89,6 +89,7 @@ foreach ($port in @(3000, 55432, 55433)) {
 
 $installationAttempted = $false
 $cleanupSafe = $true
+$cleanupProblems = New-Object 'System.Collections.Generic.List[string]'
 $installerLog = Join-Path $env:RUNNER_TEMP "installer.log"
 $managerLog = Join-Path $installRoot "logs\manager.log"
 $previousTestApiUrl = $env:NGT_TEST_RELEASE_API_URL
@@ -413,6 +414,7 @@ try {
       }
     } catch {
       $cleanupSafe = $false
+      $cleanupProblems.Add("online-update-api")
       Write-Warning ("Online-update acceptance API cleanup failed: " + $_.Exception.Message)
     }
   }
@@ -441,10 +443,12 @@ try {
         }
       } catch {
         $cleanupSafe = $false
+        $cleanupProblems.Add("uninstaller")
         Write-Warning ("Installer acceptance cleanup failed: " + $_.Exception.Message)
       }
     } elseif (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json")) {
       $cleanupSafe = $false
+      $cleanupProblems.Add("missing-uninstaller")
       Write-Warning "Installer acceptance could not find its uninstaller; retained the isolated installation."
     }
   }
@@ -452,11 +456,15 @@ try {
     foreach ($port in @(3000, 55432, 55433)) {
       if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
         $cleanupSafe = $false
+        $cleanupProblems.Add("listener-port-$port")
         Write-Warning "Installer acceptance left port $port open; no process was stopped by the test cleanup."
       }
     }
   }
-  if (-not $cleanupSafe) { throw "Windows installer acceptance cleanup could not be verified." }
+  if (-not $cleanupSafe) {
+    $reason = if ($cleanupProblems.Count) { $cleanupProblems -join ", " } else { "unclassified" }
+    throw "Windows installer acceptance cleanup could not be verified ($reason)."
+  }
   if (Test-Path -LiteralPath $installRoot) {
     $expectedInstallRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "NGTManager"))
     if ([System.IO.Path]::GetFullPath($installRoot) -ne $expectedInstallRoot) {
