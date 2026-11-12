@@ -5833,11 +5833,11 @@ mod tests {
             .join("candidate-run.json");
 
         assert!(!destination.parent().unwrap().exists());
-        atomic_write(&destination, br#"{\"phase\":\"running\"}"#).unwrap();
+        atomic_write(&destination, br#"{"phase":"running"}"#).unwrap();
 
         assert_eq!(
             fs::read(&destination).unwrap(),
-            br#"{\"phase\":\"running\"}"#
+            br#"{"phase":"running"}"#
         );
         let _ = fs::remove_dir_all(root);
     }
