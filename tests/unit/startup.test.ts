@@ -383,7 +383,7 @@ describe("Windows persistent startup", () => {
     expect(start).toContain('child.send({ type: "ngt:shutdown" })');
     expect(start).not.toContain('child.kill("SIGTERM")');
     expect(bridge).toContain('process.listenerCount("SIGTERM")');
-    expect(bridge).toContain('process.emit("SIGTERM")');
+    expect(bridge).toContain('process.emit("SIGTERM", "SIGTERM")');
   });
 
   it("provides a PowerShell 5.1 wrapper for the shared external Rust sampler", async () => {
