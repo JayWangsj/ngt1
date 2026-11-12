@@ -2224,7 +2224,8 @@ export function ItemsEditor({
                         </span>
                         <div className="selection-summary-copy">
                           <strong>
-                            {item.draftPriceOption?.name ?? selectedProduct.name}
+                            {item.draftPriceOption?.name ??
+                              selectedProduct.name}
                           </strong>
                           <small>
                             {item.draftPriceOption && (
