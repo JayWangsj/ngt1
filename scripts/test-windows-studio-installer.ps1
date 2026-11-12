@@ -268,16 +268,25 @@ try {
       -Code $businessCode -SnapshotPath $businessSnapshotPath
 
     $updateId = [guid]::NewGuid().ToString()
-    $reserveResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-reserve.txt"
-    & $managerPath reserve-update $updateId $ExpectedVersion --result-file $reserveResultPath | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $reserveResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($reserveResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    $reserveOutput = & $managerPath reserve-update $updateId $ExpectedVersion 2>&1
+    $reserveExitCode = $LASTEXITCODE
+    $reserveText = (@($reserveOutput) -join "`n").Trim()
+    $reserveStatus = $null
+    try { $reserveStatus = $reserveText | ConvertFrom-Json } catch { }
+    if ($reserveExitCode -ne 0 -or -not $reserveStatus -or
+        $reserveStatus.updateId -ne $updateId -or
+        $reserveStatus.targetVersion -ne $ExpectedVersion -or
+        $reserveStatus.status -ne "starting") {
       throw "NGTManager could not reserve the exact-SHA online update."
     }
-    $startResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-start.txt"
-    & $managerPath start-update $updateId --result-file $startResultPath | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $startResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($startResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    $startOutput = & $managerPath start-update $updateId 2>&1
+    $startExitCode = $LASTEXITCODE
+    $startText = (@($startOutput) -join "`n").Trim()
+    $startStatus = $null
+    try { $startStatus = $startText | ConvertFrom-Json } catch { }
+    if ($startExitCode -ne 0 -or -not $startStatus -or
+        $startStatus.updateId -ne $updateId -or
+        $startStatus.executorConfirmed -ne $true) {
       throw "NGTManager could not start the Rust online updater."
     }
 
