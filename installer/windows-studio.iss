@@ -206,6 +206,21 @@ begin
   Result := Copy(ResultLines[1], 1, 512);
 end;
 
+function ExportFailureDiagnostics(ManagerPath: String): String;
+var
+  DiagnosticPath: String;
+  ResultCode: Integer;
+  Started: Boolean;
+begin
+  Result := '';
+  DiagnosticPath := ExpandConstant('{userdocs}\NGTManager-diagnostics-' + AttemptId + '.txt');
+  if FileExists(DiagnosticPath) or (not FileExists(ManagerPath)) then exit;
+  Started := Exec(ManagerPath, 'diagnose-export "' + DiagnosticPath + '"',
+    ExtractFileDir(ManagerPath), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if Started and (ResultCode = 0) and FileExists(DiagnosticPath) then
+    Result := DiagnosticPath;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ManagerPath: String;
@@ -220,6 +235,7 @@ var
   ExtractionElapsedMs: Int64;
   ManagerError: String;
   MessageText: String;
+  DiagnosticPath: String;
 begin
   NeedsRestart := False;
   if PrepareSucceeded then
@@ -289,8 +305,12 @@ begin
             MessageText := 'Cancellation was requested. Setup waited for a safe rollback point.'
           else
             MessageText := 'NGTManager stopped during: ' + PhaseDescription(CurrentPhase) + '.';
+          DiagnosticPath := ExportFailureDiagnostics(ManagerPath);
+          if DiagnosticPath <> '' then
+            MessageText := MessageText + #13#10 + 'Unified diagnostics saved to: ' + DiagnosticPath
+          else
+            MessageText := MessageText + #13#10 + 'Open the matching Inno Setup Log in %TEMP% for installation details.';
           Result := MessageText + #13#10 + 'Attempt ID: ' + AttemptId + #13#10 +
-            'Open the matching Inno Setup Log in %TEMP% for installation details.' + #13#10 +
             'After NGTManager starts, use Settings > Export diagnostics to create one support file.';
           Log('NGTManager core failed or cancellation was requested; exit=' + IntToStr(ResultCode) +
             '; attempt=' + AttemptId + '.');

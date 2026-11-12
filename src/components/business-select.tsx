@@ -526,7 +526,9 @@ export function SelectDropdown({
             else openDropdown();
           }}
           onKeyDown={(event) => {
-            if (["Enter", " ", "ArrowDown"].includes(event.key)) {
+            if (open) {
+              keys(event);
+            } else if (["Enter", " ", "ArrowDown"].includes(event.key)) {
               event.preventDefault();
               openDropdown();
             }

@@ -840,7 +840,7 @@ export function SystemUpdate({
                 </small>
               )}
             </div>
-            {!info.notInstallable && (
+            {!info.notInstallable && !confirmationOpen && (
               <Button
                 type="button"
                 disabled={

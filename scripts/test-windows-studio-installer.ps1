@@ -376,7 +376,20 @@ try {
       (Join-Path $installRoot "logs\application.log")
     )
     $diagnosticSources += Join-Path $installRoot "state\update-status.json"
+    $diagnosticSources += Join-Path $installRoot "state\runtime\candidate-run.json"
+    $diagnosticSources += Join-Path $installRoot "state\runtime\run-state.json"
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "update-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    if (Test-Path -LiteralPath $installerLog -PathType Leaf) {
+      $attemptLog = Get-Content -LiteralPath $installerLog -Raw -ErrorAction SilentlyContinue
+      $attemptMatch = [regex]::Match($attemptLog, 'NGTManager install attempt ID: (?<id>[A-Za-z0-9-]{1,64})')
+      if ($attemptMatch.Success) {
+        $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+        $attemptDiagnostics = Join-Path $documents ("NGTManager-diagnostics-" + $attemptMatch.Groups["id"].Value + ".txt")
+        if (Test-Path -LiteralPath $attemptDiagnostics -PathType Leaf) {
+          $diagnosticSources += $attemptDiagnostics
+        }
+      }
+    }
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "migration-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `
       -Stage "installer-acceptance" -Tag ("v" + $ExpectedVersion) -Commit $env:GITHUB_SHA `

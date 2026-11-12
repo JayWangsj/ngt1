@@ -1532,8 +1532,10 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   const suffix = Date.now();
   const projectName = `Temporary compatibility ${suffix}`;
   const productName = `iPhone 15 display fixture ${suffix}`;
+  const compatibleProductName = `iPhone 11 display fixture ${suffix}`;
   const optionName = `iPhone 15 scheme ${suffix}`;
   let productId = "";
+  let compatibleProductId = "";
   const setupDb = new PrismaClient();
   try {
     const customer = await setupDb.customer.findFirstOrThrow({
@@ -1566,6 +1568,25 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       },
     });
     productId = product.id;
+    const compatibleProduct = await setupDb.product.create({
+      data: {
+        name: compatibleProductName,
+        category: "Schermi",
+        usage: "REPAIR",
+        costPrice: "20",
+        salePrice: "0",
+        stockQuantity: 2,
+        compatibilities: {
+          create: {
+            category: "PHONE",
+            brand: "Apple",
+            model: "iPhone 11",
+            project: projectName,
+          },
+        },
+      },
+    });
+    compatibleProductId = compatibleProduct.id;
     const rule = await setupDb.priceRule.create({
       data: {
         category: "PHONE",
@@ -1624,7 +1645,7 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   await chooseBusinessOption(
     page,
     "Ricambio richiesto",
-    productName,
+    compatibleProductName,
     draftDialog,
   );
   await draftDialog.getByLabel(/Nome opzione/).fill("iPhone 11 repair scheme");
@@ -1657,6 +1678,15 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       await verifyDb.productCompatibility.count({
         where: {
           productId,
+          model: "iPhone 11",
+          project: projectName.toLocaleLowerCase("it"),
+        },
+      }),
+    ).toBe(0);
+    expect(
+      await verifyDb.productCompatibility.count({
+        where: {
+          productId: compatibleProductId,
           model: "iPhone 11",
           project: projectName.toLocaleLowerCase("it"),
         },
@@ -1988,10 +2018,7 @@ test("shows a retired repair part in its historical order and hides it from new 
       .getByLabel("Consegna prevista", { exact: true })
       .fill("2099-12-31");
     await chooseRepairProjects(page, [retirementFixture.project]);
-    const openOptions = page.getByRole("button", {
-      name: "Opzioni ricambio",
-      exact: true,
-    });
+    const openOptions = page.locator(".quote-required-part-add:visible");
     await expect(openOptions).toHaveCount(1);
     await openOptions.click();
     const optionPicker = page.getByRole("dialog", {
@@ -3723,13 +3750,13 @@ test("settings action rows keep shared layout and responsive behavior", async ({
 
   await page.goto("/settings/data");
   const actions = page.locator(".settings-action");
-  await expect(actions).toHaveCount(4);
+  await expect(actions).toHaveCount(5);
   const row = actions.first();
   await expect(row).toHaveCSS("gap", "24px");
   await expect(row).toHaveCSS("padding-top", "18px");
   await expect(row.locator("p")).toHaveCSS("margin-top", "5px");
 
-  const clearRow = actions.nth(3);
+  const clearRow = actions.last();
   const clearButton = clearRow.locator(".button-danger");
   await expect(clearButton).toHaveCSS("opacity", "0");
   await expect(clearButton).toHaveCSS("pointer-events", "none");
@@ -7546,31 +7573,34 @@ test("system update page offers browser fallback and confirms authorization", as
   });
 
   await page.goto("/settings/system-update");
+  await expect(page).toHaveURL(/\/$/);
+  const updateDialog = page.getByRole("dialog");
+  await expect(updateDialog).toBeVisible();
   const italianButton = page.getByRole("button", {
     name: "Italiano",
     exact: true,
   });
   if (await italianButton.isVisible()) await italianButton.click();
-  await expect(page.locator(".system-update-page")).toContainText(
+  await expect(updateDialog.locator(".system-update-page")).toContainText(
     "Per controllare gli aggiornamenti, autorizza GitHub una sola volta.",
   );
-  await page
+  await updateDialog
     .getByRole("button", { name: "Autorizza GitHub", exact: true })
     .click();
   await expect.poll(() => authorizationStarts).toBe(1);
-  await expect(page.locator(".github-auth-fallback")).toContainText(
+  await expect(updateDialog.locator(".github-auth-fallback")).toContainText(
     "ABCD-1234",
   );
   await expect(
-    page.getByRole("link", { name: "Apri autorizzazione" }),
+    updateDialog.getByRole("link", { name: "Apri autorizzazione" }),
   ).toHaveAttribute("href", "https://github.com/login/device");
-  await expect(page.locator(".system-update-page")).toContainText(
+  await expect(updateDialog.locator(".system-update-page")).toContainText(
     "Il sistema è aggiornato.",
   );
   await expect.poll(() => authorizationStarts).toBe(1);
-  await expect(page.locator(".github-auth-fallback")).toHaveCount(0);
+  await expect(updateDialog.locator(".github-auth-fallback")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Autorizza GitHub", exact: true }),
+    updateDialog.getByRole("button", { name: "Autorizza GitHub", exact: true }),
   ).toHaveCount(0);
 });
 test("quick service editor uses the shared dialog form layout", async ({
@@ -9991,7 +10021,7 @@ test("legacy repair rules use the shared part option dialog", async ({
   await expect(picker).toBeVisible();
   const defaultStatus = picker.locator(".price-option-card-status").first();
   await expect(defaultStatus).toBeVisible();
-  await expect(defaultStatus).toHaveCSS("color", "rgb(128, 96, 0)");
+  await expect(defaultStatus).toHaveCSS("color", "rgb(70, 82, 77)");
   await expect(
     picker.locator(".price-option-choice").filter({
       hasText: "Batteria Test",
@@ -11195,7 +11225,7 @@ test("quote hierarchy supports stable hover editing and linked batch selection",
   await editAction.focus();
   await page.keyboard.press("Tab");
   await page.keyboard.press("Shift+Tab");
-  await expect(editAction).toHaveCSS("outline-color", "rgb(128, 96, 0)");
+  await expect(editAction).toHaveCSS("outline-color", "rgb(70, 82, 77)");
   await expect(editAction).toHaveCSS("outline-offset", "3px");
   const hoveredProjectPosition = await row
     .locator("button.inline-rule-project")

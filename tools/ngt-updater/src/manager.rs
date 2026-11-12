@@ -2632,6 +2632,16 @@ fn stop_children(
         application.error_code.unwrap_or("none"),
         application.elapsed_ms,
     );
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.detail(
+            DiagnosticComponent::Manager,
+            format!(
+                "runtime.shutdown.application.exit_code={:?}\n",
+                application.exit_code
+            )
+            .as_bytes(),
+        );
+    }
     if !application.confirmed {
         run_state.phase = "failed".to_owned();
         run_state.ended_at_utc = Some(iso_timestamp());
@@ -2690,6 +2700,16 @@ fn stop_children(
         database.error_code.unwrap_or("none"),
         database.elapsed_ms,
     );
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.detail(
+            DiagnosticComponent::Manager,
+            format!(
+                "runtime.shutdown.database.exit_code={:?}\n",
+                database.exit_code
+            )
+            .as_bytes(),
+        );
+    }
     let failures = [application.error_code, database.error_code]
         .into_iter()
         .flatten()
@@ -2735,12 +2755,14 @@ fn stop_children(
             0,
         );
         return Err(format!(
-            "Runtime shutdown required forced cleanup or the stop result could not be saved ({}).",
+            "Runtime shutdown required forced cleanup or the stop result could not be saved ({}; application_exit_code={:?}; database_exit_code={:?}).",
             if state_write_failed {
                 "STOP_RESULT_WRITE_FAILED".to_owned()
             } else {
                 failures.join(",")
-            }
+            },
+            application.exit_code,
+            database.exit_code
         ));
     }
     run_state.phase = "completed".to_owned();

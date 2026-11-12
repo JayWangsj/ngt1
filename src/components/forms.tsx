@@ -373,19 +373,54 @@ const blankItem = (): ItemView => ({
   priceOptionName: "",
   suggested: "",
 });
-function defaultPriceOption(rule?: RuleView | null) {
-  const options = rule?.options?.filter((option) => option.enabled) ?? [];
-  return options.find((option) => option.isDefault) ?? options[0] ?? null;
-}
-function itemPriceOption(rule: RuleView | null | undefined, item: ItemView) {
+function eligiblePriceOptions(
+  match: { rule: RuleView; level: string } | null | undefined,
+  device: { category: string; brand: string; series: string; model: string },
+  project: string,
+) {
   return (
-    rule?.options?.find(
+    match?.rule.options?.filter(
       (option) =>
         option.enabled &&
-        (option.id === item.priceOptionId ||
-          (!item.priceOptionId && option.productId === item.requiredProductId)),
+        option.product.enabled !== false &&
+        (option.product.usage ?? "REPAIR") === "REPAIR" &&
+        (match.level !== "GENERIC" ||
+          option.product.compatibilities?.some((compatibility) =>
+            matchesProductCompatibility(compatibility, device, project),
+          )),
+    ) ?? []
+  );
+}
+function defaultPriceOption(options: PriceRuleOptionView[]) {
+  return options.find((option) => option.isDefault) ?? options[0] ?? null;
+}
+function itemPriceOption(options: PriceRuleOptionView[], item: ItemView) {
+  return (
+    options.find(
+      (option) =>
+        option.id === item.priceOptionId ||
+        (!item.priceOptionId && option.productId === item.requiredProductId),
     ) ?? null
   );
+}
+function availableRequiredProductId(
+  match: { rule: RuleView; level: string } | null | undefined,
+  products: CreatedProduct[],
+  device: { category: string; brand: string; series: string; model: string },
+  project: string,
+) {
+  const productId = match?.rule.requiredProductId;
+  const product = products.find((candidate) => candidate.id === productId);
+  if (
+    !product ||
+    (match?.level === "GENERIC" &&
+      !product.compatibilities?.some((compatibility) =>
+        matchesProductCompatibility(compatibility, device, project),
+      ))
+  ) {
+    return "";
+  }
+  return product.id;
 }
 function numeric(value: string) {
   try {
@@ -1464,7 +1499,9 @@ export function ItemsEditor({
   const pickerProjects = [
     ...catalogProjects.map((project) => {
       const found = matchRule(rules, device, project)!;
-      const option = defaultPriceOption(found.rule);
+      const option = defaultPriceOption(
+        eligiblePriceOptions(found, device, project),
+      );
       return {
         project,
         final: option?.suggested ?? found.rule.suggested,
@@ -1480,7 +1517,13 @@ export function ItemsEditor({
           priceOptionName: option?.name ?? "",
           suggested: option?.suggested ?? found.rule.suggested,
           requiredProductId:
-            option?.productId ?? found.rule.requiredProductId ?? "",
+            option?.productId ??
+            availableRequiredProductId(
+              found,
+              availableProducts,
+              device,
+              project,
+            ),
           requiredQuantity:
             option?.quantity ?? found.rule.requiredQuantity ?? 1,
           requiredProductRemoved: false,
@@ -1557,7 +1600,9 @@ export function ItemsEditor({
           normalizedProject(candidate) === normalizedProject(item.project),
       );
       const found = project ? matchRule(rules, device, project) : null;
-      const option = defaultPriceOption(found?.rule);
+      const option = defaultPriceOption(
+        eligiblePriceOptions(found, device, project),
+      );
       return project && found
         ? {
             ...item,
@@ -1567,7 +1612,13 @@ export function ItemsEditor({
             priceOptionName: option?.name ?? "",
             suggested: option?.suggested ?? found.rule.suggested,
             requiredProductId:
-              option?.productId ?? found.rule.requiredProductId ?? "",
+              option?.productId ??
+            availableRequiredProductId(
+              found,
+              availableProducts,
+              device,
+              project,
+            ),
             requiredQuantity:
               option?.quantity ?? found.rule.requiredQuantity ?? 1,
             requiredProductRemoved: false,
@@ -1664,21 +1715,11 @@ export function ItemsEditor({
         if (focusedEdit && initialEdit?.index !== index) return null;
         const projects = deviceProjects(rules, device);
         const match = matchRule(rules, device, item.project);
-        const priceOptions =
-          match?.rule.options?.filter(
-            (option) =>
-              option.enabled &&
-              option.product.enabled !== false &&
-              (option.product.usage ?? "REPAIR") === "REPAIR" &&
-              (match.level !== "GENERIC" ||
-                option.product.compatibilities?.some((compatibility) =>
-                  matchesProductCompatibility(
-                    compatibility,
-                    device,
-                    item.project,
-                  ),
-                )),
-          ) ?? [];
+        const priceOptions = eligiblePriceOptions(
+          match,
+          device,
+          item.project,
+        );
         const draftProduct = availableProducts.find(
           (product) => product.id === item.draftPriceOption?.productId,
         );
@@ -1717,7 +1758,7 @@ export function ItemsEditor({
             ),
         );
         const selectedPriceOption =
-          draftPriceOptionView ?? itemPriceOption(match?.rule, item);
+          draftPriceOptionView ?? itemPriceOption(priceOptions, item);
         const projectQuery = projectQueries[index] ?? "";
         const drafts = temporaryProjects[index] ?? [];
         const normalizedQuery = normalizedProject(projectQuery);
@@ -2058,7 +2099,9 @@ export function ItemsEditor({
                   }}
                   onChange={(project) => {
                     const found = matchRule(rules, device, project);
-                    const option = defaultPriceOption(found?.rule);
+                    const option = defaultPriceOption(
+                      eligiblePriceOptions(found, device, project),
+                    );
                     const draft = drafts.find(
                       (candidate) =>
                         normalizedProject(candidate.project) ===
@@ -2088,8 +2131,12 @@ export function ItemsEditor({
                           option?.suggested ?? found?.rule.suggested ?? "",
                         requiredProductId:
                           option?.productId ??
-                          found?.rule.requiredProductId ??
-                          "",
+                          availableRequiredProductId(
+                            found,
+                            availableProducts,
+                            device,
+                            project,
+                          ),
                         requiredProductName: option?.product.name ?? "",
                         requiredQuantity:
                           option?.quantity ?? found?.rule.requiredQuantity ?? 1,

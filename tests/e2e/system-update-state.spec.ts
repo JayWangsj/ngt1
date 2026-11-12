@@ -456,7 +456,7 @@ test("captures an available release in the expanded sidebar without progress", a
   await expect(page.locator(".update-notification")).toHaveCount(0);
   await expect(page.locator(".sidebar-update-dot")).toBeVisible();
   await page.locator(".sidebar-update-entry").click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/settings\/?$/);
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator(".update-release-card")).toContainText("2.0.10");
   await expect(page.locator(".update-progress-card")).toHaveCount(0);
@@ -657,8 +657,9 @@ test("keeps the version link and red dot usable when the sidebar is collapsed", 
     animations: "disabled",
   });
   await page.locator(".sidebar-update-entry").click();
-  await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator(".system-update-page")).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/?$/);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator(".update-release-card")).toBeVisible();
 });
 
 test("shows progress only after the executor reports a real stage", async ({
