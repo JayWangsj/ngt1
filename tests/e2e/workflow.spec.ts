@@ -1532,18 +1532,6 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   const pageErrors: string[] = [];
   const serverActionEvents: string[] = [];
   const orderRouteEvents: string[] = [];
-  const safeActionErrorCategories = new Map([
-    ["Ricambio non disponibile.", "part-unavailable"],
-    ["Selezione ricambio non valida.", "part-invalid"],
-    ["L'opzione ricambio non appartiene all'intervento selezionato.", "option-rule-mismatch"],
-    ["Il ricambio non corrisponde all'opzione selezionata.", "part-option-mismatch"],
-    ["临时配件方案保存失败，请刷新后重试。", "draft-option-save"],
-    ["配件报价方案保存失败，请刷新后重试。", "quote-option-save"],
-    ["同一维修项目只能有一个默认配件方案。", "duplicate-default-options"],
-    ["同一维修项目的配件方案内容冲突，请刷新后重选。", "draft-option-conflict"],
-    ["该维修项目已有不同的配件报价方案，请刷新后重新选择。", "existing-rule-conflict"],
-    ["所选配件不适用于当前设备和维修项目，请刷新后重选。", "part-incompatible"],
-  ]);
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
@@ -1574,10 +1562,18 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
         if (!message) errorCategory = "unreadable";
         else if (message.startsWith("Operazione non riuscita.")) {
           errorCategory = "internal";
-        } else if (safeActionErrorCategories.has(message)) {
-          errorCategory =
-            safeActionErrorCategories.get(message) ?? "business-rule";
-        } else if (/配件|Ricambio|opzione/i.test(message)) {
+        } else if (message.includes("不适用于当前设备")) {
+          errorCategory = "part-incompatible";
+        } else if (message.includes("内容冲突")) {
+          errorCategory = "draft-option-conflict";
+        } else if (message.includes("已有不同的配件报价方案")) {
+          errorCategory = "existing-rule-conflict";
+        } else if (message.includes("默认配件方案")) {
+          errorCategory = "default-option-conflict";
+        } else if (
+          message.includes("保存失败") ||
+          /Ricambio|ricambio|opzione/i.test(message)
+        ) {
           errorCategory = "part-option";
         } else errorCategory = "business-rule";
       }
