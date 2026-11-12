@@ -1550,7 +1550,7 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       const body = await response.text();
       const ok = body.match(/"ok"\s*:\s*(true|false)/)?.[1] ?? "unknown";
       const hasId = /"id"\s*:/.test(body);
-      const errorMatch = body.match(/"error"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"/);
+      const errorMatch = body.match(/"error"\s*:\s*"((?:\\.|[^"\\])*)"/);
       let errorCategory = "none";
       if (errorMatch) {
         let message = "";
