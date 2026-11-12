@@ -130,29 +130,14 @@ if ($AuthMatrixOnly) {
 }
 
 if ($Child) {
-  Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-
-public static class NgtAcceptanceChildHandles
-{
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern IntPtr GetStdHandle(int nStdHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
-}
-'@
-  foreach ($stdHandleId in @(-11, -12)) {
-    $stdHandle = [NgtAcceptanceChildHandles]::GetStdHandle($stdHandleId)
-    if ($stdHandle -eq [IntPtr]::Zero -or $stdHandle.ToInt64() -eq -1) { continue }
-    if (-not [NgtAcceptanceChildHandles]::SetHandleInformation($stdHandle, 1, 0)) {
-      throw "Could not isolate standard-user acceptance output handles."
-    }
-  }
-
   $request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
+  $transcriptStarted = $false
+  try {
+    Start-Transcript -Path ([string]$request.transcriptPath) -Force | Out-Null
+    $transcriptStarted = $true
+  } catch {
+    throw "Could not start the standard-user acceptance transcript."
+  }
   foreach ($name in @("GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")) {
     Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
   }
@@ -293,6 +278,7 @@ public static class NgtAcceptanceChildHandles
     }
     $childExitCode = 1
   } finally {
+    if ($transcriptStarted) { Stop-Transcript | Out-Null }
     foreach ($name in @("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR")) {
       Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
     }
@@ -370,7 +356,7 @@ $isolatedTemp = Join-Path $env:RUNNER_TEMP ("ngt-acceptance-" + $runId)
 $requestPath = Join-Path $isolatedTemp "request.json"
 $childFailurePath = Join-Path $isolatedTemp "child-failure.json"
 $resultPath = Join-Path $isolatedTemp "acceptance.exit-code"
-$stdoutPath = Join-Path $isolatedTemp "acceptance.stdout.log"
+$stdoutPath = Join-Path $isolatedTemp "acceptance.transcript.log"
 $stderrPath = Join-Path $isolatedTemp "acceptance.stderr.log"
 $ghConfigDirectory = Join-Path $isolatedTemp "gh-config"
 $hostsPath = Join-Path $ghConfigDirectory "hosts.yml"
@@ -468,6 +454,7 @@ try {
     parameters = $parameters
     resultPath = $resultPath
     failurePath = $childFailurePath
+    transcriptPath = $stdoutPath
     environment = @{
       GITHUB_ACTIONS = $env:GITHUB_ACTIONS
       RUNNER_ENVIRONMENT = $env:RUNNER_ENVIRONMENT
@@ -500,7 +487,7 @@ try {
   Write-Output "Starting the verified $Acceptance acceptance as a disposable standard Windows user."
   $process = Start-Process -FilePath $powershellPath -ArgumentList $childArguments `
     -Credential $credential -LoadUserProfile -WorkingDirectory $workspace `
-    -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+    -RedirectStandardOutput "\\.\NUL" -RedirectStandardError "\\.\NUL" -WindowStyle Hidden -PassThru
   $processHandle = Get-NgtAcceptanceProcessHandle -Process $process
 
   $acceptanceDeadline = (Get-Date).AddMinutes(110)
