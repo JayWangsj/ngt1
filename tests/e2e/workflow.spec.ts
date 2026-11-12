@@ -1570,11 +1570,26 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
           errorCategory = "existing-rule-conflict";
         } else if (message.includes("默认配件方案")) {
           errorCategory = "default-option-conflict";
-        } else if (
-          message.includes("保存失败") ||
-          /Ricambio|ricambio|opzione/i.test(message)
-        ) {
-          errorCategory = "part-option";
+        } else if (message.includes("临时配件方案保存失败")) {
+          errorCategory = "draft-option-not-found";
+        } else if (message.includes("配件报价方案保存失败")) {
+          errorCategory = "price-rule-not-found";
+        } else if (message.includes("内容冲突")) {
+          errorCategory = "draft-option-conflict";
+        } else if (message.includes("同一维修项目只能有一个默认配件方案")) {
+          errorCategory = "default-option-conflict";
+        } else if (message.includes("所选配件不适用于当前设备")) {
+          errorCategory = "part-incompatible";
+        } else if (message.includes("L'opzione ricambio non appartiene")) {
+          errorCategory = "option-not-in-rule";
+        } else if (message.includes("Il ricambio non corrisponde")) {
+          errorCategory = "part-option-mismatch";
+        } else if (/^Ricambio non disponibile/i.test(message)) {
+          errorCategory = "part-unavailable";
+        } else if (/^Ricambi insufficienti/i.test(message)) {
+          errorCategory = "parts-insufficient";
+        } else if (/Ricambio|ricambio|opzione/i.test(message)) {
+          errorCategory = "part-option-other";
         } else errorCategory = "business-rule";
       }
       result = "ok=" + ok + " id=" + hasId + " errorCategory=" + errorCategory;
