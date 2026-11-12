@@ -305,6 +305,70 @@ New-Item -ItemType Directory -Path $licenseDirectory -Force | Out-Null
 Copy-Item -LiteralPath "licenses\github-cli.txt" `
   -Destination $licenseDirectory -Force
 
+$controlDataCache = Join-Path $projectRoot ".local\postgres-tools"
+$controlDataArchive = Join-Path $controlDataCache "postgresql-17.10-2-windows-x64-binaries.zip"
+$controlDataArchiveUrl = "https://get.enterprisedb.com/postgresql/postgresql-17.10-2-windows-x64-binaries.zip"
+$controlDataArchiveHash = "ef9b1e5e23d2e8a83914ba13d9dc536a72210fba53fd1808ff1f7e06bb22b106"
+$controlDataExecutableHash = "eb48b96114795530ba9aec9920e86c41fced3bb19e4aa59781dcc4f45a31f9c3"
+if (-not (Test-Path -LiteralPath $controlDataArchive -PathType Leaf)) {
+  New-Item -ItemType Directory -Path $controlDataCache -Force | Out-Null
+  $download = Join-Path $controlDataCache ("postgresql-17.10-2-" + [guid]::NewGuid().ToString("N") + ".download")
+  try {
+    & curl.exe --fail --location --retry 2 --retry-delay 2 --silent --show-error `
+      --output $download $controlDataArchiveUrl
+    if ($LASTEXITCODE -ne 0) {
+      throw "Unable to download the pinned PostgreSQL control-data tool archive."
+    }
+    $downloadHash = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($downloadHash -ne $controlDataArchiveHash) {
+      throw "The PostgreSQL control-data tool archive failed SHA-256 verification."
+    }
+    [System.IO.File]::Move($download, $controlDataArchive)
+  } finally {
+    if (Test-Path -LiteralPath $download -PathType Leaf) {
+      Remove-Item -LiteralPath $download -Force
+    }
+  }
+}
+$actualControlDataArchiveHash = (Get-FileHash -LiteralPath $controlDataArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualControlDataArchiveHash -ne $controlDataArchiveHash) {
+  throw "The cached PostgreSQL control-data tool archive failed SHA-256 verification."
+}
+$controlDataExtract = Join-Path $controlDataCache ("edb-17.10-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $controlDataExtract | Out-Null
+& tar.exe -xf $controlDataArchive -C $controlDataExtract `
+  "pgsql/bin/pg_controldata.exe" "pgsql/server_license.txt"
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to extract the pinned PostgreSQL control-data tool."
+}
+$controlDataSource = Join-Path $controlDataExtract "pgsql\bin\pg_controldata.exe"
+$controlDataLicense = Join-Path $controlDataExtract "pgsql\server_license.txt"
+if (-not (Test-Path -LiteralPath $controlDataSource -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $controlDataLicense -PathType Leaf)) {
+  throw "The PostgreSQL control-data tool archive is incomplete."
+}
+$actualControlDataExecutableHash = (Get-FileHash -LiteralPath $controlDataSource -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualControlDataExecutableHash -ne $controlDataExecutableHash) {
+  throw "The PostgreSQL control-data executable failed SHA-256 verification."
+}
+$postgresVersionOutput = @(& (Join-Path $postgresBin "postgres.exe") --version 2>&1)
+if (($LASTEXITCODE -ne 0) -or
+    ([string]::Join(" ", @($postgresVersionOutput | ForEach-Object { [string]$_ })) -notmatch "\b17\.10\b")) {
+  throw "The bundled PostgreSQL server is not version 17.10."
+}
+Copy-Item -LiteralPath $controlDataSource -Destination (Join-Path $postgresBin "pg_controldata.exe") -Force
+Copy-Item -LiteralPath $controlDataLicense -Destination (Join-Path $licenseDirectory "postgresql-server.txt") -Force
+foreach ($controlDataDependency in @("libintl-9.dll", "vcruntime140.dll")) {
+  if (-not (Test-Path -LiteralPath (Join-Path $postgresBin $controlDataDependency) -PathType Leaf)) {
+    throw "The PostgreSQL control-data runtime dependency is missing: $controlDataDependency"
+  }
+}
+$packagedControlDataOutput = @(& (Join-Path $postgresBin "pg_controldata.exe") --version 2>&1)
+if (($LASTEXITCODE -ne 0) -or
+    ([string]::Join(" ", @($packagedControlDataOutput | ForEach-Object { [string]$_ })) -notmatch "\b17\.10\b")) {
+  throw "The packaged PostgreSQL control-data tool failed its runtime dependency check."
+}
+
 $runtimeHash = Get-NgtRuntimeHash $runtimeDirectory
 $fileManifest = @{}
 $stageFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse -Force)

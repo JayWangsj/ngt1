@@ -35,6 +35,7 @@ try {
     "runtime/node.exe",
     "runtime/postgres/bin/postgres.exe",
     "runtime/postgres/bin/pg_controldata.exe",
+    "licenses/postgresql-server.txt",
     "tools/NGTManager.exe",
     "tools/NGTUpdater.exe",
     "scripts/check-windows-credential-store.ps1",

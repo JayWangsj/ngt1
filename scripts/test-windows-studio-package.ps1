@@ -177,6 +177,8 @@ try {
     $nodeExecutable = Join-Path $releaseRoot "runtime\node.exe"
     Invoke-NgtCommand $nodeExecutable @("--version")
     Invoke-NgtCommand $nodeExecutable @("-e", "require('pg');")
+    Invoke-NgtCommand `
+      (Join-Path $releaseRoot "runtime\postgres\bin\pg_controldata.exe") @("--version")
     foreach ($requiredPath in @(
       "node_modules\prisma\build\index.js",
       ".next\standalone\node_modules\.prisma\client\default.js",
