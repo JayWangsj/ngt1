@@ -1552,7 +1552,7 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       const hasId = /"id"\s*:/.test(body);
       const errorMatch = body.match(/"error"\s*:\s*"((?:\\.|[^"\\])*)"/);
       let errorCategory = "none";
-      if (errorMatch) {
+      if (ok === "false" && errorMatch) {
         let message = "";
         try {
           message = JSON.parse('"' + errorMatch[1] + '"');
@@ -1578,7 +1578,10 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
         } else errorCategory = "business-rule";
       }
       result = "ok=" + ok + " id=" + hasId + " errorCategory=" + errorCategory;
-    } catch {}
+    } catch (error) {
+      const failureName = error instanceof Error ? error.name : "unknown";
+      result = "unavailable:" + failureName;
+    }
     serverActionEvents.push("response " + response.status() + " " + result);
   });
   const suffix = Date.now();
