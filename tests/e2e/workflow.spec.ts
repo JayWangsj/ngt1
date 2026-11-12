@@ -1542,15 +1542,15 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   });
   page.on("response", async (response) => {
     const pathname = new URL(response.url()).pathname;
-    if (/^\\/orders\\/(?!new$)[a-z0-9]+$/i.test(pathname))
+    if (/^\/orders\/(?!new$)[a-z0-9]+$/i.test(pathname))
       orderRouteEvents.push("response " + response.status());
     if (!response.request().headers()["next-action"]) return;
     let result = "unavailable";
     try {
       const body = await response.text();
-      const ok = body.match(/"ok"\\s*:\\s*(true|false)/)?.[1] ?? "unknown";
-      const hasId = /"id"\\s*:/.test(body);
-      const hasError = /"error"\\s*:/.test(body);
+      const ok = body.match(/"ok"\s*:\s*(true|false)/)?.[1] ?? "unknown";
+      const hasId = /"id"\s*:/.test(body);
+      const hasError = /"error"\s*:/.test(body);
       result = "ok=" + ok + " id=" + hasId + " error=" + hasError;
     } catch {}
     serverActionEvents.push("response " + response.status() + " " + result);
