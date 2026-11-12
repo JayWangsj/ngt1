@@ -578,7 +578,10 @@ fn write_maintenance(root: &Path, operation_id: &str, enabled: bool) -> Result<(
 }
 
 fn atomic_write(destination: &Path, contents: &[u8]) -> Result<(), String> {
-    if let Some(parent) = destination.parent().filter(|path| !path.as_os_str().is_empty()) {
+    if let Some(parent) = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)
             .map_err(|error| format!("Unable to create atomic state directory: {error}"))?;
     }
@@ -5835,10 +5838,7 @@ mod tests {
         assert!(!destination.parent().unwrap().exists());
         atomic_write(&destination, br#"{"phase":"running"}"#).unwrap();
 
-        assert_eq!(
-            fs::read(&destination).unwrap(),
-            br#"{"phase":"running"}"#
-        );
+        assert_eq!(fs::read(&destination).unwrap(), br#"{"phase":"running"}"#);
         let _ = fs::remove_dir_all(root);
     }
 
