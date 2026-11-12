@@ -760,6 +760,21 @@ export const it = {
   diagnosticsExportFailed: "Esportazione del file diagnostico non riuscita.",
   backupReadFailed: "Impossibile leggere il file di backup.",
   importRequestFailed: "Richiesta di importazione non riuscita.",
+  backupImportErrors: {
+    BACKUP_FILE_TOO_LARGE: "Il file di backup supera il limite di 20 MiB.",
+    BACKUP_TARGET_NOT_EMPTY: "Il database contiene già dati aziendali.",
+    BACKUP_FORMAT_UNSUPPORTED: "Formato o versione del backup non supportati.",
+    BACKUP_RECORD_CONFLICT:
+      "I record o la richiesta di importazione sono in conflitto.",
+    BACKUP_REFERENCE_CONFLICT:
+      "Il backup contiene riferimenti mancanti o in conflitto.",
+    BACKUP_FILE_INVALID: "Il contenuto del backup non è valido.",
+    BACKUP_IMPORT_BUSY: "Il database è occupato. Riprova con lo stesso file.",
+    BACKUP_IMPORT_FAILED:
+      "Importazione non riuscita. Controlla il codice di diagnostica.",
+    DATABASE_UNAVAILABLE: "Il database locale non è disponibile.",
+    SYSTEM_MAINTENANCE: "Sistema in manutenzione. Riprova più tardi.",
+  },
   diagnosticNotRecorded: "Il codice diagnostico non è stato inviato.",
   diagnosticIdLabel: "ID diagnostico",
   importData: "Importa dati",

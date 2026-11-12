@@ -4940,8 +4940,19 @@ describe("versioned data backup import", () => {
     expect(await db.businessClock.count()).toBe(0);
     expect(await db.user.count()).toBe(usersBefore);
 
-    const first = await importBusinessData(owner, backup);
+    const request = {
+      id: "51411b4b-b4ee-4dc4-b056-76de652cbfff",
+      digest: "a".repeat(64),
+    };
+    const [first, replay] = await Promise.all([
+      importBusinessData(owner, backup, request),
+      importBusinessData(owner, backup, request),
+    ]);
     expect(first.imported).toBeGreaterThan(0);
+    expect(replay).toEqual(first);
+    await expect(
+      importBusinessData(owner, backup, { ...request, digest: "b".repeat(64) }),
+    ).rejects.toMatchObject({ code: "BACKUP_RECORD_CONFLICT" });
     expect(await db.workOrder.count()).toBe(1);
     expect(await db.customer.count()).toBe(1);
     expect(

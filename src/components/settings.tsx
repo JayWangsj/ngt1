@@ -455,6 +455,7 @@ export function DataSettings() {
   const it = useMessages();
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
+  const importRequest = useRef<{ key: string; id: string } | null>(null);
   const sampleRequestId = useRef<string | null>(null);
   const sampleRequestAccepted = useRef(false);
   const reportPathInput = useRef<HTMLInputElement>(null);
@@ -779,7 +780,11 @@ export function DataSettings() {
             : `${it.backupReadFailed} ${it.diagnosticNotRecorded}`,
         );
       }
-      const requestDiagnosticId = crypto.randomUUID();
+      const key = JSON.stringify([file.name, file.size, file.lastModified]);
+      if (importRequest.current?.key !== key) {
+        importRequest.current = { key, id: crypto.randomUUID() };
+      }
+      const requestDiagnosticId = importRequest.current.id;
       let response: Response;
       try {
         response = await fetch("/api/data/import", {
@@ -805,6 +810,7 @@ export function DataSettings() {
         imported?: number;
         skipped?: number;
         error?: string;
+        errorCode?: string;
         diagnosticId?: string;
       };
       try {
@@ -823,10 +829,17 @@ export function DataSettings() {
             : `${it.importRequestFailed} ${it.diagnosticNotRecorded}`,
         );
       }
-      if (!response.ok)
+      if (!response.ok) {
+        const errorLabel =
+          result.errorCode &&
+          it.backupImportErrors[
+            result.errorCode as keyof typeof it.backupImportErrors
+          ];
         throw new Error(
-          `${result.error || it.connectionError}${result.diagnosticId ? ` (${it.diagnosticIdLabel}: ${result.diagnosticId})` : ""}`,
+          `${errorLabel || result.error || it.connectionError}${result.diagnosticId ? ` (${it.diagnosticIdLabel}: ${result.diagnosticId})` : ""}`,
         );
+      }
+      importRequest.current = null;
       setMessage(
         `${it.importSuccess} ${String(result.imported ?? 0)} / ${String(result.skipped ?? 0)}`,
       );

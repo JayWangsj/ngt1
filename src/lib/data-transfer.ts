@@ -180,6 +180,7 @@ export type BackupImportErrorCode =
   | "BACKUP_REFERENCE_CONFLICT"
   | "BACKUP_TARGET_NOT_EMPTY"
   | "BACKUP_RECORD_CONFLICT"
+  | "BACKUP_IMPORT_BUSY"
   | "SYSTEM_MAINTENANCE"
   | "DATABASE_UNAVAILABLE"
   | "BACKUP_IMPORT_FAILED";
@@ -799,16 +800,59 @@ function mapBackupTransactionError(error: unknown): BackupImportError {
 export async function importBusinessData(
   actorInput: Actor,
   value: unknown,
+  request?: { id: string; digest: string },
 ): Promise<ImportSummary> {
   const actor = await ensureActor(actorInput);
   const backup = ensureBackup(value);
   let imported = 0;
   let skipped = 0;
-  const transaction = db.$transaction(async (tx) => {
+  const transaction = async (tx: Prisma.TransactionClient) => {
+    const tables = Object.values(BACKUP_MODELS)
+      .sort()
+      .map((name) => `"public"."${name}"`);
+    await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+    try {
+      await tx.$executeRaw`LOCK TABLE ${Prisma.raw(tables.join(", "))} IN SHARE ROW EXCLUSIVE MODE`;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        ["55P03", "40P01"].includes(String(error.meta?.code))
+      ) {
+        throw new BackupImportError(
+          "BACKUP_IMPORT_BUSY",
+          "preflight",
+          "Il database è occupato. Riprova tra poco.",
+        );
+      }
+      throw error;
+    }
+    await tx.$executeRaw`SET LOCAL lock_timeout = '0'`;
     const existingImport = await tx.auditLog.findUnique({
       where: { id: LEGACY_IMPORT_MARKER_ID },
     });
     if (existingImport) {
+      const previous = existingImport.context;
+      if (
+        request &&
+        existingImport.actorId === actor.id &&
+        previous &&
+        typeof previous === "object" &&
+        !Array.isArray(previous) &&
+        previous.requestId === request.id
+      ) {
+        if (
+          previous.digest === request.digest &&
+          typeof previous.imported === "number" &&
+          typeof previous.skipped === "number"
+        ) {
+          return { imported: previous.imported, skipped: previous.skipped };
+        }
+        throw new BackupImportError(
+          "BACKUP_RECORD_CONFLICT",
+          "preflight",
+          "La richiesta è già associata a un altro file.",
+        );
+      }
       throw new BackupImportError(
         "BACKUP_TARGET_NOT_EMPTY",
         "preflight",
@@ -1028,7 +1072,9 @@ export async function importBusinessData(
       entityIds.set(source.id, target.id);
     }
     for (const source of backup.data.retailSales) {
-      let target = await tx.retailSale.findUnique({ where: { id: source.id } });
+      let target = await tx.retailSale.findUnique({
+        where: { id: source.id },
+      });
       target ??= await tx.retailSale.findUnique({
         where: { requestId: source.requestId },
       });
@@ -1176,7 +1222,9 @@ export async function importBusinessData(
       entityIds.set(source.id, target.id);
     }
     for (const source of backup.data.prices) {
-      let target = await tx.priceRule.findUnique({ where: { id: source.id } });
+      let target = await tx.priceRule.findUnique({
+        where: { id: source.id },
+      });
       target ??= await tx.priceRule.findUnique({
         where: {
           category_brand_series_model_project: {
@@ -1763,7 +1811,9 @@ export async function importBusinessData(
         skipped++;
         continue;
       }
-      const exists = await tx.auditLog.findUnique({ where: { id: source.id } });
+      const exists = await tx.auditLog.findUnique({
+        where: { id: source.id },
+      });
       if (exists) skipped++;
       else {
         await tx.auditLog.create({
@@ -1789,7 +1839,9 @@ export async function importBusinessData(
         continue;
       }
       const exists =
-        (await tx.inventoryMovement.findUnique({ where: { id: source.id } })) ??
+        (await tx.inventoryMovement.findUnique({
+          where: { id: source.id },
+        })) ??
         (await tx.inventoryMovement.findUnique({
           where: { requestId: source.requestId },
         }));
@@ -1871,12 +1923,25 @@ export async function importBusinessData(
           backupFormat: backup.format,
           backupVersion: backup.version,
           exportedAt: backup.exportedAt,
+          ...(request
+            ? {
+                requestId: request.id,
+                digest: request.digest,
+                imported,
+                skipped,
+              }
+            : {}),
         },
       },
     });
-  });
-  await transaction.catch((error: unknown) => {
-    throw mapBackupTransactionError(error);
-  });
-  return { imported, skipped };
+    return { imported, skipped };
+  };
+  return db
+    .$transaction(transaction, {
+      isolationLevel: "ReadCommitted",
+      timeout: 120_000,
+    })
+    .catch((error: unknown) => {
+      throw mapBackupTransactionError(error);
+    });
 }

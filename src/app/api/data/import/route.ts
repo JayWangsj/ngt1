@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { BusinessError } from "@/lib/domain";
 import {
   BACKUP_FORMAT,
@@ -46,7 +46,7 @@ export const runtime = "nodejs";
 async function readBackupJson(
   request: Request,
 ): Promise<
-  | { kind: "ok"; value: unknown }
+  | { kind: "ok"; value: unknown; digest: string }
   | { kind: "too-large" }
   | { kind: "read-failed" }
   | { kind: "invalid" }
@@ -77,6 +77,7 @@ async function readBackupJson(
     const bytes = Buffer.concat(chunks, size);
     return {
       kind: "ok",
+      digest: createHash("sha256").update(bytes).digest("hex"),
       value: JSON.parse(
         new TextDecoder("utf-8", { fatal: true }).decode(bytes),
       ),
@@ -140,7 +141,8 @@ function failureResponse(
           ? 500
           : error.code === "BACKUP_TARGET_NOT_EMPTY" ||
               error.code === "BACKUP_REFERENCE_CONFLICT" ||
-              error.code === "BACKUP_RECORD_CONFLICT"
+              error.code === "BACKUP_RECORD_CONFLICT" ||
+              error.code === "BACKUP_IMPORT_BUSY"
             ? 409
             : 400;
   emitApplicationDiagnostic({
@@ -240,7 +242,10 @@ export async function POST(request: Request) {
     const value = parsed.value;
     metadata = backupMetadata(value);
     const actor = await requireActor();
-    const result = await importBusinessData(actor, value);
+    const result = await importBusinessData(actor, value, {
+      id: diagnosticId,
+      digest: parsed.digest,
+    });
     return Response.json(result);
   } catch (error) {
     if (error instanceof BackupImportError)
