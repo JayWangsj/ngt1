@@ -55,6 +55,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check
+      - run: pnpm exec prettier src/components/forms.tsx | diff -u src/components/forms.tsx - || true
       - run: pnpm test
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
