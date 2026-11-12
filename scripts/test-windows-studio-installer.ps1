@@ -378,10 +378,6 @@ try {
     if ($clearUpdateCommand.ExitCode -ne 0) {
       throw "NGTManager could not clear the completed online-update lock."
     }
-    $clearExitCode = $LASTEXITCODE
-    if ($clearExitCode -ne 0) {
-      throw "NGTManager could not release the completed update lock."
-    }
     if (Test-Path -LiteralPath (Join-Path $installRoot "state\update.lock")) {
       throw "NGTManager left the online update lock after successful completion."
     }
@@ -419,18 +415,9 @@ try {
   & (Join-Path $PSScriptRoot "verify-windows-studio-runtime.ps1") `
     -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$metadata.version) `
     -ExpectedCommit $env:GITHUB_SHA
-  $uninstallStdoutPath = Join-Path $env:RUNNER_TEMP ("ngt-manager-uninstall-" + [guid]::NewGuid().ToString("N") + ".stdout.log")
-  $uninstallStderrPath = Join-Path $env:RUNNER_TEMP ("ngt-manager-uninstall-" + [guid]::NewGuid().ToString("N") + ".stderr.log")
-  $managerUninstall = Start-Process -FilePath $managerPath -ArgumentList @("uninstall") `
-    -WorkingDirectory $installRoot -RedirectStandardOutput $uninstallStdoutPath `
-    -RedirectStandardError $uninstallStderrPath -WindowStyle Hidden -PassThru
-  Wait-NgtInstallerProcess -Process $managerUninstall -Description "NGTManager safe-uninstall command" `
-    -TimeoutMinutes 5 -ProgressPaths @($managerLog)
+  $managerUninstall = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("uninstall") -WorkingDirectory $installRoot
   if ($managerUninstall.ExitCode -ne 0) {
-    $uninstallDetails = @(
-      Get-Content -LiteralPath $uninstallStdoutPath -Raw -ErrorAction SilentlyContinue
-      Get-Content -LiteralPath $uninstallStderrPath -Raw -ErrorAction SilentlyContinue
-    ) -join "`n"
+    $uninstallDetails = $managerUninstall.Text
     $uninstallDetails = Protect-NgtAcceptanceDiagnosticText -Text $uninstallDetails -Secrets $diagnosticSecrets
     $uninstallDetails = [regex]::Replace($uninstallDetails, "[`r`n]+", " ").Trim()
     if ($uninstallDetails.Length -gt 400) { $uninstallDetails = $uninstallDetails.Substring(0, 400) }
