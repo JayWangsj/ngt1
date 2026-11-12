@@ -2,6 +2,7 @@
 
 use chrono::{SecondsFormat, Utc};
 use fs2::{available_space, FileExt};
+use ngt_updater::diagnostics::{Component as DiagnosticComponent, LogOwner, LogSession};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
@@ -13,11 +14,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const GITHUB_API: &str = "https://api.github.com";
 const CHECKSUM_LIMIT: u64 = 1024;
+const UPDATE_LOG_FILE_LIMIT: u64 = 512 * 1024;
+const UPDATE_LOG_TOTAL_LIMIT: u64 = 6 * 1024 * 1024;
+static UPDATER_DIAGNOSTICS: OnceLock<Option<LogSession>> = OnceLock::new();
 
 #[derive(Debug)]
 struct UpdateError {
@@ -137,11 +142,45 @@ fn main() -> ExitCode {
     }
     let args = match parse_args() {
         Ok(args) => args,
-        Err(_) => return ExitCode::FAILURE,
+        Err(error) => {
+            let root = env::var_os("LOCALAPPDATA")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .map(|path| path.join("NGTManager"));
+            if let Some(root) = root {
+                let _ = UPDATER_DIAGNOSTICS
+                    .set(LogSession::start(&root, "none", "unknown", LogOwner::Updater).ok());
+                record_updater_failure(&error);
+                finish_updater_diagnostics();
+            }
+            return ExitCode::FAILURE;
+        }
     };
+    let _ = UPDATER_DIAGNOSTICS.set(
+        LogSession::start(
+            &args.install_root,
+            &args.update_id,
+            &args.target_version,
+            LogOwner::Updater,
+        )
+        .ok(),
+    );
+    if let Some(logger) = updater_diagnostics() {
+        logger.record(
+            DiagnosticComponent::Updater,
+            "info",
+            "updater.process.started",
+            "starting",
+            "none",
+        );
+    }
     let _process_lease = match UpdateProcessLease::acquire(&args) {
         Ok(lease) => lease,
-        Err(_) => return ExitCode::FAILURE,
+        Err(error) => {
+            record_updater_failure(&error);
+            finish_updater_diagnostics();
+            return ExitCode::FAILURE;
+        }
     };
     if let Err(error) = run(&args) {
         let log_path = update_log_path(&args.install_root, &args.update_id);
@@ -149,10 +188,66 @@ fn main() -> ExitCode {
             &log_path,
             &format!("FAILED {}: {}", error.stage, redact(&error.message)),
         );
+        record_updater_failure(&error);
         let _ = finish_failed(&args, &error);
+        finish_updater_diagnostics();
         return ExitCode::FAILURE;
     }
+    if let Some(logger) = updater_diagnostics() {
+        logger.record(
+            DiagnosticComponent::Updater,
+            "info",
+            "updater.operation.completed",
+            "complete",
+            "none",
+        );
+    }
+    finish_updater_diagnostics();
     ExitCode::SUCCESS
+}
+
+fn updater_diagnostics() -> Option<&'static LogSession> {
+    UPDATER_DIAGNOSTICS.get()?.as_ref()
+}
+
+fn record_updater_failure(error: &UpdateError) {
+    if let Some(logger) = updater_diagnostics() {
+        let error_code = error
+            .message
+            .split_once("(os error ")
+            .and_then(|(_, suffix)| suffix.split_once(')'))
+            .map(|(digits, _)| digits)
+            .filter(|digits| {
+                !digits.is_empty()
+                    && digits.len() <= 5
+                    && digits.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            .map(|code| format!("WIN32_{code}"))
+            .unwrap_or_else(|| {
+                format!(
+                    "UPDATER_{}",
+                    error.stage.to_ascii_uppercase().replace('-', "_")
+                )
+            });
+        logger.record(
+            DiagnosticComponent::Updater,
+            "error",
+            "updater.operation.failed",
+            error.stage,
+            &error_code,
+        );
+        let detail = format!("{} {}\n", error.stage, redact(&error.message));
+        logger.detail(
+            DiagnosticComponent::Updater,
+            detail.chars().take(1024).collect::<String>().as_bytes(),
+        );
+    }
+}
+
+fn finish_updater_diagnostics() {
+    if let Some(logger) = updater_diagnostics() {
+        logger.finish();
+    }
 }
 
 #[cfg(windows)]
@@ -199,7 +294,6 @@ fn run_update_mutex_hold() -> Option<ExitCode> {
 
 fn run(args: &Args) -> Result<()> {
     let log_path = update_log_path(&args.install_root, &args.update_id);
-    fs::create_dir_all(log_path.parent().expect("log directory"))?;
     append_log(&log_path, "Updater process started.")?;
 
     let context = validate_install(args)?;
@@ -1505,16 +1599,124 @@ impl Drop for WindowsMutex {
 }
 
 fn append_log(path: &Path, message: &str) -> Result<()> {
-    fs::create_dir_all(path.parent().expect("log directory"))?;
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    writeln!(file, "{} {}", now(), redact(message))?;
-    file.sync_data()?;
+    let line = format!("{} {}\n", now(), redact(message));
+    if append_bounded_update_log(path, line.as_bytes()).is_err() {
+        if let Some(logger) = updater_diagnostics() {
+            logger.record(
+                DiagnosticComponent::Updater,
+                "warning",
+                "updater.log.write_failed",
+                "logging",
+                "UPDATER_LOG_WRITE_FAILED",
+            );
+        }
+    }
+    Ok(())
+}
+
+fn append_bounded_update_log(path: &Path, line: &[u8]) -> std::io::Result<()> {
+    let directory = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing log directory")
+    })?;
+    fs::create_dir_all(directory)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => {}
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "update log is not a regular file",
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(path)?;
+    file.try_lock_exclusive()?;
+    let current = file.metadata()?.len();
+    if current.saturating_add(line.len() as u64) > UPDATE_LOG_FILE_LIMIT {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WriteZero,
+            "update detail file quota reached",
+        ));
+    }
+    cleanup_update_logs(directory, path, line.len() as u64)?;
+    file.write_all(line)?;
+    if line.windows(7).any(|window| window == b"FAILED ")
+        || line.windows(9).any(|window| window == b"verified.")
+        || line.windows(10).any(|window| window == b"completed.")
+    {
+        file.sync_data()?;
+    }
+    Ok(())
+}
+
+fn cleanup_update_logs(directory: &Path, current: &Path, incoming: u64) -> std::io::Result<()> {
+    let now = SystemTime::now();
+    let retention = Duration::from_secs(14 * 24 * 60 * 60);
+    let mut files = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let update_id = name
+            .strip_prefix("update-")
+            .and_then(|name| name.strip_suffix(".log"));
+        if path == current || !update_id.is_some_and(is_uuid) {
+            continue;
+        }
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => metadata,
+            _ => continue,
+        };
+        files.push((
+            metadata.modified().unwrap_or(UNIX_EPOCH),
+            metadata.len(),
+            path,
+        ));
+    }
+    files.sort_by_key(|(modified, _, _)| *modified);
+    let mut total = files.iter().map(|(_, size, _)| *size).sum::<u64>();
+    total = total.saturating_add(
+        fs::metadata(current)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0),
+    );
+    for (modified, size, path) in files {
+        let expired = now
+            .duration_since(modified)
+            .is_ok_and(|age| age > retention);
+        if !expired && total.saturating_add(incoming) <= UPDATE_LOG_TOTAL_LIMIT {
+            continue;
+        }
+        let candidate = match OpenOptions::new().read(true).write(true).open(&path) {
+            Ok(file) if file.try_lock_exclusive().is_ok() => file,
+            _ => continue,
+        };
+        drop(candidate);
+        if fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(size);
+        }
+    }
+    if total.saturating_add(incoming) > UPDATE_LOG_TOTAL_LIMIT {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WriteZero,
+            "update detail quota reached",
+        ));
+    }
     Ok(())
 }
 
 fn update_log_path(install_root: &Path, update_id: &str) -> PathBuf {
     install_root
         .join("logs")
+        .join("updater")
         .join(format!("update-{}.log", update_id))
 }
 
@@ -1853,6 +2055,40 @@ mod tests {
 
         assert_eq!(metadata.version, "2.0.19");
         assert!(metadata.commit.is_empty());
+    }
+
+    #[test]
+    fn update_log_cleanup_removes_only_uuid_named_logs() {
+        let root = std::env::temp_dir().join(format!(
+            "ngt-update-log-cleanup-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let owned = root.join("update-12345678-1234-1234-1234-123456789abc.log");
+        let unrelated = root.join("update-customer-backup.log");
+        fs::write(&owned, b"owned").unwrap();
+        fs::write(&unrelated, b"unrelated").unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&owned)
+            .unwrap()
+            .set_len(3 * 1024 * 1024)
+            .unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&unrelated)
+            .unwrap()
+            .set_len(1024 * 1024)
+            .unwrap();
+
+        cleanup_update_logs(&root, &root.join("update-current.log"), 4 * 1024 * 1024).unwrap();
+
+        assert!(!owned.exists());
+        assert!(unrelated.exists());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

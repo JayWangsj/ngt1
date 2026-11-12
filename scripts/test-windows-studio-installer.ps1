@@ -47,6 +47,37 @@ function Wait-NgtInstallerProcess(
   $Process.Refresh()
 }
 
+function Invoke-NgtManagerCommand {
+  param(
+    [Parameter(Mandatory = $true)][string]$ManagerPath,
+    [Parameter(Mandatory = $true)][string[]]$Arguments,
+    [Parameter(Mandatory = $true)][string]$WorkingDirectory
+  )
+
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $ManagerPath
+  $startInfo.Arguments = [string]::Join(" ", $Arguments)
+  $startInfo.WorkingDirectory = $WorkingDirectory
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $process = [System.Diagnostics.Process]::new()
+  try {
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw "NGTManager command did not start." }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $text = (@($stdout, $stderr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+    return [pscustomobject]@{ ExitCode = [int]$process.ExitCode; Text = $text.Trim() }
+  } finally {
+    $process.Dispose()
+  }
+}
 function Invoke-NgtBusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string]$Code, [string]$SnapshotPath) {
   $probePath = Join-Path $PSScriptRoot "windows-studio-business-probe.cjs"
   $node = Join-Path $ReleaseRoot "runtime\node.exe"
@@ -89,10 +120,12 @@ foreach ($port in @(3000, 55432, 55433)) {
 
 $installationAttempted = $false
 $cleanupSafe = $true
+$cleanupProblems = New-Object 'System.Collections.Generic.List[string]'
 $installerLog = Join-Path $env:RUNNER_TEMP "installer.log"
 $managerLog = Join-Path $installRoot "logs\manager.log"
 $previousTestApiUrl = $env:NGT_TEST_RELEASE_API_URL
 $updateServerProcess = $null
+$managerUninstallFailure = $null
 $businessSnapshotPath = Join-Path $env:RUNNER_TEMP "ngt-manager-online-update-business.json"
 try {
   if ($OnlineUpdateAcceptance -and $ProductionUpdaterAcceptance) {
@@ -157,16 +190,16 @@ try {
     throw "The installed release is missing its verified Node runtime."
   }
   $managerPath = Join-Path $installRoot "tools\NGTManager.exe"
-  $statusResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-status.txt"
-  & $managerPath status --result-file $statusResultPath | Out-Null
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $statusResultPath -PathType Leaf)) {
-    throw "NGTManager could not write its status result."
+  $statusCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("status") -WorkingDirectory $installRoot
+  $statusResult = $statusCommand.Text
+  $statusExitCode = $statusCommand.ExitCode
+  if ($statusExitCode -ne 0) {
+    throw "NGTManager status failed with exit code $statusExitCode."
   }
-  $statusResult = [System.IO.File]::ReadAllText($statusResultPath)
-  if (-not $statusResult.StartsWith("SUCCESS`n", [StringComparison]::Ordinal)) {
-    throw "NGTManager did not return a successful status result."
+  if ([string]::IsNullOrWhiteSpace($statusResult)) {
+    throw "NGTManager returned an empty status result."
   }
-  $managerStatus = $statusResult.Substring(8) | ConvertFrom-Json
+  $managerStatus = $statusResult | ConvertFrom-Json
   if (-not $managerStatus.installed -or
       $managerStatus.transactionStage -ne "Committed" -or
       [string]$managerStatus.version -ne [string]$metadata.version) {
@@ -268,21 +301,43 @@ try {
     Invoke-NgtBusinessDataProbe -ReleaseRoot $releaseRoot -Action "seed" `
       -Code $businessCode -SnapshotPath $businessSnapshotPath
 
+    $updateStatusPath = Join-Path $installRoot "state\update-status.json"
     $updateId = [guid]::NewGuid().ToString()
-    $reserveResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-reserve.txt"
-    & $managerPath reserve-update $updateId $ExpectedVersion --result-file $reserveResultPath | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $reserveResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($reserveResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
-      throw "NGTManager could not reserve the exact-SHA online update."
+    $reserveCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("reserve-update", $updateId, $ExpectedVersion) -WorkingDirectory $installRoot
+    $reserveExitCode = $reserveCommand.ExitCode
+    $reserveText = $reserveCommand.Text
+    $reserveStatus = $null
+    if (Test-Path -LiteralPath $updateStatusPath -PathType Leaf) {
+      try { $reserveStatus = Get-Content -LiteralPath $updateStatusPath -Raw | ConvertFrom-Json } catch { }
     }
-    $startResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-start.txt"
-    & $managerPath start-update $updateId --result-file $startResultPath | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $startResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($startResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    if ($reserveExitCode -ne 0 -or -not $reserveStatus -or
+        $reserveStatus.updateId -ne $updateId -or
+        $reserveStatus.targetVersion -ne $ExpectedVersion -or
+        $reserveStatus.status -ne "starting") {
+      $failureDetails = $reserveText
+      if ([string]::IsNullOrWhiteSpace($failureDetails) -and (Test-Path -LiteralPath $updateStatusPath -PathType Leaf)) {
+        $failureDetails = Get-Content -LiteralPath $updateStatusPath -Raw -ErrorAction SilentlyContinue
+      }
+      $failureDetails = Protect-NgtAcceptanceDiagnosticText -Text $failureDetails -Secrets $diagnosticSecrets
+      $failureDetails = [regex]::Replace([string]$failureDetails, '[\r\n]+', ' ').Trim()
+      if ($failureDetails.Length -gt 400) { $failureDetails = $failureDetails.Substring(0, 400) }
+      if (-not $failureDetails) {
+        $stateDirectory = Join-Path $installRoot "state"
+        $failureDetails = "managerOutputEmpty; managerPresent=$([bool](Test-Path -LiteralPath $managerPath -PathType Leaf)); stateDirectoryPresent=$([bool](Test-Path -LiteralPath $stateDirectory -PathType Container)); updateLockPresent=$([bool](Test-Path -LiteralPath (Join-Path $stateDirectory 'update.lock') -PathType Leaf)); updateStatusPresent=$([bool](Test-Path -LiteralPath $updateStatusPath -PathType Leaf))"
+      }
+      throw "NGTManager could not reserve the exact-SHA online update (exit code $reserveExitCode; $failureDetails)."
+    }
+    $startCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("start-update", $updateId) -WorkingDirectory $installRoot
+    $startExitCode = $startCommand.ExitCode
+    $startText = $startCommand.Text
+    $startStatus = $null
+    try { $startStatus = $startText | ConvertFrom-Json } catch { }
+    if ($startExitCode -ne 0 -or -not $startStatus -or
+        $startStatus.updateId -ne $updateId -or
+        $startStatus.executorConfirmed -ne $true) {
       throw "NGTManager could not start the Rust online updater."
     }
 
-    $updateStatusPath = Join-Path $installRoot "state\update-status.json"
     $updateDeadline = [DateTime]::UtcNow.AddMinutes(90)
     $updateStatus = $null
     do {
@@ -303,28 +358,25 @@ try {
       throw "The Rust online updater did not complete with the exact candidate version and commit."
     }
 
-    $processResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-process.txt"
     $processDeadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
-      & $managerPath update-process $updateId --result-file $processResultPath | Out-Null
-      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $processResultPath -PathType Leaf)) {
+      $processCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("update-process", $updateId) -WorkingDirectory $installRoot
+      $processExitCode = $processCommand.ExitCode
+      $processText = $processCommand.Text
+      $processResult = $null
+      try { $processResult = $processText | ConvertFrom-Json } catch { }
+      if ($processExitCode -ne 0 -or -not $processResult -or $null -eq $processResult.active) {
         throw "NGTManager could not inspect the online updater process lease."
       }
-      $processResult = [System.IO.File]::ReadAllText($processResultPath)
-      if (-not $processResult.StartsWith("SUCCESS`n", [StringComparison]::Ordinal)) {
-        throw "NGTManager returned an invalid online updater process result."
-      }
-      $processActive = ($processResult.Substring(8) | ConvertFrom-Json).active
+      $processActive = [bool]$processResult.active
       if (-not $processActive) { break }
       Start-Sleep -Seconds 1
     } while ([DateTime]::UtcNow -lt $processDeadline)
     if ($processActive) { throw "The Rust online updater did not release its process lease." }
 
-    $clearResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-clear.txt"
-    & $managerPath clear-update-lock $updateId complete --result-file $clearResultPath | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $clearResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($clearResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
-      throw "NGTManager could not release the completed update lock."
+    $clearUpdateCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("clear-update-lock", $updateId, "complete") -WorkingDirectory $installRoot
+    if ($clearUpdateCommand.ExitCode -ne 0) {
+      throw "NGTManager could not clear the completed online-update lock."
     }
     if (Test-Path -LiteralPath (Join-Path $installRoot "state\update.lock")) {
       throw "NGTManager left the online update lock after successful completion."
@@ -346,15 +398,12 @@ try {
       -Code $businessCode -SnapshotPath $businessSnapshotPath
   } else {
     $releaseManagerPath = Join-Path $releaseRoot "tools\NGTManager.exe"
-    $repairResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-repair-result.txt"
-    $repairArguments = 'repair "{0}" --result-file "{1}"' -f $releaseRoot, $repairResultPath
+    $repairArguments = 'repair "{0}"' -f $releaseRoot
     $repair = Start-Process -FilePath $releaseManagerPath -ArgumentList $repairArguments `
       -WindowStyle Hidden -PassThru
     Wait-NgtInstallerProcess -Process $repair -Description "NGTManager repair" `
       -TimeoutMinutes 30 -ProgressPaths @($managerLog)
-    if ($repair.ExitCode -ne 0 -or
-        -not (Test-Path -LiteralPath $repairResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($repairResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    if ($repair.ExitCode -ne 0) {
       throw "NGTManager could not repair the verified candidate package."
     }
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot "data\postgres\PG_VERSION")) -or
@@ -366,8 +415,27 @@ try {
   & (Join-Path $PSScriptRoot "verify-windows-studio-runtime.ps1") `
     -ReleaseRoot $releaseRoot -ExpectedVersion ([string]$metadata.version) `
     -ExpectedCommit $env:GITHUB_SHA
+  $managerUninstall = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("uninstall") -WorkingDirectory $installRoot
+  if ($managerUninstall.ExitCode -ne 0) {
+    $uninstallDetails = $managerUninstall.Text
+    $uninstallDetails = Protect-NgtAcceptanceDiagnosticText -Text $uninstallDetails -Secrets $diagnosticSecrets
+    $uninstallDetails = [regex]::Replace($uninstallDetails, "[`r`n]+", " ").Trim()
+    if ($uninstallDetails.Length -gt 400) { $uninstallDetails = $uninstallDetails.Substring(0, 400) }
+    if ($uninstallDetails) {
+      $managerUninstallFailure = "exit code $($managerUninstall.ExitCode): $uninstallDetails"
+      throw "NGTManager safe-uninstall command failed with $managerUninstallFailure"
+    }
+    $managerUninstallFailure = "exit code $($managerUninstall.ExitCode), no diagnostic text"
+    throw "NGTManager safe-uninstall command failed with $managerUninstallFailure"
+  }
+
+  Write-Output "NGTManager safe-uninstall command passed."
   Write-Output "Windows installer acceptance passed for v$($metadata.version)."
 } catch {
+  $primaryFailureMessage = Protect-NgtAcceptanceDiagnosticText -Text $_.Exception.Message -Secrets $diagnosticSecrets
+  $primaryFailureMessage = [regex]::Replace([string]$primaryFailureMessage, '[\r\n]+', ' ').Trim()
+  if ($primaryFailureMessage.Length -gt 400) { $primaryFailureMessage = $primaryFailureMessage.Substring(0, 400) }
+  if ($primaryFailureMessage) { $cleanupProblems.Add("primary failure: $primaryFailureMessage") }
   try {
     $diagnosticSources = @(
       $installerLog,
@@ -376,7 +444,20 @@ try {
       (Join-Path $installRoot "logs\application.log")
     )
     $diagnosticSources += Join-Path $installRoot "state\update-status.json"
+    $diagnosticSources += Join-Path $installRoot "state\runtime\candidate-run.json"
+    $diagnosticSources += Join-Path $installRoot "state\runtime\run-state.json"
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "update-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    if (Test-Path -LiteralPath $installerLog -PathType Leaf) {
+      $attemptLog = Get-Content -LiteralPath $installerLog -Raw -ErrorAction SilentlyContinue
+      $attemptMatch = [regex]::Match($attemptLog, 'NGTManager install attempt ID: (?<id>[A-Za-z0-9-]{1,64})')
+      if ($attemptMatch.Success) {
+        $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+        $attemptDiagnostics = Join-Path $documents ("NGTManager-diagnostics-" + $attemptMatch.Groups["id"].Value + ".txt")
+        if (Test-Path -LiteralPath $attemptDiagnostics -PathType Leaf) {
+          $diagnosticSources += $attemptDiagnostics
+        }
+      }
+    }
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "migration-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `
       -Stage "installer-acceptance" -Tag ("v" + $ExpectedVersion) -Commit $env:GITHUB_SHA `
@@ -397,6 +478,7 @@ try {
       }
     } catch {
       $cleanupSafe = $false
+      $cleanupProblems.Add("online-update-api")
       Write-Warning ("Online-update acceptance API cleanup failed: " + $_.Exception.Message)
     }
   }
@@ -425,22 +507,43 @@ try {
         }
       } catch {
         $cleanupSafe = $false
-        Write-Warning ("Installer acceptance cleanup failed: " + $_.Exception.Message)
+        $cleanupMessage = [regex]::Replace([string]$_.Exception.Message, "[\r\n]+", " ")
+        if (-not [string]::IsNullOrWhiteSpace([string]$uninstallerLog) -and
+            (Test-Path -LiteralPath $uninstallerLog -PathType Leaf)) {
+          try {
+            $uninstallerLogTail = @(Get-Content -LiteralPath $uninstallerLog -Tail 8 -ErrorAction Stop) -join " | "
+            $uninstallerLogTail = [regex]::Replace($uninstallerLogTail, "[\r\n]+", " ")
+            if ($uninstallerLogTail.Length -gt 250) { $uninstallerLogTail = $uninstallerLogTail.Substring($uninstallerLogTail.Length - 250) }
+            if ($uninstallerLogTail) { $cleanupMessage += "; log tail: $uninstallerLogTail" }
+          } catch { $cleanupMessage += "; uninstaller log could not be read" }
+        }
+        if ($cleanupMessage.Length -gt 600) { $cleanupMessage = $cleanupMessage.Substring(0, 600) }
+        $cleanupProblems.Add("uninstaller: $cleanupMessage")
+        Write-Warning ("Installer acceptance cleanup failed: " + $cleanupMessage)
       }
     } elseif (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json")) {
       $cleanupSafe = $false
+      $cleanupProblems.Add("missing-uninstaller")
       Write-Warning "Installer acceptance could not find its uninstaller; retained the isolated installation."
     }
+  }
+  if ($managerUninstallFailure) {
+    $cleanupSafe = $false
+    $cleanupProblems.Add("manager safe-uninstall: $managerUninstallFailure")
   }
   if ($cleanupSafe) {
     foreach ($port in @(3000, 55432, 55433)) {
       if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
         $cleanupSafe = $false
+        $cleanupProblems.Add("listener-port-$port")
         Write-Warning "Installer acceptance left port $port open; no process was stopped by the test cleanup."
       }
     }
   }
-  if (-not $cleanupSafe) { throw "Windows installer acceptance cleanup could not be verified." }
+  if (-not $cleanupSafe) {
+    $reason = if ($cleanupProblems.Count) { $cleanupProblems -join ", " } else { "unclassified" }
+    throw "Windows installer acceptance cleanup could not be verified ($reason)."
+  }
   if (Test-Path -LiteralPath $installRoot) {
     $expectedInstallRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "NGTManager"))
     if ([System.IO.Path]::GetFullPath($installRoot) -ne $expectedInstallRoot) {

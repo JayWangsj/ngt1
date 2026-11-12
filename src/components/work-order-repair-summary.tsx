@@ -63,6 +63,7 @@ export function WorkOrderRepairSummary({
   productCategories,
   initialDiscount,
   initialVat,
+  owner,
   locked,
   protectPriceOnOptionSwitch,
 }: {
@@ -127,6 +128,7 @@ export function WorkOrderRepairSummary({
         products={products}
         productCategories={productCategories}
         initialEdit={{ index, field }}
+        owner={owner}
         focusedEdit
         showEmptyPartSummary
         protectPriceOnOptionSwitch={protectPriceOnOptionSwitch}

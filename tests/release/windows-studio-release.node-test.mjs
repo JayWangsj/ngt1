@@ -395,6 +395,9 @@ test("publication can be safely retried after an ambiguous successful response",
     assets: releaseAssets,
   };
   const api = makeApi({ release });
+  const held = await publishRelease(api, assets, manifest, { holdDraft: true });
+  assert.equal(held.draft, true);
+  assert.equal(api.current().draft, true);
   const updateRelease = api.updateRelease;
   let loseFirstResponse = true;
   api.updateRelease = async (...args) => {

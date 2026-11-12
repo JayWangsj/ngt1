@@ -175,7 +175,7 @@
 
 .addDevice:focus-visible,
 :global(.button-add-device):focus-visible {
-  outline: 2px solid #d7aa00;
+  outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
 

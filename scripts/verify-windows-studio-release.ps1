@@ -68,7 +68,9 @@ foreach ($requiredFile in @(
   "tools/NGTUpdater.exe",
   "runtime/node.exe",
   "runtime/postgres/bin/postgres.exe",
-  "prisma/schema.prisma"
+  "runtime/postgres/bin/pg_controldata.exe",
+  "prisma/schema.prisma",
+  "licenses/postgresql-server.txt"
 )) {
   if (-not (Test-Path -LiteralPath (Join-Path $root $requiredFile.Replace("/", "\")) -PathType Leaf)) {
     throw "Studio release is missing a required runtime file: $requiredFile"

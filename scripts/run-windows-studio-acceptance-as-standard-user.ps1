@@ -131,6 +131,13 @@ if ($AuthMatrixOnly) {
 
 if ($Child) {
   $request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
+  $transcriptStarted = $false
+  try {
+    Start-Transcript -Path ([string]$request.transcriptPath) -Force | Out-Null
+    $transcriptStarted = $true
+  } catch {
+    throw "Could not start the standard-user acceptance transcript."
+  }
   foreach ($name in @("GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")) {
     Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
   }
@@ -271,6 +278,7 @@ if ($Child) {
     }
     $childExitCode = 1
   } finally {
+    if ($transcriptStarted) { Stop-Transcript | Out-Null }
     foreach ($name in @("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR")) {
       Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
     }
@@ -348,7 +356,7 @@ $isolatedTemp = Join-Path $env:RUNNER_TEMP ("ngt-acceptance-" + $runId)
 $requestPath = Join-Path $isolatedTemp "request.json"
 $childFailurePath = Join-Path $isolatedTemp "child-failure.json"
 $resultPath = Join-Path $isolatedTemp "acceptance.exit-code"
-$stdoutPath = Join-Path $isolatedTemp "acceptance.stdout.log"
+$stdoutPath = Join-Path $isolatedTemp "acceptance.transcript.log"
 $stderrPath = Join-Path $isolatedTemp "acceptance.stderr.log"
 $ghConfigDirectory = Join-Path $isolatedTemp "gh-config"
 $hostsPath = Join-Path $ghConfigDirectory "hosts.yml"
@@ -446,6 +454,7 @@ try {
     parameters = $parameters
     resultPath = $resultPath
     failurePath = $childFailurePath
+    transcriptPath = $stdoutPath
     environment = @{
       GITHUB_ACTIONS = $env:GITHUB_ACTIONS
       RUNNER_ENVIRONMENT = $env:RUNNER_ENVIRONMENT
@@ -478,7 +487,7 @@ try {
   Write-Output "Starting the verified $Acceptance acceptance as a disposable standard Windows user."
   $process = Start-Process -FilePath $powershellPath -ArgumentList $childArguments `
     -Credential $credential -LoadUserProfile -WorkingDirectory $workspace `
-    -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+    -RedirectStandardOutput "\\.\NUL" -RedirectStandardError "NUL" -WindowStyle Hidden -PassThru
   $processHandle = Get-NgtAcceptanceProcessHandle -Process $process
 
   $acceptanceDeadline = (Get-Date).AddMinutes(110)

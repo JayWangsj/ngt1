@@ -187,6 +187,8 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
 
   await search.focus();
   await expect(search).toHaveCSS("outline-style", "solid");
+  await expect(search).toHaveCSS("outline-width", "2px");
+  await expect(search).toHaveCSS("outline-color", "rgb(70, 82, 77)");
   expect(await computedContrast(search, "outlineColor")).toBeGreaterThanOrEqual(
     3,
   );
@@ -199,6 +201,15 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
     );
   if (!datePickerScopeClass)
     throw new Error("The DatePicker CSS Module scope was not rendered.");
+  const datePickerInput = page.locator(".date-picker-input").first();
+  await datePickerInput.focus();
+  await expect(datePickerInput).toHaveCSS("outline-style", "solid");
+  await expect(datePickerInput).toHaveCSS("outline-width", "2px");
+  await expect(datePickerInput).toHaveCSS("outline-color", "rgb(70, 82, 77)");
+  await expect(datePickerInput).toHaveCSS(
+    "border-top-color",
+    "rgb(217, 221, 219)",
+  );
 
   const selectTrigger = page.locator(".business-select-trigger").first();
   const selectRoot = selectTrigger.locator("xpath=..");
@@ -207,7 +218,9 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
   await expect(selectTrigger).toHaveCSS("min-height", "41px");
   await selectTrigger.focus();
   await expect(selectTrigger).toHaveCSS("outline-style", "solid");
-  await selectTrigger.click();
+  await expect(selectTrigger).toHaveCSS("outline-width", "2px");
+  await expect(selectTrigger).toHaveCSS("outline-color", "rgb(70, 82, 77)");
+  await selectTrigger.press("Enter");
   const selectPanel = page.locator(
     ".business-select-panel.is-entering:visible",
   );
@@ -224,8 +237,8 @@ test("shared controls keep readable text, borders, and keyboard focus", async ({
   const openTriggerShadow = await selectTrigger.evaluate(
     (element) => getComputedStyle(element).boxShadow,
   );
-  expect(openTriggerShadow).not.toBe("none");
-  await selectTrigger.click();
+  expect(openTriggerShadow).toBe("none");
+  await selectTrigger.press("Enter");
   await expect(selectPanel).toHaveCount(0);
 
   await page.evaluate(() => {
@@ -382,7 +395,10 @@ test("searchable business select keeps its scoped control styles", async ({
   await expect(searchBox).toHaveCSS("border-radius", "8px");
   await expect(searchBox.locator("xpath=..")).toHaveCSS("display", "grid");
   await customerSearch.focus();
-  await expect(searchBox).not.toHaveCSS("box-shadow", "none");
+  await expect(searchBox).toHaveCSS("outline-style", "solid");
+  await expect(searchBox).toHaveCSS("outline-width", "2px");
+  await expect(searchBox).toHaveCSS("outline-color", "rgb(70, 82, 77)");
+  await expect(searchBox).toHaveCSS("box-shadow", "none");
 
   const chevron = customerSearch
     .locator("xpath=../..")

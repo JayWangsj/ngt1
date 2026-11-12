@@ -57,17 +57,53 @@ export const businessClockInput = z
         message: "Data non valida",
       });
   });
-export const itemInput = z.object({
-  project: short,
-  final: amountInput,
-  adjustmentReason: text,
-  discount: amountInput.default("0"),
-  saveRule: z.boolean().default(false),
-  priceOptionId: z.string().trim().max(100).default(""),
-  requiredProductId: z.string().trim().max(100).default(""),
-  requiredQuantity: z.coerce.number().int().min(1).max(999).default(1),
-  requiredProductRemoved: z.boolean().default(false),
+const draftPriceOptionInput = z.object({
+  productId: z.string().trim().min(1).max(100),
+  name: short,
+  suggested: amountInput.refine(
+    (value) => Number(value.replace(",", ".")) > 0,
+    "Prezzo suggerito non valido",
+  ),
+  cost: z.union([amountInput, z.literal("")]).default(""),
+  quantity: z.number().int().min(1).max(999),
+  minutes: z.number().int().min(0).max(10000),
+  warrantyDays: z.number().int().min(0).max(3650),
+  notes: text,
+  isDefault: z.boolean().default(false),
 });
+export const itemInput = z
+  .object({
+    project: short,
+    final: amountInput,
+    adjustmentReason: text,
+    discount: amountInput.default("0"),
+    saveRule: z.boolean().default(false),
+    priceOptionId: z.string().trim().max(100).default(""),
+    requiredProductId: z.string().trim().max(100).default(""),
+    requiredQuantity: z.coerce.number().int().min(1).max(999).default(1),
+    requiredProductRemoved: z.boolean().default(false),
+    draftPriceOption: draftPriceOptionInput.optional(),
+  })
+  .superRefine((item, ctx) => {
+    if (!item.draftPriceOption) return;
+    if (!item.saveRule)
+      ctx.addIssue({
+        code: "custom",
+        path: ["draftPriceOption"],
+        message: "L'opzione temporanea non è valida.",
+      });
+    if (
+      (item.requiredProductId &&
+        item.requiredProductId !== item.draftPriceOption.productId) ||
+      item.requiredQuantity !== item.draftPriceOption.quantity ||
+      item.priceOptionId
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["draftPriceOption"],
+        message: "L'opzione ricambio non corrisponde alla selezione.",
+      });
+  });
 export const orderInput = z
   .object({
     requestId: z.string().uuid(),
@@ -231,10 +267,15 @@ export const productUpdateInput = z
   });
 export const paidTotalInput = z.object({
   requestId: z.string().uuid(),
+  expectedPaidCents: z.number().int().min(0).max(9_999_999_999),
   amount: amountInput,
   method: z.enum(["CASH", "CARD", "OTHER"]).default("CASH"),
   adjustmentReason: z.string().trim().min(1).max(200),
 });
+export const priceRuleOptionStateInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("enabled"), enabled: z.boolean() }),
+  z.object({ action: z.literal("default") }),
+]);
 export const inventoryAdjustmentInput = z.object({
   requestId: z.string().uuid(),
   quantity: z.coerce
@@ -394,6 +435,13 @@ export const refundInput = z.object({
   method: z.enum(["CASH", "CARD", "OTHER"]),
   reason: z.string().trim().min(1).max(2000),
 });
+export const afterSalesRefundInput = refundInput.extend({
+  sessionId: z.string().min(1).max(100),
+});
+export const afterSalesCancelInput = z.object({
+  requestId: z.string().uuid(),
+  sessionId: z.string().min(1).max(100),
+});
 export const ruleInput = z
   .object({
     category: z
@@ -441,7 +489,6 @@ export const priceRuleOptionInput = z.object({
   quantity: z.coerce.number().int().min(1).max(999).default(1),
   minutes: z.coerce.number().int().min(0).max(10000).default(60),
   warrantyDays: z.coerce.number().int().min(0).max(3650).default(0),
-  enabled: z.boolean().default(true),
   isDefault: z.boolean().default(false),
   notes: text,
 });

@@ -290,6 +290,7 @@ export async function generateTestData(
     "DIAGNOSING",
     "REPAIRING",
     "PARTS_MISSING",
+    "PARTS_PENDING_CONFIRMATION",
     "READY",
     "COMPLETED",
     "REWORKING",

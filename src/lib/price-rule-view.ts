@@ -2,8 +2,23 @@ import type { Prisma } from "@prisma/client";
 import type { RuleView } from "@/components/forms";
 
 type RuleWithOptions = Prisma.PriceRuleGetPayload<{
-  include: { options: { include: { product: true } } };
+  include: {
+    options: {
+      include: {
+        product: true;
+      };
+    };
+  };
 }>;
+type ProductWithCompatibilities =
+  RuleWithOptions["options"][number]["product"] & {
+    compatibilities?: {
+      category: string;
+      brand: string;
+      model: string;
+      project: string;
+    }[];
+  };
 
 export function priceRuleViews(
   rules: RuleWithOptions[],
@@ -25,6 +40,7 @@ export function priceRuleViews(
     requiredQuantity: rule.requiredQuantity,
     options: rule.options.map((option) => {
       const reserved = reservedByProduct.get(option.productId) ?? 0;
+      const product = option.product as ProductWithCompatibilities;
       return {
         id: option.id,
         productId: option.productId,
@@ -38,12 +54,16 @@ export function priceRuleViews(
         isDefault: option.isDefault,
         notes: option.notes,
         product: {
-          id: option.product.id,
-          name: option.product.name,
-          category: option.product.category,
-          stock: option.product.stockQuantity,
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          costPrice: product.costPrice.toString(),
+          enabled: product.enabled,
+          usage: product.usage,
+          stock: product.stockQuantity,
           reserved,
-          available: Math.max(0, option.product.stockQuantity - reserved),
+          available: Math.max(0, product.stockQuantity - reserved),
+          compatibilities: product.compatibilities ?? [],
         },
       };
     }),

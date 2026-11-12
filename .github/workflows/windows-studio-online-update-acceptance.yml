@@ -93,6 +93,45 @@ jobs:
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
           Get-ChildItem -LiteralPath $candidate -Force | Copy-Item -Destination $destination -Recurse -Force
           ./scripts/run-windows-studio-acceptance-as-standard-user.ps1 -Acceptance online-update
+      - name: Summarize sanitized Windows acceptance failure
+        if: failure()
+        shell: powershell
+        run: |
+          $diagnosticPath = Join-Path $env:RUNNER_TEMP "ngt-acceptance-diagnostics-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)\acceptance-failure.json"
+          $summaryPath = $env:GITHUB_STEP_SUMMARY
+          if (-not (Test-Path -LiteralPath $diagnosticPath -PathType Leaf)) {
+            Add-Content -LiteralPath $summaryPath -Encoding UTF8 -Value "No sanitized acceptance diagnostic was produced."
+            exit 0
+          }
+          try {
+            $report = Get-Content -LiteralPath $diagnosticPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("## Sanitized Windows acceptance failure")
+            foreach ($name in @("acceptance", "childExitCode", "processExitCode", "timedOut")) {
+              $value = $report.$name
+              if ($null -ne $value -and [string]$value -ne "") { $lines.Add("- ${name}: $value") }
+            }
+            foreach ($section in @("primaryFailure", "childFailure")) {
+              $failure = $report.$section
+              if (-not $failure) { continue }
+              foreach ($name in @("type", "message", "script", "line")) {
+                $value = [string]$failure.$name
+                if ([string]::IsNullOrWhiteSpace($value)) { continue }
+                $value = [regex]::Replace($value, "[\r\n|\x60<>]", " ")
+                if ($value.Length -gt 500) { $value = $value.Substring(0, 500) }
+                $lines.Add("- ${section}.${name}: $value")
+              }
+            }
+            foreach ($failure in $report.cleanupFailures) {
+              $value = [regex]::Replace([string]$failure.step, "[\r\n|\x60<>]", " ")
+              if ($value.Length -gt 200) { $value = $value.Substring(0, 200) }
+              $lines.Add("- cleanupFailure: $value")
+            }
+            Add-Content -LiteralPath $summaryPath -Encoding UTF8 -Value ($lines -join [Environment]::NewLine)
+            Write-Output ($lines -join [Environment]::NewLine)
+          } catch {
+            Add-Content -LiteralPath $summaryPath -Encoding UTF8 -Value "The sanitized acceptance diagnostic could not be summarized; see the uploaded diagnostic artifact."
+          }
       - name: Upload sanitized Windows acceptance failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

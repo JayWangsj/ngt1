@@ -25,7 +25,8 @@ import { clearBusinessData } from "@/lib/data-transfer";
 import { generateTestData } from "@/lib/test-tools";
 import { assertStudioWritesAvailable } from "@/lib/studio-maintenance";
 type Result<Data = undefined> =
-  { ok: true; id?: string; data?: Data } | { ok: false; error: string };
+  | { ok: true; id?: string; data?: Data }
+  | { ok: false; error: string; errorCode?: string };
 async function execute<Work extends { id?: string } | void, Data = undefined>(
   work: () => Promise<Work>,
   select?: (result: Work) => Data,
@@ -191,11 +192,16 @@ export async function paymentAction(id: string, input: unknown) {
 }
 export async function setPaidTotalAction(id: string, input: unknown) {
   const actor = await requireActor();
-  return execute(
+  const result = await execute(
     () => service.setPaidTotal(actor, id, input),
     undefined,
     orderPaths(id),
   );
+  return !result.ok &&
+    result.error ===
+      "L'incassato è cambiato. Verifica il nuovo totale e riprova."
+    ? { ...result, errorCode: "PAID_TOTAL_CHANGED" as const }
+    : result;
 }
 export async function createProductAction(input: unknown) {
   const actor = await requireActor();
@@ -388,6 +394,21 @@ export async function afterSalesAction(id: string, input: unknown) {
     orderPaths(id),
   );
 }
+export async function afterSalesRefundAction(id: string, input: unknown) {
+  const actor = await requireActor();
+  return execute(
+    () => service.refundAfterSales(actor, id, input),
+    undefined,
+    orderPaths(id),
+  );
+}
+export async function cancelAfterSalesAction(id: string, input: unknown) {
+  const actor = await requireActor();
+  return execute(() => service.cancelAfterSales(actor, id, input), undefined, [
+    ...orderPaths(id),
+    "/inventory",
+  ]);
+}
 export async function updateReworkPartAction(
   id: string,
   itemId: string,
@@ -433,6 +454,19 @@ export async function priceRuleOptionAction(
   const actor = await requireActor();
   return execute(
     () => service.savePriceRuleOption(actor, ruleId, id, input),
+    undefined,
+    pricePaths,
+  );
+}
+
+export async function priceRuleOptionStateAction(
+  ruleId: string,
+  id: string,
+  input: unknown,
+) {
+  const actor = await requireActor();
+  return execute(
+    () => service.setPriceRuleOptionState(actor, ruleId, id, input),
     undefined,
     pricePaths,
   );

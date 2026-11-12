@@ -1,17 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   ChevronRight,
   CircleAlert,
+  Copy,
   DatabaseBackup,
   Download,
+  Activity,
   FlaskConical,
   Languages,
-  RefreshCw,
   Smartphone,
   Sparkles,
   Trash2,
@@ -23,7 +30,6 @@ import { LanguageSwitch, useMessages } from "./language";
 import { Button } from "./ui/button";
 import { DatePicker, SimpleSelect } from "./business-select";
 import { Field } from "./forms";
-import { useUpdateState } from "./update-state";
 import {
   FaultCatalogManager,
   type FaultCatalogItem,
@@ -49,6 +55,57 @@ import settingsActionStyles from "./settings-action.module.css";
 import motionSettingControlStyles from "./motion-setting-control.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
 
+const memorySampleSaveRetryCodes = new Set([
+  "REPORT_SAVE_FAILED",
+  "SAVE_UNCONFIRMED",
+  "SAVE_UNAVAILABLE",
+  "DOCUMENTS_NOT_WRITABLE",
+  "DOCUMENTS_FOLDER_UNAVAILABLE",
+  "REPORT_TEMP_CREATE_FAILED",
+  "REPORT_WRITE_FAILED",
+  "REPORT_PUBLISH_FAILED",
+]);
+
+type SaveFile = {
+  createWritable: () => Promise<{
+    write: (value: Blob) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
+async function saveBlob(
+  blob: Blob,
+  filename: string,
+  description: string,
+  mimeType: string,
+  extension: string,
+) {
+  const picker = (
+    window as typeof window & {
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        types: { description: string; accept: Record<string, string[]> }[];
+      }) => Promise<SaveFile>;
+    }
+  ).showSaveFilePicker;
+  if (picker) {
+    const handle = await picker({
+      suggestedName: filename,
+      types: [{ description, accept: { [mimeType]: [extension] } }],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function SettingsEntry({
   href,
   icon,
@@ -65,7 +122,7 @@ function SettingsEntry({
   return (
     <Link
       href={href}
-      className={`panel padded settings-card ${settingsCardStyles.card} settings-entry ${settingsEntryStyles.entry} ${settingsEntryStyles.dashboardLink} dashboard-action-link ${className}`.trim()}
+      className={`settings-entry ${settingsEntryStyles.entry} ${settingsEntryStyles.dashboardLink} dashboard-action-link ${className}`.trim()}
     >
       <span
         className={`settings-entry-icon ${settingsEntryStyles.icon}`}
@@ -74,7 +131,9 @@ function SettingsEntry({
         {icon}
       </span>
       <span className={`settings-entry-copy ${settingsEntryStyles.copy}`}>
-        <strong className="dashboard-link-label">{title}</strong>
+        <strong className={`settings-entry-label ${settingsEntryStyles.label}`}>
+          <span>{title}</span>
+        </strong>
         <small>{description}</small>
       </span>
       <ChevronRight size={20} aria-hidden="true" />
@@ -83,91 +142,83 @@ function SettingsEntry({
 }
 
 export function SettingsOverview({
-  currentVersion,
   testToolsEnabled,
 }: {
-  currentVersion: string;
   testToolsEnabled: boolean;
 }) {
   const it = useMessages();
-  const update = useUpdateState();
-  const updateDescription = update.info?.updateAvailable
-    ? update.check.phase === "failed"
-      ? it.updateCheckStale.replace(
-          "{version}",
-          update.info.latestVersion || "",
-        )
-      : it.updateAvailable.replace("{version}", update.info.latestVersion || "")
-    : update.check.phase === "not-installable"
-      ? it.updateNotInstallable
-      : update.task.phase === "running" || update.task.phase === "rolling-back"
-        ? it.updateInstalling
-        : ["failed", "rollback-failed", "interrupted"].includes(
-              update.task.phase,
-            )
-          ? it.updateFailed
-          : `${it.currentVersion}: ${update.currentVersion || currentVersion}`;
   return (
-    <div
-      className={`settings-grid settings-overview ${settingsEntryStyles.grid}`}
-    >
-      <SettingsEntry
-        href="/settings/language"
-        icon={<Languages size={20} />}
-        title={it.language}
-        description={it.languageSettingsHelp}
-      />
-      <SettingsEntry
-        href="/settings/interface-motion"
-        icon={<Sparkles size={20} />}
-        title={it.interfaceMotion}
-        description={it.interfaceMotionHelp}
-      />
+    <div className={settingsEntryStyles.overview}>
+      <section className={settingsEntryStyles.group}>
+        <h2>{it.settingsGroupInterface}</h2>
+        <div className={settingsEntryStyles.rows}>
+          <SettingsEntry
+            href="/settings/language"
+            icon={<Languages size={19} />}
+            title={it.language}
+            description={it.languageSettingsHelp}
+          />
+          <SettingsEntry
+            href="/settings/interface-motion"
+            icon={<Sparkles size={19} />}
+            title={it.interfaceMotion}
+            description={it.interfaceMotionHelp}
+          />
+        </div>
+      </section>
+      <section className={settingsEntryStyles.group}>
+        <h2>{it.settingsGroupBusiness}</h2>
+        <div className={settingsEntryStyles.rows}>
+          <SettingsEntry
+            href="/settings/business-date"
+            icon={<CalendarDays size={19} />}
+            title={it.businessDate}
+            description={it.businessDateHelp}
+          />
+          <SettingsEntry
+            href="/settings/quick-services"
+            icon={<Wrench size={19} />}
+            title={it.quickService.title}
+            description={it.quickService.description}
+          />
+          <SettingsEntry
+            href="/settings/device-models"
+            icon={<Smartphone size={19} />}
+            title={it.modelCatalog.title}
+            description={it.modelCatalog.description}
+          />
+          <SettingsEntry
+            href="/settings/fault-catalog"
+            icon={<CircleAlert size={19} />}
+            title={it.faultCatalog}
+            description={it.faultCatalogDescription}
+          />
+        </div>
+      </section>
+      <section className={settingsEntryStyles.group}>
+        <h2>{it.settingsGroupData}</h2>
+        <div className={settingsEntryStyles.rows}>
+          <SettingsEntry
+            href="/settings/data"
+            icon={<DatabaseBackup size={19} />}
+            title={it.dataManagement}
+            description={it.dataManagementHelp}
+          />
+        </div>
+      </section>
       {testToolsEnabled && (
-        <SettingsEntry
-          href="/settings/test-tools"
-          icon={<FlaskConical size={20} />}
-          title={it.testTools}
-          description={it.testToolsHelp}
-        />
+        <section className={settingsEntryStyles.group}>
+          <h2>{it.settingsGroupTesting}</h2>
+          <div className={settingsEntryStyles.rows}>
+            <SettingsEntry
+              href="/settings/test-tools"
+              icon={<FlaskConical size={19} />}
+              title={it.testTools}
+              description={it.testToolsHelp}
+            />
+          </div>
+        </section>
       )}
-      <SettingsEntry
-        href="/settings/business-date"
-        icon={<CalendarDays size={20} />}
-        title={it.businessDate}
-        description={it.businessDateHelp}
-      />
-      <SettingsEntry
-        href="/settings/system-update"
-        icon={<RefreshCw size={20} />}
-        title={it.systemUpdate}
-        description={updateDescription}
-        className="system-update-entry"
-      />
-      <SettingsEntry
-        href="/settings/quick-services"
-        icon={<Wrench size={20} />}
-        title={it.quickService.title}
-        description={it.quickService.description}
-      />
-      <SettingsEntry
-        href="/settings/device-models"
-        icon={<Smartphone size={20} />}
-        title={it.modelCatalog.title}
-        description={it.modelCatalog.description}
-      />
-      <SettingsEntry
-        href="/settings/fault-catalog"
-        icon={<CircleAlert size={20} />}
-        title={it.faultCatalog}
-        description={it.faultCatalogDescription}
-      />
-      <SettingsEntry
-        href="/settings/data"
-        icon={<DatabaseBackup size={20} />}
-        title={it.dataManagement}
-        description={it.dataManagementHelp}
-      />
     </div>
   );
 }
@@ -404,9 +455,220 @@ export function DataSettings() {
   const it = useMessages();
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
+  const sampleRequestId = useRef<string | null>(null);
+  const sampleRequestAccepted = useRef(false);
+  const reportPathInput = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
+  const [sampleStatus, setSampleStatus] = useState<{
+    requestId: string;
+    taskId?: string | null;
+    phase: string;
+    elapsedSeconds: number;
+    recordedSamples: number;
+    completeSamples: number;
+    incompleteSamples: number;
+    missedSamples: number;
+    reportPath?: string | null;
+    expectedReportPath?: string | null;
+    reportAvailability?: "available" | "moved" | "unavailable";
+    errorCode?: string | null;
+  } | null>(null);
+  const [sampleError, setSampleError] = useState("");
+  const [sampleMessage, setSampleMessage] = useState("");
+  const [sampleStarting, setSampleStarting] = useState(false);
+  const [retryRequestId, setRetryRequestId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const refreshMemorySample = useCallback(
+    async (requestId?: string) => {
+      const query = new URLSearchParams({ mode: "memory-sample" });
+      if (requestId) query.set("requestId", requestId);
+      const response = await fetch(`/api/diagnostics/export?${query}`, {
+        cache: "no-store",
+      });
+      if (response.status === 404) {
+        if (!requestId) setSampleStatus(null);
+        else if (sampleRequestAccepted.current) {
+          sampleRequestAccepted.current = false;
+          setSampleStatus(null);
+          setRetryRequestId(null);
+          setSampleError(it.memorySampleExpired);
+        }
+        return false;
+      }
+      if (!response.ok) throw new Error("memory_sample_status_unavailable");
+      const result = (await response.json()) as {
+        status?: typeof sampleStatus;
+      };
+      if (!result.status) throw new Error("memory_sample_status_invalid");
+      setSampleStatus(result.status);
+      sampleRequestAccepted.current = true;
+      setRetryRequestId(null);
+      setSampleError("");
+      sampleRequestId.current = requestId ?? result.status.requestId;
+      return ["queued", "preparing", "warmup", "sampling", "saving"].includes(
+        result.status.phase,
+      );
+    },
+    [it.memorySampleExpired],
+  );
+
+  async function sendMemorySampleStart(requestId: string) {
+    const response = await fetch("/api/diagnostics/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start-memory-sample", requestId }),
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      errorCode?: string;
+      status?: typeof sampleStatus;
+    };
+    if (!response.ok)
+      throw new Error(result.errorCode ?? "memory_sample_start_failed");
+    if (result.status) setSampleStatus(result.status);
+    sampleRequestAccepted.current = true;
+    setRetryRequestId(null);
+    setSampleError("");
+  }
+
+  async function sendMemorySampleSaveRetry(requestId: string) {
+    const response = await fetch("/api/diagnostics/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "retry-memory-sample-save", requestId }),
+    });
+    if (!response.ok) throw new Error("memory_sample_save_failed");
+    const result = (await response.json()) as { status?: typeof sampleStatus };
+    if (result.status) setSampleStatus(result.status);
+    setRetryRequestId(null);
+    setSampleError("");
+  }
+
+  async function startMemorySample() {
+    const saveRetry =
+      sampleStatus?.phase === "failed" &&
+      memorySampleSaveRetryCodes.has(sampleStatus.errorCode ?? "");
+    const requestId = saveRetry
+      ? sampleStatus.requestId
+      : (retryRequestId ?? crypto.randomUUID());
+    sampleRequestId.current = requestId;
+    sampleRequestAccepted.current = saveRetry || retryRequestId !== null;
+    setSampleStarting(true);
+    setSampleError("");
+    setSampleMessage("");
+    setSampleStatus((current) =>
+      current?.requestId === requestId
+        ? current
+        : {
+            requestId,
+            phase: "preparing",
+            elapsedSeconds: 0,
+            recordedSamples: 0,
+            completeSamples: 0,
+            incompleteSamples: 0,
+            missedSamples: 0,
+          },
+    );
+    try {
+      if (saveRetry) await sendMemorySampleSaveRetry(requestId);
+      else await sendMemorySampleStart(requestId);
+    } catch (cause) {
+      const errorCode = cause instanceof Error ? cause.message : "";
+      const documentsUnavailable =
+        errorCode === "DOCUMENTS_NOT_WRITABLE" ||
+        errorCode === "DOCUMENTS_FOLDER_UNAVAILABLE";
+      const requestExpired = errorCode === "REQUEST_EXPIRED";
+      setRetryRequestId(requestExpired ? null : requestId);
+      if (requestExpired) {
+        sampleRequestId.current = null;
+        sampleRequestAccepted.current = false;
+      }
+      setSampleError(
+        requestExpired
+          ? it.memorySampleExpired
+          : documentsUnavailable
+            ? it.memorySampleDirectoryUnavailable
+            : it.memorySampleStartFailed,
+      );
+      void refreshMemorySample(requestId)
+        .then((active) => {
+          if (!active && !sampleRequestAccepted.current)
+            setSampleStatus((current) =>
+              current?.requestId === requestId ? null : current,
+            );
+        })
+        .catch(() => {
+          if (!documentsUnavailable) setSampleError(it.memorySampleUnavailable);
+        });
+    } finally {
+      setSampleStarting(false);
+    }
+  }
+
+  async function copyMemorySamplePath() {
+    const path = sampleStatus?.reportPath ?? sampleStatus?.expectedReportPath;
+    if (!path) return;
+    try {
+      await navigator.clipboard.writeText(path);
+      setSampleMessage(it.pathCopied);
+    } catch {
+      reportPathInput.current?.focus();
+      reportPathInput.current?.select();
+      setSampleMessage(it.copyPathFailed);
+    }
+  }
+
+  const sampleActive =
+    !!sampleStatus &&
+    ["queued", "preparing", "warmup", "sampling", "saving"].includes(
+      sampleStatus.phase,
+    );
+  const expectedReportPathVisible =
+    sampleStatus?.phase === "failed" &&
+    memorySampleSaveRetryCodes.has(sampleStatus.errorCode ?? "");
+  const displayReportPath =
+    sampleStatus?.reportPath ??
+    (expectedReportPathVisible ? sampleStatus?.expectedReportPath : null);
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (sampleRequestId.current && !sampleRequestAccepted.current) return;
+      try {
+        const active = await refreshMemorySample(
+          sampleRequestId.current ?? undefined,
+        );
+        if (
+          !disposed &&
+          document.visibilityState === "visible" &&
+          (active || sampleActive)
+        )
+          timer = setTimeout(poll, 2000);
+      } catch {
+        setSampleError(it.memorySampleUnavailable);
+        if (!disposed && sampleActive) timer = setTimeout(poll, 2000);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void poll();
+      else if (timer) clearTimeout(timer);
+    };
+    void poll();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [
+    it.memorySampleUnavailable,
+    refreshMemorySample,
+    sampleActive,
+    sampleStatus?.phase,
+    sampleStatus?.requestId,
+  ]);
 
   async function exportFile() {
     setPending(true);
@@ -419,40 +681,13 @@ export function DataSettings() {
       const disposition = response.headers.get("Content-Disposition") ?? "";
       const filename =
         disposition.match(/filename="([^"]+)"/)?.[1] ?? "ngt-backup.json";
-      const picker = (
-        window as typeof window & {
-          showSaveFilePicker?: (options: {
-            suggestedName: string;
-            types: { description: string; accept: Record<string, string[]> }[];
-          }) => Promise<{
-            createWritable: () => Promise<{
-              write: (value: Blob) => Promise<void>;
-              close: () => Promise<void>;
-            }>;
-          }>;
-        }
-      ).showSaveFilePicker;
-      if (picker) {
-        const handle = await picker({
-          suggestedName: filename,
-          types: [
-            {
-              description: "Backup JSON",
-              accept: { "application/json": [".json"] },
-            },
-          ],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-      } else {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        link.click();
-        URL.revokeObjectURL(url);
-      }
+      await saveBlob(
+        blob,
+        filename,
+        "Backup JSON",
+        "application/json",
+        ".json",
+      );
       setMessage(it.exportData);
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
@@ -462,22 +697,136 @@ export function DataSettings() {
     }
   }
 
+  async function exportDiagnostics() {
+    setPending(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/diagnostics/export");
+      if (!response.ok) {
+        const result = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          diagnosticId?: string;
+        };
+        throw new Error(
+          `${it.diagnosticsExportFailed}${result.diagnosticId ? ` ${it.diagnosticIdLabel}: ${result.diagnosticId}` : ""}`,
+        );
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/)?.[1] ??
+        "NGTManager-diagnostics.txt";
+      await saveBlob(
+        blob,
+        filename,
+        "NGTManager diagnostics",
+        "text/plain",
+        ".txt",
+      );
+      setMessage(it.diagnosticsExported);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setError(
+        cause instanceof Error ? cause.message : it.diagnosticsExportFailed,
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function reportClientFailure(
+    diagnosticId: string,
+    eventCode: "IMPORT_FILE_READ_FAILED" | "IMPORT_REQUEST_FAILED",
+  ) {
+    try {
+      const response = await fetch("/api/diagnostics/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diagnosticId, eventCode }),
+      });
+      if (!response.ok) return false;
+      const result: unknown = await response.json();
+      return (
+        !!result &&
+        typeof result === "object" &&
+        "accepted" in result &&
+        result.accepted === true
+      );
+    } catch {
+      // The originating failure remains visible even if its report cannot be sent.
+      return false;
+    }
+  }
+
   async function importFile(file: File) {
     setPending(true);
     setMessage("");
     setError("");
     try {
-      const response = await fetch("/api/data/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: await file.text(),
-      });
-      const result = (await response.json()) as {
+      let backupJson: string;
+      try {
+        backupJson = await file.text();
+      } catch {
+        const diagnosticId = crypto.randomUUID();
+        const recorded = await reportClientFailure(
+          diagnosticId,
+          "IMPORT_FILE_READ_FAILED",
+        );
+        throw new Error(
+          recorded
+            ? `${it.backupReadFailed} ${it.diagnosticIdLabel}: ${diagnosticId}`
+            : `${it.backupReadFailed} ${it.diagnosticNotRecorded}`,
+        );
+      }
+      const requestDiagnosticId = crypto.randomUUID();
+      let response: Response;
+      try {
+        response = await fetch("/api/data/import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-NGT-Diagnostic-Id": requestDiagnosticId,
+          },
+          body: backupJson,
+        });
+      } catch {
+        const recorded = await reportClientFailure(
+          requestDiagnosticId,
+          "IMPORT_REQUEST_FAILED",
+        );
+        throw new Error(
+          recorded
+            ? `${it.importRequestFailed} ${it.diagnosticIdLabel}: ${requestDiagnosticId}`
+            : `${it.importRequestFailed} ${it.diagnosticNotRecorded}`,
+        );
+      }
+      let result: {
         imported?: number;
         skipped?: number;
         error?: string;
+        diagnosticId?: string;
       };
-      if (!response.ok) throw new Error(result.error || it.connectionError);
+      try {
+        const payload: unknown = await response.json();
+        if (!payload || typeof payload !== "object" || Array.isArray(payload))
+          throw new Error("invalid_response");
+        result = payload as typeof result;
+      } catch {
+        const recorded = await reportClientFailure(
+          requestDiagnosticId,
+          "IMPORT_REQUEST_FAILED",
+        );
+        throw new Error(
+          recorded
+            ? `${it.importRequestFailed} ${it.diagnosticIdLabel}: ${requestDiagnosticId}`
+            : `${it.importRequestFailed} ${it.diagnosticNotRecorded}`,
+        );
+      }
+      if (!response.ok)
+        throw new Error(
+          `${result.error || it.connectionError}${result.diagnosticId ? ` (${it.diagnosticIdLabel}: ${result.diagnosticId})` : ""}`,
+        );
       setMessage(
         `${it.importSuccess} ${String(result.imported ?? 0)} / ${String(result.skipped ?? 0)}`,
       );
@@ -552,6 +901,128 @@ export function DataSettings() {
           }}
         />
       </div>
+      <div className={`settings-action ${settingsActionStyles.action}`}>
+        <div>
+          <strong>{it.exportDiagnostics}</strong>
+          <p>{it.exportDiagnosticsHelp}</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={() => void exportDiagnostics()}
+        >
+          <Download size={17} />
+          {it.exportDiagnostics}
+        </Button>
+      </div>
+      <div className={`settings-action ${settingsActionStyles.action}`}>
+        <div>
+          <strong>{it.sampleMemory}</strong>
+          <p>{it.sampleMemoryHelp}</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={sampleStarting || sampleActive}
+          onClick={() => void startMemorySample()}
+        >
+          <Activity size={17} />
+          {sampleStatus?.phase === "failed" &&
+          memorySampleSaveRetryCodes.has(sampleStatus.errorCode ?? "")
+            ? it.memorySampleRetrySave
+            : retryRequestId
+              ? it.memorySampleRetry
+              : it.sampleMemory}
+        </Button>
+      </div>
+      {sampleStatus && (
+        <div
+          className={settingsActionStyles.memorySampleResult}
+          role="status"
+          aria-live="polite"
+        >
+          <p>
+            {sampleStatus.phase === "queued"
+              ? it.memorySampleQueued
+              : sampleStatus.phase === "preparing"
+                ? it.memorySamplePreparing
+                : sampleStatus.phase === "warmup"
+                  ? `${it.memorySampleWarmup} ${Math.max(0, 120 - sampleStatus.elapsedSeconds)}s`
+                  : sampleStatus.phase === "sampling"
+                    ? `${it.memorySampleProgress} · ${sampleStatus.recordedSamples}/300`
+                    : sampleStatus.phase === "saving"
+                      ? it.memorySampleSaving
+                      : sampleStatus.phase === "complete"
+                        ? sampleStatus.completeSamples >= 270 &&
+                          sampleStatus.incompleteSamples +
+                            sampleStatus.missedSamples ===
+                            0
+                          ? it.memorySampleComplete
+                          : it.memorySamplePartial
+                        : sampleStatus.errorCode === "REQUEST_EXPIRED"
+                          ? it.memorySampleExpired
+                          : sampleStatus.errorCode === "NO_COMPLETE_SAMPLES"
+                            ? it.memorySampleNoCompletePoints
+                            : sampleStatus.errorCode ===
+                                  "DOCUMENTS_NOT_WRITABLE" ||
+                                sampleStatus.errorCode ===
+                                  "DOCUMENTS_FOLDER_UNAVAILABLE"
+                              ? it.memorySampleDirectoryUnavailable
+                              : memorySampleSaveRetryCodes.has(
+                                    sampleStatus.errorCode ?? "",
+                                  )
+                                ? it.memorySampleSaveFailed
+                                : it.memorySampleFailed}
+          </p>
+          {sampleStatus.phase === "sampling" && (
+            <p>
+              {it.memorySampleCounts}: {sampleStatus.completeSamples} /{" "}
+              {sampleStatus.incompleteSamples} / {sampleStatus.missedSamples}
+            </p>
+          )}
+          {displayReportPath && (
+            <div className={settingsActionStyles.memorySamplePath}>
+              <label htmlFor="memory-sample-report-path">
+                {sampleStatus.reportPath
+                  ? it.memorySamplePath
+                  : it.memorySampleExpectedPath}
+              </label>
+              <div>
+                <input
+                  ref={reportPathInput}
+                  id="memory-sample-report-path"
+                  type="text"
+                  readOnly
+                  value={displayReportPath}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void copyMemorySamplePath()}
+                >
+                  <Copy size={16} />
+                  {it.copyPath}
+                </Button>
+              </div>
+            </div>
+          )}
+          {sampleStatus.reportAvailability === "moved" && (
+            <p>{it.memorySampleMoved}</p>
+          )}
+          {sampleStatus.reportAvailability === "unavailable" && (
+            <p>{it.memorySampleDirectoryUnavailable}</p>
+          )}
+          {retryRequestId && <p>{it.memorySampleRetryHint}</p>}
+          {sampleMessage && <p>{sampleMessage}</p>}
+          {sampleError && (
+            <p className="message error" role="alert">
+              {sampleError}
+            </p>
+          )}
+        </div>
+      )}
       <div
         className={`settings-action danger-zone ${settingsActionStyles.action}`}
       >

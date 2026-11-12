@@ -1,7 +1,15 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type { CSSProperties } from "react";
 import {
   LayoutDashboard,
   Wrench,
@@ -17,9 +25,12 @@ import {
   CircleAlert,
   LoaderCircle,
 } from "lucide-react";
+import { X } from "lucide-react";
 import { useMessages } from "./language";
 import { BrandLogo } from "./brand-logo";
 import { useUpdateState } from "./update-state";
+import { SystemUpdate } from "./system-update";
+import updatePopoverStyles from "./system-update-popover.module.css";
 import {
   applySidebarPreference,
   clampSidebarWidth,
@@ -29,12 +40,33 @@ import {
   writeSidebarPreference,
 } from "@/lib/sidebar-preference";
 
+type UpdatePopoverPosition = {
+  left: number;
+  top: number;
+  maxHeight: number;
+  placement: "right" | "below" | "above" | "overlay";
+  anchorOffset: number;
+};
+
 export function Sidebar() {
   const it = useMessages();
   const path = usePathname();
   const { currentVersion, check, info, task } = useUpdateState();
   const [width, setWidth] = useState(240);
   const [collapsed, setCollapsed] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateExpanded, setUpdateExpanded] = useState(false);
+  const [updatePosition, setUpdatePosition] = useState<UpdatePopoverPosition>({
+    left: 260,
+    top: 12,
+    maxHeight: 600,
+    placement: "right",
+    anchorOffset: 32,
+  });
+  const updateEntry = useRef<HTMLButtonElement>(null);
+  const updatePanel = useRef<HTMLElement>(null);
+  const updateClose = useRef<HTMLButtonElement>(null);
+  const positionFrame = useRef<number | null>(null);
   const links = [
     { href: "/", label: it.nav.dashboard, icon: LayoutDashboard },
     { href: "/orders", label: it.nav.orders, icon: Wrench },
@@ -42,7 +74,6 @@ export function Sidebar() {
     { href: "/inventory", label: it.nav.inventory, icon: Package },
     { href: "/customers", label: it.nav.customers, icon: Users },
     { href: "/prices", label: it.nav.prices, icon: Tags },
-    { href: "/settings", label: it.nav.settings, icon: Settings },
   ];
 
   useEffect(() => {
@@ -54,6 +85,263 @@ export function Sidebar() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  const closeUpdatePanel = useCallback(() => {
+    setUpdateOpen(false);
+    setUpdateExpanded(false);
+    window.requestAnimationFrame(() => updateEntry.current?.focus());
+  }, []);
+
+  const positionUpdatePanel = useCallback(() => {
+    const button = updateEntry.current;
+    const panel = updatePanel.current;
+    if (!button || !panel || updateExpanded) return;
+    const header = panel.querySelector<HTMLElement>("header");
+    const content = panel.querySelector<HTMLElement>(
+      ".system-update-compact-content",
+    );
+    if (!header || !content) return;
+
+    const rect = button.getBoundingClientRect();
+    const gap = 8;
+    const visibleViewport = window.visualViewport;
+    const viewportLeft = visibleViewport?.offsetLeft ?? 0;
+    const viewportTop = visibleViewport?.offsetTop ?? 0;
+    const viewportWidth = visibleViewport?.width ?? window.innerWidth;
+    const viewportHeight = visibleViewport?.height ?? window.innerHeight;
+    const previousOverflowY = content.style.overflowY;
+    content.style.overflowY = "hidden";
+    const panelStyle = window.getComputedStyle(panel);
+    const naturalHeight = Math.ceil(
+      header.getBoundingClientRect().height +
+        content.scrollHeight +
+        Number.parseFloat(panelStyle.paddingTop) +
+        Number.parseFloat(panelStyle.paddingBottom) +
+        Number.parseFloat(panelStyle.borderTopWidth) +
+        Number.parseFloat(panelStyle.borderBottomWidth),
+    );
+    content.style.overflowY = previousOverflowY;
+
+    const panelWidth = panel.getBoundingClientRect().width || 360;
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(Math.max(value, min), Math.max(min, max));
+    const verticalMargin = Math.max(
+      4,
+      Math.min(12, Math.floor((viewportHeight - naturalHeight) / 2)),
+    );
+    const minTop = viewportTop + verticalMargin;
+    const maxHeight = Math.max(
+      1,
+      Math.min(naturalHeight, viewportHeight - verticalMargin * 2),
+    );
+    const maxTop = viewportTop + viewportHeight - verticalMargin - maxHeight;
+    let next: UpdatePopoverPosition;
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      const belowTop = rect.bottom + gap;
+      const aboveBottom = rect.top - gap;
+      const below = viewportTop + viewportHeight - verticalMargin - belowTop;
+      const above = aboveBottom - minTop;
+      let placement: UpdatePopoverPosition["placement"];
+      let top: number;
+      if (below >= naturalHeight) {
+        placement = "below";
+        top = belowTop;
+      } else if (above >= naturalHeight) {
+        placement = "above";
+        top = aboveBottom - naturalHeight;
+      } else if (naturalHeight <= viewportHeight - verticalMargin * 2) {
+        placement = "overlay";
+        top = clamp(
+          rect.top + rect.height / 2 - naturalHeight / 2,
+          minTop,
+          maxTop,
+        );
+      } else {
+        placement = below >= above ? "below" : "above";
+        top =
+          placement === "below"
+            ? clamp(belowTop, minTop, maxTop)
+            : clamp(aboveBottom - maxHeight, minTop, maxTop);
+        if (
+          (placement === "below" && top < belowTop) ||
+          (placement === "above" && top + maxHeight > aboveBottom)
+        )
+          placement = "overlay";
+      }
+      const left = clamp(
+        rect.right - panelWidth,
+        viewportLeft + 12,
+        viewportLeft + viewportWidth - panelWidth - 12,
+      );
+      const anchorOffset = rect.left + rect.width / 2 - left;
+      if (
+        placement !== "overlay" &&
+        (anchorOffset < 16 || anchorOffset > panelWidth - 16)
+      )
+        placement = "overlay";
+      next = {
+        left,
+        top,
+        maxHeight,
+        placement,
+        anchorOffset: clamp(anchorOffset, 16, panelWidth - 16),
+      };
+    } else {
+      const desiredLeft = rect.right + gap;
+      const rightFits =
+        desiredLeft + panelWidth <= viewportLeft + viewportWidth - 12;
+      const placement = rightFits ? "right" : "overlay";
+      const left = rightFits
+        ? desiredLeft
+        : clamp(
+            rect.left + rect.width / 2 - panelWidth / 2,
+            viewportLeft + 12,
+            viewportLeft + viewportWidth - panelWidth - 12,
+          );
+      const top = clamp(
+        rect.top + rect.height / 2 - maxHeight / 2,
+        minTop,
+        maxTop,
+      );
+      const targetOffset = rect.top + rect.height / 2 - top;
+      const validArrow = targetOffset >= 16 && targetOffset <= maxHeight - 16;
+      next = {
+        left,
+        top,
+        maxHeight,
+        placement: placement === "right" && validArrow ? "right" : "overlay",
+        anchorOffset: clamp(targetOffset, 16, maxHeight - 16),
+      };
+    }
+    setUpdatePosition((current) =>
+      Object.keys(next).every(
+        (key) =>
+          current[key as keyof UpdatePopoverPosition] ===
+          next[key as keyof UpdatePopoverPosition],
+      )
+        ? current
+        : next,
+    );
+  }, [updateExpanded]);
+
+  const scheduleUpdatePosition = useCallback(() => {
+    if (positionFrame.current !== null) return;
+    positionFrame.current = window.requestAnimationFrame(() => {
+      positionFrame.current = null;
+      positionUpdatePanel();
+    });
+  }, [positionUpdatePanel]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("open-update") !== "1") return;
+      setUpdateExpanded(true);
+      setUpdateOpen(true);
+      url.searchParams.delete("open-update");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!updateOpen) return;
+    positionUpdatePanel();
+    const focusFrame = window.requestAnimationFrame(() => {
+      updateClose.current?.focus();
+    });
+    const button = updateEntry.current;
+    const panel = updatePanel.current;
+    const resizeObserver = new ResizeObserver(scheduleUpdatePosition);
+    if (!updateExpanded) {
+      if (button) resizeObserver.observe(button);
+      const sidebar = button?.closest(".sidebar");
+      if (sidebar) resizeObserver.observe(sidebar);
+      const header = panel?.querySelector("header");
+      const content = panel?.querySelector<HTMLElement>(
+        ".system-update-compact-content",
+      );
+      const status = content?.querySelector(".system-update-compact-status");
+      const actions = content?.querySelector(".update-primary-actions");
+      for (const target of [panel, header, content, status, actions])
+        if (target) resizeObserver.observe(target);
+    }
+    window.addEventListener("resize", scheduleUpdatePosition);
+    window.addEventListener("scroll", scheduleUpdatePosition, true);
+    window.visualViewport?.addEventListener("resize", scheduleUpdatePosition);
+    window.visualViewport?.addEventListener("scroll", scheduleUpdatePosition);
+    const onPointerDown = (event: PointerEvent) => {
+      if (updateExpanded) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(".sidebar-toggle, .sidebar-resizer")
+      )
+        return;
+      if (
+        target instanceof Node &&
+        !updatePanel.current?.contains(target) &&
+        !updateEntry.current?.contains(target)
+      )
+        closeUpdatePanel();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeUpdatePanel();
+        return;
+      }
+      if (!updateExpanded || event.key !== "Tab") return;
+      const focusable = updatePanel.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    const previousOverflow = document.body.style.overflow;
+    if (updateExpanded) document.body.style.overflow = "hidden";
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      if (positionFrame.current !== null) {
+        window.cancelAnimationFrame(positionFrame.current);
+        positionFrame.current = null;
+      }
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleUpdatePosition);
+      window.removeEventListener("scroll", scheduleUpdatePosition, true);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        scheduleUpdatePosition,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        scheduleUpdatePosition,
+      );
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [
+    closeUpdatePanel,
+    positionUpdatePanel,
+    scheduleUpdatePosition,
+    updateExpanded,
+    updateOpen,
+  ]);
 
   function toggleCollapsed() {
     const next = !collapsed;
@@ -184,7 +472,6 @@ export function Sidebar() {
     }
   })();
   const updateLabel = `${currentVersionLabel}: ${updateSummary}`;
-  const updateHref = "/settings/system-update";
   const UpdateIcon = updateFailed
     ? CircleAlert
     : updateRunning
@@ -226,12 +513,29 @@ export function Sidebar() {
             </Link>
           ))}
         </nav>
+      </div>
+      <div className="sidebar-utilities">
         <Link
-          href={updateHref}
-          className={`sidebar-update-entry${path.startsWith(updateHref) ? " active" : ""}`}
+          href="/settings"
+          className={`sidebar-settings-entry${path.startsWith("/settings") ? " active" : ""}`}
+          aria-label={it.nav.settings}
+          title={it.nav.settings}
+        >
+          <Settings size={19} aria-hidden="true" />
+          <span className="sidebar-settings-copy">{it.nav.settings}</span>
+        </Link>
+        <button
+          ref={updateEntry}
+          type="button"
+          className={`sidebar-update-entry${updateOpen ? " active" : ""}`}
           aria-label={updateLabel}
-          aria-current={path.startsWith(updateHref) ? "page" : undefined}
+          aria-expanded={updateOpen}
+          aria-haspopup="dialog"
           title={updateLabel}
+          onClick={() => {
+            if (updateOpen) closeUpdatePanel();
+            else setUpdateOpen(true);
+          }}
         >
           <span className="sidebar-update-icon" aria-hidden="true">
             <UpdateIcon
@@ -254,7 +558,7 @@ export function Sidebar() {
             size={16}
             aria-hidden="true"
           />
-        </Link>
+        </button>
       </div>
       <div
         className="sidebar-resizer"
@@ -268,6 +572,64 @@ export function Sidebar() {
         onPointerDown={beginResize}
         onKeyDown={resizeFromKeyboard}
       />
+      {updateOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className={
+              updateExpanded ? updatePopoverStyles.backdrop : undefined
+            }
+          >
+            <section
+              ref={updatePanel}
+              className={`${updatePopoverStyles.panel} ${updateExpanded ? updatePopoverStyles.expanded : updatePopoverStyles.compact}`}
+              data-placement={updatePosition.placement}
+              style={
+                updateExpanded
+                  ? undefined
+                  : ({
+                      left: updatePosition.left,
+                      top: updatePosition.top,
+                      maxHeight: updatePosition.maxHeight,
+                      "--anchor-offset": `${updatePosition.anchorOffset}px`,
+                    } as CSSProperties)
+              }
+              role="dialog"
+              aria-modal={updateExpanded || undefined}
+              aria-labelledby="sidebar-update-title"
+              onFocusCapture={(event) => {
+                if (
+                  !updateExpanded &&
+                  event.target instanceof HTMLElement &&
+                  event.target.matches(".update-check-action")
+                )
+                  event.target.scrollIntoView({ block: "nearest" });
+              }}
+            >
+              <header className={updatePopoverStyles.header}>
+                <div>
+                  <h2 id="sidebar-update-title">{it.systemUpdate}</h2>
+                  <span>{currentVersionLabel}</span>
+                </div>
+                <button
+                  ref={updateClose}
+                  type="button"
+                  className={updatePopoverStyles.close}
+                  aria-label={it.close}
+                  onClick={closeUpdatePanel}
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              <SystemUpdate
+                currentVersion={currentVersion}
+                expanded={updateExpanded}
+                onExpandedChange={setUpdateExpanded}
+              />
+            </section>
+          </div>,
+          document.body,
+        )}
     </aside>
   );
 }

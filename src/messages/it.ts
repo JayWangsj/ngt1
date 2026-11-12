@@ -209,6 +209,7 @@ export const it = {
     DIAGNOSING: "In diagnosi",
     REPAIRING: "In riparazione",
     PARTS_MISSING: "Ricambio mancante",
+    PARTS_PENDING_CONFIRMATION: "Da confermare",
     READY: "Da ritirare",
     COMPLETED: "Consegnato",
     REWORKING: "In riparazione post-vendita",
@@ -247,6 +248,7 @@ export const it = {
     completeRepair: "Completa riparazione",
     completeQuickService: "Completa servizio",
     viewMissingParts: "Controlla ricambi mancanti",
+    confirmRepair: "Conferma avvio riparazione",
   },
   methods: {
     CASH: "Contanti",
@@ -506,7 +508,13 @@ export const it = {
   viewOrder: "Apri scheda",
   viewDetails: "Vedi dettagli",
   editProject: "Vedi / modifica intervento",
-  settingsDescription: "Lingua, data di lavoro, backup e gestione dei dati.",
+  settingsDescription: "Preferenze dell'interfaccia, configurazione e dati.",
+  settingsGroupInterface: "Preferenze dell'interfaccia",
+  settingsGroupBusiness: "Configurazione attività",
+  settingsGroupData: "Dati",
+  settingsGroupTesting: "Strumenti di test",
+  openUpdateFromSidebar:
+    "Apri “Versione e aggiornamenti” in fondo al menu laterale.",
   languageSettingsHelp: "Scegli la lingua usata nell'interfaccia.",
   language: "Lingua",
   interfaceMotion: "Animazioni interfaccia",
@@ -709,6 +717,51 @@ export const it = {
   dataManagementHelp: "Esporta, importa o cancella i dati del sistema.",
   exportData: "Esporta dati",
   exportHelp: "Scarica un file compatibile con le versioni future.",
+  exportDiagnostics: "Esporta diagnostica",
+  exportDiagnosticsHelp:
+    "Crea un file diagnostico senza dati personali per analizzare i problemi di installazione, avvio e importazione.",
+  sampleMemory: "Campiona memoria",
+  memorySampleRetry: "Riprova campionamento",
+  memorySampleRetrySave: "Riprova a salvare il rapporto",
+  memorySampleExpired:
+    "La richiesta di campionamento è scaduta o non è più disponibile. Avviala di nuovo.",
+  sampleMemoryHelp:
+    "Riscaldamento di 2 minuti, poi un campione ogni 2 secondi per 10 minuti.",
+  memorySampleQueued: "In coda, in attesa della verifica dell'ambiente.",
+  memorySamplePreparing: "Preparazione del campionamento.",
+  memorySampleWarmup:
+    "Riscaldamento in corso. Lascia aperta la pagina o usa normalmente il sistema.",
+  memorySampleProgress: "Campionamento",
+  memorySampleCounts: "Completi / incompleti / saltati",
+  memorySampleSaving: "Campionamento completato; salvataggio del rapporto.",
+  memorySampleComplete: "Rapporto di memoria salvato.",
+  memorySamplePartial:
+    "Rapporto salvato, ma i campioni completi non bastano per confrontare le versioni.",
+  memorySampleFailed: "Il campionamento della memoria non è riuscito.",
+  memorySampleSaveFailed:
+    "Salvataggio del rapporto non riuscito. I dati raccolti sono conservati e puoi riprovare.",
+  memorySampleUnavailable:
+    "Impossibile leggere temporaneamente lo stato; nuova connessione in corso.",
+  memorySampleStartFailed:
+    "Impossibile avviare il campionamento. Verifica che il sistema sia in esecuzione e riprova.",
+  memorySamplePath: "Percorso del rapporto",
+  memorySampleExpectedPath: "Percorso previsto del rapporto",
+  copyPath: "Copia percorso",
+  pathCopied: "Percorso copiato.",
+  copyPathFailed:
+    "Impossibile copiare il percorso; selezionalo e copialo manualmente.",
+  memorySampleNoCompletePoints: "Nessun campione completo in questa sessione.",
+  memorySampleMoved: "Il file del rapporto è stato spostato o eliminato.",
+  memorySampleDirectoryUnavailable:
+    "La cartella Documenti non è disponibile; riprova più tardi.",
+  memorySampleRetryHint:
+    "I dati del campionamento sono conservati; puoi riprovare a salvare il rapporto.",
+  diagnosticsExported: "File diagnostico esportato.",
+  diagnosticsExportFailed: "Esportazione del file diagnostico non riuscita.",
+  backupReadFailed: "Impossibile leggere il file di backup.",
+  importRequestFailed: "Richiesta di importazione non riuscita.",
+  diagnosticNotRecorded: "Il codice diagnostico non è stato inviato.",
+  diagnosticIdLabel: "ID diagnostico",
   importData: "Importa dati",
   importHelp:
     "I dati esistenti restano invariati; i duplicati vengono ignorati.",
@@ -783,6 +836,9 @@ export const it = {
   paymentAdjustmentReason: "Motivo della modifica",
   paymentAdjustmentDetailsRequired: "Seleziona il metodo e indica il motivo.",
   paymentCorrection: "Correggi totale incassato",
+  paymentCorrectionChanged:
+    "Il totale incassato è cambiato ed è ora {amount}. Verifica e salva di nuovo.",
+  paymentCorrectionConfirmLatest: "Conferma il nuovo totale",
   balance: "Da pagare",
   dueDate: "Consegna prevista",
   diagnosticFee: "Costo diagnosi (€)",
@@ -940,6 +996,13 @@ export const it = {
     feeEvent: "Costo post-vendita",
     paymentEvent: "Incasso post-vendita",
     refundEvent: "Rimborso",
+    refundSession: "Rimborsa e chiudi questa riparazione",
+    refundSessionEvent: "Rimborso della riparazione post-vendita",
+    cancelSession: "Annulla questa riparazione post-vendita",
+    cancelSessionSubtitle:
+      "La scheda consegnata e gli incassi originali resteranno invariati.",
+    refundBeforeCancel: "Rimborsa prima tutto l'incasso di questa riparazione.",
+    cancelledEvent: "Riparazione post-vendita annullata",
     warrantyActive: "Il dispositivo è ancora in garanzia",
     warrantyExpiring: "La garanzia è prossima alla scadenza",
     warrantyExpired: "Garanzia scaduta",
@@ -1074,10 +1137,11 @@ export const it = {
     "Nessun ricambio associato: viene usato il prezzo base dell'intervento.",
   partOptionName: "Nome opzione",
   quantity: "Quantità ricambio",
-  durationMinutes: "Tempo previsto (minuti)",
   warrantyDays: "Giorni di garanzia",
   defaultRecommended: "Opzione consigliata predefinita",
   setDefault: "Imposta predefinita",
+  setPartOptionDefault: "Imposta come opzione predefinita",
+  partOptionDefault: "Opzione predefinita attuale",
   ruleHelp:
     "Per modello: marca + modello. Per serie: marca + serie. Per una regola generica, lascia vuoti tutti i campi dispositivo.",
   reportDescription:

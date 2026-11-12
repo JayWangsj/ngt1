@@ -592,7 +592,12 @@ export async function prepareDraft(api, directory, manifest) {
   );
 }
 
-export async function publishRelease(api, directory, manifest) {
+export async function publishRelease(
+  api,
+  directory,
+  manifest,
+  { holdDraft = false } = {},
+) {
   assertManifest(manifest);
   await verifyArtifact(directory, manifest);
   if ((await api.resolveTagCommit(manifest.tag)) !== manifest.sha) {
@@ -610,6 +615,14 @@ export async function publishRelease(api, directory, manifest) {
     );
   }
   await verifyRemoteAssets(api, release, manifest, true);
+  if (holdDraft) {
+    if (!release.draft && !release.prerelease) {
+      throw new Error(
+        "This candidate requires studio validation before a stable release.",
+      );
+    }
+    return release;
+  }
   if (!release.draft) return release;
   await api.updateRelease(release.id, { draft: false });
 
@@ -1097,8 +1110,17 @@ async function main() {
       );
       return;
     }
-    const published = await publishRelease(api, directory, manifest);
-    console.log("Published verified Release " + published.html_url + ".");
+    const { windowsPrereleaseVersion } = JSON.parse(
+      await readFile("package.json", "utf8"),
+    );
+    const release = await publishRelease(api, directory, manifest, {
+      holdDraft: windowsPrereleaseVersion === version,
+    });
+    console.log(
+      release.draft
+        ? "Verified Draft held for studio validation."
+        : "Verified public Release " + release.html_url + ".",
+    );
     return;
   }
   if (command === "qualify") {
@@ -1130,7 +1152,7 @@ async function main() {
         result.run.id +
         (ready
           ? "; Release Ready passed for run " + ready.id
-          : "; v2.0.23 uses the formal Draft acceptance gates") +
+          : "; non-version tags use the formal Draft acceptance gates") +
         ".",
     );
     return;

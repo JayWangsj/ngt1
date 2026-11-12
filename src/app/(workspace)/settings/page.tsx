@@ -1,7 +1,6 @@
 import { PageHeader } from "@/components/common";
 import { SettingsOverview } from "@/components/settings";
 import { getMessages } from "@/lib/i18n-server";
-import { appVersion } from "@/lib/version";
 import { isTestToolsEnabled } from "@/lib/test-tools-guard";
 
 export default async function SettingsPage() {
@@ -12,10 +11,7 @@ export default async function SettingsPage() {
         title={it.nav.settings}
         description={it.settingsDescription}
       />
-      <SettingsOverview
-        testToolsEnabled={isTestToolsEnabled()}
-        currentVersion={appVersion}
-      />
+      <SettingsOverview testToolsEnabled={isTestToolsEnabled()} />
     </>
   );
 }

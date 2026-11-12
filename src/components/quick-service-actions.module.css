@@ -72,8 +72,8 @@
 
 .remove:focus-visible {
   border-color: transparent;
-  background: #fff7d6;
-  outline: 2px solid #806000;
+  background: var(--surface-hover);
+  outline: 2px solid var(--border-focus);
   outline-offset: 3px;
 }
 

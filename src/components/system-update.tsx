@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   CheckCircle2,
@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useLanguage, useMessages } from "./language";
 import { Button } from "./ui/button";
-import { DialogBody, DialogFooter, DialogForm, FormDialog } from "./forms";
 import { useUpdateState } from "./update-state";
 import {
   classifyUpdateTask,
@@ -31,7 +30,6 @@ import {
 import settingsCardStyles from "./settings-card.module.css";
 import settingsActionStyles from "./settings-action.module.css";
 import motionSwitchStyles from "./ui/motion-switch.module.css";
-import systemUpdateDialogStyles from "./system-update-dialog.module.css";
 
 type GitHubAuth = {
   status: "opening" | "waiting";
@@ -147,8 +145,12 @@ function taskSummary(
 
 export function SystemUpdate({
   currentVersion: fallbackVersion,
+  expanded,
+  onExpandedChange,
 }: {
   currentVersion: string;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }) {
   const it = useMessages();
   const { locale } = useLanguage();
@@ -159,6 +161,7 @@ export function SystemUpdate({
     task,
     ensureChecked,
     checkForUpdates,
+    refreshTask,
     startUpdate: launchUpdate,
   } = useUpdateState();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -171,16 +174,158 @@ export function SystemUpdate({
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [diagnostics, setDiagnostics] = useState<string | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const authMonitor = useRef<AbortController | null>(null);
+  const monitorGitHubLogin = useCallback(
+    async (signal: AbortSignal) => {
+      for (let attempt = 0; attempt < 900; attempt += 1) {
+        const continuing = await new Promise<boolean>((resolve) => {
+          const finish = (value: boolean) => {
+            window.clearTimeout(timer);
+            signal.removeEventListener("abort", abort);
+            resolve(value);
+          };
+          const abort = () => finish(false);
+          const timer = window.setTimeout(() => finish(true), 1000);
+          signal.addEventListener("abort", abort, { once: true });
+        });
+        if (!continuing || signal.aborted) return;
+        try {
+          const response = await fetch("/api/system-update/auth", {
+            cache: "no-store",
+            signal,
+          });
+          const result = (await response.json()) as {
+            status?: string;
+            message?: string;
+            verificationUrl?: string;
+            userCode?: string;
+            error?: string;
+          };
+          if (!response.ok)
+            throw new Error(result.error || it.updateLoginFailed);
+          if (result.status === "success") {
+            setGitHubAuth(null);
+            setAuthMessage(it.updateLoginSuccess);
+            setAuthPending(false);
+            await checkForUpdates();
+            return;
+          }
+          if (result.status === "failed") {
+            setGitHubAuth({
+              status: "waiting",
+              verificationUrl: result.verificationUrl,
+              userCode: result.userCode,
+            });
+            setAuthMessage("");
+            setAuthError(
+              result.message
+                ? `${it.updateLoginFailed} ${result.message}`
+                : it.updateLoginFailed,
+            );
+            setAuthPending(false);
+            return;
+          }
+          const waiting = result.status === "waiting";
+          setGitHubAuth({
+            status: waiting ? "waiting" : "opening",
+            verificationUrl: result.verificationUrl,
+            userCode: result.userCode,
+          });
+          setAuthMessage(
+            waiting ? it.updateLoginWaiting : it.updateLoginOpening,
+          );
+        } catch (cause) {
+          if (signal.aborted) return;
+          setAuthMessage("");
+          setAuthError(
+            cause instanceof Error ? cause.message : it.updateLoginFailed,
+          );
+          setAuthPending(false);
+          return;
+        }
+      }
+      setAuthMessage("");
+      setAuthError(it.updateLoginTimeout);
+      setAuthPending(false);
+    },
+    [
+      checkForUpdates,
+      it.updateLoginFailed,
+      it.updateLoginOpening,
+      it.updateLoginSuccess,
+      it.updateLoginTimeout,
+      it.updateLoginWaiting,
+    ],
+  );
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setAutoCheck(readAutoUpdateCheck());
-      void ensureChecked();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [ensureChecked]);
+    const loadAuthentication = async (signal: AbortSignal) => {
+      try {
+        const response = await fetch("/api/system-update/auth", {
+          cache: "no-store",
+          signal,
+        });
+        const result = (await response.json()) as {
+          status?: string;
+          verificationUrl?: string;
+          userCode?: string;
+          message?: string;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(result.error || it.updateLoginFailed);
+        if (result.status === "waiting" || result.status === "opening") {
+          setGitHubAuth({
+            status: result.status,
+            verificationUrl: result.verificationUrl,
+            userCode: result.userCode,
+          });
+          setAuthPending(true);
+          setAuthMessage(
+            result.status === "waiting"
+              ? it.updateLoginWaiting
+              : it.updateLoginOpening,
+          );
+          const controller = new AbortController();
+          authMonitor.current = controller;
+          void monitorGitHubLogin(controller.signal);
+        } else if (result.status === "failed") {
+          setAuthError(result.message || it.updateLoginFailed);
+        } else if (result.status === "success") {
+          setAuthMessage(it.updateLoginSuccess);
+        }
+      } catch (cause) {
+        if (signal.aborted) return;
+        setAuthError(
+          cause instanceof Error ? cause.message : it.updateLoginFailed,
+        );
+      }
+    };
+    const controller = new AbortController();
+    const frame = window.requestAnimationFrame(() =>
+      setAutoCheck(readAutoUpdateCheck()),
+    );
+    void ensureChecked();
+    void refreshTask();
+    void loadAuthentication(controller.signal);
+    return () => {
+      controller.abort();
+      authMonitor.current?.abort();
+      authMonitor.current = null;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [
+    ensureChecked,
+    it.updateLoginFailed,
+    it.updateLoginOpening,
+    it.updateLoginSuccess,
+    it.updateLoginWaiting,
+    monitorGitHubLogin,
+    refreshTask,
+  ]);
 
   async function beginGitHubLogin() {
+    onExpandedChange(true);
+    if (authPending) return;
     if (info?.installed && !info.authRequired) {
       setGitHubAuth(null);
       setAuthError("");
@@ -190,9 +335,13 @@ export function SystemUpdate({
     setAuthPending(true);
     setAuthError("");
     setAuthMessage(it.updateLoginOpening);
+    authMonitor.current?.abort();
+    const controller = new AbortController();
+    authMonitor.current = controller;
     try {
       const response = await fetch("/api/system-update/auth", {
         method: "POST",
+        signal: controller.signal,
       });
       const result = (await response.json()) as {
         status?: string;
@@ -206,72 +355,15 @@ export function SystemUpdate({
         verificationUrl: result.verificationUrl,
         userCode: result.userCode,
       });
-      await monitorGitHubLogin();
+      await monitorGitHubLogin(controller.signal);
     } catch (cause) {
+      if (controller.signal.aborted) return;
       setAuthMessage("");
       setAuthError(
         cause instanceof Error ? cause.message : it.updateLoginFailed,
       );
       setAuthPending(false);
     }
-  }
-
-  async function monitorGitHubLogin() {
-    for (let attempt = 0; attempt < 900; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      try {
-        const response = await fetch("/api/system-update/auth", {
-          cache: "no-store",
-        });
-        const result = (await response.json()) as {
-          status?: string;
-          message?: string;
-          verificationUrl?: string;
-          userCode?: string;
-          error?: string;
-        };
-        if (!response.ok) throw new Error(result.error || it.updateLoginFailed);
-        if (result.status === "success") {
-          setGitHubAuth(null);
-          setAuthMessage(it.updateLoginSuccess);
-          setAuthPending(false);
-          await checkForUpdates();
-          return;
-        }
-        if (result.status === "failed") {
-          setGitHubAuth({
-            status: "waiting",
-            verificationUrl: result.verificationUrl,
-            userCode: result.userCode,
-          });
-          setAuthMessage("");
-          setAuthError(
-            result.message
-              ? `${it.updateLoginFailed} ${result.message}`
-              : it.updateLoginFailed,
-          );
-          setAuthPending(false);
-          return;
-        }
-        const waiting = result.status === "waiting";
-        setGitHubAuth({
-          status: waiting ? "waiting" : "opening",
-          verificationUrl: result.verificationUrl,
-          userCode: result.userCode,
-        });
-        setAuthMessage(waiting ? it.updateLoginWaiting : it.updateLoginOpening);
-      } catch (cause) {
-        setAuthMessage("");
-        setAuthError(
-          cause instanceof Error ? cause.message : it.updateLoginFailed,
-        );
-        setAuthPending(false);
-        return;
-      }
-    }
-    setAuthMessage("");
-    setAuthError(it.updateLoginTimeout);
-    setAuthPending(false);
   }
 
   async function copyGitHubAuth(value: string) {
@@ -300,6 +392,7 @@ export function SystemUpdate({
   }
 
   async function loadDiagnostics() {
+    onExpandedChange(true);
     setDiagnosticsOpen((open) => !open);
     if (diagnostics !== null) return;
     setDiagnosticsLoading(true);
@@ -411,6 +504,34 @@ export function SystemUpdate({
     "rollback-succeeded",
     "rollback-failed",
   ].includes(taskPhase);
+  useEffect(() => {
+    if (
+      info?.updateAvailable ||
+      info?.notInstallable ||
+      info?.authRequired ||
+      checkPhase === "failed" ||
+      checkPhase === "auth-required" ||
+      taskPhase !== "idle" ||
+      confirmationOpen ||
+      diagnosticsOpen ||
+      githubAuth ||
+      authError ||
+      startError
+    )
+      onExpandedChange(true);
+  }, [
+    authError,
+    checkPhase,
+    confirmationOpen,
+    diagnosticsOpen,
+    githubAuth,
+    info?.authRequired,
+    info?.notInstallable,
+    info?.updateAvailable,
+    onExpandedChange,
+    startError,
+    taskPhase,
+  ]);
   const renderStages = (status: UpdateStatus, stale = false) => (
     <ol className="update-stage-list">
       {stages.map(([stage, label]) => {
@@ -471,6 +592,47 @@ export function SystemUpdate({
     </ol>
   );
 
+  if (!expanded)
+    return (
+      <div className="system-update-compact-content">
+        <p
+          className="system-update-compact-status"
+          role="status"
+          aria-live="polite"
+        >
+          {checkDescription}
+        </p>
+        <div className="update-primary-actions">
+          <Button
+            type="button"
+            variant="outline"
+            className="update-check-action"
+            disabled={checkPhase === "checking"}
+            onClick={() => void checkForUpdates()}
+          >
+            <RefreshCw
+              size={17}
+              className={checkPhase === "checking" ? "spin" : undefined}
+            />
+            {checkPhase === "checking"
+              ? it.checkingUpdates
+              : it.checkForUpdates}
+          </Button>
+          {info?.authRequired && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={authPending}
+              onClick={() => void beginGitHubLogin()}
+            >
+              <GitBranch size={18} />
+              {it.authorizeGitHub}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+
   return (
     <div className="system-update-page">
       <section className="panel padded update-overview">
@@ -487,6 +649,8 @@ export function SystemUpdate({
         <div className="update-primary-actions">
           <Button
             type="button"
+            variant="outline"
+            className="update-check-action"
             disabled={checkPhase === "checking"}
             onClick={() => void checkForUpdates()}
           >
@@ -676,7 +840,7 @@ export function SystemUpdate({
                 </small>
               )}
             </div>
-            {!info.notInstallable && (
+            {!info.notInstallable && !confirmationOpen && (
               <Button
                 type="button"
                 disabled={
@@ -684,7 +848,10 @@ export function SystemUpdate({
                   checkPhase === "checking" ||
                   info.authRequired
                 }
-                onClick={() => setConfirmationOpen(true)}
+                onClick={() => {
+                  onExpandedChange(true);
+                  setConfirmationOpen(true);
+                }}
               >
                 <Download size={17} />
                 {it.updateNow}
@@ -939,42 +1106,30 @@ export function SystemUpdate({
       </section>
 
       {confirmationOpen && info?.latestVersion && (
-        <FormDialog
-          title={it.updateConfirmTitle}
-          onClose={() => setConfirmationOpen(false)}
-        >
-          <DialogForm
-            onSubmit={(event) => {
-              event.preventDefault();
-              void confirmUpdate();
-            }}
-          >
-            <DialogBody
-              className={`confirm-update-dialog ${systemUpdateDialogStyles.confirmationBody}`}
-            >
-              <div
-                className={`confirm-update-icon ${systemUpdateDialogStyles.confirmationIcon}`}
-                aria-hidden="true"
-              >
-                <Download size={22} />
-              </div>
+        <section className="panel padded update-confirmation-step">
+          <div className="update-confirmation-copy">
+            <span className="confirm-update-icon" aria-hidden="true">
+              <Download size={22} />
+            </span>
+            <div>
+              <h2>{it.updateConfirmTitle}</h2>
               <p>{it.updateConfirm.replace("{version}", info.latestVersion)}</p>
-            </DialogBody>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="cancel"
-                onClick={() => setConfirmationOpen(false)}
-              >
-                {it.cancel}
-              </Button>
-              <Button type="submit">
-                <Download size={17} />
-                {it.updateNow}
-              </Button>
-            </DialogFooter>
-          </DialogForm>
-        </FormDialog>
+            </div>
+          </div>
+          <div className="dialog-actions">
+            <Button
+              type="button"
+              variant="cancel"
+              onClick={() => setConfirmationOpen(false)}
+            >
+              {it.cancel}
+            </Button>
+            <Button type="button" onClick={() => void confirmUpdate()}>
+              <Download size={17} />
+              {it.updateNow}
+            </Button>
+          </div>
+        </section>
       )}
     </div>
   );

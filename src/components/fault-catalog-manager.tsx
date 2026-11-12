@@ -96,6 +96,14 @@ export function FaultCatalogManager({
   const savingName = useRef(false);
   const cancellingName = useRef(false);
   const editingInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (embedded || !open) return;
+    const frame = window.requestAnimationFrame(() =>
+      searchInput.current?.focus(),
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [embedded, open]);
   useEffect(() => {
     if (!editingId) return;
     const frame = requestAnimationFrame(() =>
@@ -323,6 +331,7 @@ export function FaultCatalogManager({
         <label className="fault-search">
           <Search size={15} />
           <input
+            ref={searchInput}
             value={query}
             placeholder={it.faultSearch}
             onChange={(event) => {

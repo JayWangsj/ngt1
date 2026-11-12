@@ -25,6 +25,7 @@ import {
   WarrantyForm,
   WarrantyProgressPanel,
   ReworkPartEditor,
+  AfterSalesSessionControls,
 } from "@/components/forms";
 import { getLocale, getMessages } from "@/lib/i18n-server";
 import {
@@ -36,7 +37,10 @@ import {
   CustomerDetailLink,
   OrderDetailCard,
 } from "@/components/order-detail-ui";
-import { DetailStatusControl } from "@/components/order-list-controls";
+import {
+  DetailStatusControl,
+  PaymentCorrection,
+} from "@/components/order-list-controls";
 import { CompleteInspectionButton } from "@/components/inspection-quote";
 import { getBusinessDay } from "@/lib/business-date";
 import { WorkOrderRepairSummary } from "@/components/work-order-repair-summary";
@@ -92,6 +96,8 @@ export default async function Detail({
             "QUOTE_CREATED",
             "AFTER_SALES_OPENED",
             "AFTER_SALES_PART_CHANGED",
+            "AFTER_SALES_REFUND_ISSUED",
+            "AFTER_SALES_CANCELLED",
             "REFUND_ISSUED",
             "STATUS_CHANGED",
           ],
@@ -158,7 +164,16 @@ export default async function Detail({
       where: {
         stockTracked: true,
         consumedAt: null,
-        order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
+        order: {
+          status: {
+            in: [
+              "REPAIRING",
+              "PARTS_PENDING_CONFIRMATION",
+              "READY",
+              "REWORKING",
+            ],
+          },
+        },
       },
       _sum: { quantity: true },
     }),
@@ -176,6 +191,12 @@ export default async function Detail({
     (sum, payment) => sum + cents(payment.amount),
     0,
   );
+  const activeReworkSession = order.reworks.find((session) => session.open);
+  const activeReworkReceived = activeReworkSession
+    ? order.payments
+        .filter((payment) => payment.reworkSessionId === activeReworkSession.id)
+        .reduce((sum, payment) => sum + cents(payment.amount), 0)
+    : 0;
   const financiallyClosed = ["REFUNDED", "CANCELLED"].includes(order.status);
   const received = financiallyClosed ? 0 : receivedTotal;
   const currentDue = financiallyClosed ? 0 : totals.due;
@@ -198,6 +219,7 @@ export default async function Detail({
     order.type === "REPAIR" && order.status === "DIAGNOSING" ? (
       <CompleteInspectionButton
         orderId={id}
+        owner={actor.role === "OWNER"}
         inspectionFee={order.inspectionFee.toString()}
         device={{
           category: order.device.category,
@@ -438,6 +460,15 @@ export default async function Detail({
                 !["COMPLETED", "CANCELLED"].includes(order.status) && (
                   <PaymentForm key={remaining} id={id} remaining={remaining} />
                 )}
+              <PaymentCorrection
+                row={{
+                  id,
+                  due: currentDue,
+                  paid: receivedTotal,
+                  status: order.status,
+                  afterSalesOpen: false,
+                }}
+              />
             </section>
           </div>
         </div>
@@ -521,6 +552,37 @@ export default async function Detail({
         detail,
       });
     }
+    if (audit.action === "AFTER_SALES_REFUND_ISSUED")
+      events.push({
+        id: audit.id,
+        at: audit.createdAt,
+        title:
+          it.afterSales.refundSessionEvent +
+          " " +
+          money(cents(String(context.amount))),
+        actor: audit.actorName,
+        detail: [
+          context.method
+            ? it.afterSales.refundMethod +
+              ": " +
+              it.methods[context.method as keyof typeof it.methods]
+            : null,
+          context.reason,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+    if (audit.action === "AFTER_SALES_CANCELLED")
+      events.push({
+        id: audit.id,
+        at: audit.createdAt,
+        title: it.afterSales.cancelledEvent,
+        actor: audit.actorName,
+        detail:
+          it.afterSales.feeEvent +
+          ": " +
+          money(cents(String(context.fee ?? "0"))),
+      });
     if (audit.action === "AFTER_SALES_PART_CHANGED")
       events.push({
         id: audit.id,
@@ -635,6 +697,14 @@ export default async function Detail({
             paid={received}
             balance={remaining}
             afterSalesOpen={order.afterSalesOpen}
+            primaryAction={
+              order.status === "PARTS_PENDING_CONFIRMATION"
+                ? {
+                    status: order.afterSalesOpen ? "REWORKING" : "REPAIRING",
+                    label: it.stageActions.confirmRepair,
+                  }
+                : undefined
+            }
           />
           {inspectionStageAction}
           {order.status === "PARTS_MISSING" && (
@@ -1014,6 +1084,7 @@ export default async function Detail({
                         <ReworkPartEditor
                           orderId={id}
                           itemId={activeRework.id}
+                          owner={actor.role === "OWNER"}
                           value={activeRework.requiredProductId ?? ""}
                           products={repairProducts.map((product) => ({
                             id: product.id,
@@ -1156,11 +1227,28 @@ export default async function Detail({
               ) && (
                 <PaymentForm key={remaining} id={id} remaining={remaining} />
               )}
+            <PaymentCorrection
+              row={{
+                id,
+                due: currentDue,
+                paid: receivedTotal,
+                status: order.status,
+                afterSalesOpen: order.afterSalesOpen,
+              }}
+            />
+            {order.afterSalesOpen && activeReworkSession && (
+              <AfterSalesSessionControls
+                id={id}
+                sessionId={activeReworkSession.id}
+                received={activeReworkReceived}
+              />
+            )}
           </section>
 
           {order.status === "COMPLETED" && (
             <AfterSalesActions
               orderId={id}
+              owner={actor.role === "OWNER"}
               received={receivedTotal}
               originalProjects={order.items.map((item) => ({
                 id: item.id,
@@ -1168,7 +1256,15 @@ export default async function Detail({
                 price: money(cents(item.final)),
                 warranty: itemWarranties.get(item.id) ?? null,
                 warrantyDays: item.warrantyDays,
-                reworked: Boolean(item.reworkItem),
+                reworked: Boolean(
+                  order.reworks.some(
+                    (session) =>
+                      !session.cancelledAt &&
+                      session.items.some(
+                        (entry) => entry.originalItemId === item.id,
+                      ),
+                  ),
+                ),
                 requiredProductId: item.requiredProductId ?? undefined,
                 requiredQuantity: item.requiredQuantity,
               }))}

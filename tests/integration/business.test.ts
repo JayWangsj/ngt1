@@ -40,15 +40,20 @@ import {
   replaceQuote,
   savePriceRule,
   savePriceRuleOption,
+  setPriceRuleOptionState,
   deletePriceRuleOption,
   setPaidTotal,
   removeWorkOrderProduct,
   setUserEnabled,
   updateOrder,
+  updatePriceRuleFields,
   updateDueDate,
   updateWarranty,
   updateBusinessClock,
   openAfterSales,
+  updateReworkPart,
+  refundAfterSales,
+  cancelAfterSales,
   refundOrder,
   deleteInventoryCategory,
   deleteDeviceCatalogOption,
@@ -567,9 +572,13 @@ describe("PostgreSQL workflow", () => {
       quantity: 1,
       minutes: 40,
       warrantyDays: 0,
-      enabled: false,
       isDefault: false,
       notes: "",
+    });
+    expect(disabledOption.enabled).toBe(true);
+    await setPriceRuleOptionState(owner, rule.id, disabledOption.id, {
+      action: "enabled",
+      enabled: false,
     });
     const updateCompatibility = (product: typeof lcd, models: string[]) =>
       updateProduct(owner, product.id, {
@@ -635,6 +644,9 @@ describe("PostgreSQL workflow", () => {
       enabled: true,
       isDefault: true,
       notes: "",
+    });
+    await setPriceRuleOptionState(owner, rule.id, oledOption.id, {
+      action: "default",
     });
     expect(
       await db.priceRuleOption.findUniqueOrThrow({
@@ -715,9 +727,13 @@ describe("PostgreSQL workflow", () => {
       quantity: 1,
       minutes: 60,
       warrantyDays: 90,
-      enabled: false,
+      enabled: true,
       isDefault: true,
       notes: "",
+    });
+    await setPriceRuleOptionState(owner, rule.id, lcdOption.id, {
+      action: "enabled",
+      enabled: false,
     });
     await updateCompatibility(lcd, ["iPhone 16"]);
     expect(
@@ -733,6 +749,128 @@ describe("PostgreSQL workflow", () => {
         await db.priceRule.findUniqueOrThrow({ where: { id: rule.id } })
       ).suggested.toString(),
     ).toBe("100");
+  });
+
+  it("preserves the latest enabled and default state when an older option edit saves", async () => {
+    const { product, rule, option } = await configureRepairOption(
+      "Concurrent option edit",
+    );
+    const secondProduct = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Concurrent option default",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "18",
+      salePrice: "0",
+      initialStock: 3,
+      minStock: 0,
+    });
+    const secondOption = await savePriceRuleOption(owner, rule.id, null, {
+      productId: secondProduct.id,
+      name: secondProduct.name,
+      suggested: "89",
+      cost: "18",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 0,
+      enabled: true,
+      isDefault: false,
+      notes: "",
+    });
+
+    await setPriceRuleOptionState(owner, rule.id, secondOption.id, {
+      action: "default",
+    });
+    await setPriceRuleOptionState(owner, rule.id, option.id, {
+      action: "enabled",
+      enabled: false,
+    });
+    await savePriceRuleOption(owner, rule.id, option.id, {
+      productId: product.id,
+      name: "Edited from an older form",
+      suggested: "81",
+      cost: "32",
+      quantity: 1,
+      minutes: 60,
+      warrantyDays: 30,
+      enabled: true,
+      isDefault: true,
+      notes: "",
+    });
+
+    const editedOption = await db.priceRuleOption.findUniqueOrThrow({
+      where: { id: option.id },
+    });
+    expect(editedOption).toMatchObject({
+      name: "Edited from an older form",
+      enabled: false,
+      isDefault: false,
+    });
+    expect(editedOption.suggested.toString()).toBe("81");
+    expect(
+      await db.priceRuleOption.findUniqueOrThrow({
+        where: { id: secondOption.id },
+      }),
+    ).toMatchObject({ enabled: true, isDefault: true });
+    await expect(
+      savePriceRuleOption(owner, rule.id, null, {
+        productId: product.id,
+        name: product.name,
+        suggested: "80",
+        cost: "32",
+        quantity: 1,
+        minutes: 60,
+        warrantyDays: 0,
+        notes: "",
+      }),
+    ).rejects.toThrow("esiste già");
+  });
+
+  it("keeps exactly one default when two options are recommended concurrently", async () => {
+    const { rule } = await configureRepairOption("Concurrent default race");
+    const options: { id: string }[] = [];
+    for (const name of ["Concurrent default A", "Concurrent default B"]) {
+      const product = await createProduct(owner, {
+        requestId: randomUUID(),
+        name,
+        category: "Ricambi",
+        usage: "REPAIR",
+        costPrice: "18",
+        salePrice: "0",
+        initialStock: 3,
+        minStock: 0,
+      });
+      options.push(
+        await savePriceRuleOption(owner, rule.id, null, {
+          productId: product.id,
+          name: product.name,
+          suggested: "89",
+          cost: "18",
+          quantity: 1,
+          minutes: 60,
+          warrantyDays: 0,
+          isDefault: false,
+          notes: "",
+        }),
+      );
+    }
+
+    await Promise.all(
+      options.map((option) =>
+        setPriceRuleOptionState(owner, rule.id, option.id, {
+          action: "default",
+        }),
+      ),
+    );
+
+    const defaults = await db.priceRuleOption.findMany({
+      where: { ruleId: rule.id, enabled: true, isDefault: true },
+    });
+    expect(defaults).toHaveLength(1);
+    const updatedRule = await db.priceRule.findUniqueOrThrow({
+      where: { id: rule.id },
+    });
+    expect(updatedRule.requiredProductId).toBe(defaults[0].productId);
   });
 
   it("keeps an explicit no-part choice after saving and allows a later selection", async () => {
@@ -788,6 +926,14 @@ describe("PostgreSQL workflow", () => {
       salePrice: "0",
       initialStock: 3,
       minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "Display",
+        },
+      ],
     });
     await replaceQuote(staff, order.id, {
       items: [
@@ -1206,6 +1352,7 @@ describe("PostgreSQL workflow", () => {
     ).toBe("READY");
     await setPaidTotal(staff, created.id, {
       requestId: randomUUID(),
+      expectedPaidCents: 2000,
       amount: "100",
       method: "OTHER",
       adjustmentReason: "Saldo saldato manualmente",
@@ -1239,6 +1386,7 @@ describe("PostgreSQL workflow", () => {
 
     await setPaidTotal(staff, order.id, {
       requestId: randomUUID(),
+      expectedPaidCents: 0,
       amount: "110",
       method: "CARD",
       adjustmentReason: "Pagamento parziale registrato",
@@ -1263,6 +1411,39 @@ describe("PostgreSQL workflow", () => {
     expect(audit.context).toMatchObject({
       reason: "Pagamento parziale registrato",
     });
+  });
+  it("replays a payment correction once and rejects a stale paid-total baseline", async () => {
+    const order = await createOrder(staff, input({ deposit: "0" }));
+    const correction = {
+      requestId: randomUUID(),
+      expectedPaidCents: 0,
+      amount: "50",
+      method: "CARD" as const,
+      adjustmentReason: "Rettifica idempotente",
+    };
+
+    await setPaidTotal(staff, order.id, correction);
+    await setPaidTotal(staff, order.id, correction);
+    expect(await db.payment.count({ where: { orderId: order.id } })).toBe(1);
+    expect(
+      await db.auditLog.count({
+        where: { entityId: order.id, action: "PAYMENT_TOTAL_SET" },
+      }),
+    ).toBe(1);
+
+    await expect(
+      setPaidTotal(staff, order.id, {
+        ...correction,
+        requestId: randomUUID(),
+      }),
+    ).rejects.toThrow("è cambiato");
+    await expect(
+      setPaidTotal(staff, order.id, {
+        ...correction,
+        adjustmentReason: "Contenuto diverso con la stessa richiesta",
+      }),
+    ).rejects.toThrow("già stata usata");
+    expect(await db.payment.count({ where: { orderId: order.id } })).toBe(1);
   });
   it("locks delivered history and adds paid or free post-sale repairs independently", async () => {
     const created = await createOrder(staff, input({ deposit: "100" }));
@@ -1382,7 +1563,7 @@ describe("PostgreSQL workflow", () => {
       }),
     ).toBe(1);
   });
-  it("shares one rework flow, restores rework status after parts arrive and keeps one chance per item", async () => {
+  it("requires confirmation when after-sales parts arrive and cancels only that session", async () => {
     const part = await createProduct(staff, {
       requestId: randomUUID(),
       name: "Display rework",
@@ -1430,6 +1611,9 @@ describe("PostgreSQL workflow", () => {
     expect(
       await db.reworkSession.count({ where: { orderId: created.id } }),
     ).toBe(1);
+    const session = await db.reworkSession.findFirstOrThrow({
+      where: { orderId: created.id, open: true },
+    });
     await expect(
       changeStatus(staff, created.id, { status: "REWORKING" }),
     ).rejects.toThrow("post-vendita");
@@ -1439,6 +1623,11 @@ describe("PostgreSQL workflow", () => {
       type: "STOCK_IN",
       note: "",
     });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: created.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, created.id, { status: "REWORKING" });
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: created.id } }))
         .status,
@@ -1452,21 +1641,391 @@ describe("PostgreSQL workflow", () => {
       await db.reworkSession.count({ where: { orderId: created.id } }),
     ).toBe(1);
     await changeStatus(staff, created.id, { status: "READY" });
-    await changeStatus(staff, created.id, {
-      status: "CANCELLED",
-      note: "Cliente rinuncia al ritiro",
+    await expect(
+      changeStatus(staff, created.id, {
+        status: "CANCELLED",
+        note: "Cliente rinuncia al ritiro",
+      }),
+    ).rejects.toThrow("Cambio di stato");
+    await cancelAfterSales(staff, created.id, {
+      requestId: randomUUID(),
+      sessionId: session.id,
     });
     const cancelled = await db.workOrder.findUniqueOrThrow({
       where: { id: created.id },
       include: { history: { orderBy: { createdAt: "desc" } } },
     });
-    expect(cancelled.status).toBe("CANCELLED");
+    expect(cancelled.status).toBe("COMPLETED");
     expect(cancelled.history[0]).toMatchObject({
       from: "READY",
-      to: "CANCELLED",
-      note: "Cliente rinuncia al ritiro",
+      to: "COMPLETED",
+      note: "After-sales repair cancelled.",
     });
+    expect(
+      await db.reworkSession.findUniqueOrThrow({ where: { id: session.id } }),
+    ).toMatchObject({ open: false, cancelledAt: expect.any(Date) });
   });
+  it("requires operator confirmation after parts arrive and rechecks stock at confirmation", async () => {
+    const part = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio conferma test",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 0,
+      minStock: 0,
+    });
+    await savePriceRule(owner, null, {
+      brand: "Apple",
+      model: "iPhone 13",
+      project: "Pending confirmation test",
+      suggested: "40",
+      minutes: 30,
+      enabled: true,
+      requiredProductId: part.id,
+      requiredQuantity: 1,
+    });
+    const first = await createOrder(
+      staff,
+      input({
+        phone: "3331111121",
+        deposit: "0",
+        items: [{ project: "Pending confirmation test", final: "40" }],
+      }),
+    );
+    expect(first.status).toBe("PARTS_MISSING");
+
+    await adjustInventory(staff, part.id, {
+      requestId: randomUUID(),
+      quantity: 1,
+      type: "STOCK_IN",
+      note: "",
+    });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: first.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+
+    const second = await createOrder(
+      staff,
+      input({
+        phone: "3331111122",
+        deposit: "0",
+        items: [{ project: "Pending confirmation test", final: "40" }],
+      }),
+    );
+    expect(second.status).toBe("PARTS_MISSING");
+    expect(
+      await db.workOrderProduct.aggregate({
+        where: {
+          productId: part.id,
+          kind: "REPAIR_PART",
+          consumedAt: null,
+          order: {
+            status: {
+              in: [
+                "REPAIRING",
+                "PARTS_PENDING_CONFIRMATION",
+                "READY",
+                "REWORKING",
+              ],
+            },
+          },
+        },
+        _sum: { quantity: true },
+      }),
+    ).toMatchObject({ _sum: { quantity: 1 } });
+
+    await db.product.update({
+      where: { id: part.id },
+      data: { stockQuantity: 0 },
+    });
+    const returnedToMissing = await changeStatus(staff, first.id, {
+      status: "REPAIRING",
+    });
+    expect(returnedToMissing.status).toBe("PARTS_MISSING");
+    expect(
+      await db.statusHistory.findFirstOrThrow({
+        where: {
+          orderId: first.id,
+          from: "PARTS_PENDING_CONFIRMATION",
+          to: "PARTS_MISSING",
+        },
+      }),
+    ).toBeTruthy();
+
+    await adjustInventory(staff, part.id, {
+      requestId: randomUUID(),
+      quantity: 1,
+      type: "STOCK_IN",
+      note: "",
+    });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: first.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    expect(
+      (await changeStatus(staff, first.id, { status: "REPAIRING" })).status,
+    ).toBe("REPAIRING");
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: second.id } }))
+        .status,
+    ).toBe("PARTS_MISSING");
+  });
+
+  it("records status history when after-sales part changes require confirmation", async () => {
+    const created = await createOrder(staff, input({ deposit: "100" }));
+    const originalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: created.id },
+    });
+    await updateWarranty(staff, created.id, {
+      items: [{ id: originalItem.id, days: 30, notes: "" }],
+    });
+    const unavailable = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio indisponibile rework history",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 0,
+      minStock: 0,
+    });
+    const available = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio disponibile rework history",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 1,
+      minStock: 0,
+    });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+    await openAfterSales(staff, created.id, {
+      items: [
+        {
+          originalItemId: originalItem.id,
+          treatment: "WARRANTY",
+          fee: "0",
+          requiredProductId: unavailable.id,
+          requiredQuantity: 1,
+        },
+      ],
+      notes: "",
+      dueDate: "2099-12-31",
+    });
+    const reworkItem = await db.reworkItem.findFirstOrThrow({
+      where: { session: { orderId: created.id, open: true } },
+    });
+    await updateReworkPart(staff, created.id, reworkItem.id, {
+      productId: available.id,
+      quantity: 1,
+    });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: created.id } }))
+        .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    expect(
+      await db.statusHistory.findFirstOrThrow({
+        where: {
+          orderId: created.id,
+          from: "PARTS_MISSING",
+          to: "PARTS_PENDING_CONFIRMATION",
+        },
+      }),
+    ).toBeTruthy();
+    expect(
+      (await changeStatus(staff, created.id, { status: "REWORKING" })).status,
+    ).toBe("REWORKING");
+  });
+
+  it("refunds and cancels only the current after-sales session, then preserves repeated history in backups", async () => {
+    const created = await createOrder(staff, input({ deposit: "100" }));
+    const originalItem = await db.workOrderItem.findFirstOrThrow({
+      where: { orderId: created.id },
+    });
+    const part = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "Ricambio annullamento test",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "10",
+      salePrice: "0",
+      initialStock: 1,
+      minStock: 0,
+    });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+    await openAfterSales(staff, created.id, {
+      items: [
+        {
+          originalItemId: originalItem.id,
+          treatment: "PAID",
+          fee: "50",
+          requiredProductId: part.id,
+          requiredQuantity: 1,
+        },
+      ],
+      notes: "",
+      dueDate: "2099-12-31",
+    });
+    const firstSession = await db.reworkSession.findFirstOrThrow({
+      where: { orderId: created.id, open: true },
+    });
+    await addPayment(staff, created.id, {
+      requestId: randomUUID(),
+      amount: "20",
+      method: "CARD",
+      kind: "BALANCE",
+    });
+    await expect(
+      cancelAfterSales(staff, created.id, {
+        requestId: randomUUID(),
+        sessionId: firstSession.id,
+      }),
+    ).rejects.toThrow("Rimborsa prima");
+
+    const refundRequestId = randomUUID();
+    const refundInput = {
+      requestId: refundRequestId,
+      sessionId: firstSession.id,
+      amount: "20",
+      method: "CASH",
+      reason: "Rimborso test",
+    };
+    await refundAfterSales(staff, created.id, refundInput);
+    await refundAfterSales(staff, created.id, refundInput);
+    const refund = await db.payment.findUniqueOrThrow({
+      where: { requestId: refundRequestId },
+    });
+    expect(refund).toMatchObject({
+      orderId: created.id,
+      reworkSessionId: firstSession.id,
+      kind: "REFUND",
+    });
+
+    await cancelAfterSales(staff, created.id, {
+      requestId: randomUUID(),
+      sessionId: firstSession.id,
+    });
+    const cancelledOrder = await db.workOrder.findUniqueOrThrow({
+      where: { id: created.id },
+      include: { payments: true },
+    });
+    expect(cancelledOrder).toMatchObject({
+      status: "COMPLETED",
+      afterSalesOpen: false,
+      afterSalesDueDate: null,
+    });
+    expect(cancelledOrder.afterSalesFee.toString()).toBe("0");
+    expect(
+      cancelledOrder.payments
+        .filter((payment) => payment.reworkSessionId === null)
+        .reduce((sum, payment) => sum + Number(payment.amount), 0),
+    ).toBe(100);
+    expect(
+      await db.reworkSession.findUniqueOrThrow({
+        where: { id: firstSession.id },
+      }),
+    ).toMatchObject({ open: false, cancelledAt: expect.any(Date) });
+    expect(
+      await db.auditLog.count({
+        where: {
+          entityId: created.id,
+          action: "AFTER_SALES_CANCELLED",
+        },
+      }),
+    ).toBe(1);
+
+    await openAfterSales(staff, created.id, {
+      items: [
+        {
+          originalItemId: originalItem.id,
+          treatment: "PAID",
+          fee: "10",
+          requiredProductId: "",
+          requiredQuantity: 1,
+        },
+      ],
+      notes: "Second after-sales session",
+      dueDate: "2099-12-31",
+    });
+    const secondSession = await db.reworkSession.findFirstOrThrow({
+      where: { orderId: created.id, open: true },
+    });
+    expect(secondSession.id).not.toBe(firstSession.id);
+    await addPayment(staff, created.id, {
+      requestId: randomUUID(),
+      amount: "10",
+      method: "CARD",
+      kind: "BALANCE",
+    });
+    await changeStatus(staff, created.id, { status: "READY" });
+    await changeStatus(staff, created.id, {
+      status: "COMPLETED",
+      pickedUpBy: "Cliente",
+    });
+    await expect(
+      openAfterSales(staff, created.id, {
+        items: [
+          {
+            originalItemId: originalItem.id,
+            treatment: "PAID",
+            fee: "10",
+            requiredProductId: "",
+            requiredQuantity: 1,
+          },
+        ],
+        notes: "",
+        dueDate: "",
+      }),
+    ).rejects.toThrow("già una riparazione");
+
+    const backup = await exportBusinessData();
+    expect(backup.data.reworkSessions).toHaveLength(2);
+    expect(
+      backup.data.reworkSessions.find(
+        (session) => session.id === firstSession.id,
+      )?.cancelledAt,
+    ).toBeTruthy();
+    await clearBusinessData(owner);
+    await importBusinessData(owner, backup);
+    const restored = await db.reworkSession.findMany({
+      where: { orderId: created.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(restored).toHaveLength(2);
+    expect(restored[0].cancelledAt).toBeInstanceOf(Date);
+    expect(restored[1]).toMatchObject({ open: false, cancelledAt: null });
+
+    const legacy = structuredClone(backup) as unknown as {
+      version: number;
+      data: { reworkSessions: { cancelledAt?: Date | null }[] };
+    };
+    for (const session of legacy.data.reworkSessions)
+      delete session.cancelledAt;
+    await clearBusinessData(owner);
+    await importBusinessData(owner, legacy);
+    expect(
+      await db.reworkSession.findMany({
+        where: { orderId: created.id },
+        orderBy: { createdAt: "asc" },
+      }),
+    ).toMatchObject([
+      { open: false, cancelledAt: null },
+      { open: false, cancelledAt: null },
+    ]);
+  });
+
   it("refunds the full received amount without deleting original payments", async () => {
     const created = await createOrder(staff, input({ deposit: "100" }));
     await changeStatus(staff, created.id, { status: "REPAIRING" });
@@ -1780,6 +2339,11 @@ describe("PostgreSQL workflow", () => {
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: order.id } }))
         .status,
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, order.id, { status: "REPAIRING" });
+    expect(
+      (await db.workOrder.findUniqueOrThrow({ where: { id: order.id } }))
+        .status,
     ).toBe("REPAIRING");
   });
   it("saves a custom repair item's selected part as its default quote part", async () => {
@@ -1792,6 +2356,14 @@ describe("PostgreSQL workflow", () => {
       salePrice: "0",
       initialStock: 2,
       minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "Sostituzione scheda madre",
+        },
+      ],
     });
     await createOrder(
       staff,
@@ -2030,11 +2602,18 @@ describe("PostgreSQL workflow", () => {
   });
   it("does not replace newer list prices when only editing an old order discount", async () => {
     const old = await createOrder(owner, input({ deposit: "0" }));
+    const rule = await db.priceRule.findFirstOrThrow({
+      where: { project: "display" },
+    });
+    await updatePriceRuleFields(owner, rule.id, {
+      project: rule.project,
+      suggested: "120",
+    });
     await createOrder(
       owner,
       input({
         deposit: "0",
-        items: [{ project: "Display", final: "120", saveRule: true }],
+        items: [{ project: "Display", final: "120" }],
       }),
     );
     await replaceQuote(owner, old.id, {
@@ -2676,9 +3255,13 @@ describe("unified product inventory", () => {
       quantity: 1,
       minutes: 40,
       warrantyDays: 0,
-      enabled: false,
       isDefault: false,
       notes: "",
+    });
+    expect(disabledOption.enabled).toBe(true);
+    await setPriceRuleOptionState(owner, rule.id, disabledOption.id, {
+      action: "enabled",
+      enabled: false,
     });
     const order = await createOrder(
       staff,
@@ -2968,7 +3551,16 @@ describe("work order products and combined checkout", () => {
           productId: part.id,
           kind: "REPAIR_PART",
           consumedAt: null,
-          order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
+          order: {
+            status: {
+              in: [
+                "REPAIRING",
+                "PARTS_PENDING_CONFIRMATION",
+                "READY",
+                "REWORKING",
+              ],
+            },
+          },
         },
         _sum: { quantity: true },
       }),
@@ -2991,7 +3583,8 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: second.id } }))
         .status,
-    ).toBe("REPAIRING");
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, second.id, { status: "REPAIRING" });
 
     await changeStatus(staff, second.id, { status: "READY" });
     expect(
@@ -3113,7 +3706,8 @@ describe("work order products and combined checkout", () => {
     expect(
       (await db.workOrder.findUniqueOrThrow({ where: { id: second.id } }))
         .status,
-    ).toBe("REPAIRING");
+    ).toBe("PARTS_PENDING_CONFIRMATION");
+    await changeStatus(staff, second.id, { status: "REPAIRING" });
     expect(
       (await db.product.findUniqueOrThrow({ where: { id: part.id } }))
         .stockQuantity,
@@ -3193,6 +3787,14 @@ describe("work order products and combined checkout", () => {
       salePrice: "0",
       initialStock: 2,
       minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 13",
+          project: "READY ricambio",
+        },
+      ],
     });
     await savePriceRule(owner, null, {
       brand: "Apple",
@@ -3451,6 +4053,7 @@ describe("work order products and combined checkout", () => {
     });
     await setPaidTotal(staff, order.id, {
       requestId: randomUUID(),
+      expectedPaidCents: 0,
       amount: "120",
       method: "CASH",
       adjustmentReason: "Pagamento completo",
@@ -4064,6 +4667,184 @@ describe("service order safety", () => {
   });
 });
 
+describe("temporary repair option drafts", () => {
+  it("saves compatible temporary options atomically without replacing order prices", async () => {
+    const product = async (name: string) =>
+      createProduct(owner, {
+        requestId: randomUUID(),
+        name,
+        category: "Ricambi",
+        usage: "REPAIR",
+        costPrice: "20",
+        salePrice: "0",
+        initialStock: 5,
+        minStock: 0,
+        compatibilities: [
+          {
+            category: "PHONE",
+            brand: "Apple",
+            model: "iPhone 11",
+            project: "临时屏幕",
+          },
+        ],
+      });
+    const [oled, lcd] = await Promise.all([
+      product("iPhone 11 OLED"),
+      product("iPhone 11 LCD"),
+    ]);
+    const request = input({
+      model: "iPhone11",
+      deposit: "0",
+      items: [
+        {
+          project: "临时屏幕",
+          final: "90",
+          saveRule: true,
+          requiredProductId: oled.id,
+          requiredQuantity: 1,
+          draftPriceOption: {
+            productId: oled.id,
+            name: "OLED 方案",
+            suggested: "120",
+            cost: "20",
+            quantity: 1,
+            minutes: 45,
+            warrantyDays: 30,
+            notes: "保留草稿报价",
+            isDefault: true,
+          },
+        },
+        {
+          project: "临时屏幕",
+          final: "90",
+          saveRule: true,
+          requiredProductId: lcd.id,
+          requiredQuantity: 1,
+          draftPriceOption: {
+            productId: lcd.id,
+            name: "LCD 方案",
+            suggested: "80",
+            cost: "15",
+            quantity: 1,
+            minutes: 60,
+            warrantyDays: 7,
+            notes: "",
+            isDefault: false,
+          },
+        },
+      ],
+    });
+    const order = await createOrder(staff, request);
+    const repeated = await createOrder(staff, request);
+    const savedRule = await db.priceRule.findUniqueOrThrow({
+      where: {
+        category_brand_series_model_project: {
+          category: "PHONE",
+          brand: "Apple",
+          series: "",
+          model: "iPhone 11",
+          project: "临时屏幕",
+        },
+      },
+      include: { options: { orderBy: { productId: "asc" } } },
+    });
+    const savedOrder = await db.workOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { items: { orderBy: { priceOptionName: "asc" } } },
+    });
+
+    expect(repeated.id).toBe(order.id);
+    expect(savedRule.suggested.toString()).toBe("120");
+    expect(savedRule.options.map((option) => option.name).sort()).toEqual([
+      "LCD 方案",
+      "OLED 方案",
+    ]);
+    expect(savedOrder.items.map((item) => item.final.toString())).toEqual([
+      "90",
+      "90",
+    ]);
+    expect(savedOrder.items.map((item) => item.priceOptionName).sort()).toEqual(
+      ["LCD 方案", "OLED 方案"],
+    );
+    expect(savedRule.options.filter((option) => option.isDefault)).toHaveLength(
+      1,
+    );
+    expect(
+      await db.productCompatibility.count({ where: { model: "iPhone 11" } }),
+    ).toBe(2);
+
+    await expect(
+      createOrder(
+        staff,
+        input({
+          model: "iPhone 11",
+          deposit: "0",
+          items: [
+            {
+              project: "临时屏幕",
+              final: "90",
+              saveRule: true,
+              requiredProductId: oled.id,
+              requiredQuantity: 1,
+              draftPriceOption: {
+                productId: oled.id,
+                name: "OLED 方案",
+                suggested: "121",
+                cost: "20",
+                quantity: 1,
+                minutes: 45,
+                warrantyDays: 30,
+                notes: "保留草稿报价",
+                isDefault: true,
+              },
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("不同的配件报价方案");
+    expect(await db.priceRule.count({ where: { model: "iPhone 11" } })).toBe(1);
+  });
+
+  it("rejects a direct part when its model or project compatibility does not match", async () => {
+    const product = await createProduct(owner, {
+      requestId: randomUUID(),
+      name: "iPhone 12 display",
+      category: "Ricambi",
+      usage: "REPAIR",
+      costPrice: "20",
+      salePrice: "0",
+      initialStock: 2,
+      minStock: 0,
+      compatibilities: [
+        {
+          category: "PHONE",
+          brand: "Apple",
+          model: "iPhone 12",
+          project: "Display",
+        },
+      ],
+    });
+    await expect(
+      createOrder(
+        staff,
+        input({
+          model: "iPhone 11",
+          deposit: "0",
+          items: [
+            {
+              project: "Display",
+              final: "80",
+              requiredProductId: product.id,
+              requiredQuantity: 1,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("不适用于当前设备和维修项目");
+    expect(await db.workOrder.count()).toBe(0);
+  });
+});
+
 describe("versioned data backup import", () => {
   it("exports, clears, restores and skips an identical second import", async () => {
     const usersBefore = await db.user.count();
@@ -4625,9 +5406,12 @@ describe("versioned data backup import", () => {
       orderId: "missing-order",
       deviceId: "missing-device",
     } as never);
-    await expect(importBusinessData(owner, invalidReference)).rejects.toThrow(
-      "Il backup contiene un riferimento non valido.",
-    );
+    await expect(
+      importBusinessData(owner, invalidReference),
+    ).rejects.toMatchObject({
+      code: "BACKUP_REFERENCE_CONFLICT",
+      message: "Il backup contiene un riferimento non valido.",
+    });
 
     await saveCustomer(owner, null, {
       name: "Duplicate backup customer",
@@ -4639,13 +5423,19 @@ describe("versioned data backup import", () => {
     });
     await expect(
       importBusinessData(owner, duplicateUniqueValue),
-    ).rejects.toThrow("Il backup contiene valori univoci duplicati.");
+    ).rejects.toMatchObject({
+      code: "BACKUP_RECORD_CONFLICT",
+      message: "Il backup contiene valori univoci duplicati.",
+    });
 
     const invalidExportDate = await exportBusinessData();
     invalidExportDate.exportedAt = "invalid";
-    await expect(importBusinessData(owner, invalidExportDate)).rejects.toThrow(
-      "Formato di backup non supportato.",
-    );
+    await expect(
+      importBusinessData(owner, invalidExportDate),
+    ).rejects.toMatchObject({
+      code: "BACKUP_FORMAT_UNSUPPORTED",
+      message: "Formato di backup non supportato.",
+    });
   });
 
   it("continues to accept version 1 backups without inventory arrays", async () => {

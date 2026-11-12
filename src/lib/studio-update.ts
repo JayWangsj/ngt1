@@ -640,7 +640,7 @@ function maintenancePath(installRoot: string) {
 }
 
 function updateLogPath(installRoot: string, updateId: string) {
-  return path.join(installRoot, "logs", `update-${updateId}.log`);
+  return path.join(installRoot, "logs", "updater", `update-${updateId}.log`);
 }
 
 function authStatusPath(installRoot: string) {
@@ -1027,15 +1027,24 @@ export async function getStudioUpdateLog(root?: string) {
   if (!installRoot) return "";
   const status = await getStudioUpdateStatus(studioRoot);
   if (!status.updateId) return "";
-  try {
-    const contents = await readFile(
-      updateLogPath(installRoot, status.previousUpdateId || status.updateId),
-      "utf8",
-    );
-    return redactUpdateLog(contents.slice(-20_000));
-  } catch {
-    return "";
+  const updateId = status.previousUpdateId || status.updateId;
+  const legacyLogPath = path.join(
+    installRoot,
+    "logs",
+    `update-${updateId}.log`,
+  );
+  for (const logPath of [updateLogPath(installRoot, updateId), legacyLogPath]) {
+    try {
+      const contents = await readFile(
+        /*turbopackIgnore: true*/ logPath,
+        "utf8",
+      );
+      return redactUpdateLog(contents.slice(-20_000));
+    } catch {
+      // Read the previous log location when upgrading from an older manager.
+    }
   }
+  return "";
 }
 
 function redactUpdateLog(contents: string) {
@@ -1247,7 +1256,7 @@ export function checkStudioUpdate(
 ): Promise<StudioUpdateInfo> {
   const root = resolveStudioRoot(options.root);
   const key = [
-    path.resolve(root).toLowerCase(),
+    path.resolve(/*turbopackIgnore: true*/ root).toLowerCase(),
     options.targetVersion || "latest",
   ].join(":");
   const pending = updateChecksInFlight.get(key);

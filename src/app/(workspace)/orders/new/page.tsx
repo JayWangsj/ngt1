@@ -11,14 +11,27 @@ export default async function NewOrder({
   searchParams: Promise<{ type?: string }>;
 }) {
   const it = await getMessages();
-  await requireActor();
+  const actor = await requireActor();
   const query = await searchParams;
   const rules = await db.priceRule.findMany({
     where: { enabled: true },
     include: {
       options: {
         where: { enabled: true },
-        include: { product: true },
+        include: {
+          product: {
+            include: {
+              compatibilities: {
+                select: {
+                  category: true,
+                  brand: true,
+                  model: true,
+                  project: true,
+                },
+              },
+            },
+          },
+        },
         orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
       },
     },
@@ -60,7 +73,15 @@ export default async function NewOrder({
     }),
     db.product.findMany({
       where: { enabled: true, usage: "REPAIR" },
-      select: { id: true, name: true, category: true, stockQuantity: true },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        stockQuantity: true,
+        compatibilities: {
+          select: { category: true, brand: true, model: true, project: true },
+        },
+      },
       orderBy: [{ favorite: "desc" }, { name: "asc" }],
     }),
     db.inventoryCategory.findMany({
@@ -74,7 +95,16 @@ export default async function NewOrder({
         kind: "REPAIR_PART",
         consumedAt: null,
         stockTracked: true,
-        order: { status: { in: ["REPAIRING", "READY", "REWORKING"] } },
+        order: {
+          status: {
+            in: [
+              "REPAIRING",
+              "PARTS_PENDING_CONFIRMATION",
+              "READY",
+              "REWORKING",
+            ],
+          },
+        },
       },
       _sum: { quantity: true },
     }),
@@ -101,6 +131,7 @@ export default async function NewOrder({
         }))}
         repairForm={
           <NewOrderWizard
+            owner={actor.role === "OWNER"}
             faultOptions={faultOptions.map(({ _count, ...fault }) => ({
               ...fault,
               usageCount: _count.orders,
@@ -117,6 +148,7 @@ export default async function NewOrder({
                 product.stockQuantity -
                   (reservedByProduct.get(product.id) ?? 0),
               ),
+              compatibilities: product.compatibilities,
             }))}
             productCategories={productCategories}
             rules={priceRuleViews(rules, reservedByProduct)}

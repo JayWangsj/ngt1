@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useMessages } from "./language";
 import { useUpdateState } from "./update-state";
@@ -9,14 +7,12 @@ import { Button } from "./ui/button";
 
 export function UpdateStartupCheck() {
   const it = useMessages();
-  const path = usePathname();
   const { check, info, task } = useUpdateState();
   const [dismissedVersion, setDismissedVersion] = useState("");
   const version = info?.latestVersion || "";
   if (
     !version ||
     !info?.updateAvailable ||
-    path.startsWith("/settings/system-update") ||
     [
       "starting",
       "queued",
@@ -39,9 +35,9 @@ export function UpdateStartupCheck() {
             : it.updateNoticeBody}
         </span>
       </div>
-      <Button asChild>
-        <Link href="/settings/system-update">{it.viewUpdate}</Link>
-      </Button>
+      <span className="update-notification-action-hint">
+        {it.openUpdateFromSidebar}
+      </span>
       <Button
         type="button"
         variant="outline"

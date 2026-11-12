@@ -50,6 +50,15 @@ const errors: Record<string, string> = {
   "Il dispositivo non appartiene al cliente selezionato.":
     "设备不属于当前客户。",
   "Richiesta di pagamento già utilizzata.": "该付款请求已使用，请刷新后核对。",
+  "La richiesta di rettifica è già stata usata.":
+    "该纠正请求已用于其他操作，请刷新后核对。",
+  "L'incassato è cambiato. Verifica il nuovo totale e riprova.":
+    "累计已收已变化，请核对当前金额后再次保存。",
+  "Attiva prima l'opzione ricambio.": "请先启用这个配件方案。",
+  "Il ricambio selezionato non è compatibile con il dispositivo e l'intervento.":
+    "所选配件与当前设备或维修项目不兼容，请重新选择。",
+  "L'opzione per questo progetto esiste già. Controlla il listino e riattivala se è disattivata.":
+    "当前项目已有该配件方案；请检查报价表，如方案已停用请先启用。",
   "Sono presenti incassi: gestire il rimborso prima dell'annullamento. I rimborsi non sono inclusi nel MVP.":
     "已有收款，取消前需处理退款；当前版本不支持退款。",
   "Importo non valido (massimo 2 decimali).": "金额无效，最多两位小数。",
