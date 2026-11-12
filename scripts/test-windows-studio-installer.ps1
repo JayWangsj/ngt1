@@ -279,7 +279,11 @@ try {
         $reserveStatus.updateId -ne $updateId -or
         $reserveStatus.targetVersion -ne $ExpectedVersion -or
         $reserveStatus.status -ne "starting") {
-      throw "NGTManager could not reserve the exact-SHA online update."
+      $failureDetails = Protect-NgtAcceptanceDiagnosticText -Text $reserveText -Secrets $diagnosticSecrets
+      $failureDetails = [regex]::Replace([string]$failureDetails, '[\r\n]+', ' ').Trim()
+      if ($failureDetails.Length -gt 400) { $failureDetails = $failureDetails.Substring(0, 400) }
+      if (-not $failureDetails) { $failureDetails = "no manager output" }
+      throw "NGTManager could not reserve the exact-SHA online update (exit code $reserveExitCode; $failureDetails)."
     }
     $startOutput = & $managerPath start-update $updateId 2>&1
     $startExitCode = $LASTEXITCODE
@@ -397,6 +401,10 @@ try {
   Write-Output "NGTManager safe-uninstall command passed."
   Write-Output "Windows installer acceptance passed for v$($metadata.version)."
 } catch {
+  $primaryFailureMessage = Protect-NgtAcceptanceDiagnosticText -Text $_.Exception.Message -Secrets $diagnosticSecrets
+  $primaryFailureMessage = [regex]::Replace([string]$primaryFailureMessage, '[\r\n]+', ' ').Trim()
+  if ($primaryFailureMessage.Length -gt 400) { $primaryFailureMessage = $primaryFailureMessage.Substring(0, 400) }
+  if ($primaryFailureMessage) { $cleanupProblems.Add("primary failure: $primaryFailureMessage") }
   try {
     $diagnosticSources = @(
       $installerLog,
