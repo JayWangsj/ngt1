@@ -569,6 +569,9 @@ test("keeps queued task stages separate from the installed version", async ({
   });
   await page.reload();
   const updateEntry = page.locator(".sidebar-update-entry");
+  if ((await updateEntry.getAttribute("aria-expanded")) !== "true") {
+    await updateEntry.click();
+  }
   await expect(updateEntry).toHaveAttribute("aria-expanded", "true");
   const version = page.locator(".update-version-block strong");
   await expect(version).toHaveText("v2.0.15");

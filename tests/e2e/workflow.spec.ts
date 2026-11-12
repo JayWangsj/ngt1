@@ -1652,6 +1652,14 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
   await draftDialog.getByLabel(/Prezzo suggerito/).fill("120");
   await draftDialog.getByRole("button", { name: "Salva", exact: true }).click();
   await expect(draftDialog).toHaveCount(0);
+  const createdOption = optionPicker
+    .locator(".price-option-choice")
+    .filter({ hasText: "iPhone 11 repair scheme" });
+  await expect(createdOption).toBeVisible();
+  await createdOption.click();
+  await optionPicker
+    .getByRole("button", { name: "Conferma selezione", exact: true })
+    .click();
   const draftSummary = page
     .locator(".selected-part-summary")
     .filter({ hasText: "iPhone 11 repair scheme" });
