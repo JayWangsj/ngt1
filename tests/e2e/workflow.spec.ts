@@ -1804,7 +1804,7 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
         where: {
           productId: compatibleProductId,
           model: "iPhone 11",
-          project: projectName.toLocaleLowerCase("it"),
+          project: { equals: projectName, mode: "insensitive" },
         },
       }),
     ).toBe(1);
