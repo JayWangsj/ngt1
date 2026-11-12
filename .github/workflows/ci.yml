@@ -54,6 +54,10 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm lint
+      - name: Temporary E2E formatting diagnostics
+        run: |
+          pnpm exec prettier --write tests/e2e/workflow.spec.ts
+          git diff -- tests/e2e/workflow.spec.ts
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
