@@ -653,7 +653,14 @@ async function snapshots(
   const results = [];
   const projectPrices = new Map<string, number>();
   for (const item of input) {
-    const match = matchRule(effectiveRules, device, item.project);
+    const selectedRule = item.priceOptionId
+      ? effectiveRules.find((rule) =>
+          rule.options.some((option) => option.id === item.priceOptionId),
+        )
+      : undefined;
+    const match =
+      (selectedRule && matchRule([selectedRule], device, item.project)) ??
+      matchRule(effectiveRules, device, item.project);
     const final = cents(item.final);
     const projectKey = normalizeRepairProject(item.project);
     if (
