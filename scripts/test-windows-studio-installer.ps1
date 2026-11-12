@@ -443,8 +443,10 @@ try {
         }
       } catch {
         $cleanupSafe = $false
-        $cleanupProblems.Add("uninstaller")
-        Write-Warning ("Installer acceptance cleanup failed: " + $_.Exception.Message)
+        $cleanupMessage = [regex]::Replace([string]$_.Exception.Message, "[\r\n]+", " ")
+        if ($cleanupMessage.Length -gt 300) { $cleanupMessage = $cleanupMessage.Substring(0, 300) }
+        $cleanupProblems.Add("uninstaller: $cleanupMessage")
+        Write-Warning ("Installer acceptance cleanup failed: " + $cleanupMessage)
       }
     } elseif (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json")) {
       $cleanupSafe = $false
