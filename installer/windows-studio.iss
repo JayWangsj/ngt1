@@ -290,9 +290,9 @@ begin
             MessageText := 'Cancellation was requested. Setup waited for a safe rollback point.'
           else
             MessageText := 'NGTManager stopped during: ' + PhaseDescription(CurrentPhase) + '.';
-          Result := MessageText + #13#10 + 'Attempt ID: ' + AttemptId +
-            #13#10 + 'Open the matching Inno Setup Log in %TEMP% for installation details.' +
-            #13#10 + 'After NGTManager starts, use Settings > Export diagnostics to create one support file.';
+          Result := MessageText + #13#10 + 'Attempt ID: ' + AttemptId + #13#10 +
+            'Open the matching Inno Setup Log in %TEMP% for installation details.' + #13#10 +
+            'After NGTManager starts, use Settings > Export diagnostics to create one support file.';
           Log('NGTManager core failed or cancellation was requested; exit=' + IntToStr(ResultCode) +
             '; attempt=' + AttemptId + '.');
         end
@@ -310,8 +310,8 @@ begin
       end;
     except
       Log('NGTManager preparation raised an exception; attempt=' + AttemptId + '.');
-      Result := 'NGTManager could not finish package preparation. Attempt ID: ' + AttemptId +
-        #13#10 + 'Open the matching Inno Setup Log in %TEMP% and retry with the complete offline installer.';
+      Result := 'NGTManager could not finish package preparation. Attempt ID: ' + AttemptId + #13#10 +
+        'Open the matching Inno Setup Log in %TEMP% and retry with the complete offline installer.';
     end;
   finally
     CoreRunning := False;
