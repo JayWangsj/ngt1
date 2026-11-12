@@ -1613,12 +1613,12 @@ export function ItemsEditor({
             suggested: option?.suggested ?? found.rule.suggested,
             requiredProductId:
               option?.productId ??
-            availableRequiredProductId(
-              found,
-              availableProducts,
-              device,
-              project,
-            ),
+              availableRequiredProductId(
+                found,
+                products,
+                device,
+                project,
+              ),
             requiredQuantity:
               option?.quantity ?? found.rule.requiredQuantity ?? 1,
             requiredProductRemoved: false,
@@ -1641,7 +1641,7 @@ export function ItemsEditor({
           };
     });
     onChange(projectPicker ? next.filter((item) => item.project) : next);
-  }, [deviceKey, device, items, rules, onChange, projectPicker]);
+  }, [deviceKey, device, items, rules, onChange, projectPicker, products]);
   const update = (index: number, patch: Partial<ItemView>) => {
     const next = items.map((item, i) =>
       i === index
