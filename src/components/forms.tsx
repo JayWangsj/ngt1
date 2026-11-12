@@ -1613,12 +1613,7 @@ export function ItemsEditor({
             suggested: option?.suggested ?? found.rule.suggested,
             requiredProductId:
               option?.productId ??
-              availableRequiredProductId(
-                found,
-                products,
-                device,
-                project,
-              ),
+              availableRequiredProductId(found, products, device, project),
             requiredQuantity:
               option?.quantity ?? found.rule.requiredQuantity ?? 1,
             requiredProductRemoved: false,
