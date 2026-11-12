@@ -40,6 +40,10 @@ export type UpdateStatus = {
   executorConfirmed?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  installerPhase?: string;
+  installerProgressAt?: string;
+  installerFiles?: number;
+  installerBytes?: number;
   completedStages?: string[];
   skippedStages?: string[];
   failedStage?: string;

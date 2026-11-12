@@ -206,9 +206,13 @@ try {
     throw "NGTManager did not report a committed installation of the verified release."
   }
   $runEntry = Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue
-  if (-not $runEntry -or $runEntry.NGTManager -notmatch 'NGTManager\.exe" run$') {
-    throw "NGTManager did not register direct per-user startup."
+  if ($runEntry -and $runEntry.NGTManager) {
+    throw "NGTManager unexpectedly registered per-user startup."
   }
+  if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
+    throw "A silent first install unexpectedly started the application."
+  }
+  Start-Process -FilePath $managerPath -ArgumentList "run" -WorkingDirectory $installRoot -WindowStyle Hidden
 
   $health = $null
   for ($attempt = 0; $attempt -lt 180; $attempt++) {

@@ -50,6 +50,7 @@ New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 Write-Output "Inno Setup compiler: $CompilerPath"
 Write-Output "Installer package directory: $packageDirectory"
 Write-Output "Installer output: $outputRoot"
+$packageFiles = Get-ChildItem -LiteralPath $packageDirectory -File -Recurse -Force | Measure-Object -Property Length -Sum
 $packageDrive = "Z:"
 if (Get-PSDrive -Name "Z" -ErrorAction SilentlyContinue) {
   throw "Temporary installer package drive Z: is already in use."
@@ -62,6 +63,8 @@ try {
   & $CompilerPath `
     ("/DAppVersion=" + $version) `
     ("/DPackageDirectory=" + $packageDrive) `
+    ("/DPackageBytes=" + [long]$packageFiles.Sum) `
+    ("/DPackageFileCount=" + $packageFiles.Count) `
     ("/DIconPath=" + $iconPath) `
     ("/DOutputDir=" + $outputRoot) `
     $installerDefinition

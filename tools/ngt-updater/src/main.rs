@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
 use std::sync::OnceLock;
@@ -1091,9 +1091,109 @@ fn run_installer(args: &Args, installer: &Path, log_path: &Path) -> Result<ExitS
         command.arg(format!("/NGTAcceptanceFailureStage={stage}"));
     }
     hide_console(&mut command);
-    command
-        .status()
-        .map_err(|error| UpdateError::new("installing", error.to_string()))
+    let mut child = command
+        .spawn()
+        .map_err(|error| UpdateError::new("installing", error.to_string()))?;
+    let mut last_progress = None;
+    let mut last_heartbeat = None;
+    let mut progressed_at = now();
+    let mut last_status_write = Instant::now();
+    write_progress(
+        args,
+        "running",
+        "installing",
+        json!({
+            "installerPhase": "unpacking",
+            "installerProgressAt": progressed_at,
+        }),
+    )?;
+    loop {
+        if let Some(result) = child
+            .try_wait()
+            .map_err(|error| UpdateError::new("installing", error.to_string()))?
+        {
+            return Ok(result);
+        }
+        if let Ok(mut log) = File::open(&installer_log) {
+            let offset = log
+                .metadata()
+                .map(|meta| meta.len().saturating_sub(16 * 1024))
+                .unwrap_or(0);
+            let mut tail = Vec::new();
+            if log.seek(SeekFrom::Start(offset)).is_ok()
+                && log.take(16 * 1024).read_to_end(&mut tail).is_ok()
+            {
+                let text = String::from_utf8_lossy(&tail);
+                if let Some((complete, _)) = text.rsplit_once('\n') {
+                    if let Some(line) = complete
+                        .lines()
+                        .rev()
+                        .find(|line| installer_progress(line, &args.update_id).is_some())
+                    {
+                        if last_heartbeat.as_deref() != Some(line) {
+                            if let Some(progress) = installer_progress(line, &args.update_id) {
+                                if last_progress.as_ref() != Some(&progress) {
+                                    progressed_at = now();
+                                }
+                                let (phase, files, bytes) = &progress;
+                                let _ = write_progress(
+                                    args,
+                                    "running",
+                                    "installing",
+                                    json!({
+                                        "installerPhase": phase, "installerProgressAt": progressed_at,
+                                        "installerFiles": files, "installerBytes": bytes
+                                    }),
+                                );
+                                last_progress = Some(progress);
+                                last_heartbeat = Some(line.to_owned());
+                                last_status_write = Instant::now();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if last_status_write.elapsed() >= Duration::from_secs(5) {
+            let (phase, files, bytes) = last_progress
+                .clone()
+                .unwrap_or_else(|| ("unpacking".to_owned(), None, None));
+            let _ = write_progress(
+                args,
+                "running",
+                "installing",
+                json!({
+                    "installerPhase": phase,
+                    "installerProgressAt": progressed_at,
+                    "installerFiles": files,
+                    "installerBytes": bytes,
+                }),
+            );
+            last_status_write = Instant::now();
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn installer_progress(line: &str, update_id: &str) -> Option<(String, Option<u32>, Option<u64>)> {
+    let (_, payload) = line.split_once("NGT_PROGRESS|")?;
+    let mut fields = payload.trim_end().split('|');
+    if fields.next()? != update_id {
+        return None;
+    }
+    let phase = fields.next()?;
+    if phase.is_empty()
+        || phase.len() > 40
+        || !phase.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+    {
+        return None;
+    }
+    fields.next()?.parse::<u64>().ok()?;
+    fields.next()?.parse::<u64>().ok()?;
+    fields.next()?.parse::<u8>().ok()?;
+    let files = fields.next().and_then(|n| n.parse().ok());
+    let bytes = fields.next().and_then(|n| n.parse().ok());
+    Some((phase.to_owned(), files, bytes))
 }
 
 #[cfg(feature = "acceptance-api")]
@@ -1179,6 +1279,23 @@ fn verify_installed_release(args: &Args, client: &Client) -> Result<String> {
 
 fn ensure_installer_succeeded(args: &Args, installer: &ExitStatus) -> Result<()> {
     if installer.success() {
+        if semver::Version::parse(&args.target_version)
+            .is_ok_and(|version| (version.major, version.minor, version.patch) >= (2, 0, 25))
+        {
+            let registration: Value = read_json(
+                &args.install_root.join("state/installer-registration.json"),
+            )
+            .map_err(|_| UpdateError::new("installing", "Setup registration was not confirmed."))?;
+            if registration["operationId"] != args.update_id
+                || registration["version"] != args.target_version
+                || registration["outcome"] != "complete"
+            {
+                return Err(UpdateError::new(
+                    "installing",
+                    "Setup registration does not match this update.",
+                ));
+            }
+        }
         return Ok(());
     }
     Err(installer_exit_error(
@@ -2342,6 +2459,19 @@ mod tests {
         fs::write(root.join("nested").join("larger.bin"), b"1234567890").unwrap();
         assert_eq!(directory_size(&root).unwrap(), 15);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installer_progress_is_scoped_to_the_active_task() {
+        assert_eq!(
+            installer_progress(
+                "18:41 NGT_PROGRESS|task|candidate_verification|44|434|0|212|1200",
+                "task"
+            ),
+            Some(("candidate_verification".into(), Some(212), Some(1200)))
+        );
+        assert!(installer_progress("NGT_PROGRESS|previous|stop_runtime|2|5|0", "task").is_none());
+        assert!(installer_progress("NGT_PROGRESS|task|invalid phase|2|5|0", "task").is_none());
     }
 
     #[test]

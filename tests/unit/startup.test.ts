@@ -130,7 +130,9 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("fn stop_application(");
     expect(manager).toContain('write_all(b"shutdown\\n")');
     expect(manager).toContain("&children.application_job,");
-    expect(manager).toContain("return ensure_legacy_runtime_confirmed(root)");
+    expect(manager).toContain(
+      "return ensure_legacy_runtime_confirmed(root, deadline, probe_release)",
+    );
     expect(manager).toContain("resolvePostgresRuntime");
     expect(manager).toContain("pg_controldata.exe");
     expect(manager).toContain("postgres_cluster_is_clean");
@@ -276,22 +278,22 @@ describe("Windows persistent startup", () => {
     }
   });
 
-  it("registers per-user startup directly to the Rust manager", async () => {
+  it("removes only the legacy per-user Rust manager startup command", async () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const autostart = manager.slice(
-      manager.indexOf("fn set_autostart("),
+      manager.indexOf("fn remove_legacy_autostart("),
       manager.indexOf(
         "fn read_build_number(",
-        manager.indexOf("fn set_autostart("),
+        manager.indexOf("fn remove_legacy_autostart("),
       ),
     );
     expect(autostart).toContain(
       "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
     );
-    expect(autostart).toContain('root.join("tools").join("NGTManager.exe")');
-    expect(autostart).toContain(
-      'format!("\\\"{}\\\" run", executable.display())',
-    );
+    expect(autostart).toContain('root.join("tools/NGTManager.exe")');
+    expect(autostart).toContain("RegQueryValueExW");
+    expect(autostart).toContain("RegDeleteValueW");
+    expect(autostart).not.toContain("RegSetValueExW");
     expect(autostart).not.toContain("ScheduledTask");
     expect(autostart).not.toContain("wscript.exe");
   });
@@ -546,14 +548,15 @@ describe("Windows persistent startup", () => {
       "function PrepareToInstall(var NeedsRestart: Boolean): String",
     );
     expect(installer).toContain("ExecAndLogOutput(ManagerPath");
-    expect(installer).toContain("CreateOutputMarqueeProgressPage(");
+    expect(installer).toContain("AfterInstall: InstallExtractedPackage");
+    expect(installer).toContain("GetSpaceOnDisk64");
+    expect(installer).not.toContain("ExtractTemporaryFiles(");
     expect(installer).toContain("--package-extract-ms ");
     expect(installer).toContain("--package-file-count ");
     expect(installer).toContain("record-installer-registration ");
     expect(installer).toContain(
       "Cancellation will wait for the current safe step",
     );
-    expect(installer).toContain("WizardForm.CancelButton.Enabled := True");
     expect(installer).toContain("WizardForm.CancelButton.Enabled := False");
     expect(installer).not.toContain(
       "RaiseException('NGTManager installation failed.",
@@ -627,7 +630,9 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain(
       "function PrepareToInstall(var NeedsRestart: Boolean): String",
     );
-    expect(installer).not.toContain("RaiseException");
+    expect(installer).toContain(
+      "if not PrepareSucceeded then RaiseException(Failure)",
+    );
     expect(packager).toContain("cargo build --release --bins");
     expect(packager).toContain('"NGTManager.exe"');
     expect(packager).toContain('"NGTUpdater.exe"');
@@ -713,8 +718,10 @@ describe("Windows persistent startup", () => {
     const installer = await readFile("installer/windows-studio.iss", "utf8");
     expect(installer).toContain("function ReadManagerError: String");
     expect(installer).toContain("LoadStringsFromFile(ResultPath, ResultLines)");
-    expect(installer).toContain("Result := Copy(ResultLines[1], 1, 512)");
+    expect(installer).toContain("Result := Copy(ResultLines[1], 1, 1024)");
     expect(installer).toContain("if (not Started) or (ResultCode <> 0) then");
-    expect(installer).not.toContain("RaiseException");
+    expect(installer).toContain(
+      "if not PrepareSucceeded then RaiseException(Failure)",
+    );
   });
 });

@@ -910,8 +910,52 @@ export function SystemUpdate({
               {taskPhase === "reconnecting"
                 ? it.updateLastConfirmedStage
                 : it.updateCurrentStage}
-              : {stageLabel(trustedProgressStatus.stage || "checking", it)}
+              :{" "}
+              {trustedProgressStatus.stage === "installing" &&
+              trustedProgressStatus.installerPhase
+                ? (
+                    {
+                      unpacking:
+                        locale === "zh"
+                          ? "解压安装包"
+                          : "Estrazione del pacchetto",
+                      package_source_verification:
+                        locale === "zh"
+                          ? "校验安装包"
+                          : "Verifica del pacchetto",
+                      candidate_file_copy:
+                        locale === "zh" ? "复制候选文件" : "Copia dei file",
+                      candidate_verification:
+                        locale === "zh" ? "校验候选文件" : "Verifica dei file",
+                      stop_runtime:
+                        locale === "zh"
+                          ? "停止旧实例"
+                          : "Arresto della versione precedente",
+                      database_migration:
+                        locale === "zh"
+                          ? "迁移数据库"
+                          : "Migrazione del database",
+                      recovery:
+                        locale === "zh"
+                          ? "恢复安装"
+                          : "Ripristino dell’installazione",
+                    } as Record<string, string>
+                  )[trustedProgressStatus.installerPhase] ||
+                  stageLabel(trustedProgressStatus.stage, it)
+                : stageLabel(trustedProgressStatus.stage || "checking", it)}
             </span>
+            {trustedProgressStatus.stage === "installing" &&
+              trustedProgressStatus.installerProgressAt && (
+                <small>
+                  {locale === "zh" ? "最近推进" : "Ultimo avanzamento"}:{" "}
+                  {formatTimestamp(
+                    trustedProgressStatus.installerProgressAt,
+                    locale,
+                  )}
+                  {typeof trustedProgressStatus.installerFiles === "number" &&
+                    ` · ${trustedProgressStatus.installerFiles} ${locale === "zh" ? "个文件" : "file"}`}
+                </small>
+              )}
             {stepProgress && (
               <>
                 <span>

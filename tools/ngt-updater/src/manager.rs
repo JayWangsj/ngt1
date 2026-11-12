@@ -79,6 +79,8 @@ struct Transaction {
     #[serde(default)]
     database_initialization_published: bool,
     failure: Option<String>,
+    #[serde(default)]
+    restore_verified: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,6 +94,7 @@ struct PreflightResult {
     root: PathBuf,
     package_bytes: u64,
     database_bytes: u64,
+    manifest: ReleaseManifest,
 }
 
 fn inspect_postgres_directory(database: &Path) -> Result<PostgresDirectoryState, String> {
@@ -124,7 +127,7 @@ fn inspect_postgres_directory(database: &Path) -> Result<PostgresDirectoryState,
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ReleaseManifest {
     version: String,
@@ -152,6 +155,21 @@ fn stable_root() -> Result<PathBuf, String> {
 }
 
 fn verify_release(root: &Path) -> Result<ReleaseManifest, String> {
+    verify_release_with_progress(root, None)
+}
+
+fn verify_release_with_progress(
+    root: &Path,
+    progress: Option<&InstallProgress>,
+) -> Result<ReleaseManifest, String> {
+    verify_release_until(root, progress, None)
+}
+
+fn verify_release_until(
+    root: &Path,
+    progress: Option<&InstallProgress>,
+    deadline: Option<Instant>,
+) -> Result<ReleaseManifest, String> {
     let root_metadata = fs::symlink_metadata(root)
         .map_err(|error| format!("Release directory is unavailable: {error}"))?;
     if !root_metadata.is_dir() || is_reparse(&root_metadata) {
@@ -184,7 +202,16 @@ fn verify_release(root: &Path) -> Result<ReleaseManifest, String> {
         return Err("Release manifest does not contain a file inventory.".to_owned());
     }
     let mut expected_paths = BTreeSet::new();
-    for (relative, expected_hash) in &manifest.files {
+    let mut processed_bytes = 0u64;
+    for (index, (relative, expected_hash)) in manifest.files.iter().enumerate() {
+        if deadline.is_some_and(|end| Instant::now() >= end) {
+            return Err("Release verification exceeded its time limit.".to_owned());
+        }
+        if let Some(progress) = progress {
+            if index % 32 == 0 {
+                progress.check_cancel()?;
+            }
+        }
         let relative_path = Path::new(relative);
         if relative.contains('\\')
             || relative_path
@@ -205,6 +232,9 @@ fn verify_release(root: &Path) -> Result<ReleaseManifest, String> {
         let mut hash = Sha256::new();
         let mut buffer = [0u8; 64 * 1024];
         loop {
+            if deadline.is_some_and(|end| Instant::now() >= end) {
+                return Err("Release verification exceeded its time limit.".to_owned());
+            }
             let count = file
                 .read(&mut buffer)
                 .map_err(|error| format!("Unable to read release file {relative}: {error}"))?;
@@ -212,6 +242,10 @@ fn verify_release(root: &Path) -> Result<ReleaseManifest, String> {
                 break;
             }
             hash.update(&buffer[..count]);
+            processed_bytes = processed_bytes.saturating_add(count as u64);
+        }
+        if let Some(progress) = progress {
+            progress.set_current_metrics(Some((index + 1) as u32), Some(processed_bytes));
         }
         let actual = format!("{:x}", hash.finalize());
         if !actual.eq_ignore_ascii_case(expected_hash) {
@@ -552,6 +586,18 @@ fn write_config(root: &Path, config: &ManagerConfig) -> Result<(), String> {
 
 fn write_maintenance(root: &Path, operation_id: &str, enabled: bool) -> Result<(), String> {
     let path = root.join("state").join("update-maintenance.json");
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let marker: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
+                "The maintenance marker is unreadable; it was preserved.".to_owned()
+            })?;
+            if marker["updateId"] != operation_id {
+                return Err("Another operation owns the maintenance marker.".to_owned());
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Unable to read the maintenance marker: {error}")),
+    }
     if enabled {
         let state = serde_json::json!({
             "formatVersion": 1,
@@ -683,7 +729,7 @@ fn directory_size(root: &Path) -> Result<u64, String> {
     Ok(size)
 }
 
-fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
+fn copy_directory(source: &Path, destination: &Path, durable: bool) -> Result<(), String> {
     let metadata = fs::symlink_metadata(source)
         .map_err(|error| format!("Unable to inspect {}: {error}", source.display()))?;
     if !metadata.is_dir() || is_reparse(&metadata) {
@@ -707,10 +753,22 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
             ));
         }
         if entry_metadata.is_dir() {
-            copy_directory(&source_path, &destination_path)?;
+            copy_directory(&source_path, &destination_path, durable)?;
         } else if entry_metadata.is_file() {
             fs::copy(&source_path, &destination_path)
                 .map_err(|error| format!("Unable to copy {}: {error}", source_path.display()))?;
+            if durable {
+                OpenOptions::new()
+                    .write(true)
+                    .open(&destination_path)
+                    .and_then(|file| file.sync_all())
+                    .map_err(|error| {
+                        format!(
+                            "Unable to flush database copy (os error {}).",
+                            error.raw_os_error().unwrap_or(0)
+                        )
+                    })?;
+            }
         } else {
             return Err(format!("Unsupported entry: {}", source_path.display()));
         }
@@ -722,18 +780,16 @@ fn copy_release(
     source: &Path,
     destination: &Path,
     progress: &InstallProgress,
+    manifest: &ReleaseManifest,
 ) -> Result<ReleaseManifest, String> {
-    progress.set_phase("source_copy_verification");
-    let manifest = verify_release(source)?;
-    progress.set_current_metrics(
-        Some(manifest.files.len().min(u32::MAX as usize) as u32),
-        None,
-    );
     progress.set_phase_with_metrics("candidate_file_copy", None, None);
     fs::create_dir_all(destination)
         .map_err(|error| format!("Unable to create candidate release: {error}"))?;
     let mut copied_bytes = 0u64;
-    for relative in manifest.files.keys() {
+    for (index, relative) in manifest.files.keys().enumerate() {
+        if index % 32 == 0 {
+            progress.check_cancel()?;
+        }
         let relative_path = Path::new(relative);
         let source_file = source.join(relative_path);
         let destination_file = destination.join(relative_path);
@@ -744,6 +800,7 @@ fn copy_release(
         let copied = fs::copy(&source_file, &destination_file)
             .map_err(|error| format!("Unable to deploy {relative}: {error}"))?;
         copied_bytes = copied_bytes.saturating_add(copied);
+        progress.set_current_metrics(Some((index + 1) as u32), Some(copied_bytes));
     }
     fs::copy(
         source.join("studio-release.json"),
@@ -754,12 +811,12 @@ fn copy_release(
         Some(manifest.files.len().min(u32::MAX as usize) as u32),
         Some(copied_bytes),
     );
-    progress.set_phase_with_metrics(
-        "candidate_verification",
-        Some(manifest.files.len().min(u32::MAX as usize) as u32),
-        Some(copied_bytes),
-    );
-    verify_release(destination)
+    progress.set_phase("candidate_verification");
+    let verified = verify_release_with_progress(destination, Some(progress))?;
+    if &verified != manifest {
+        return Err("The deployed release manifest changed during installation.".to_owned());
+    }
+    Ok(verified)
 }
 
 fn verify_pe_x64(path: &Path) -> Result<(), String> {
@@ -801,7 +858,7 @@ fn validate_runtime(
     if let Some(progress) = progress {
         progress.set_phase("package_source_verification");
     }
-    let manifest = verify_release(source)?;
+    let manifest = verify_release_with_progress(source, progress)?;
     let required = [
         "runtime/node.exe",
         "runtime/gh.exe",
@@ -890,7 +947,7 @@ fn preflight(
         progress.set_phase("windows_compatibility_check");
     }
     check_windows_build()?;
-    validate_runtime(source, progress)?;
+    let manifest = validate_runtime(source, progress)?;
     if let Some(progress) = progress {
         progress.set_phase("installation_path_check");
     }
@@ -1052,6 +1109,7 @@ fn preflight(
         root,
         package_bytes: release_size,
         database_bytes: database_size,
+        manifest,
     })
 }
 
@@ -1154,8 +1212,10 @@ fn candidate_package_version(args: &[String]) -> Option<String> {
     let manifest_path = Path::new(args.get(1)?).join("studio-release.json");
     let file = File::open(manifest_path).ok()?;
     let mut bytes = Vec::with_capacity(1024);
-    file.take(1024 * 1024 + 1).read_to_end(&mut bytes).ok()?;
-    if bytes.len() > 1024 * 1024 {
+    file.take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > 16 * 1024 * 1024 {
         return None;
     }
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
@@ -1287,7 +1347,7 @@ fn log_child_exit(root: &Path, component: DiagnosticComponent, status: &std::pro
     }
 }
 
-fn record_command_failure(root: &Path, arguments: &[String], message: &str) {
+fn record_command_failure(root: &Path, arguments: &[String], message: &str) -> Option<String> {
     if let Some(logger) = manager_diagnostics(root) {
         let lower = message.to_ascii_lowercase();
         let installer_command = arguments.first().is_some_and(|command| {
@@ -1334,7 +1394,7 @@ fn record_command_failure(root: &Path, arguments: &[String], message: &str) {
             )
         };
         let code = failure_code(message);
-        logger.record(component, "error", event_code, phase, &code);
+        return Some(logger.record(component, "error", event_code, phase, &code));
     } else {
         // Keep a safe breadcrumb when the structured logger itself is unavailable.
         if fs::create_dir_all(root.join("logs")).is_ok() {
@@ -1352,6 +1412,7 @@ fn record_command_failure(root: &Path, arguments: &[String], message: &str) {
             }
         }
     }
+    None
 }
 
 fn iso_timestamp() -> String {
@@ -1868,9 +1929,11 @@ fn runtime_stop_source(root: &Path) -> &'static str {
 }
 
 #[cfg(windows)]
-fn wait_for_runtime_stop(root: &Path) -> Result<File, String> {
+fn wait_for_runtime_stop(root: &Path, probe_release: Option<&Path>) -> Result<File, String> {
     let lock_path = root.join("state").join("run.lock");
-    for stop_attempts in 0..180 {
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let mut next_request = Instant::now();
+    while Instant::now() < deadline {
         let lock = match OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -1889,15 +1952,23 @@ fn wait_for_runtime_stop(root: &Path) -> Result<File, String> {
         if let Some(lock) = lock {
             match lock.try_lock_exclusive() {
                 Ok(()) => {
-                    ensure_previous_runtime_confirmed(root)?;
+                    ensure_port_available(APPLICATION_PORT)?;
+                    ensure_port_available(DATABASE_PORT)?;
+                    ensure_previous_runtime_confirmed_until(root, deadline, probe_release)?;
+                    match fs::symlink_metadata(root.join("data/postgres/postmaster.pid")) {
+                        Ok(_) => return Err("A PostgreSQL process marker is still present; its shutdown could not be confirmed.".to_owned()),
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(format!("Unable to inspect the PostgreSQL process marker: {error}")),
+                    }
                     return Ok(lock);
                 }
                 Err(error) if is_lock_contention(&error) => {}
                 Err(error) => return Err(format!("Unable to check the runtime lock: {error}")),
             }
         }
-        if stop_attempts % 10 == 0 {
+        if Instant::now() >= next_request {
             request_runtime_stop_with_source(root, "maintenance-operation")?;
+            next_request = Instant::now() + Duration::from_secs(5);
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -1906,11 +1977,20 @@ fn wait_for_runtime_stop(root: &Path) -> Result<File, String> {
 
 #[cfg(windows)]
 fn ensure_previous_runtime_confirmed(root: &Path) -> Result<(), String> {
+    ensure_previous_runtime_confirmed_until(root, Instant::now() + Duration::from_secs(30), None)
+}
+
+#[cfg(windows)]
+fn ensure_previous_runtime_confirmed_until(
+    root: &Path,
+    deadline: Instant,
+    probe_release: Option<&Path>,
+) -> Result<(), String> {
     let path = root.join("state/runtime/run-state.json");
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ensure_legacy_runtime_confirmed(root)
+            return ensure_legacy_runtime_confirmed(root, deadline, probe_release)
         }
         Err(_) => {
             return Err(
@@ -1922,17 +2002,21 @@ fn ensure_previous_runtime_confirmed(root: &Path) -> Result<(), String> {
     let record = serde_json::from_slice::<RuntimeRunRecord>(&bytes).map_err(|_| {
         "The previous runtime stop state is invalid; installation was cancelled.".to_owned()
     })?;
-    if matches!(record.phase.as_str(), "completed" | "startup-failed")
-        && record.ended_at_utc.is_some()
-    {
+    if record.phase == "completed" && record.ended_at_utc.is_some() {
         Ok(())
+    } else if record.phase == "startup-failed" && record.ended_at_utc.is_some() {
+        ensure_legacy_runtime_confirmed(root, deadline, probe_release)
     } else {
         Err("The previous runtime shutdown is unconfirmed; start and stop NGTManager normally before installing, updating, repairing, or uninstalling.".to_owned())
     }
 }
 
 #[cfg(windows)]
-fn ensure_legacy_runtime_confirmed(root: &Path) -> Result<(), String> {
+fn ensure_legacy_runtime_confirmed(
+    root: &Path,
+    deadline: Instant,
+    probe_release: Option<&Path>,
+) -> Result<(), String> {
     let Some(config) = read_config(root)? else {
         return Ok(());
     };
@@ -1966,7 +2050,7 @@ fn ensure_legacy_runtime_confirmed(root: &Path) -> Result<(), String> {
         return Err("The legacy runtime paths do not belong to this installation; installation was cancelled.".to_owned());
     }
 
-    let manifest = verify_release(&release)?;
+    let manifest = verify_release_until(&release, None, Some(deadline))?;
     if manifest.version != config.version {
         return Err("The legacy runtime version does not match its installation record; installation was cancelled.".to_owned());
     }
@@ -1977,15 +2061,34 @@ fn ensure_legacy_runtime_confirmed(root: &Path) -> Result<(), String> {
         );
     }
 
+    if Instant::now() >= deadline {
+        return Err("The legacy shutdown check exceeded its time limit.".to_owned());
+    }
+    let control_release = legacy_control_release(&release, probe_release)?;
     let temp = ascii_temp_directory()?;
-    let mut command = Command::new(release.join("runtime/node.exe"));
+    let mut command = Command::new(control_release.join("runtime/node.exe"));
+    command
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("LANGUAGE", "C");
     let runner = r#"
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePostgresRuntime } from './scripts/postgres-runtime.mjs';
+const [legacyServer, database] = process.argv.slice(1);
 const { runtime } = await resolvePostgresRuntime();
-const child = spawn(join(runtime, 'bin', 'pg_controldata.exe'), process.argv.slice(1), { windowsHide: true, stdio: 'inherit' });
-child.on('error', (error) => { console.error(error.message); process.exitCode = 1; });
+const controlTool = join(runtime, 'bin', 'pg_controldata.exe');
+const version = (tool) => {
+  const result = spawnSync(tool, ['--version'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
+  return result.status === 0 ? /\(PostgreSQL\) (\d+)\b/.exec(result.stdout)?.[1] : undefined;
+};
+const serverVersion = version(legacyServer);
+const controlVersion = version(controlTool);
+if (!serverVersion || !controlVersion) process.exit(41);
+if (serverVersion !== controlVersion || readFileSync(join(database, 'PG_VERSION'), 'utf8').trim() !== serverVersion) process.exit(42);
+const child = spawn(controlTool, ['-D', database], { windowsHide: true, stdio: 'inherit' });
+child.on('error', () => { process.exitCode = 43; });
 child.on('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0); });
 "#;
     command
@@ -1993,9 +2096,9 @@ child.on('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0)
         .arg("-e")
         .arg(runner)
         .arg("--")
-        .arg("-D")
+        .arg(release.join("runtime/postgres/bin/postgres.exe"))
         .arg(&database);
-    configure_runtime_command(&mut command, &release, root, &temp);
+    configure_runtime_command(&mut command, control_release, root, &temp);
     hide_console(&mut command);
     command
         .stdin(Stdio::null())
@@ -2006,7 +2109,7 @@ child.on('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0)
         "The legacy PostgreSQL control data could not be checked; installation was cancelled."
             .to_owned()
     })?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = deadline.min(Instant::now() + Duration::from_secs(10));
     let exit = match wait_child_until(&mut child, deadline) {
         Ok(Some(exit)) => exit,
         Ok(None) => {
@@ -2025,13 +2128,48 @@ child.on('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0)
         "The legacy PostgreSQL control data could not be read; installation was cancelled."
             .to_owned()
     })?;
-    if !exit.success()
-        || !output.status.success()
-        || !postgres_cluster_is_clean(&String::from_utf8_lossy(&output.stdout))
-    {
-        return Err("The legacy PostgreSQL cluster is not confirmed cleanly shut down; installation was cancelled.".to_owned());
+    if !exit.success() || !output.status.success() {
+        return Err(match exit.code() {
+            Some(41) => "Unable to read the installed PostgreSQL or control-data tool version (exit 41).".to_owned(),
+            Some(42) => "The control-data tool version does not match the installed PostgreSQL or database (exit 42).".to_owned(),
+            _ => format!("The legacy PostgreSQL control-data tool failed (exit {}).", status_code(&exit)),
+        });
+    }
+    let output = String::from_utf8_lossy(&output.stdout);
+    if !postgres_cluster_is_clean(&output) {
+        let state = output.lines().find_map(|line| {
+            let (name, state) = line.split_once(':')?;
+            (name.trim() == "Database cluster state").then_some(state.trim())
+        });
+        let state = match state {
+            Some(
+                state @ ("in production"
+                | "in crash recovery"
+                | "in archive recovery"
+                | "shut down in recovery"
+                | "shutting down"
+                | "starting up"),
+            ) => state,
+            _ => "unrecognized",
+        };
+        return Err(format!(
+            "The legacy PostgreSQL cluster is not confirmed cleanly shut down (state: {state})."
+        ));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn legacy_control_release<'a>(
+    installed: &'a Path,
+    candidate: Option<&'a Path>,
+) -> Result<&'a Path, String> {
+    const TOOL: &str = "runtime/postgres/bin/pg_controldata.exe";
+    if installed.join(TOOL).is_file() {
+        return Ok(installed);
+    }
+    candidate.filter(|path| path.join(TOOL).is_file()).ok_or_else(||
+        "The installed PostgreSQL has no control-data tool and no verified installation candidate supplied one.".to_owned())
 }
 
 fn postgres_cluster_is_clean(output: &str) -> bool {
@@ -3013,64 +3151,70 @@ fn pg_ctl_status(exit_code: Option<i32>) -> Result<bool, String> {
 }
 
 #[cfg(windows)]
-fn set_autostart(root: &Path, enabled: bool) -> Result<(), String> {
+fn remove_legacy_autostart(root: &Path) -> Result<(), String> {
     use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
-        KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ,
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
+        KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
     };
-    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
-    let name: Vec<u16> = "NGTManager".encode_utf16().chain(Some(0)).collect();
+    let wide = |value: &str| value.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+    let name = wide("NGTManager");
     let mut key: HKEY = std::ptr::null_mut();
-    let result = unsafe {
-        RegCreateKeyExW(
+    let status = unsafe {
+        RegOpenKeyExW(
             HKEY_CURRENT_USER,
             subkey.as_ptr(),
             0,
-            std::ptr::null(),
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            std::ptr::null(),
+            KEY_QUERY_VALUE | KEY_SET_VALUE,
             &mut key,
-            std::ptr::null_mut(),
         )
     };
-    if result != 0 {
+    if status == 2 {
+        return Ok(());
+    }
+    if status != 0 {
         return Err(format!(
-            "Unable to register per-user startup: error {result}."
+            "Unable to open startup registration (os error {status})."
         ));
     }
-    let result = if enabled {
-        let executable = root.join("tools").join("NGTManager.exe");
-        let value = format!("\"{}\" run", executable.display());
-        let data: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
-        unsafe {
-            RegSetValueExW(
-                key,
-                name.as_ptr(),
-                0,
-                REG_SZ,
-                data.as_ptr() as *const u8,
-                (data.len() * 2) as u32,
-            )
-        }
-    } else {
-        unsafe { RegDeleteValueW(key, name.as_ptr()) }
+    let expected = wide(&format!(
+        "\"{}\" run",
+        root.join("tools/NGTManager.exe").display()
+    ));
+    let mut actual = vec![0u16; expected.len()];
+    let mut size = (actual.len() * 2) as u32;
+    let mut kind = 0;
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            name.as_ptr(),
+            std::ptr::null(),
+            &mut kind,
+            actual.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    let status = match status {
+        0 if kind == REG_SZ
+            && size as usize == expected.len() * 2
+            && String::from_utf16_lossy(&actual)
+                .eq_ignore_ascii_case(&String::from_utf16_lossy(&expected)) =>
+        unsafe { RegDeleteValueW(key, name.as_ptr()) },
+        0 | 2 | 234 => 0,
+        other => other,
     };
     unsafe { RegCloseKey(key) };
-    if result != 0 && (enabled || result != 2) {
+    if status != 0 && status != 2 {
         return Err(format!(
-            "Unable to update per-user startup registration: error {result}."
+            "Unable to remove startup registration (os error {status})."
         ));
     }
     Ok(())
 }
 
 #[cfg(not(windows))]
-fn set_autostart(_root: &Path, _enabled: bool) -> Result<(), String> {
-    Err("Per-user startup registration is supported only on Windows x64.".to_owned())
+fn remove_legacy_autostart(_root: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -3148,7 +3292,7 @@ fn backup_database(
     advance_transaction(root, transaction, Stage::BackupCreating)?;
     fs::create_dir_all(&backup_root)
         .map_err(|error| format!("Unable to create operation backup: {error}"))?;
-    copy_directory(&root.join("data/postgres"), &backup_data)?;
+    copy_directory(&root.join("data/postgres"), &backup_data, true)?;
     advance_transaction(root, transaction, Stage::BackupCreated)?;
     advance_transaction(root, transaction, Stage::BackupVerifying)?;
     verify_database_copy(release, root, &backup_root, &backup_data)?;
@@ -3164,8 +3308,20 @@ fn verify_database_copy(
 ) -> Result<(), String> {
     ensure_port_available(DATABASE_PORT + 1)?;
     let verification = backup_root.join("verification");
-    copy_directory(backup_data, &verification)?;
+    copy_directory(backup_data, &verification, false)?;
     let log = backup_root.join("verification.log");
+    verify_database_directory(release, root, &verification, &log)?;
+    remove_owned_directory(backup_root, &verification)
+}
+
+#[cfg(windows)]
+fn verify_database_directory(
+    release: &Path,
+    root: &Path,
+    verification: &Path,
+    log: &Path,
+) -> Result<(), String> {
+    ensure_port_available(DATABASE_PORT + 1)?;
     let job = RuntimeJob::new()?;
     let start_args = vec![
         std::ffi::OsString::from("-D"),
@@ -3179,15 +3335,43 @@ fn verify_database_copy(
         std::ffi::OsString::from("-l"),
         log.as_os_str().to_owned(),
     ];
-    let start_status = spawn_pg_ctl(&job, release, root, &start_args)?
-        .wait()
-        .map_err(|error| format!("Unable to verify the database backup: {error}"))?;
+    let mut start = spawn_pg_ctl(&job, release, root, &start_args)?;
+    let start_status = wait_child_until(&mut start, Instant::now() + Duration::from_secs(70))
+        .map_err(|error| format!("Unable to verify the database backup: {error}"))?
+        .ok_or_else(|| "Backup database startup timed out.".to_owned())?;
     if !start_status.success() {
         return Err(format!(
             "Database backup verification failed (exit {}).",
             status_code(&start_status)
         ));
     }
+    let query_result = (|| {
+        let secret = fs::read(root.join("data/local-secrets.json"))
+            .map_err(|_| "Unable to read database verification credentials.".to_owned())?;
+        let secret: serde_json::Value = serde_json::from_slice(&secret)
+            .map_err(|_| "Invalid database verification credentials.".to_owned())?;
+        let password = secret["password"]
+            .as_str()
+            .ok_or_else(|| "Missing database verification credentials.".to_owned())?;
+        let mut command = Command::new(release.join("runtime/node.exe"));
+        let temp = ascii_temp_directory()?;
+        configure_runtime_command(&mut command, release, root, &temp);
+        command.env("PGPASSWORD", password).args(["--input-type=module", "-e", r#"
+import pg from 'pg';
+const client = new pg.Client({host:'127.0.0.1',port:55433,user:'ngt',database:'ngt',connectionTimeoutMillis:5000,statement_timeout:5000});
+await client.connect();
+try { await client.query('SELECT 1 FROM "WorkOrder" LIMIT 1'); }
+finally { await client.end(); }
+"#]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        hide_console(&mut command);
+        let mut child = job
+            .spawn(&mut command)
+            .map_err(|error| format!("Unable to start backup structure check: {error}"))?;
+        match wait_child_until(&mut child, Instant::now() + Duration::from_secs(12)) {
+            Ok(Some(status)) if status.success() => Ok(()),
+            _ => Err("The backup database did not pass its structure check.".to_owned()),
+        }
+    })();
     let stop_args = vec![
         std::ffi::OsString::from("-D"),
         verification.as_os_str().to_owned(),
@@ -3198,9 +3382,10 @@ fn verify_database_copy(
         std::ffi::OsString::from("30"),
         std::ffi::OsString::from("stop"),
     ];
-    let stop_status = spawn_pg_ctl(&job, release, root, &stop_args)?
-        .wait()
-        .map_err(|error| format!("Unable to stop the verification database: {error}"))?;
+    let mut stop = spawn_pg_ctl(&job, release, root, &stop_args)?;
+    let stop_status = wait_child_until(&mut stop, Instant::now() + Duration::from_secs(40))
+        .map_err(|error| format!("Unable to stop the verification database: {error}"))?
+        .ok_or_else(|| "Verification database shutdown timed out.".to_owned())?;
     if !stop_status.success() {
         return Err(format!(
             "Verification database did not stop cleanly (exit {}).",
@@ -3208,11 +3393,16 @@ fn verify_database_copy(
         ));
     }
     drop(job);
-    remove_owned_directory(backup_root, &verification)?;
-    Ok(())
+    query_result
 }
 
-fn restore_database(root: &Path, backup_root: &Path, operation_id: &str) -> Result<(), String> {
+#[cfg(windows)]
+fn restore_database(
+    root: &Path,
+    backup_root: &Path,
+    transaction: &mut Transaction,
+) -> Result<(), String> {
+    let operation_id = &transaction.operation_id;
     if operation_id.is_empty()
         || operation_id.len() > 64
         || !operation_id
@@ -3240,36 +3430,75 @@ fn restore_database(root: &Path, backup_root: &Path, operation_id: &str) -> Resu
         );
     }
     let preserved = data_root.join(format!("postgres-interrupted-{operation_id}"));
-    let preserved_exists = match fs::symlink_metadata(&preserved) {
-        Ok(metadata) if metadata.is_dir() && !is_reparse(&metadata) => true,
-        Ok(_) => return Err("The interrupted database copy is not a regular directory.".to_owned()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => {
-            return Err(format!(
-                "Unable to inspect the interrupted database copy: {error}"
-            ))
+    let staging = data_root.join(format!("postgres-restoring-{operation_id}"));
+    let directory_exists = |path: &Path| -> Result<bool, String> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() && !is_reparse(&metadata) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            _ => Err("A recovery database path is unsafe or unreadable.".to_owned()),
         }
     };
-    let mut has_preserved_data = preserved_exists;
-    match fs::symlink_metadata(&data) {
-        Ok(metadata) if metadata.is_dir() && !is_reparse(&metadata) => {
-            if preserved_exists {
-                remove_owned_directory(&data_root, &data)?;
-            } else {
-                fs::rename(&data, &preserved).map_err(|error| {
-                    format!("Unable to preserve the current database before recovery: {error}")
-                })?;
-                has_preserved_data = true;
-            }
+    let preserved_exists = directory_exists(&preserved)?;
+    let active_exists = directory_exists(&data)?;
+    let staging_exists = directory_exists(&staging)?;
+    if transaction.restore_verified && preserved_exists && active_exists && !staging_exists {
+        if inspect_postgres_directory(&data)? != PostgresDirectoryState::Initialized {
+            return Err(
+                "The switched recovery database is incomplete; both copies were preserved."
+                    .to_owned(),
+            );
         }
-        Ok(_) => return Err("The current database is not a regular directory.".to_owned()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("Unable to inspect the current database: {error}")),
+        return Ok(());
     }
-    copy_directory(&backup, &data)?;
-    if has_preserved_data {
-        remove_owned_directory(&data_root, &preserved)?;
+    if (preserved_exists && active_exists) || (!preserved_exists && !active_exists) {
+        return Err("The database recovery copies do not match the recorded operation; all copies were preserved.".to_owned());
     }
+    if !transaction.restore_verified {
+        if preserved_exists {
+            return Err(
+                "A preserved database exists without a verified recovery record.".to_owned(),
+            );
+        }
+        if staging_exists {
+            remove_owned_directory(&data_root, &staging)?;
+        }
+        let previous = transaction
+            .previous_config
+            .as_ref()
+            .ok_or_else(|| "The previous database runtime could not be verified.".to_owned())?;
+        verify_release(&previous.active_release)?;
+        check_space(
+            &data_root,
+            directory_size(&backup)?.saturating_add(128 * 1024 * 1024),
+        )?;
+        copy_directory(&backup, &staging, true)?;
+        verify_database_directory(
+            &previous.active_release,
+            root,
+            &staging,
+            &backup_root.join("recovery-verification.log"),
+        )?;
+        transaction.restore_verified = true;
+        write_transaction(root, transaction)?;
+    } else if !staging_exists {
+        return Err(
+            "The verified recovery staging directory is missing; existing data was preserved."
+                .to_owned(),
+        );
+    }
+    if inspect_postgres_directory(&staging)? != PostgresDirectoryState::Initialized {
+        return Err(
+            "The verified recovery staging directory is incomplete; existing data was preserved."
+                .to_owned(),
+        );
+    }
+    if !preserved_exists {
+        fs::rename(&data, &preserved).map_err(|error| {
+            format!("Unable to preserve the current database before recovery: {error}")
+        })?;
+    }
+    fs::rename(&staging, &data)
+        .map_err(|error| format!("Unable to activate the recovered database: {error}"))?;
     Ok(())
 }
 
@@ -3358,6 +3587,7 @@ fn create_transaction(
         database_initialization_owned: false,
         database_initialization_published: false,
         failure: None,
+        restore_verified: false,
     };
     write_transaction(root, &transaction)?;
     Ok(transaction)
@@ -3407,20 +3637,27 @@ impl InstallProgress {
                 match stop_receiver.recv_timeout(Duration::from_secs(3)) {
                     Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        let (current, phase_elapsed) = {
+                        let (current, phase_elapsed, files, bytes) = {
                             let current = thread_phase
                                 .lock()
                                 .unwrap_or_else(|error| error.into_inner());
-                            (current.name.clone(), current.started.elapsed().as_secs())
+                            (
+                                current.name.clone(),
+                                current.started.elapsed().as_secs(),
+                                current.item_count,
+                                current.bytes,
+                            )
                         };
                         let cancel_pending = thread_cancel_file
                             .as_ref()
                             .filter(|path| cancel_file_exists(path, &thread_id))
                             .map_or(0, |_| if current == "commit_release" { 2 } else { 1 });
                         println!(
-                            "NGT_PROGRESS|{thread_id}|{current}|{phase_elapsed}|{}|{}",
+                            "NGT_PROGRESS|{thread_id}|{current}|{phase_elapsed}|{}|{}|{}|{}",
                             setup_elapsed_ms / 1000 + thread_started.elapsed().as_secs(),
-                            cancel_pending
+                            cancel_pending,
+                            files.map(|v| v.to_string()).unwrap_or_default(),
+                            bytes.map(|v| v.to_string()).unwrap_or_default()
                         );
                     }
                 }
@@ -3783,7 +4020,7 @@ fn install_package(
         })
         && previous_config.as_ref().is_some_and(|config| {
             verify_release(&config.active_release)
-                .and_then(|active| verify_release(source).map(|candidate| (active, candidate)))
+                .map(|active| (active, &preflight.manifest))
                 .is_ok_and(|(active, candidate)| {
                     active.version == candidate.version
                         && active.commit == candidate.commit
@@ -3795,17 +4032,25 @@ fn install_package(
     }
     progress.check_cancel()?;
     if requested_operation == "install" || completed_update_retry {
-        if let Some(config) = previous_config.as_ref() {
+        if let Some(config) = previous_config
+            .as_ref()
+            .filter(|config| config.version == preflight.manifest.version)
+        {
             let active = verify_release(&config.active_release)?;
-            let candidate = verify_release(source)?;
+            let candidate = &preflight.manifest;
             if active.version == candidate.version
                 && active.commit == candidate.commit
                 && active.files == candidate.files
             {
-                set_autostart(&root, true)?;
+                remove_legacy_autostart(&root)?;
                 drop(_operation_lock);
-                if !runtime_is_active(&root)? {
-                    launch_manager(&root, "run")?;
+                if requested_operation == "update" && !runtime_is_active(&root)? {
+                    if let Err(error) = launch_manager(&root, "run") {
+                        log_line(
+                            &root,
+                            &format!("Unable to start the committed release: {error}"),
+                        );
+                    }
                 }
                 progress.finish("complete");
                 return Ok(format!(
@@ -3845,15 +4090,16 @@ fn install_package(
         database_state,
     )?;
     let candidate_stage = root.join("releases").join(format!(".candidate-{id}"));
-    let mut stage_created = false;
+    let restart_runtime = runtime_is_active(&root)?;
     let result = (|| {
         progress.set_phase_with_metrics("deploy_candidate", None, Some(preflight.package_bytes));
         fs::create_dir_all(root.join("releases"))
             .map_err(|error| format!("Unable to create releases directory: {error}"))?;
+        fs::create_dir(&candidate_stage)
+            .map_err(|error| format!("Unable to create a new candidate directory: {error}"))?;
         transaction.candidate_release = Some(candidate_stage.clone());
         write_transaction(&root, &transaction)?;
-        stage_created = true;
-        let manifest = copy_release(source, &candidate_stage, &progress)?;
+        let manifest = copy_release(source, &candidate_stage, &progress, &preflight.manifest)?;
         progress.set_current_metrics(
             Some(manifest.files.len().min(u32::MAX as usize) as u32),
             Some(preflight.package_bytes),
@@ -3861,8 +4107,16 @@ fn install_package(
         advance_transaction(&root, &mut transaction, Stage::Staged)?;
         progress.check_cancel()?;
 
+        if database_state == PostgresDirectoryState::Initialized {
+            ensure_port_available(DATABASE_PORT + 1)?;
+            check_space(
+                &root,
+                required_space(0, directory_size(&root.join("data/postgres"))?),
+            )?;
+        }
+        write_maintenance(&root, &id, true)?;
         progress.set_phase("stop_runtime");
-        let _runtime_lock = wait_for_runtime_stop(&root)?;
+        let _runtime_lock = wait_for_runtime_stop(&root, Some(&candidate_stage))?;
         progress.check_cancel()?;
         ensure_port_available(APPLICATION_PORT)?;
         ensure_port_available(DATABASE_PORT)?;
@@ -3871,7 +4125,6 @@ fn install_package(
             maintenance.maintenance = true;
             write_config(&root, &maintenance)?;
         }
-        write_maintenance(&root, &id, true)?;
         advance_transaction(&root, &mut transaction, Stage::Maintenance)?;
 
         progress.set_phase_with_metrics("backup_database", None, Some(preflight.database_bytes));
@@ -3879,8 +4132,15 @@ fn install_package(
         progress.check_cancel()?;
         transaction.migration_started = true;
         write_transaction(&root, &transaction)?;
-        let candidate = verify_release(&candidate_stage)?;
-        validate_candidate(&candidate_stage, &root, &id, &mut transaction, &progress)?;
+        let candidate = &manifest;
+        validate_candidate(
+            &candidate_stage,
+            &root,
+            &id,
+            &mut transaction,
+            &progress,
+            &candidate.version,
+        )?;
         progress.check_cancel()?;
         advance_transaction(&root, &mut transaction, Stage::CandidateHealthy)?;
 
@@ -3923,7 +4183,7 @@ fn install_package(
         };
         write_config(&root, &config)?;
         write_maintenance(&root, &id, false)?;
-        set_autostart(&root, true)?;
+        remove_legacy_autostart(&root)?;
         advance_transaction(&root, &mut transaction, Stage::Committed)?;
         if let Err(error) = cleanup_committed_database_marker(&root, &transaction) {
             log_line(
@@ -3937,7 +4197,14 @@ fn install_package(
     match result {
         Ok(config) => {
             drop(_operation_lock);
-            launch_manager(&root, "run")?;
+            if restart_runtime && requested_operation == "update" {
+                if let Err(error) = launch_manager(&root, "run") {
+                    log_line(
+                        &root,
+                        &format!("Unable to start the committed release: {error}"),
+                    );
+                }
+            }
             progress.finish("complete");
             Ok(format!(
                 "NGTManager v{} installed successfully.",
@@ -3947,19 +4214,16 @@ fn install_package(
         Err(error) => {
             progress.set_phase_failure("recovery");
             let recovery = rollback_transaction(&root, &mut transaction);
-            if stage_created && candidate_stage.exists() {
-                let _ = remove_owned_directory(&root.join("releases"), &candidate_stage);
-            }
             if let Err(recovery_error) = recovery {
                 progress.finish_failure("recovery_failed");
                 transaction.failure = Some("recovery_failed".to_owned());
                 transaction.stage = Stage::Failed;
                 let _ = write_transaction(&root, &transaction);
-                return Err(format!("Installation failed and recovery needs attention: {recovery_error}. Data and backups were preserved."));
+                return Err(format!("Installation failed: {error}\nRecovery needs attention: {recovery_error}\nData and backups were preserved."));
             }
             progress.finish("failed");
             drop(_operation_lock);
-            if previous_config.is_some() {
+            if previous_config.is_some() && restart_runtime {
                 let _ = launch_manager(&root, "run");
             }
             Err(error)
@@ -4007,6 +4271,7 @@ fn validate_candidate(
     operation_id: &str,
     transaction: &mut Transaction,
     progress: &InstallProgress,
+    version: &str,
 ) -> Result<(), String> {
     let job = RuntimeJob::new()?;
     let mut runtime_run = RuntimeRunRecord::new(unique_id(), "candidate-validation");
@@ -4046,7 +4311,7 @@ fn validate_candidate(
                 return Err(error);
             }
         };
-        let health = wait_for_health(&mut application, &verify_release(release)?.version, None);
+        let health = wait_for_health(&mut application, version, None);
         runtime_run.phase = "running".to_owned();
         write_runtime_run(root, &runtime_run)?;
         let mut children = RuntimeChildren {
@@ -4081,6 +4346,7 @@ fn validate_candidate(
     _operation_id: &str,
     _transaction: &mut Transaction,
     _progress: &InstallProgress,
+    _version: &str,
 ) -> Result<(), String> {
     Err("NGTManager runtime is supported only on Windows x64.".to_owned())
 }
@@ -4211,6 +4477,67 @@ fn verify_operation_owned_database(database: &Path, operation_id: &str) -> Resul
     Ok(())
 }
 
+fn can_abandon_candidate(root: &Path, transaction: &Transaction) -> Result<bool, String> {
+    if !matches!(
+        transaction.operation,
+        Operation::Install | Operation::Update | Operation::Repair
+    ) || transaction.migration_started
+        || transaction.backup_root.is_some()
+        || transaction.database_initialization_directory.is_some()
+        || transaction.database_initialization_owned
+        || transaction.database_initialization_published
+    {
+        return Ok(false);
+    }
+    let candidate = root
+        .join("releases")
+        .join(format!(".candidate-{}", transaction.operation_id));
+    if transaction
+        .candidate_release
+        .as_ref()
+        .is_some_and(|path| path != &candidate)
+    {
+        return Ok(false);
+    }
+    let mut current = read_config(root)?;
+    if let Some(config) = current.as_mut() {
+        config.maintenance = false;
+    }
+    if current != transaction.previous_config {
+        return Ok(false);
+    }
+    let database_state = inspect_postgres_directory(&root.join("data/postgres"))?;
+    let expected = if transaction.database_was_present {
+        PostgresDirectoryState::Initialized
+    } else if transaction.database_directory_was_empty {
+        PostgresDirectoryState::Empty
+    } else {
+        PostgresDirectoryState::Missing
+    };
+    if database_state != expected {
+        return Ok(false);
+    }
+    if let Some(config) = current {
+        if !config.active_release.starts_with(root.join("releases"))
+            || config.active_release == candidate
+        {
+            return Ok(false);
+        }
+        for relative in [
+            "tools/NGTManager.exe",
+            "tools/NGTUpdater.exe",
+            "assets/ngt-studio.ico",
+        ] {
+            let active = fs::read(config.active_release.join(relative));
+            let stable = fs::read(root.join(relative));
+            if !matches!((active, stable), (Ok(a), Ok(b)) if a == b) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<(), String> {
     if matches!(transaction.stage, Stage::Committed | Stage::RolledBack) {
         return Ok(());
@@ -4225,11 +4552,17 @@ fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<()
         transaction.stage = Stage::RollingBack;
         write_transaction(root, transaction)?;
     }
+    let abandon = can_abandon_candidate(root, transaction)?;
+    write_maintenance(root, &transaction.operation_id, true)?;
     #[cfg(windows)]
-    let _runtime_lock = wait_for_runtime_stop(root)?;
+    let _runtime_lock = if abandon {
+        None
+    } else {
+        Some(wait_for_runtime_stop(root, None)?)
+    };
     if transaction.migration_started {
-        if let Some(backup_root) = transaction.backup_root.as_ref() {
-            if backup_root != &root.join("backups").join(&transaction.operation_id) {
+        if let Some(backup_root) = transaction.backup_root.clone() {
+            if backup_root != root.join("backups").join(&transaction.operation_id) {
                 return Err(
                     "The operation backup path is invalid; current and original data were preserved."
                         .to_owned(),
@@ -4242,17 +4575,35 @@ fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<()
                 );
             }
             #[cfg(windows)]
-            restore_database(root, backup_root, &transaction.operation_id)?;
+            restore_database(root, &backup_root, transaction)?;
+        } else if transaction.database_was_present {
+            return Err(
+                "A verified recovery backup is required; existing data was preserved.".to_owned(),
+            );
         }
     }
-    if should_remove_initial_database(transaction) {
+    if !abandon && should_remove_initial_database(transaction) {
         cleanup_initial_database(root, transaction)?;
     }
     if let Some(previous) = transaction.previous_config.as_ref() {
         let mut restored = previous.clone();
         restored.maintenance = false;
+        if !abandon {
+            verify_release(&restored.active_release)?;
+            for relative in [
+                "tools/NGTManager.exe",
+                "tools/NGTUpdater.exe",
+                "assets/ngt-studio.ico",
+            ] {
+                let source = restored.active_release.join(relative);
+                let target = root.join(relative);
+                if !matches!((fs::read(&source), fs::read(&target)), (Ok(a), Ok(b)) if a == b) {
+                    copy_file_atomically(&source, &target)?;
+                }
+            }
+        }
         write_config(root, &restored)?;
-        set_autostart(root, true)?;
+        remove_legacy_autostart(root)?;
     } else if let (Some(candidate), Some(current)) =
         (transaction.candidate_release.as_ref(), read_config(root)?)
     {
@@ -4260,7 +4611,7 @@ fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<()
             fs::remove_file(config_path(root)).map_err(|error| {
                 format!("Unable to clear the uncommitted manager configuration: {error}")
             })?;
-            let _ = set_autostart(root, false);
+            let _ = remove_legacy_autostart(root);
         }
     }
     write_maintenance(root, &transaction.operation_id, false)?;
@@ -4447,7 +4798,7 @@ fn recover_transaction(root: &Path) -> Result<String, String> {
                 config.maintenance = false;
                 write_config(root, &config)?;
                 write_maintenance(root, &transaction.operation_id, false)?;
-                set_autostart(root, true)?;
+                remove_legacy_autostart(root)?;
                 advance_transaction(root, &mut transaction, Stage::Committed)?;
                 return Ok("Completed the interrupted release switch.".to_owned());
             }
@@ -4458,7 +4809,7 @@ fn recover_transaction(root: &Path) -> Result<String, String> {
 }
 
 #[cfg(windows)]
-fn launch_manager(root: &Path, command: &str) -> Result<(), String> {
+fn launch_manager(root: &Path, command: &str) -> Result<Child, String> {
     let executable = root.join("tools/NGTManager.exe");
     if !executable.is_file() {
         return Err("The stable manager executable is missing.".to_owned());
@@ -4472,12 +4823,11 @@ fn launch_manager(root: &Path, command: &str) -> Result<(), String> {
     hide_console(&mut child);
     child
         .spawn()
-        .map(|_| ())
         .map_err(|error| format!("Unable to start NGTManager: {error}"))
 }
 
 #[cfg(not(windows))]
-fn launch_manager(_root: &Path, _command: &str) -> Result<(), String> {
+fn launch_manager(_root: &Path, _command: &str) -> Result<Child, String> {
     Err("NGTManager runtime is supported only on Windows x64.".to_owned())
 }
 
@@ -4559,6 +4909,30 @@ fn ensure_update_operation(
         });
     if matching_online_update {
         return Ok(());
+    }
+    if requested_operation != "update"
+        && update_id_is_valid(update_id)
+        && !update_process_active(root, update_id)?
+        && !root.join("state/update-maintenance.json").exists()
+        && read_transaction_if_exists(root)?.is_some_and(|transaction| {
+            transaction.operation_id == update_id && transaction.stage == Stage::RolledBack
+        })
+    {
+        let mut status = read_update_value(&update_status_path(root))?;
+        if status["updateId"] == update_id
+            && read_config(root)?.is_some_and(|config| status["previousVersion"] == config.version)
+        {
+            status["status"] = serde_json::json!("failed");
+            status["recoveryStatus"] = serde_json::json!("succeeded");
+            status["executorAlive"] = serde_json::json!(false);
+            atomic_write(
+                &update_status_path(root),
+                &serde_json::to_vec(&status).map_err(|error| error.to_string())?,
+            )?;
+            fs::remove_file(path)
+                .map_err(|error| format!("Unable to release the recovered update: {error}"))?;
+            return Ok(());
+        }
     }
     Err(
         "Another update task owns this installation; wait for it to finish or recover it first."
@@ -4938,6 +5312,11 @@ fn start_online_update(_root: &Path, _update_id: &str) -> Result<String, String>
 
 #[cfg(windows)]
 fn acquire_run_lock(root: &Path) -> Result<Option<File>, String> {
+    acquire_runtime_file_lock(root, "run.lock")
+}
+
+#[cfg(windows)]
+fn acquire_runtime_file_lock(root: &Path, name: &str) -> Result<Option<File>, String> {
     let state = root.join("state");
     fs::create_dir_all(&state)
         .map_err(|error| format!("Unable to create runtime state: {error}"))?;
@@ -4946,7 +5325,7 @@ fn acquire_run_lock(root: &Path) -> Result<Option<File>, String> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(state.join("run.lock"))
+        .open(state.join(name))
     {
         Ok(lock) => lock,
         Err(error) if is_lock_contention(&error) => return Ok(None),
@@ -5283,12 +5662,35 @@ fn start_memory_sample(root: &Path, request_id: &str) -> Result<String, String> 
 
 #[cfg(windows)]
 fn open_system(root: &Path) -> Result<String, String> {
+    let Some(_open_lock) = acquire_runtime_file_lock(root, "open.lock")? else {
+        return Ok("NGTManager is already being opened.".to_owned());
+    };
     let config = read_config(root)?.ok_or_else(|| "NGTManager is not installed.".to_owned())?;
-    if !runtime_is_active(root)? {
-        launch_manager(root, "run")?;
-    }
+    let mut supervisor = if runtime_is_active(root)? {
+        None
+    } else {
+        Some(launch_manager(root, "run")?)
+    };
     let client = health_client()?;
-    for _ in 0..180 {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while Instant::now() < deadline {
+        if config.maintenance || root.join("state/update-maintenance.json").exists() {
+            return Err("NGTManager is in maintenance. Try opening it after the current operation finishes.".to_owned());
+        }
+        if let Some(child) = supervisor.as_mut() {
+            if let Some(exit) = child
+                .try_wait()
+                .map_err(|error| format!("Unable to inspect startup: {error}"))?
+            {
+                if !exit.success() || !runtime_is_active(root)? {
+                    return Err(format!(
+                        "NGTManager stopped during startup (exit {}). See the diagnostic logs.",
+                        status_code(&exit)
+                    ));
+                }
+                supervisor = None;
+            }
+        }
         if health_matches(&client, &config.version) {
             let mut command = Command::new("cmd.exe");
             command
@@ -5304,7 +5706,11 @@ fn open_system(root: &Path) -> Result<String, String> {
         }
         thread::sleep(Duration::from_secs(1));
     }
-    Err("NGTManager did not pass its health check; see logs/manager.log.".to_owned())
+    let phase = fs::read(root.join("state/runtime/run-state.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<RuntimeRunRecord>(&bytes).ok())
+        .map_or_else(|| "unknown".to_owned(), |state| state.phase);
+    Err(format!("NGTManager did not become ready within 60 seconds (last phase: {phase}). See the diagnostic logs."))
 }
 
 #[cfg(not(windows))]
@@ -5497,7 +5903,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 inspect_postgres_directory(&root.join("data/postgres"))?,
             )?;
             advance_transaction(&root, &mut transaction, Stage::Uninstalling)?;
-            set_autostart(&root, false)?;
+            remove_legacy_autostart(&root)?;
             advance_transaction(&root, &mut transaction, Stage::Committed)?;
             Ok("NGTManager was stopped. Business data and backups were retained.".to_owned())
         }
@@ -5600,6 +6006,21 @@ fn run(args: &[String]) -> Result<String, String> {
                 _ => return Err("Installer registration outcome is invalid.".to_owned()),
             };
             let root = stable_root()?;
+            let _operation_lock = lock_state(&root)?;
+            let config = read_config(&root)?.ok_or_else(|| "No committed version was found.".to_owned())?;
+            let transaction = read_transaction(&root)?;
+            if config.maintenance || transaction.stage != Stage::Committed {
+                return Err("Setup registration requires a committed version.".to_owned());
+            }
+            if root.join("state/update.lock").exists()
+                && read_update_value(&update_lock_path(&root))?["updateId"] != operation_id.as_str() {
+                return Err("Another update owns setup registration.".to_owned());
+            }
+            let registration = serde_json::json!({
+                "formatVersion": 1, "operationId": operation_id, "version": config.version, "outcome": outcome,
+            });
+            atomic_write(&root.join("state/installer-registration.json"), &serde_json::to_vec(&registration)
+                .map_err(|error| error.to_string())?)?;
             set_operation_id(&root, operation_id);
             if let Some(logger) = manager_diagnostics(&root) {
                 logger.record_with_metrics(
@@ -5756,11 +6177,33 @@ pub fn main() -> std::process::ExitCode {
     initialize_manager_diagnostics(&arguments);
     let result = run(&arguments);
     if let Err(message) = &result {
-        if let Ok(root) = stable_root() {
+        let diagnostic_id = if let Ok(root) = stable_root() {
             if let Ok(Some(transaction)) = read_transaction_if_exists(&root) {
                 set_operation_id(&root, &transaction.operation_id);
             }
-            record_command_failure(&root, &arguments, message);
+            record_command_failure(&root, &arguments, message)
+        } else {
+            None
+        };
+        #[cfg(not(windows))]
+        let _ = diagnostic_id;
+        #[cfg(windows)]
+        if arguments == ["open"] && result_file.is_none() {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+            let message = match diagnostic_id {
+                Some(id) => format!("{message}\nDiagnostic ID: {id}"),
+                None => message.clone(),
+            };
+            let body: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+            let title: Vec<u16> = "NGTManager".encode_utf16().chain(Some(0)).collect();
+            unsafe {
+                MessageBoxW(
+                    std::ptr::null_mut(),
+                    body.as_ptr(),
+                    title.as_ptr(),
+                    MB_OK | MB_ICONERROR,
+                );
+            }
         }
     }
     if let Some(path) = result_file {
@@ -5804,6 +6247,30 @@ pub fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_database_probe_uses_verified_candidate_when_old_tool_is_missing() {
+        let root = std::env::temp_dir().join(format!("ngt-legacy-probe-{}", unique_id()));
+        let installed = root.join("installed");
+        let candidate = root.join("candidate");
+        for release in [&installed, &candidate] {
+            fs::create_dir_all(release.join("runtime/postgres/bin")).unwrap();
+        }
+        let tool = "runtime/postgres/bin/pg_controldata.exe";
+        assert!(legacy_control_release(&installed, None).is_err());
+        fs::write(candidate.join(tool), "").unwrap();
+        assert_eq!(
+            legacy_control_release(&installed, Some(&candidate)).unwrap(),
+            candidate
+        );
+        fs::write(installed.join(tool), "").unwrap();
+        assert_eq!(
+            legacy_control_release(&installed, Some(&candidate)).unwrap(),
+            installed
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn legacy_database_handoff_requires_a_clean_control_state() {
@@ -6037,53 +6504,66 @@ mod tests {
         root
     }
 
+    #[cfg(windows)]
     #[test]
-    fn retrying_database_restore_does_not_accumulate_preserved_copies() {
+    fn retrying_verified_restore_preserves_original_database() {
         let root = std::env::temp_dir().join(format!("ngt-manager-restore-{}", unique_id()));
         let data_root = root.join("data");
         let data = data_root.join("postgres");
         let operation_id = "restore-test";
         let backup_root = root.join("backups").join(operation_id);
         let backup = backup_root.join("database");
+        let staging = data_root.join("postgres-restoring-restore-test");
         fs::create_dir_all(&data).unwrap();
         fs::create_dir_all(&backup).unwrap();
+        for path in [&backup, &staging] {
+            fs::create_dir_all(path.join("base")).unwrap();
+            fs::create_dir_all(path.join("global")).unwrap();
+            fs::create_dir_all(path.join("pg_wal")).unwrap();
+            fs::write(path.join("PG_VERSION"), "17").unwrap();
+            fs::write(path.join("global/pg_control"), "control").unwrap();
+        }
         fs::write(data.join("PG_VERSION"), "original").unwrap();
-        fs::write(backup.join("PG_VERSION"), "verified").unwrap();
-
-        restore_database(&root, &backup_root, operation_id).unwrap();
-        let preserved = data_root.join("postgres-interrupted-restore-test");
-        assert_eq!(
-            fs::read_to_string(data.join("PG_VERSION")).unwrap(),
-            "verified"
-        );
-        assert!(!preserved.exists());
-
-        fs::create_dir_all(&preserved).unwrap();
-        fs::write(
-            preserved.join("PG_VERSION"),
-            "preserved before interrupted restore",
+        let mut transaction = create_transaction(
+            &root,
+            Operation::Update,
+            operation_id.into(),
+            None,
+            PostgresDirectoryState::Initialized,
         )
         .unwrap();
-        remove_owned_directory(&data_root, &data).unwrap();
-        fs::create_dir_all(&data).unwrap();
-        fs::write(data.join("PG_VERSION"), "partial restore").unwrap();
-        restore_database(&root, &backup_root, operation_id).unwrap();
+        transaction.restore_verified = true;
+        let preserved = data_root.join("postgres-interrupted-restore-test");
+        fs::rename(&data, &preserved).unwrap();
+        for _ in 0..2 {
+            restore_database(&root, &backup_root, &mut transaction).unwrap();
+            assert_eq!(fs::read_to_string(data.join("PG_VERSION")).unwrap(), "17");
+            assert_eq!(
+                fs::read_to_string(preserved.join("PG_VERSION")).unwrap(),
+                "original"
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
-        let preserved_copies = fs::read_dir(&data_root)
-            .unwrap()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("postgres-interrupted-restore-test")
-            })
-            .count();
-        assert_eq!(preserved_copies, 0);
-        assert_eq!(
-            fs::read_to_string(data.join("PG_VERSION")).unwrap(),
-            "verified"
-        );
+    #[test]
+    fn candidate_abandonment_rejects_database_changes_and_foreign_markers() {
+        let root = std::env::temp_dir().join(format!("ngt-manager-abandon-{}", unique_id()));
+        let mut transaction = create_transaction(
+            &root,
+            Operation::Install,
+            "candidate-test".into(),
+            None,
+            PostgresDirectoryState::Missing,
+        )
+        .unwrap();
+        assert!(can_abandon_candidate(&root, &transaction).unwrap());
+        transaction.migration_started = true;
+        assert!(!can_abandon_candidate(&root, &transaction).unwrap());
+        write_maintenance(&root, "candidate-test", true).unwrap();
+        assert!(write_maintenance(&root, "different-task", false).is_err());
+        assert!(write_maintenance(&root, "different-task", true).is_err());
+        write_maintenance(&root, "candidate-test", false).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -6200,6 +6680,7 @@ mod tests {
             database_initialization_owned: true,
             database_initialization_published: true,
             failure: None,
+            restore_verified: false,
         };
         cleanup_initial_database(&root, &transaction).unwrap();
         assert!(data.join("postgres").is_dir());
@@ -6258,6 +6739,7 @@ mod tests {
             database_initialization_owned: false,
             database_initialization_published: false,
             failure: None,
+            restore_verified: false,
         };
         cleanup_initial_database(&root, &transaction).unwrap();
         assert_eq!(fs::read_dir(&database).unwrap().count(), 0);
@@ -6302,6 +6784,7 @@ mod tests {
             database_initialization_owned: false,
             database_initialization_published: false,
             failure: None,
+            restore_verified: false,
         };
         assert!(should_initialize_database(&transaction));
         transaction.database_directory_was_empty = true;
@@ -6331,6 +6814,7 @@ mod tests {
             database_initialization_owned: false,
             database_initialization_published: false,
             failure: None,
+            restore_verified: false,
         };
         assert!(should_remove_initial_database(&transaction));
         transaction.database_was_present = true;

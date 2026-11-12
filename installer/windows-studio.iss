@@ -10,6 +10,12 @@
 #ifndef OutputDir
   #error OutputDir is required
 #endif
+#ifndef PackageBytes
+  #error PackageBytes is required
+#endif
+#ifndef PackageFileCount
+  #error PackageFileCount is required
+#endif
 #define AppName "NGTManager"
 #define AppId "{{E7B1C553-4F5A-4239-A4C2-7DCA1DC27121}"
 
@@ -43,7 +49,8 @@ UninstallDisplayIcon={localappdata}\NGTManager\assets\ngt-studio.ico
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#PackageDirectory}\*"; DestDir: "{app}"; Flags: dontcopy ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion; AfterInstall: InstallExtractedPackage
 
 [Icons]
 Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
@@ -59,7 +66,6 @@ Type: filesandordirs; Name: "{localappdata}\NGTManager\assets"
 
 [Code]
 var
-  ProgressPage: TOutputMarqueeProgressWizardPage;
   AttemptId: String;
   ResultPath: String;
   CancelPath: String;
@@ -101,9 +107,7 @@ begin
       GetDateTimeString('yyyymmddhhnnss', #0, #0) + IntToStr(GetTickCount64) +
       ExpandConstant('{tmp}') +
       ParamStr(0) + IntToStr(Random(2147483647))), 1, 32);
-  ProgressPage := CreateOutputMarqueeProgressPage(
-    'Installing NGTManager',
-    'The full offline package is being prepared. The installation remains active while this step runs.');
+  WizardForm.BorderIcons := [biSystemMenu, biMinimize];
 end;
 
 function PhaseDescription(const Phase: String): String;
@@ -160,6 +164,7 @@ var
   PhaseElapsed: String;
   TotalElapsed: String;
   CancelPending: String;
+  ProcessedFiles: String;
   PhaseElapsedSeconds: Integer;
   TotalElapsedSeconds: Integer;
   StatusText: String;
@@ -173,28 +178,32 @@ begin
   PhaseElapsed := TakeField(Fields);
   TotalElapsed := TakeField(Fields);
   CancelPending := TakeField(Fields);
+  ProcessedFiles := TakeField(Fields);
   if MessageOperationId <> AttemptId then
     exit;
   CurrentPhase := Phase;
   PhaseElapsedSeconds := StrToIntDef(PhaseElapsed, 0);
   TotalElapsedSeconds := StrToIntDef(TotalElapsed, 0);
   StatusText := PhaseDescription(Phase);
+  if (StrToIntDef(ProcessedFiles, -1) >= 0) then
+    StatusText := StatusText + ' (' + ProcessedFiles + ' files processed)';
   if PhaseElapsedSeconds > 30 then
     StatusText := StatusText + ' — this step is taking longer than usual';
   if (CancelPending = '1') then
     StatusText := StatusText + '. Cancellation will wait for the current safe step';
   if (CancelPending = '2') then
     StatusText := StatusText + '. Cancellation arrived too late; finishing safely';
-  ProgressPage.SetText(StatusText,
+  WizardForm.StatusLabel.Caption := StatusText;
+  WizardForm.FilenameLabel.Caption :=
     'Total elapsed: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
     IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Current step: ' +
-    IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId);
-  ProgressPage.Animate;
+    IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId;
 end;
 
 function ReadManagerError: String;
 var
   ResultSize: Integer;
+  I: Integer;
   ResultLines: TArrayOfString;
 begin
   Result := '';
@@ -203,7 +212,9 @@ begin
   if not LoadStringsFromFile(ResultPath, ResultLines) then exit;
   if GetArrayLength(ResultLines) < 2 then exit;
   if ResultLines[0] <> 'ERROR' then exit;
-  Result := Copy(ResultLines[1], 1, 512);
+  Result := Copy(ResultLines[1], 1, 1024);
+  for I := 2 to GetArrayLength(ResultLines) - 1 do
+    Result := Copy(Result + #13#10 + ResultLines[I], 1, 2048);
 end;
 
 function ExportFailureDiagnostics(ManagerPath: String): String;
@@ -221,7 +232,38 @@ begin
     Result := DiagnosticPath;
 end;
 
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
+  MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+begin
+  Result := 'Install location:' + NewLine + Space + ExpandConstant('{localappdata}\NGTManager');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  FreeBytes: Int64;
+  TotalBytes: Int64;
+  Required: Int64;
+  TempPath: String;
+begin
+  NeedsRestart := False;
+  Result := '';
+  AttemptStartTick := GetTickCount64;
+  if not SafeOperationId(AttemptId) then
+  begin
+    Result := 'The installer operation ID is invalid.';
+    exit;
+  end;
+  TempPath := ExpandConstant('{tmp}');
+  Required := {#PackageBytes} + 134217728;
+  if not GetSpaceOnDisk64(TempPath, FreeBytes, TotalBytes) then
+    Result := 'Unable to check temporary disk space at ' + TempPath
+  else if FreeBytes < Required then
+    Result := 'Insufficient temporary disk space at ' + TempPath + '. Available: ' +
+      IntToStr(FreeBytes) + ' bytes. Additional space required: ' + IntToStr(Required - FreeBytes) + ' bytes.';
+  Log('NGTManager install attempt ID: ' + AttemptId);
+end;
+
+procedure InstallExtractedPackage;
 var
   ManagerPath: String;
   PackagePath: String;
@@ -230,53 +272,28 @@ var
   UpdateId: String;
   Started: Boolean;
   ResultCode: Integer;
-  ExtractedFiles: Integer;
-  ExtractStartedTick: Int64;
   ExtractionElapsedMs: Int64;
   ManagerError: String;
   MessageText: String;
   DiagnosticPath: String;
+  Failure: String;
 begin
-  NeedsRestart := False;
-  if PrepareSucceeded then
-  begin
-    Result := '';
-    exit;
-  end;
-
-  WizardForm.CancelButton.Enabled := True;
-  WizardForm.Update;
-  CancelRequested := False;
-  Result := '';
-  AttemptStartTick := GetTickCount64;
+  Failure := '';
   UpdateId := ExpandConstant('{param:NGTUpdateId|}');
-  if not SafeOperationId(AttemptId) then
-  begin
-    Result := 'The installer operation ID is invalid. Setup Log: see the Inno Setup Log in %TEMP%.';
-    PrepareSucceeded := False;
-    exit;
-  end;
-  PackagePath := ExpandConstant('{tmp}\') + '{app}';
+  PackagePath := ExpandConstant('{tmp}\ngt-package');
   ManagerPath := PackagePath + '\tools\NGTManager.exe';
   ResultPath := ExpandConstant('{tmp}\NGTManager-setup-result-' + AttemptId + '.txt');
   CancelPath := ExpandConstant('{tmp}\NGTManager-' + AttemptId + '.cancel');
   DeleteFile(ResultPath);
   DeleteFile(CancelPath);
-  ProgressPage.SetText('Unpacking the offline installation package',
-    'This preparation step may take a short time. The progress bar is indeterminate.');
-  ProgressPage.Show;
-  ProgressPage.Animate;
+  WizardForm.ProgressGauge.Style := npbstMarquee;
   try
     try
-      Log('NGTManager install attempt ID: ' + AttemptId);
-      Log('NGTManager package extraction started.');
-      ExtractStartedTick := GetTickCount64;
-      ExtractedFiles := ExtractTemporaryFiles('{app}\*');
-      ExtractionElapsedMs := GetTickCount64 - ExtractStartedTick;
-      Log('NGTManager package extraction completed; files=' + IntToStr(ExtractedFiles));
+      ExtractionElapsedMs := GetTickCount64 - AttemptStartTick;
+      Log('NGTManager package extraction completed; files={#PackageFileCount}');
       if not FileExists(ManagerPath) then
       begin
-        Result := 'The offline package is incomplete. Attempt ID: ' + AttemptId +
+        Failure := 'The offline package is incomplete. Attempt ID: ' + AttemptId +
           '. Open the Inno Setup Log in %TEMP% and retry with the complete installer.';
       end
       else
@@ -286,15 +303,15 @@ begin
         Parameters := Operation + ' "' + PackagePath + '" ' + AttemptId +
           ' --result-file "' + ResultPath + '" --cancel-file "' + CancelPath +
           '" --package-extract-ms ' + IntToStr(ExtractionElapsedMs) +
-          ' --package-file-count ' + IntToStr(ExtractedFiles);
+          ' --package-file-count {#PackageFileCount}';
         CoreRunning := True;
         CancelRequested := False;
         CurrentPhase := 'environment_check';
-        ProgressPage.SetText(PhaseDescription(CurrentPhase),
-          'Elapsed: 0s  ·  Attempt ' + AttemptId);
+        WizardForm.StatusLabel.Caption := PhaseDescription(CurrentPhase);
+        WizardForm.FilenameLabel.Caption := 'Attempt ' + AttemptId;
         Log('NGTManager transaction started; operation=' + Operation + '.');
         Started := ExecAndLogOutput(ManagerPath, Parameters, PackagePath,
-          SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode, @ManagerOutput);
+          SW_HIDE, ewWaitUntilTerminated, ResultCode, @ManagerOutput);
         CoreRunning := False;
         if (not Started) or (ResultCode <> 0) then
         begin
@@ -310,7 +327,7 @@ begin
             MessageText := MessageText + #13#10 + 'Unified diagnostics saved to: ' + DiagnosticPath
           else
             MessageText := MessageText + #13#10 + 'Open the matching Inno Setup Log in %TEMP% for installation details.';
-          Result := MessageText + #13#10 + 'Attempt ID: ' + AttemptId + #13#10 +
+          Failure := MessageText + #13#10 + 'Attempt ID: ' + AttemptId + #13#10 +
             'After NGTManager starts, use Settings > Export diagnostics to create one support file.';
           Log('NGTManager core failed or cancellation was requested; exit=' + IntToStr(ResultCode) +
             '; attempt=' + AttemptId + '.');
@@ -329,14 +346,15 @@ begin
       end;
     except
       Log('NGTManager preparation raised an exception; attempt=' + AttemptId + '.');
-      Result := 'NGTManager could not finish package preparation. Attempt ID: ' + AttemptId + #13#10 +
+      Failure := 'NGTManager could not finish package preparation. Attempt ID: ' + AttemptId + #13#10 +
         'Open the matching Inno Setup Log in %TEMP% and retry with the complete offline installer.';
     end;
   finally
     CoreRunning := False;
-    ProgressPage.Hide;
+    WizardForm.ProgressGauge.Style := npbstNormal;
   end;
-  PrepareSucceeded := Result = '';
+  PrepareSucceeded := Failure = '';
+  if not PrepareSucceeded then RaiseException(Failure);
 end;
 
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
@@ -350,16 +368,16 @@ begin
       CancelRequested := True;
       if SaveStringToFile(CancelPath, 'cancel', False) then
       begin
-        ProgressPage.SetText('Cancellation requested',
-          'NGTManager will finish the current safe step before rolling back.');
+        WizardForm.StatusLabel.Caption := 'Cancellation requested';
+        WizardForm.FilenameLabel.Caption := 'NGTManager will finish the current safe step before rolling back.';
         Log('User requested cancellation; deferring to the next safe transaction checkpoint.');
       end
       else
       begin
         CancelRequested := False;
         Log('Unable to write the cancellation request marker.');
-        ProgressPage.SetText('Unable to request cancellation',
-          'The operation is still running. Keep this window open.');
+        WizardForm.StatusLabel.Caption := 'Unable to request cancellation';
+        WizardForm.FilenameLabel.Caption := 'The operation is still running. Keep this window open.';
       end;
     end;
   end
@@ -371,7 +389,7 @@ begin
   end;
 end;
 
-procedure ReportInstallerRegistration(const Outcome: String);
+function ReportInstallerRegistration(const Outcome: String): Boolean;
 var
   ManagerPath: String;
   InstallRoot: String;
@@ -388,7 +406,8 @@ begin
   ResultCode := -1;
   Started := ExecAndLogOutput(ManagerPath, Parameters, InstallRoot,
     SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode, nil);
-  if Started and (ResultCode = 0) then
+  Result := Started and (ResultCode = 0);
+  if Result then
     Log('NGTManager Inno registration result recorded; outcome=' + Outcome +
       '; elapsedMs=' + IntToStr(ElapsedMs) + '.')
   else
@@ -400,8 +419,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and PrepareSucceeded then
   begin
+    if not ReportInstallerRegistration('complete') then
+      RaiseException('NGTManager was committed, but setup registration could not be confirmed. Run this same installer to finish registration.');
     PostInstallReached := True;
-    ReportInstallerRegistration('complete');
   end;
 end;
 
