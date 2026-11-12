@@ -1557,22 +1557,14 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
         try {
           message = JSON.parse('"' + errorMatch[1] + '"');
         } catch {
-          errorCategory = "unreadable";
+          message = "";
         }
         if (!message) errorCategory = "unreadable";
-        else if (message === "Operazione non riuscita. Aggiorna la pagina e riprova.")
+        else if (message.startsWith("Operazione non riuscita.")) {
           errorCategory = "internal";
-        else if (message === "Controlla i campi obbligatori e gli importi.")
-          errorCategory = "validation";
-        else if (message === "Record già presente. Controlla i dati e riprova.")
-          errorCategory = "duplicate";
-        else if (/配件|Ricambio|opzione/i.test(message))
+        } else if (/配件|Ricambio|opzione/i.test(message)) {
           errorCategory = "part-option";
-        else if (/cliente|dispositivo|telefono/i.test(message))
-          errorCategory = "customer-device";
-        else if (/importo|acconto|totale|saldo/i.test(message))
-          errorCategory = "amount";
-        else errorCategory = "business-rule";
+        } else errorCategory = "business-rule";
       }
       result = "ok=" + ok + " id=" + hasId + " errorCategory=" + errorCategory;
     } catch {}
