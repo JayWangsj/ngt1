@@ -311,27 +311,25 @@ try {
       throw "The Rust online updater did not complete with the exact candidate version and commit."
     }
 
-    $processResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-process.txt"
     $processDeadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
-      & $managerPath update-process $updateId --result-file $processResultPath | Out-Null
-      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $processResultPath -PathType Leaf)) {
+      $processOutput = & $managerPath update-process $updateId 2>&1
+      $processExitCode = $LASTEXITCODE
+      $processText = (@($processOutput) -join "`n").Trim()
+      $processResult = $null
+      try { $processResult = $processText | ConvertFrom-Json } catch { }
+      if ($processExitCode -ne 0 -or -not $processResult -or $null -eq $processResult.active) {
         throw "NGTManager could not inspect the online updater process lease."
       }
-      $processResult = [System.IO.File]::ReadAllText($processResultPath)
-      if (-not $processResult.StartsWith("SUCCESS`n", [StringComparison]::Ordinal)) {
-        throw "NGTManager returned an invalid online updater process result."
-      }
-      $processActive = ($processResult.Substring(8) | ConvertFrom-Json).active
+      $processActive = [bool]$processResult.active
       if (-not $processActive) { break }
       Start-Sleep -Seconds 1
     } while ([DateTime]::UtcNow -lt $processDeadline)
     if ($processActive) { throw "The Rust online updater did not release its process lease." }
 
-    $clearResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-update-clear.txt"
-    & $managerPath clear-update-lock $updateId complete --result-file $clearResultPath | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $clearResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($clearResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    & $managerPath clear-update-lock $updateId complete 2>&1 | Out-Null
+    $clearExitCode = $LASTEXITCODE
+    if ($clearExitCode -ne 0) {
       throw "NGTManager could not release the completed update lock."
     }
     if (Test-Path -LiteralPath (Join-Path $installRoot "state\update.lock")) {
@@ -354,15 +352,12 @@ try {
       -Code $businessCode -SnapshotPath $businessSnapshotPath
   } else {
     $releaseManagerPath = Join-Path $releaseRoot "tools\NGTManager.exe"
-    $repairResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-repair-result.txt"
-    $repairArguments = 'repair "{0}" --result-file "{1}"' -f $releaseRoot, $repairResultPath
+    $repairArguments = 'repair "{0}"' -f $releaseRoot
     $repair = Start-Process -FilePath $releaseManagerPath -ArgumentList $repairArguments `
       -WindowStyle Hidden -PassThru
     Wait-NgtInstallerProcess -Process $repair -Description "NGTManager repair" `
       -TimeoutMinutes 30 -ProgressPaths @($managerLog)
-    if ($repair.ExitCode -ne 0 -or
-        -not (Test-Path -LiteralPath $repairResultPath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($repairResultPath).StartsWith("SUCCESS`n", [StringComparison]::Ordinal))) {
+    if ($repair.ExitCode -ne 0) {
       throw "NGTManager could not repair the verified candidate package."
     }
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot "data\postgres\PG_VERSION")) -or
