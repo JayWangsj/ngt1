@@ -128,6 +128,7 @@ jobs:
               $lines.Add("- cleanupFailure: $value")
             }
             Add-Content -LiteralPath $summaryPath -Encoding UTF8 -Value ($lines -join [Environment]::NewLine)
+            Write-Output ($lines -join [Environment]::NewLine)
           } catch {
             Add-Content -LiteralPath $summaryPath -Encoding UTF8 -Value "The sanitized acceptance diagnostic could not be summarized; see the uploaded diagnostic artifact."
           }
