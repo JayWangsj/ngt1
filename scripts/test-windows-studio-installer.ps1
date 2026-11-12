@@ -54,30 +54,30 @@ function Invoke-NgtManagerCommand {
     [Parameter(Mandatory = $true)][string]$WorkingDirectory
   )
 
-  $commandId = [guid]::NewGuid().ToString("N")
-  $stdoutPath = Join-Path $env:RUNNER_TEMP ("ngt-manager-cli-" + $commandId + ".stdout.log")
-  $stderrPath = Join-Path $env:RUNNER_TEMP ("ngt-manager-cli-" + $commandId + ".stderr.log")
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $ManagerPath
+  $startInfo.Arguments = [string]::Join(" ", $Arguments)
+  $startInfo.WorkingDirectory = $WorkingDirectory
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $process = [System.Diagnostics.Process]::new()
   try {
-    $startArguments = @{
-      FilePath = $ManagerPath
-      ArgumentList = $Arguments
-      WorkingDirectory = $WorkingDirectory
-      RedirectStandardOutput = $stdoutPath
-      RedirectStandardError = $stderrPath
-      WindowStyle = "Hidden"
-      PassThru = $true
-      Wait = $true
-    }
-    $process = Start-Process @startArguments
-    $stdout = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { [System.IO.File]::ReadAllText($stdoutPath) } else { "" }
-    $stderr = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { [System.IO.File]::ReadAllText($stderrPath) } else { "" }
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw "NGTManager command did not start." }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
     $text = (@($stdout, $stderr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
     return [pscustomobject]@{ ExitCode = [int]$process.ExitCode; Text = $text.Trim() }
   } finally {
-    Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    $process.Dispose()
   }
 }
-
 function Invoke-NgtBusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string]$Code, [string]$SnapshotPath) {
   $probePath = Join-Path $PSScriptRoot "windows-studio-business-probe.cjs"
   $node = Join-Path $ReleaseRoot "runtime\node.exe"
