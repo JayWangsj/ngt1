@@ -444,7 +444,16 @@ try {
       } catch {
         $cleanupSafe = $false
         $cleanupMessage = [regex]::Replace([string]$_.Exception.Message, "[\r\n]+", " ")
-        if ($cleanupMessage.Length -gt 300) { $cleanupMessage = $cleanupMessage.Substring(0, 300) }
+        if (-not [string]::IsNullOrWhiteSpace([string]$uninstallerLog) -and
+            (Test-Path -LiteralPath $uninstallerLog -PathType Leaf)) {
+          try {
+            $uninstallerLogTail = @(Get-Content -LiteralPath $uninstallerLog -Tail 8 -ErrorAction Stop) -join " | "
+            $uninstallerLogTail = [regex]::Replace($uninstallerLogTail, "[\r\n]+", " ")
+            if ($uninstallerLogTail.Length -gt 250) { $uninstallerLogTail = $uninstallerLogTail.Substring($uninstallerLogTail.Length - 250) }
+            if ($uninstallerLogTail) { $cleanupMessage += "; log tail: $uninstallerLogTail" }
+          } catch { $cleanupMessage += "; uninstaller log could not be read" }
+        }
+        if ($cleanupMessage.Length -gt 600) { $cleanupMessage = $cleanupMessage.Substring(0, 600) }
         $cleanupProblems.Add("uninstaller: $cleanupMessage")
         Write-Warning ("Installer acceptance cleanup failed: " + $cleanupMessage)
       }
