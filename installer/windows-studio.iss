@@ -93,7 +93,6 @@ procedure InitializeWizard;
 var
   UpdateId: String;
 begin
-  Randomize;
   UpdateId := ExpandConstant('{param:NGTUpdateId|}');
   if UpdateId <> '' then
     AttemptId := UpdateId
