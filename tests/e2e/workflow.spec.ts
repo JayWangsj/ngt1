@@ -1671,7 +1671,18 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
     }),
   ).toContainText("90,00");
 
-  await save(page);
+  try {
+    await save(page);
+  } catch (cause) {
+    const message = await page
+      .getByRole("alert")
+      .textContent()
+      .catch(() => null);
+    throw new Error(
+      `Repair order creation failed: ${message?.trim() || "no visible error"}`,
+      { cause },
+    );
+  }
   const orderId = new URL(page.url()).pathname.split("/").pop();
   if (!orderId) throw new Error("Created repair order id was not available.");
   const verifyDb = new PrismaClient();
