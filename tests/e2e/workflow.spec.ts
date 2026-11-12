@@ -1540,12 +1540,20 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
     if (request.headers()["next-action"])
       serverActionEvents.push(`request ${request.method()}`);
   });
-  page.on("response", (response) => {
+  page.on("response", async (response) => {
     const pathname = new URL(response.url()).pathname;
-    if (/^\/orders\/(?!new$)[a-z0-9]+$/i.test(pathname))
-      orderRouteEvents.push(`response ${response.status()}`);
-    if (response.request().headers()["next-action"])
-      serverActionEvents.push(`response ${response.status()}`);
+    if (/^\\/orders\\/(?!new$)[a-z0-9]+$/i.test(pathname))
+      orderRouteEvents.push("response " + response.status());
+    if (!response.request().headers()["next-action"]) return;
+    let result = "unavailable";
+    try {
+      const body = await response.text();
+      const ok = body.match(/"ok"\\s*:\\s*(true|false)/)?.[1] ?? "unknown";
+      const hasId = /"id"\\s*:/.test(body);
+      const hasError = /"error"\\s*:/.test(body);
+      result = "ok=" + ok + " id=" + hasId + " error=" + hasError;
+    } catch {}
+    serverActionEvents.push("response " + response.status() + " " + result);
   });
   const suffix = Date.now();
   const projectName = `Temporary compatibility ${suffix}`;
@@ -1713,7 +1721,7 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
     let persistedOrder = "unknown";
     try {
       const savedItem = await diagnosticDb.workOrderItem.findFirst({
-        where: { project: projectName },
+        where: { project: { equals: projectName, mode: "insensitive" } },
         select: { id: true },
       });
       persistedOrder = savedItem ? "yes" : "no";
