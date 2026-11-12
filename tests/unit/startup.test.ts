@@ -102,9 +102,7 @@ describe("Windows persistent startup", () => {
     );
     expect(diagnosticRoute).toContain('"REQUEST_EXPIRED"');
     expect(
-      diagnosticRoute.indexOf(
-        "const expiresAtUtc = status.expiresAtUtc;",
-      ),
+      diagnosticRoute.indexOf("const expiresAtUtc = status.expiresAtUtc;"),
     ).toBeGreaterThan(
       diagnosticRoute.indexOf(
         'if (requestId && typeof status.taskId === "string")',
