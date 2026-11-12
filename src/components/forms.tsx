@@ -1601,7 +1601,7 @@ export function ItemsEditor({
       );
       const found = project ? matchRule(rules, device, project) : null;
       const option = defaultPriceOption(
-        eligiblePriceOptions(found, device, project),
+        eligiblePriceOptions(found, device, project ?? ""),
       );
       return project && found
         ? {
