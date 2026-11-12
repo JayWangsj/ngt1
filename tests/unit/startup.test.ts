@@ -130,10 +130,10 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("fn stop_application(");
     expect(manager).toContain('write_all(b"shutdown\\n")');
     expect(manager).toContain("&children.application_job,");
-    expect(manager).toContain(
-      "return ensure_legacy_runtime_confirmed(root, deadline, probe_release)",
-    );
-    expect(manager).toContain("resolvePostgresRuntime");
+    expect(manager).toContain("allow_verified_legacy_recovery");
+    expect(manager).toContain("fn run_postgres_tool(");
+    expect(manager).toContain("fn recover_legacy_database_after_backup(");
+    expect(manager).not.toContain("const runner = r#\"");
     expect(manager).toContain("pg_controldata.exe");
     expect(manager).toContain("postgres_cluster_is_clean");
     expect(database).toContain('join(workspace, "database-ready.pid")');
@@ -547,7 +547,10 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain(
       "function PrepareToInstall(var NeedsRestart: Boolean): String",
     );
-    expect(installer).toContain("ExecAndLogOutput(ManagerPath");
+    expect(installer).toContain("Started := Exec(ManagerPath, Parameters");
+    expect(installer).toContain("--progress-file ");
+    expect(installer).toContain("SetTimer(0, 0, 250");
+    expect(installer).toContain("procedure PollManagerProgress");
     expect(installer).toContain("AfterInstall: InstallExtractedPackage");
     expect(installer).toContain("GetSpaceOnDisk64");
     expect(installer).not.toContain("ExtractTemporaryFiles(");
@@ -612,6 +615,12 @@ describe("Windows persistent startup", () => {
       ),
     ).toBeLessThan(install.indexOf("backup_database("));
     expect(install.indexOf("backup_database(")).toBeLessThan(
+      install.indexOf("recover_legacy_database_after_backup("),
+    );
+    expect(
+      install.indexOf("recover_legacy_database_after_backup("),
+    ).toBeLessThan(install.indexOf("transaction.migration_started = true"));
+    expect(install.indexOf("backup_database(")).toBeLessThan(
       install.indexOf("validate_candidate("),
     );
     expect(install).toContain("write_maintenance(&root, &id, true)");
@@ -630,9 +639,9 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain(
       "function PrepareToInstall(var NeedsRestart: Boolean): String",
     );
-    expect(installer).toContain(
-      "if not PrepareSucceeded then RaiseException(Failure)",
-    );
+    expect(installer).toContain("if WizardSilent then");
+    expect(installer).toContain("RaiseException(Failure)");
+    expect(installer).toContain("WizardForm.Close");
     expect(packager).toContain("cargo build --release --bins");
     expect(packager).toContain('"NGTManager.exe"');
     expect(packager).toContain('"NGTUpdater.exe"');
@@ -720,8 +729,8 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("LoadStringsFromFile(ResultPath, ResultLines)");
     expect(installer).toContain("Result := Copy(ResultLines[1], 1, 1024)");
     expect(installer).toContain("if (not Started) or (ResultCode <> 0) then");
-    expect(installer).toContain(
-      "if not PrepareSucceeded then RaiseException(Failure)",
-    );
+    expect(installer).toContain("if WizardSilent then");
+    expect(installer).toContain("RaiseException(Failure)");
+    expect(installer).toContain("MsgBox(Failure, mbCriticalError, MB_OK)");
   });
 });

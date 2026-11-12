@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
@@ -1165,6 +1165,7 @@ fn ensure_port_available(port: u16) -> Result<(), String> {
 
 static MANAGER_DIAGNOSTICS: OnceLock<Option<LogSession>> = OnceLock::new();
 static INSTALL_CANCEL_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+static INSTALL_PROGRESS_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static INSTALL_EXTRACTION_METRICS: OnceLock<Option<(u64, u32)>> = OnceLock::new();
 
 fn initialize_manager_diagnostics(args: &[String]) {
@@ -1929,7 +1930,11 @@ fn runtime_stop_source(root: &Path) -> &'static str {
 }
 
 #[cfg(windows)]
-fn wait_for_runtime_stop(root: &Path, probe_release: Option<&Path>) -> Result<File, String> {
+fn wait_for_runtime_stop(
+    root: &Path,
+    probe_release: Option<&Path>,
+    allow_verified_legacy_recovery: bool,
+) -> Result<File, String> {
     let lock_path = root.join("state").join("run.lock");
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut next_request = Instant::now();
@@ -1954,9 +1959,15 @@ fn wait_for_runtime_stop(root: &Path, probe_release: Option<&Path>) -> Result<Fi
                 Ok(()) => {
                     ensure_port_available(APPLICATION_PORT)?;
                     ensure_port_available(DATABASE_PORT)?;
-                    ensure_previous_runtime_confirmed_until(root, deadline, probe_release)?;
+                    ensure_previous_runtime_confirmed_until(
+                        root,
+                        deadline,
+                        probe_release,
+                        allow_verified_legacy_recovery,
+                    )?;
                     match fs::symlink_metadata(root.join("data/postgres/postmaster.pid")) {
-                        Ok(_) => return Err("A PostgreSQL process marker is still present; its shutdown could not be confirmed.".to_owned()),
+                        Ok(_) if !allow_verified_legacy_recovery => return Err("A PostgreSQL process marker is still present; its shutdown could not be confirmed.".to_owned()),
+                        Ok(_) => {}
                         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                         Err(error) => return Err(format!("Unable to inspect the PostgreSQL process marker: {error}")),
                     }
@@ -1977,7 +1988,12 @@ fn wait_for_runtime_stop(root: &Path, probe_release: Option<&Path>) -> Result<Fi
 
 #[cfg(windows)]
 fn ensure_previous_runtime_confirmed(root: &Path) -> Result<(), String> {
-    ensure_previous_runtime_confirmed_until(root, Instant::now() + Duration::from_secs(30), None)
+    ensure_previous_runtime_confirmed_until(
+        root,
+        Instant::now() + Duration::from_secs(30),
+        None,
+        false,
+    )
 }
 
 #[cfg(windows)]
@@ -1985,12 +2001,18 @@ fn ensure_previous_runtime_confirmed_until(
     root: &Path,
     deadline: Instant,
     probe_release: Option<&Path>,
+    allow_verified_legacy_recovery: bool,
 ) -> Result<(), String> {
     let path = root.join("state/runtime/run-state.json");
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ensure_legacy_runtime_confirmed(root, deadline, probe_release)
+            return ensure_legacy_runtime_confirmed(
+                root,
+                deadline,
+                probe_release,
+                allow_verified_legacy_recovery,
+            )
         }
         Err(_) => {
             return Err(
@@ -2005,7 +2027,12 @@ fn ensure_previous_runtime_confirmed_until(
     if record.phase == "completed" && record.ended_at_utc.is_some() {
         Ok(())
     } else if record.phase == "startup-failed" && record.ended_at_utc.is_some() {
-        ensure_legacy_runtime_confirmed(root, deadline, probe_release)
+        ensure_legacy_runtime_confirmed(
+            root,
+            deadline,
+            probe_release,
+            allow_verified_legacy_recovery,
+        )
     } else {
         Err("The previous runtime shutdown is unconfirmed; start and stop NGTManager normally before installing, updating, repairing, or uninstalling.".to_owned())
     }
@@ -2016,6 +2043,7 @@ fn ensure_legacy_runtime_confirmed(
     root: &Path,
     deadline: Instant,
     probe_release: Option<&Path>,
+    allow_verified_recovery: bool,
 ) -> Result<(), String> {
     let Some(config) = read_config(root)? else {
         return Ok(());
@@ -2065,98 +2093,189 @@ fn ensure_legacy_runtime_confirmed(
         return Err("The legacy shutdown check exceeded its time limit.".to_owned());
     }
     let control_release = legacy_control_release(&release, probe_release)?;
-    let temp = ascii_temp_directory()?;
-    let mut command = Command::new(control_release.join("runtime/node.exe"));
-    command
-        .env("LC_ALL", "C")
-        .env("LANG", "C")
-        .env("LANGUAGE", "C");
-    let runner = r#"
-import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { resolvePostgresRuntime } from './scripts/postgres-runtime.mjs';
-const [legacyServer, database] = process.argv.slice(1);
-const { runtime } = await resolvePostgresRuntime();
-const controlTool = join(runtime, 'bin', 'pg_controldata.exe');
-const version = (tool) => {
-  const result = spawnSync(tool, ['--version'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
-  return result.status === 0 ? /\(PostgreSQL\) (\d+)\b/.exec(result.stdout)?.[1] : undefined;
-};
-const serverVersion = version(legacyServer);
-const controlVersion = version(controlTool);
-if (!serverVersion || !controlVersion) process.exit(41);
-if (serverVersion !== controlVersion || readFileSync(join(database, 'PG_VERSION'), 'utf8').trim() !== serverVersion) process.exit(42);
-const child = spawn(controlTool, ['-D', database], { windowsHide: true, stdio: 'inherit' });
-child.on('error', () => { process.exitCode = 43; });
-child.on('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0); });
-"#;
-    command
-        .arg("--input-type=module")
-        .arg("-e")
-        .arg(runner)
-        .arg("--")
-        .arg(release.join("runtime/postgres/bin/postgres.exe"))
-        .arg(&database);
-    configure_runtime_command(&mut command, control_release, root, &temp);
-    hide_console(&mut command);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
     let job = RuntimeJob::new()?;
-    let mut child = job.spawn(&mut command).map_err(|_| {
-        "The legacy PostgreSQL control data could not be checked; installation was cancelled."
-            .to_owned()
-    })?;
-    let deadline = deadline.min(Instant::now() + Duration::from_secs(10));
-    let exit = match wait_child_until(&mut child, deadline) {
-        Ok(Some(exit)) => exit,
-        Ok(None) => {
-            let _ = job.terminate_and_wait();
-            return Err(
-                "The legacy PostgreSQL control-data check timed out; installation was cancelled."
-                    .to_owned(),
-            );
-        }
-        Err(_) => {
-            let _ = job.terminate_and_wait();
-            return Err("The legacy PostgreSQL control data could not be checked; installation was cancelled.".to_owned());
-        }
-    };
-    let output = child.wait_with_output().map_err(|_| {
-        "The legacy PostgreSQL control data could not be read; installation was cancelled."
-            .to_owned()
-    })?;
-    if !exit.success() || !output.status.success() {
-        return Err(match exit.code() {
-            Some(41) => "Unable to read the installed PostgreSQL or control-data tool version (exit 41).".to_owned(),
-            Some(42) => "The control-data tool version does not match the installed PostgreSQL or database (exit 42).".to_owned(),
-            _ => format!("The legacy PostgreSQL control-data tool failed (exit {}).", status_code(&exit)),
-        });
+    let tool = control_release.join("runtime/postgres/bin/pg_controldata.exe");
+    let version = run_postgres_tool(
+        &job,
+        &tool,
+        &[std::ffi::OsString::from("--version")],
+        control_release,
+        root,
+        deadline,
+    )?;
+    let database_version = fs::read_to_string(database.join("PG_VERSION"))
+        .map_err(|_| "The legacy PostgreSQL version cannot be read.".to_owned())?;
+    if !version.status.success()
+        || postgres_major_version(&version.stdout) != Some(database_version.trim())
+    {
+        return Err(
+            "The control-data tool version does not match the legacy database; installation was cancelled."
+                .to_owned(),
+        );
     }
-    let output = String::from_utf8_lossy(&output.stdout);
-    if !postgres_cluster_is_clean(&output) {
-        let state = output.lines().find_map(|line| {
-            let (name, state) = line.split_once(':')?;
-            (name.trim() == "Database cluster state").then_some(state.trim())
-        });
-        let state = match state {
-            Some(
-                state @ ("in production"
-                | "in crash recovery"
-                | "in archive recovery"
-                | "shut down in recovery"
-                | "shutting down"
-                | "starting up"),
-            ) => state,
-            _ => "unrecognized",
-        };
+
+    let output = run_postgres_tool(
+        &job,
+        &tool,
+        &[
+            std::ffi::OsString::from("-D"),
+            database.as_os_str().to_owned(),
+        ],
+        control_release,
+        root,
+        deadline,
+    )?;
+    if !output.status.success() {
+        return Err(legacy_control_failure(root, &output.status, &output));
+    }
+    let control_output = String::from_utf8_lossy(&output.stdout);
+    if !postgres_cluster_is_clean(&control_output) {
+        let state = postgres_cluster_state(&control_output).unwrap_or("unrecognized");
+        if allow_verified_recovery
+            && legacy_database_is_stopped(&job, control_release, root, &database, deadline)?
+        {
+            log_line(
+                root,
+                &format!("Legacy PostgreSQL requires verified crash recovery (state: {state})."),
+            );
+            return Ok(());
+        }
         return Err(format!(
             "The legacy PostgreSQL cluster is not confirmed cleanly shut down (state: {state})."
         ));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn run_postgres_tool(
+    job: &RuntimeJob,
+    tool: &Path,
+    args: &[std::ffi::OsString],
+    release: &Path,
+    root: &Path,
+    deadline: Instant,
+) -> Result<Output, String> {
+    let temp = ascii_temp_directory()?;
+    let mut command = Command::new(tool);
+    command.args(args).env("LC_ALL", "C").env("LANG", "C");
+    configure_runtime_command(&mut command, release, root, &temp);
+    hide_console(&mut command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = job
+        .spawn(&mut command)
+        .map_err(|error| format!("Unable to start the PostgreSQL inspection tool: {error}"))?;
+    match wait_child_until(
+        &mut child,
+        deadline.min(Instant::now() + Duration::from_secs(10)),
+    )? {
+        Some(_) => child
+            .wait_with_output()
+            .map_err(|error| format!("Unable to read the PostgreSQL inspection result: {error}")),
+        None => Err("The PostgreSQL inspection tool timed out.".to_owned()),
+    }
+}
+
+fn postgres_major_version(output: &[u8]) -> Option<&str> {
+    let output = std::str::from_utf8(output).ok()?;
+    let start = output.find("(PostgreSQL) ")? + "(PostgreSQL) ".len();
+    let version = output[start..].split_whitespace().next()?;
+    version.split('.').next()
+}
+
+#[cfg(windows)]
+fn legacy_database_is_stopped(
+    job: &RuntimeJob,
+    release: &Path,
+    root: &Path,
+    database: &Path,
+    deadline: Instant,
+) -> Result<bool, String> {
+    let output = run_postgres_tool(
+        job,
+        &release.join("runtime/postgres/bin/pg_ctl.exe"),
+        &[
+            std::ffi::OsString::from("-D"),
+            database.as_os_str().to_owned(),
+            std::ffi::OsString::from("status"),
+        ],
+        release,
+        root,
+        deadline,
+    )?;
+    pg_ctl_status(output.status.code()).map(|running| !running)
+}
+
+#[cfg(windows)]
+fn legacy_control_failure(root: &Path, exit: &ExitStatus, output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let (error_code, message) = classify_legacy_control_failure(exit.code(), &stderr);
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.record(
+            DiagnosticComponent::Database,
+            "error",
+            "database.legacy_control.failed",
+            "legacy-shutdown-check",
+            error_code,
+        );
+        let detail = format!(
+            "pg_controldata exit={}\nstdout:\n{}\nstderr:\n{}",
+            status_code(exit),
+            String::from_utf8_lossy(&output.stdout),
+            stderr
+        );
+        logger.detail(
+            DiagnosticComponent::Database,
+            &detail.as_bytes()[..detail.len().min(8192)],
+        );
+    }
+    format!(
+        "{message} Installation was cancelled (exit {}).",
+        status_code(exit)
+    )
+}
+
+fn classify_legacy_control_failure(
+    exit_code: Option<i32>,
+    stderr: &str,
+) -> (&'static str, &'static str) {
+    let lower = stderr.to_ascii_lowercase();
+    match exit_code {
+        Some(41) => (
+            "POSTGRES_CONTROL_VERSION_UNREADABLE",
+            "Unable to read the installed PostgreSQL or control-data tool version.",
+        ),
+        Some(42) => (
+            "POSTGRES_CONTROL_VERSION_MISMATCH",
+            "The control-data tool version does not match the installed PostgreSQL or database.",
+        ),
+        _ if lower.contains("permission denied") || lower.contains("access is denied") => (
+            "POSTGRES_CONTROL_ACCESS_DENIED",
+            "Windows denied access to the legacy PostgreSQL control file.",
+        ),
+        _ if lower.contains("could not open file")
+            || lower.contains("no such file")
+            || lower.contains("read 0 of")
+            || lower.contains("wrong size") => (
+            "POSTGRES_CONTROL_INCOMPLETE",
+            "The legacy PostgreSQL control file is missing or incomplete.",
+        ),
+        _ if lower.contains("checksum") => (
+            "POSTGRES_CONTROL_CHECKSUM_INVALID",
+            "The legacy PostgreSQL control file failed its checksum check.",
+        ),
+        _ if lower.contains("version number") || lower.contains("not compatible") => (
+            "POSTGRES_CONTROL_VERSION_MISMATCH",
+            "The legacy PostgreSQL control file is not compatible with the verified PostgreSQL tool.",
+        ),
+        _ => (
+            "POSTGRES_CONTROL_CHECK_FAILED",
+            "The legacy PostgreSQL control-data check failed.",
+        ),
+    }
 }
 
 #[cfg(windows)]
@@ -2173,10 +2292,13 @@ fn legacy_control_release<'a>(
 }
 
 fn postgres_cluster_is_clean(output: &str) -> bool {
-    output.lines().any(|line| {
-        line.split_once(':').is_some_and(|(name, state)| {
-            name.trim() == "Database cluster state" && state.trim() == "shut down"
-        })
+    postgres_cluster_state(output) == Some("shut down")
+}
+
+fn postgres_cluster_state(output: &str) -> Option<&str> {
+    output.lines().find_map(|line| {
+        let (name, state) = line.split_once(':')?;
+        (name.trim() == "Database cluster state").then_some(state.trim())
     })
 }
 
@@ -3309,9 +3431,90 @@ fn verify_database_copy(
     ensure_port_available(DATABASE_PORT + 1)?;
     let verification = backup_root.join("verification");
     copy_directory(backup_data, &verification, false)?;
+    remove_stale_postmaster_marker(&verification)?;
     let log = backup_root.join("verification.log");
     verify_database_directory(release, root, &verification, &log)?;
     remove_owned_directory(backup_root, &verification)
+}
+
+#[cfg(windows)]
+fn remove_stale_postmaster_marker(database: &Path) -> Result<(), String> {
+    let marker = database.join("postmaster.pid");
+    match fs::symlink_metadata(&marker) {
+        Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => fs::remove_file(&marker)
+            .map_err(|error| {
+                format!("Unable to remove the verified stale database marker: {error}")
+            }),
+        Ok(_) => Err("The database process marker is not a safe regular file.".to_owned()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Unable to inspect the database process marker: {error}"
+        )),
+    }
+}
+
+#[cfg(windows)]
+fn recover_legacy_database_after_backup(
+    release: &Path,
+    root: &Path,
+    backup_root: &Path,
+) -> Result<(), String> {
+    let database = root.join("data/postgres");
+    let control_tool = release.join("runtime/postgres/bin/pg_controldata.exe");
+    let job = RuntimeJob::new()?;
+    let inspect = || {
+        run_postgres_tool(
+            &job,
+            &control_tool,
+            &[
+                std::ffi::OsString::from("-D"),
+                database.as_os_str().to_owned(),
+            ],
+            release,
+            root,
+            Instant::now() + Duration::from_secs(10),
+        )
+    };
+    let before = inspect()?;
+    if before.status.success()
+        && postgres_cluster_is_clean(&String::from_utf8_lossy(&before.stdout))
+        && !database.join("postmaster.pid").exists()
+    {
+        return Ok(());
+    }
+    if !before.status.success() {
+        return Err(legacy_control_failure(root, &before.status, &before));
+    }
+    if !legacy_database_is_stopped(
+        &job,
+        release,
+        root,
+        &database,
+        Instant::now() + Duration::from_secs(10),
+    )? {
+        return Err("The legacy database is still running; recovery was not attempted.".to_owned());
+    }
+    remove_stale_postmaster_marker(&database)?;
+    verify_database_directory(
+        release,
+        root,
+        &database,
+        &backup_root.join("legacy-recovery.log"),
+    )?;
+    let after = inspect()?;
+    if !after.status.success()
+        || !postgres_cluster_is_clean(&String::from_utf8_lossy(&after.stdout))
+    {
+        return Err(
+            "The legacy database recovery did not finish with a clean shutdown; the verified backup was preserved."
+                .to_owned(),
+        );
+    }
+    log_line(
+        root,
+        "Legacy PostgreSQL crash recovery completed and shut down cleanly.",
+    );
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -3472,6 +3675,7 @@ fn restore_database(
             directory_size(&backup)?.saturating_add(128 * 1024 * 1024),
         )?;
         copy_directory(&backup, &staging, true)?;
+        remove_stale_postmaster_marker(&staging)?;
         verify_database_directory(
             &previous.active_release,
             root,
@@ -3599,6 +3803,7 @@ struct InstallProgress {
     setup_elapsed_ms: u64,
     phase: Arc<Mutex<ProgressPhase>>,
     cancel_file: Option<PathBuf>,
+    progress_file: Option<PathBuf>,
     stop_sender: mpsc::Sender<()>,
     heartbeat: Option<thread::JoinHandle<()>>,
     finished: Mutex<bool>,
@@ -3615,6 +3820,7 @@ impl InstallProgress {
     fn new(operation_id: &str) -> Self {
         let operation_id = operation_id.to_owned();
         let cancel_file = INSTALL_CANCEL_FILE.get().cloned().flatten();
+        let progress_file = INSTALL_PROGRESS_FILE.get().cloned().flatten();
         let setup_elapsed_ms = INSTALL_EXTRACTION_METRICS
             .get()
             .and_then(|metrics| metrics.as_ref())
@@ -3630,6 +3836,7 @@ impl InstallProgress {
         let thread_id = operation_id.clone();
         let thread_started = started;
         let thread_cancel_file = cancel_file.clone();
+        let thread_progress_file = progress_file.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
         let heartbeat = thread::Builder::new()
             .name("ngt-install-progress".to_owned())
@@ -3652,12 +3859,15 @@ impl InstallProgress {
                             .as_ref()
                             .filter(|path| cancel_file_exists(path, &thread_id))
                             .map_or(0, |_| if current == "commit_release" { 2 } else { 1 });
-                        println!(
-                            "NGT_PROGRESS|{thread_id}|{current}|{phase_elapsed}|{}|{}|{}|{}",
-                            setup_elapsed_ms / 1000 + thread_started.elapsed().as_secs(),
-                            cancel_pending,
-                            files.map(|v| v.to_string()).unwrap_or_default(),
-                            bytes.map(|v| v.to_string()).unwrap_or_default()
+                        publish_install_progress(
+                            thread_progress_file.as_deref(),
+                            &format!(
+                                "NGT_PROGRESS|{thread_id}|{current}|{phase_elapsed}|{}|{}|{}|{}",
+                                setup_elapsed_ms / 1000 + thread_started.elapsed().as_secs(),
+                                cancel_pending,
+                                files.map(|v| v.to_string()).unwrap_or_default(),
+                                bytes.map(|v| v.to_string()).unwrap_or_default()
+                            ),
                         );
                     }
                 }
@@ -3669,6 +3879,7 @@ impl InstallProgress {
             setup_elapsed_ms,
             phase,
             cancel_file,
+            progress_file,
             stop_sender,
             heartbeat,
             finished: Mutex::new(false),
@@ -3764,13 +3975,16 @@ impl InstallProgress {
             .started
             .elapsed()
             .as_secs();
-        println!(
-            "NGT_PROGRESS|{}|{}|{}|{}|{}",
-            self.operation_id,
-            phase,
-            phase_elapsed,
-            self.setup_elapsed_ms / 1000 + self.started.elapsed().as_secs(),
-            self.cancel_status()
+        publish_install_progress(
+            self.progress_file.as_deref(),
+            &format!(
+                "NGT_PROGRESS|{}|{}|{}|{}|{}",
+                self.operation_id,
+                phase,
+                phase_elapsed,
+                self.setup_elapsed_ms / 1000 + self.started.elapsed().as_secs(),
+                self.cancel_status()
+            ),
         );
     }
 
@@ -3903,6 +4117,13 @@ impl InstallProgress {
                 },
             );
         }
+    }
+}
+
+fn publish_install_progress(path: Option<&Path>, line: &str) {
+    println!("{line}");
+    if let Some(path) = path {
+        let _ = fs::write(path, line.as_bytes());
     }
 }
 
@@ -4116,7 +4337,7 @@ fn install_package(
         }
         write_maintenance(&root, &id, true)?;
         progress.set_phase("stop_runtime");
-        let _runtime_lock = wait_for_runtime_stop(&root, Some(&candidate_stage))?;
+        let _runtime_lock = wait_for_runtime_stop(&root, Some(&candidate_stage), true)?;
         progress.check_cancel()?;
         ensure_port_available(APPLICATION_PORT)?;
         ensure_port_available(DATABASE_PORT)?;
@@ -4129,6 +4350,10 @@ fn install_package(
 
         progress.set_phase_with_metrics("backup_database", None, Some(preflight.database_bytes));
         backup_database(&candidate_stage, &root, &id, &mut transaction)?;
+        if let Some(backup_root) = transaction.backup_root.as_ref() {
+            progress.set_phase("recover_legacy_database");
+            recover_legacy_database_after_backup(&candidate_stage, &root, backup_root)?;
+        }
         progress.check_cancel()?;
         transaction.migration_started = true;
         write_transaction(&root, &transaction)?;
@@ -4558,7 +4783,7 @@ fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<()
     let _runtime_lock = if abandon {
         None
     } else {
-        Some(wait_for_runtime_stop(root, None)?)
+        Some(wait_for_runtime_stop(root, None, false)?)
     };
     if transaction.migration_started {
         if let Some(backup_root) = transaction.backup_root.clone() {
@@ -6052,11 +6277,36 @@ fn require_transition(current: &Stage, next: &Stage) -> Result<(), String> {
 }
 
 fn validate_result_file_path(path: &Path, arguments: &[String]) -> Result<(), String> {
+    validate_setup_output_path(
+        path,
+        arguments,
+        "NGTManager-setup-result-",
+        "install result",
+    )
+}
+
+fn validate_progress_file_path(path: &Path, arguments: &[String]) -> Result<(), String> {
+    validate_setup_output_path(
+        path,
+        arguments,
+        "NGTManager-setup-progress-",
+        "install progress",
+    )
+}
+
+fn validate_setup_output_path(
+    path: &Path,
+    arguments: &[String],
+    prefix: &str,
+    description: &str,
+) -> Result<(), String> {
     if !matches!(
         arguments.first().map(String::as_str),
         Some("install" | "update")
     ) {
-        return Err("The install result path is only valid for setup operations.".to_owned());
+        return Err(format!(
+            "The {description} path is only valid for setup operations."
+        ));
     }
     let operation_id = arguments
         .get(2)
@@ -6067,27 +6317,33 @@ fn validate_result_file_path(path: &Path, arguments: &[String]) -> Result<(), St
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
-        .ok_or_else(|| {
-            "A valid operation ID is required for the install result file.".to_owned()
-        })?;
-    let expected_name = format!("NGTManager-setup-result-{operation_id}.txt");
+        .ok_or_else(|| format!("A valid operation ID is required for the {description} file."))?;
+    let expected_name = format!("{prefix}{operation_id}.txt");
     if path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
-        return Err("The install result file name does not match its operation.".to_owned());
+        return Err(format!(
+            "The {description} file name does not match its operation."
+        ));
     }
     let parent = path
         .parent()
-        .ok_or_else(|| "The install result file directory is invalid.".to_owned())?;
+        .ok_or_else(|| format!("The {description} file directory is invalid."))?;
     let parent = fs::canonicalize(parent)
-        .map_err(|_| "The install result file directory is unavailable.".to_owned())?;
+        .map_err(|_| format!("The {description} file directory is unavailable."))?;
     let temporary = fs::canonicalize(std::env::temp_dir())
         .map_err(|_| "The temporary directory is unavailable.".to_owned())?;
     if !parent.starts_with(temporary) {
-        return Err("The install result file must be inside the temporary directory.".to_owned());
+        return Err(format!(
+            "The {description} file must be inside the temporary directory."
+        ));
     }
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Ok(_) => Err("The install result file already exists; it was not overwritten.".to_owned()),
-        Err(_) => Err("The install result file cannot be safely inspected.".to_owned()),
+        Ok(_) => Err(format!(
+            "The {description} file already exists; it was not overwritten."
+        )),
+        Err(_) => Err(format!(
+            "The {description} file cannot be safely inspected."
+        )),
     }
 }
 
@@ -6100,6 +6356,7 @@ pub fn main() -> std::process::ExitCode {
     let mut arguments = Vec::new();
     let mut result_file = None;
     let mut cancel_file = None;
+    let mut progress_file = None;
     let mut extraction_elapsed_ms = None;
     let mut extracted_file_count = None;
     let mut args = std::env::args().skip(1);
@@ -6125,6 +6382,18 @@ pub fn main() -> std::process::ExitCode {
                 Some(path) => Some(PathBuf::from(path)),
                 None => {
                     eprintln!("The install cancellation path is missing.");
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+        } else if argument == "--progress-file" {
+            if progress_file.is_some() {
+                eprintln!("The install progress path was supplied more than once.");
+                return std::process::ExitCode::FAILURE;
+            }
+            progress_file = match args.next() {
+                Some(path) => Some(PathBuf::from(path)),
+                None => {
+                    eprintln!("The install progress path is missing.");
                     return std::process::ExitCode::FAILURE;
                 }
             };
@@ -6172,8 +6441,15 @@ pub fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     }
+    if let Some(path) = progress_file.as_ref() {
+        if let Err(error) = validate_progress_file_path(path, &arguments) {
+            eprintln!("{error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
     let _ = INSTALL_EXTRACTION_METRICS.set(extraction_metrics);
     let _ = INSTALL_CANCEL_FILE.set(cancel_file);
+    let _ = INSTALL_PROGRESS_FILE.set(progress_file);
     initialize_manager_diagnostics(&arguments);
     let result = run(&arguments);
     if let Err(message) = &result {
@@ -6281,6 +6557,39 @@ mod tests {
             "Database cluster state:               in production\n"
         ));
         assert!(!postgres_cluster_is_clean("control file is unreadable\n"));
+        assert_eq!(
+            postgres_cluster_state("Database cluster state: in production\n"),
+            Some("in production")
+        );
+        assert_eq!(
+            postgres_major_version(b"pg_controldata (PostgreSQL) 17.2\n"),
+            Some("17")
+        );
+        assert_eq!(postgres_major_version(b"unexpected output\n"), None);
+    }
+
+    #[test]
+    fn legacy_control_failures_keep_a_safe_specific_reason() {
+        assert_eq!(
+            classify_legacy_control_failure(
+                Some(1),
+                "pg_controldata: error: could not open file global/pg_control"
+            )
+            .0,
+            "POSTGRES_CONTROL_INCOMPLETE"
+        );
+        assert_eq!(
+            classify_legacy_control_failure(Some(1), "Permission denied").0,
+            "POSTGRES_CONTROL_ACCESS_DENIED"
+        );
+        assert_eq!(
+            classify_legacy_control_failure(Some(42), "").0,
+            "POSTGRES_CONTROL_VERSION_MISMATCH"
+        );
+        assert_eq!(
+            classify_legacy_control_failure(Some(1), "unexpected failure").0,
+            "POSTGRES_CONTROL_CHECK_FAILED"
+        );
     }
 
     #[test]
@@ -6288,6 +6597,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("ngt-setup-result-{}", unique_id()));
         fs::create_dir(&directory).unwrap();
         let result_path = directory.join("NGTManager-setup-result-attempt-1.txt");
+        let progress_path = directory.join("NGTManager-setup-progress-attempt-1.txt");
         let arguments = vec![
             "install".to_owned(),
             "package".to_owned(),
@@ -6295,6 +6605,15 @@ mod tests {
         ];
 
         validate_result_file_path(&result_path, &arguments).unwrap();
+        validate_progress_file_path(&progress_path, &arguments).unwrap();
+        publish_install_progress(
+            Some(&progress_path),
+            "NGT_PROGRESS|attempt-1|starting|0|0|0",
+        );
+        assert_eq!(
+            fs::read_to_string(&progress_path).unwrap(),
+            "NGT_PROGRESS|attempt-1|starting|0|0|0"
+        );
         write_setup_result(&result_path, "ERROR\ninstall failed").unwrap();
         assert!(validate_result_file_path(&result_path, &arguments).is_err());
         assert!(write_setup_result(&result_path, "ERROR\nreplacement").is_err());
@@ -6309,6 +6628,7 @@ mod tests {
         assert!(validate_result_file_path(&unrelated_path, &arguments).is_err());
         let wrong_name = directory.join("business-backup.json");
         assert!(validate_result_file_path(&wrong_name, &arguments).is_err());
+        assert!(validate_progress_file_path(&wrong_name, &arguments).is_err());
         let _ = fs::remove_dir_all(directory);
     }
 

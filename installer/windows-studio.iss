@@ -69,6 +69,9 @@ var
   AttemptId: String;
   ResultPath: String;
   CancelPath: String;
+  ProgressPath: String;
+  LastProgressLine: String;
+  ProgressTimerId: UINT_PTR;
   CurrentPhase: String;
   CoreRunning: Boolean;
   CoreCommitted: Boolean;
@@ -76,9 +79,17 @@ var
   PrepareSucceeded: Boolean;
   AttemptStartTick: Int64;
   PostInstallReached: Boolean;
+  CancelWithoutPrompt: Boolean;
 
 function GetTickCount64: Int64;
   external 'GetTickCount64@kernel32.dll stdcall';
+
+function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT;
+  lpTimerFunc: LongWord): UINT_PTR;
+  external 'SetTimer@user32.dll stdcall';
+
+function KillTimer(hWnd: HWND; uIDEvent: UINT_PTR): BOOL;
+  external 'KillTimer@user32.dll stdcall';
 
 function SafeOperationId(const Value: String): Boolean;
 var
@@ -127,6 +138,7 @@ begin
   else if Phase = 'candidate_verification' then Result := 'Verifying copied program files'
   else if Phase = 'stop_runtime' then Result := 'Waiting for NGTManager to stop safely'
   else if Phase = 'backup_database' then Result := 'Backing up and verifying business data'
+  else if Phase = 'recover_legacy_database' then Result := 'Recovering the previous database safely'
   else if Phase = 'initialize_database' then Result := 'Preparing the first database'
   else if Phase = 'database_ready' then Result := 'Starting the database'
   else if Phase = 'database_migration' then Result := 'Updating the database structure'
@@ -198,6 +210,18 @@ begin
     'Total elapsed: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
     IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Current step: ' +
     IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId;
+end;
+
+procedure PollManagerProgress(Arg1: HWND; Arg2: UINT; Arg3: UINT_PTR; Arg4: DWORD);
+var
+  ProgressLine: AnsiString;
+begin
+  if (ProgressPath = '') or (not FileExists(ProgressPath)) then exit;
+  if not LoadStringFromFile(ProgressPath, ProgressLine) then exit;
+  ProgressLine := Trim(ProgressLine);
+  if (ProgressLine = '') or (ProgressLine = LastProgressLine) then exit;
+  LastProgressLine := ProgressLine;
+  ManagerOutput(ProgressLine, False, False);
 end;
 
 function ReadManagerError: String;
@@ -284,8 +308,10 @@ begin
   ManagerPath := PackagePath + '\tools\NGTManager.exe';
   ResultPath := ExpandConstant('{tmp}\NGTManager-setup-result-' + AttemptId + '.txt');
   CancelPath := ExpandConstant('{tmp}\NGTManager-' + AttemptId + '.cancel');
+  ProgressPath := ExpandConstant('{tmp}\NGTManager-setup-progress-' + AttemptId + '.txt');
   DeleteFile(ResultPath);
   DeleteFile(CancelPath);
+  DeleteFile(ProgressPath);
   WizardForm.ProgressGauge.Style := npbstMarquee;
   try
     try
@@ -302,6 +328,7 @@ begin
         if UpdateId <> '' then Operation := 'update';
         Parameters := Operation + ' "' + PackagePath + '" ' + AttemptId +
           ' --result-file "' + ResultPath + '" --cancel-file "' + CancelPath +
+          '" --progress-file "' + ProgressPath +
           '" --package-extract-ms ' + IntToStr(ExtractionElapsedMs) +
           ' --package-file-count {#PackageFileCount}';
         CoreRunning := True;
@@ -310,8 +337,16 @@ begin
         WizardForm.StatusLabel.Caption := PhaseDescription(CurrentPhase);
         WizardForm.FilenameLabel.Caption := 'Attempt ' + AttemptId;
         Log('NGTManager transaction started; operation=' + Operation + '.');
-        Started := ExecAndLogOutput(ManagerPath, Parameters, PackagePath,
-          SW_HIDE, ewWaitUntilTerminated, ResultCode, @ManagerOutput);
+        LastProgressLine := '';
+        ProgressTimerId := SetTimer(0, 0, 250, CreateCallback(@PollManagerProgress));
+        try
+          Started := Exec(ManagerPath, Parameters, PackagePath,
+            SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        finally
+          if ProgressTimerId <> 0 then KillTimer(0, ProgressTimerId);
+          ProgressTimerId := 0;
+          PollManagerProgress(0, 0, 0, 0);
+        end;
         CoreRunning := False;
         if (not Started) or (ResultCode <> 0) then
         begin
@@ -354,11 +389,26 @@ begin
     WizardForm.ProgressGauge.Style := npbstNormal;
   end;
   PrepareSucceeded := Failure = '';
-  if not PrepareSucceeded then RaiseException(Failure);
+  if not PrepareSucceeded then
+  begin
+    if WizardSilent then
+      RaiseException(Failure)
+    else
+    begin
+      MsgBox(Failure, mbCriticalError, MB_OK);
+      CancelWithoutPrompt := True;
+      WizardForm.Close;
+    end;
+  end;
 end;
 
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
+  if CancelWithoutPrompt then
+  begin
+    Confirm := False;
+    exit;
+  end;
   if CoreRunning then
   begin
     Cancel := False;
