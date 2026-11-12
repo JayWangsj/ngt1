@@ -1531,12 +1531,19 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
 }) => {
   const pageErrors: string[] = [];
   const serverActionEvents: string[] = [];
+  const orderRouteEvents: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (/^\/orders\/(?!new$)[a-z0-9]+$/i.test(pathname))
+      orderRouteEvents.push(`request ${request.method()}`);
     if (request.headers()["next-action"])
       serverActionEvents.push(`request ${request.method()}`);
   });
   page.on("response", (response) => {
+    const pathname = new URL(response.url()).pathname;
+    if (/^\/orders\/(?!new$)[a-z0-9]+$/i.test(pathname))
+      orderRouteEvents.push(`response ${response.status()}`);
     if (response.request().headers()["next-action"])
       serverActionEvents.push(`response ${response.status()}`);
   });
@@ -1702,8 +1709,21 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
       button.isDisabled().catch(() => true),
       page.locator(".field-error").allTextContents(),
     ]);
+    const diagnosticDb = new PrismaClient();
+    let persistedOrder = "unknown";
+    try {
+      const savedItem = await diagnosticDb.workOrderItem.findFirst({
+        where: { project: projectName },
+        select: { id: true },
+      });
+      persistedOrder = savedItem ? "yes" : "no";
+    } catch {
+      persistedOrder = "query failed";
+    } finally {
+      await diagnosticDb.$disconnect().catch(() => {});
+    }
     throw new Error(
-      `Repair order creation failed: message=${message?.trim() || "none"}; buttonDisabled=${disabled}; footer=${footer.replace(/\s+/g, " ")}; fieldErrors=${fieldErrors.join(" | ") || "none"}; pageErrors=${pageErrors.join(" | ") || "none"}; serverActions=${serverActionEvents.join(", ") || "none"}; submitServerActions=${serverActionEvents.slice(actionEventsBeforeSave).join(", ") || "none"}`,
+      `Repair order creation failed: message=${message?.trim() || "none"}; buttonDisabled=${disabled}; footer=${footer.replace(/\s+/g, " ")}; fieldErrors=${fieldErrors.join(" | ") || "none"}; pageErrors=${pageErrors.join(" | ") || "none"}; serverActions=${serverActionEvents.join(", ") || "none"}; submitServerActions=${serverActionEvents.slice(actionEventsBeforeSave).join(", ") || "none"}; orderRouteEvents=${orderRouteEvents.join(", ") || "none"}; persistedOrder=${persistedOrder}`,
       { cause },
     );
   }

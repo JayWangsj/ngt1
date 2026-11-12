@@ -157,10 +157,13 @@ try {
     throw "The installed release is missing its verified Node runtime."
   }
   $managerPath = Join-Path $installRoot "tools\NGTManager.exe"
-  $statusResultPath = Join-Path $env:RUNNER_TEMP "ngt-manager-status.txt"
+  $statusResultPath = Join-Path ([System.IO.Path]::GetTempPath()) ("ngt-manager-status-{0}.txt" -f [guid]::NewGuid().ToString("N"))
   & $managerPath status --result-file $statusResultPath | Out-Null
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $statusResultPath -PathType Leaf)) {
-    throw "NGTManager could not write its status result."
+  if ($LASTEXITCODE -ne 0) {
+    throw "NGTManager status failed with exit code $LASTEXITCODE."
+  }
+  if (-not (Test-Path -LiteralPath $statusResultPath -PathType Leaf)) {
+    throw "NGTManager did not create its status result in the standard user temp directory."
   }
   $statusResult = [System.IO.File]::ReadAllText($statusResultPath)
   if (-not $statusResult.StartsWith("SUCCESS`n", [StringComparison]::Ordinal)) {
