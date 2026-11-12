@@ -547,11 +547,15 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain(
       "function PrepareToInstall(var NeedsRestart: Boolean): String",
     );
-    expect(installer).toContain("Started := Exec(ManagerPath, Parameters");
+    expect(installer).toContain(
+      'Filename: "{tmp}\\ngt-package\\tools\\NGTManager.exe"',
+    );
+    expect(installer).toContain("BeforeInstall: PrepareManagerRun");
+    expect(installer).toContain("AfterInstall: FinishManagerRun");
     expect(installer).toContain("--progress-file ");
     expect(installer).toContain("SetTimer(0, 0, 250");
     expect(installer).toContain("procedure PollManagerProgress");
-    expect(installer).toContain("AfterInstall: InstallExtractedPackage");
+    expect(installer).not.toContain("AfterInstall: InstallExtractedPackage");
     expect(installer).toContain("GetSpaceOnDisk64");
     expect(installer).not.toContain("ExtractTemporaryFiles(");
     expect(installer).toContain("--package-extract-ms ");
@@ -564,6 +568,26 @@ describe("Windows persistent startup", () => {
     expect(installer).not.toContain(
       "RaiseException('NGTManager installation failed.",
     );
+    const legacyCheck = manager.slice(
+      manager.indexOf("fn ensure_legacy_runtime_confirmed("),
+      manager.indexOf(
+        "fn run_postgres_tool(",
+        manager.indexOf("fn ensure_legacy_runtime_confirmed("),
+      ),
+    );
+    expect(legacyCheck.indexOf("if allow_verified_recovery")).toBeLessThan(
+      legacyCheck.indexOf('join("runtime/postgres/bin/pg_controldata.exe")'),
+    );
+    const legacyRecovery = manager.slice(
+      manager.indexOf("fn recover_legacy_database_after_backup("),
+      manager.indexOf(
+        "fn verify_database_directory(",
+        manager.indexOf("fn recover_legacy_database_after_backup("),
+      ),
+    );
+    expect(legacyRecovery).toContain("legacy_database_is_stopped(");
+    expect(legacyRecovery).toContain("verify_database_directory(");
+    expect(legacyRecovery).not.toContain("pg_controldata.exe");
     expect(database).toContain(
       "Database directory is incomplete; existing data was preserved.",
     );
@@ -692,7 +716,7 @@ describe("Windows persistent startup", () => {
       'Filename: "{localappdata}\\NGTManager\\tools\\NGTManager.exe"',
     );
     expect(definition).toContain('Parameters: "open"');
-    expect(definition).toContain("Parameters := Operation +");
+    expect(definition).toContain("Result := Operation +");
     expect(definition).toContain("Operation := 'install'");
     expect(definition).toContain("Operation := 'update'");
     expect(definition).toContain("function InitializeUninstall()");
@@ -728,7 +752,7 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("function ReadManagerError: String");
     expect(installer).toContain("LoadStringsFromFile(ResultPath, ResultLines)");
     expect(installer).toContain("Result := Copy(ResultLines[1], 1, 1024)");
-    expect(installer).toContain("if (not Started) or (ResultCode <> 0) then");
+    expect(installer).toContain("if ManagerResultSucceeded then");
     expect(installer).toContain("if WizardSilent then");
     expect(installer).toContain("RaiseException(Failure)");
     expect(installer).toContain("MsgBox(Failure, mbCriticalError, MB_OK)");

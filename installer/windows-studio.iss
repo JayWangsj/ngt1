@@ -50,13 +50,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
-Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion; AfterInstall: InstallExtractedPackage
+Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion
 
 [Icons]
 Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 
 [Run]
+Filename: "{tmp}\ngt-package\tools\NGTManager.exe"; Parameters: "{code:ManagerParameters}"; WorkingDir: "{tmp}\ngt-package"; StatusMsg: "Preparing NGTManager safely..."; Flags: runhidden; BeforeInstall: PrepareManagerRun; AfterInstall: FinishManagerRun
 Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "Open {#AppName}"; Flags: runhidden postinstall nowait skipifsilent
 
 [UninstallDelete]
@@ -241,6 +242,18 @@ begin
     Result := Copy(Result + #13#10 + ResultLines[I], 1, 2048);
 end;
 
+function ManagerResultSucceeded: Boolean;
+var
+  ResultSize: Integer;
+  ResultLines: TArrayOfString;
+begin
+  Result := False;
+  if not FileSize(ResultPath, ResultSize) then exit;
+  if (ResultSize < 0) or (ResultSize > 4096) then exit;
+  if not LoadStringsFromFile(ResultPath, ResultLines) then exit;
+  Result := (GetArrayLength(ResultLines) >= 1) and (ResultLines[0] = 'SUCCESS');
+end;
+
 function ExportFailureDiagnostics(ManagerPath: String): String;
 var
   DiagnosticPath: String;
@@ -287,25 +300,28 @@ begin
   Log('NGTManager install attempt ID: ' + AttemptId);
 end;
 
-procedure InstallExtractedPackage;
+function ManagerParameters(Param: String): String;
 var
-  ManagerPath: String;
   PackagePath: String;
   Operation: String;
-  Parameters: String;
   UpdateId: String;
-  Started: Boolean;
-  ResultCode: Integer;
   ExtractionElapsedMs: Int64;
-  ManagerError: String;
-  MessageText: String;
-  DiagnosticPath: String;
-  Failure: String;
 begin
-  Failure := '';
   UpdateId := ExpandConstant('{param:NGTUpdateId|}');
   PackagePath := ExpandConstant('{tmp}\ngt-package');
-  ManagerPath := PackagePath + '\tools\NGTManager.exe';
+  Operation := 'install';
+  if UpdateId <> '' then Operation := 'update';
+  ExtractionElapsedMs := GetTickCount64 - AttemptStartTick;
+  Result := Operation + ' "' + PackagePath + '" ' + AttemptId +
+    ' --result-file "' + ExpandConstant('{tmp}\NGTManager-setup-result-' + AttemptId + '.txt') +
+    '" --cancel-file "' + ExpandConstant('{tmp}\NGTManager-' + AttemptId + '.cancel') +
+    '" --progress-file "' + ExpandConstant('{tmp}\NGTManager-setup-progress-' + AttemptId + '.txt') +
+    '" --package-extract-ms ' + IntToStr(ExtractionElapsedMs) +
+    ' --package-file-count {#PackageFileCount}';
+end;
+
+procedure PrepareManagerRun;
+begin
   ResultPath := ExpandConstant('{tmp}\NGTManager-setup-result-' + AttemptId + '.txt');
   CancelPath := ExpandConstant('{tmp}\NGTManager-' + AttemptId + '.cancel');
   ProgressPath := ExpandConstant('{tmp}\NGTManager-setup-progress-' + AttemptId + '.txt');
@@ -313,82 +329,61 @@ begin
   DeleteFile(CancelPath);
   DeleteFile(ProgressPath);
   WizardForm.ProgressGauge.Style := npbstMarquee;
-  try
-    try
-      ExtractionElapsedMs := GetTickCount64 - AttemptStartTick;
-      Log('NGTManager package extraction completed; files={#PackageFileCount}');
-      if not FileExists(ManagerPath) then
-      begin
-        Failure := 'The offline package is incomplete. Attempt ID: ' + AttemptId +
-          '. Open the Inno Setup Log in %TEMP% and retry with the complete installer.';
-      end
-      else
-      begin
-        Operation := 'install';
-        if UpdateId <> '' then Operation := 'update';
-        Parameters := Operation + ' "' + PackagePath + '" ' + AttemptId +
-          ' --result-file "' + ResultPath + '" --cancel-file "' + CancelPath +
-          '" --progress-file "' + ProgressPath +
-          '" --package-extract-ms ' + IntToStr(ExtractionElapsedMs) +
-          ' --package-file-count {#PackageFileCount}';
-        CoreRunning := True;
-        CancelRequested := False;
-        CurrentPhase := 'environment_check';
-        WizardForm.StatusLabel.Caption := PhaseDescription(CurrentPhase);
-        WizardForm.FilenameLabel.Caption := 'Attempt ' + AttemptId;
-        Log('NGTManager transaction started; operation=' + Operation + '.');
-        LastProgressLine := '';
-        ProgressTimerId := SetTimer(0, 0, 250, CreateCallback(@PollManagerProgress));
-        try
-          Started := Exec(ManagerPath, Parameters, PackagePath,
-            SW_HIDE, ewWaitUntilTerminated, ResultCode);
-        finally
-          if ProgressTimerId <> 0 then KillTimer(0, ProgressTimerId);
-          ProgressTimerId := 0;
-          PollManagerProgress(0, 0, 0, 0);
-        end;
-        CoreRunning := False;
-        if (not Started) or (ResultCode <> 0) then
-        begin
-          ManagerError := ReadManagerError;
-          if ManagerError <> '' then
-            MessageText := ManagerError
-          else if CancelRequested then
-            MessageText := 'Cancellation was requested. Setup waited for a safe rollback point.'
-          else
-            MessageText := 'NGTManager stopped during: ' + PhaseDescription(CurrentPhase) + '.';
-          DiagnosticPath := ExportFailureDiagnostics(ManagerPath);
-          if DiagnosticPath <> '' then
-            MessageText := MessageText + #13#10 + 'Unified diagnostics saved to: ' + DiagnosticPath
-          else
-            MessageText := MessageText + #13#10 + 'Open the matching Inno Setup Log in %TEMP% for installation details.';
-          Failure := MessageText + #13#10 + 'Attempt ID: ' + AttemptId + #13#10 +
-            'After NGTManager starts, use Settings > Export diagnostics to create one support file.';
-          Log('NGTManager core failed or cancellation was requested; exit=' + IntToStr(ResultCode) +
-            '; attempt=' + AttemptId + '.');
-        end
-        else
-        begin
-          CoreCommitted := True;
-          WizardForm.CancelButton.Enabled := False;
-          WizardForm.Update;
-          Log('NGTManager core committed; continuing Setup registration.');
-          if not DeleteFile(ExpandConstant('{autodesktop}\NGT 工作室管理系统.url')) then
-            Log('Legacy desktop URL cleanup was skipped.');
-          if not DeleteFile(ExpandConstant('{autoprograms}\NGT 工作室管理系统.url')) then
-            Log('Legacy Start Menu URL cleanup was skipped.');
-        end;
-      end;
-    except
-      Log('NGTManager preparation raised an exception; attempt=' + AttemptId + '.');
-      Failure := 'NGTManager could not finish package preparation. Attempt ID: ' + AttemptId + #13#10 +
-        'Open the matching Inno Setup Log in %TEMP% and retry with the complete offline installer.';
-    end;
-  finally
-    CoreRunning := False;
-    WizardForm.ProgressGauge.Style := npbstNormal;
+  Log('NGTManager package extraction completed; files={#PackageFileCount}');
+  CoreRunning := True;
+  CancelRequested := False;
+  CurrentPhase := 'environment_check';
+  WizardForm.StatusLabel.Caption := PhaseDescription(CurrentPhase);
+  WizardForm.FilenameLabel.Caption := 'Attempt ' + AttemptId;
+  Log('NGTManager transaction started.');
+  LastProgressLine := '';
+  ProgressTimerId := SetTimer(0, 0, 250, CreateCallback(@PollManagerProgress));
+end;
+
+procedure FinishManagerRun;
+var
+  ManagerPath: String;
+  ManagerError: String;
+  MessageText: String;
+  DiagnosticPath: String;
+  Failure: String;
+begin
+  if ProgressTimerId <> 0 then KillTimer(0, ProgressTimerId);
+  ProgressTimerId := 0;
+  PollManagerProgress(0, 0, 0, 0);
+  CoreRunning := False;
+  WizardForm.ProgressGauge.Style := npbstNormal;
+  Failure := '';
+  ManagerPath := ExpandConstant('{tmp}\ngt-package\tools\NGTManager.exe');
+  if ManagerResultSucceeded then
+  begin
+    PrepareSucceeded := True;
+    CoreCommitted := True;
+    WizardForm.CancelButton.Enabled := False;
+    Log('NGTManager core committed; continuing Setup registration.');
+    if not DeleteFile(ExpandConstant('{autodesktop}\NGT 工作室管理系统.url')) then
+      Log('Legacy desktop URL cleanup was skipped.');
+    if not DeleteFile(ExpandConstant('{autoprograms}\NGT 工作室管理系统.url')) then
+      Log('Legacy Start Menu URL cleanup was skipped.');
+    exit;
   end;
-  PrepareSucceeded := Failure = '';
+
+  ManagerError := ReadManagerError;
+  if ManagerError <> '' then
+    MessageText := ManagerError
+  else if CancelRequested then
+    MessageText := 'Cancellation was requested. Setup waited for a safe rollback point.'
+  else
+    MessageText := 'NGTManager stopped during: ' + PhaseDescription(CurrentPhase) + '.';
+  DiagnosticPath := ExportFailureDiagnostics(ManagerPath);
+  if DiagnosticPath <> '' then
+    MessageText := MessageText + #13#10 + 'Unified diagnostics saved to: ' + DiagnosticPath
+  else
+    MessageText := MessageText + #13#10 + 'Open the matching Inno Setup Log in %TEMP% for installation details.';
+  Failure := MessageText + #13#10 + 'Attempt ID: ' + AttemptId + #13#10 +
+    'After NGTManager starts, use Settings > Export diagnostics to create one support file.';
+  Log('NGTManager core failed or did not produce a success result; attempt=' + AttemptId + '.');
+  PrepareSucceeded := False;
   if not PrepareSucceeded then
   begin
     if WizardSilent then

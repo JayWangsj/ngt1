@@ -2094,6 +2094,19 @@ fn ensure_legacy_runtime_confirmed(
     }
     let control_release = legacy_control_release(&release, probe_release)?;
     let job = RuntimeJob::new()?;
+    if allow_verified_recovery {
+        if !legacy_database_is_stopped(&job, control_release, root, &database, deadline)? {
+            return Err(
+                "The legacy database is still running; installation was cancelled.".to_owned(),
+            );
+        }
+        log_line(
+            root,
+            "Legacy PostgreSQL is stopped; its raw backup will be verified by starting, querying, and cleanly stopping a copy.",
+        );
+        return Ok(());
+    }
+
     let tool = control_release.join("runtime/postgres/bin/pg_controldata.exe");
     let version = run_postgres_tool(
         &job,
@@ -2131,15 +2144,6 @@ fn ensure_legacy_runtime_confirmed(
     let control_output = String::from_utf8_lossy(&output.stdout);
     if !postgres_cluster_is_clean(&control_output) {
         let state = postgres_cluster_state(&control_output).unwrap_or("unrecognized");
-        if allow_verified_recovery
-            && legacy_database_is_stopped(&job, control_release, root, &database, deadline)?
-        {
-            log_line(
-                root,
-                &format!("Legacy PostgreSQL requires verified crash recovery (state: {state})."),
-            );
-            return Ok(());
-        }
         return Err(format!(
             "The legacy PostgreSQL cluster is not confirmed cleanly shut down (state: {state})."
         ));
@@ -3460,31 +3464,7 @@ fn recover_legacy_database_after_backup(
     backup_root: &Path,
 ) -> Result<(), String> {
     let database = root.join("data/postgres");
-    let control_tool = release.join("runtime/postgres/bin/pg_controldata.exe");
     let job = RuntimeJob::new()?;
-    let inspect = || {
-        run_postgres_tool(
-            &job,
-            &control_tool,
-            &[
-                std::ffi::OsString::from("-D"),
-                database.as_os_str().to_owned(),
-            ],
-            release,
-            root,
-            Instant::now() + Duration::from_secs(10),
-        )
-    };
-    let before = inspect()?;
-    if before.status.success()
-        && postgres_cluster_is_clean(&String::from_utf8_lossy(&before.stdout))
-        && !database.join("postmaster.pid").exists()
-    {
-        return Ok(());
-    }
-    if !before.status.success() {
-        return Err(legacy_control_failure(root, &before.status, &before));
-    }
     if !legacy_database_is_stopped(
         &job,
         release,
@@ -3501,15 +3481,6 @@ fn recover_legacy_database_after_backup(
         &database,
         &backup_root.join("legacy-recovery.log"),
     )?;
-    let after = inspect()?;
-    if !after.status.success()
-        || !postgres_cluster_is_clean(&String::from_utf8_lossy(&after.stdout))
-    {
-        return Err(
-            "The legacy database recovery did not finish with a clean shutdown; the verified backup was preserved."
-                .to_owned(),
-        );
-    }
     log_line(
         root,
         "Legacy PostgreSQL crash recovery completed and shut down cleanly.",
