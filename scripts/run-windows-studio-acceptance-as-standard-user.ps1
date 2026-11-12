@@ -487,7 +487,7 @@ try {
   Write-Output "Starting the verified $Acceptance acceptance as a disposable standard Windows user."
   $process = Start-Process -FilePath $powershellPath -ArgumentList $childArguments `
     -Credential $credential -LoadUserProfile -WorkingDirectory $workspace `
-    -RedirectStandardOutput "\\.\NUL" -RedirectStandardError "\\.\NUL" -WindowStyle Hidden -PassThru
+    -RedirectStandardOutput "\\.\NUL" -RedirectStandardError "NUL" -WindowStyle Hidden -PassThru
   $processHandle = Get-NgtAcceptanceProcessHandle -Process $process
 
   $acceptanceDeadline = (Get-Date).AddMinutes(110)
