@@ -578,6 +578,10 @@ fn write_maintenance(root: &Path, operation_id: &str, enabled: bool) -> Result<(
 }
 
 fn atomic_write(destination: &Path, contents: &[u8]) -> Result<(), String> {
+    if let Some(parent) = destination.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Unable to create atomic state directory: {error}"))?;
+    }
     let temporary = destination.with_file_name(format!(
         ".{}.{}.tmp",
         destination
@@ -5817,6 +5821,25 @@ mod tests {
         let wrong_name = directory.join("business-backup.json");
         assert!(validate_result_file_path(&wrong_name, &arguments).is_err());
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn atomic_state_write_creates_a_missing_parent_directory() {
+        let root = std::env::temp_dir().join(format!("ngt-atomic-state-{}", unique_id()));
+        fs::create_dir_all(root.join("state")).unwrap();
+        let destination = root
+            .join("state")
+            .join("runtime")
+            .join("candidate-run.json");
+
+        assert!(!destination.parent().unwrap().exists());
+        atomic_write(&destination, br#"{\"phase\":\"running\"}"#).unwrap();
+
+        assert_eq!(
+            fs::read(&destination).unwrap(),
+            br#"{\"phase\":\"running\"}"#
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(windows)]
