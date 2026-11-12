@@ -47,6 +47,37 @@ function Wait-NgtInstallerProcess(
   $Process.Refresh()
 }
 
+function Invoke-NgtManagerCommand {
+  param(
+    [Parameter(Mandatory = $true)][string]$ManagerPath,
+    [Parameter(Mandatory = $true)][string[]]$Arguments,
+    [Parameter(Mandatory = $true)][string]$WorkingDirectory
+  )
+
+  $commandId = [guid]::NewGuid().ToString("N")
+  $stdoutPath = Join-Path $env:RUNNER_TEMP ("ngt-manager-cli-" + $commandId + ".stdout.log")
+  $stderrPath = Join-Path $env:RUNNER_TEMP ("ngt-manager-cli-" + $commandId + ".stderr.log")
+  try {
+    $startArguments = @{
+      FilePath = $ManagerPath
+      ArgumentList = $Arguments
+      WorkingDirectory = $WorkingDirectory
+      RedirectStandardOutput = $stdoutPath
+      RedirectStandardError = $stderrPath
+      WindowStyle = "Hidden"
+      PassThru = $true
+      Wait = $true
+    }
+    $process = Start-Process @startArguments
+    $stdout = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { [System.IO.File]::ReadAllText($stdoutPath) } else { "" }
+    $stderr = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { [System.IO.File]::ReadAllText($stderrPath) } else { "" }
+    $text = (@($stdout, $stderr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+    return [pscustomobject]@{ ExitCode = [int]$process.ExitCode; Text = $text.Trim() }
+  } finally {
+    Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Invoke-NgtBusinessDataProbe([string]$ReleaseRoot, [string]$Action, [string]$Code, [string]$SnapshotPath) {
   $probePath = Join-Path $PSScriptRoot "windows-studio-business-probe.cjs"
   $node = Join-Path $ReleaseRoot "runtime\node.exe"
@@ -159,8 +190,9 @@ try {
     throw "The installed release is missing its verified Node runtime."
   }
   $managerPath = Join-Path $installRoot "tools\NGTManager.exe"
-  $statusResult = (& $managerPath status 2>&1 | Out-String).Trim()
-  $statusExitCode = $LASTEXITCODE
+  $statusCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("status") -WorkingDirectory $installRoot
+  $statusResult = $statusCommand.Text
+  $statusExitCode = $statusCommand.ExitCode
   if ($statusExitCode -ne 0) {
     throw "NGTManager status failed with exit code $statusExitCode."
   }
@@ -271,9 +303,9 @@ try {
 
     $updateStatusPath = Join-Path $installRoot "state\update-status.json"
     $updateId = [guid]::NewGuid().ToString()
-    $reserveOutput = & $managerPath reserve-update $updateId $ExpectedVersion 2>&1
-    $reserveExitCode = $LASTEXITCODE
-    $reserveText = (@($reserveOutput) -join "`n").Trim()
+    $reserveCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("reserve-update", $updateId, $ExpectedVersion) -WorkingDirectory $installRoot
+    $reserveExitCode = $reserveCommand.ExitCode
+    $reserveText = $reserveCommand.Text
     $reserveStatus = $null
     if (Test-Path -LiteralPath $updateStatusPath -PathType Leaf) {
       try { $reserveStatus = Get-Content -LiteralPath $updateStatusPath -Raw | ConvertFrom-Json } catch { }
@@ -289,12 +321,15 @@ try {
       $failureDetails = Protect-NgtAcceptanceDiagnosticText -Text $failureDetails -Secrets $diagnosticSecrets
       $failureDetails = [regex]::Replace([string]$failureDetails, '[\r\n]+', ' ').Trim()
       if ($failureDetails.Length -gt 400) { $failureDetails = $failureDetails.Substring(0, 400) }
-      if (-not $failureDetails) { $failureDetails = "no manager output or update status" }
+      if (-not $failureDetails) {
+        $stateDirectory = Join-Path $installRoot "state"
+        $failureDetails = "managerOutputEmpty; managerPresent=$([bool](Test-Path -LiteralPath $managerPath -PathType Leaf)); stateDirectoryPresent=$([bool](Test-Path -LiteralPath $stateDirectory -PathType Container)); updateLockPresent=$([bool](Test-Path -LiteralPath (Join-Path $stateDirectory 'update.lock') -PathType Leaf)); updateStatusPresent=$([bool](Test-Path -LiteralPath $updateStatusPath -PathType Leaf))"
+      }
       throw "NGTManager could not reserve the exact-SHA online update (exit code $reserveExitCode; $failureDetails)."
     }
-    $startOutput = & $managerPath start-update $updateId 2>&1
-    $startExitCode = $LASTEXITCODE
-    $startText = (@($startOutput) -join "`n").Trim()
+    $startCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("start-update", $updateId) -WorkingDirectory $installRoot
+    $startExitCode = $startCommand.ExitCode
+    $startText = $startCommand.Text
     $startStatus = $null
     try { $startStatus = $startText | ConvertFrom-Json } catch { }
     if ($startExitCode -ne 0 -or -not $startStatus -or
@@ -325,9 +360,9 @@ try {
 
     $processDeadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
-      $processOutput = & $managerPath update-process $updateId 2>&1
-      $processExitCode = $LASTEXITCODE
-      $processText = (@($processOutput) -join "`n").Trim()
+      $processCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("update-process", $updateId) -WorkingDirectory $installRoot
+      $processExitCode = $processCommand.ExitCode
+      $processText = $processCommand.Text
       $processResult = $null
       try { $processResult = $processText | ConvertFrom-Json } catch { }
       if ($processExitCode -ne 0 -or -not $processResult -or $null -eq $processResult.active) {
@@ -339,7 +374,10 @@ try {
     } while ([DateTime]::UtcNow -lt $processDeadline)
     if ($processActive) { throw "The Rust online updater did not release its process lease." }
 
-    & $managerPath clear-update-lock $updateId complete 2>&1 | Out-Null
+    $clearUpdateCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("clear-update-lock", $updateId, "complete") -WorkingDirectory $installRoot
+    if ($clearUpdateCommand.ExitCode -ne 0) {
+      throw "NGTManager could not clear the completed online-update lock."
+    }
     $clearExitCode = $LASTEXITCODE
     if ($clearExitCode -ne 0) {
       throw "NGTManager could not release the completed update lock."
