@@ -4064,10 +4064,7 @@ fn validate_candidate(
 }
 
 fn should_initialize_database(transaction: &Transaction) -> bool {
-    transaction.operation == Operation::Install
-        && !transaction.database_was_present
-        && (transaction.database_directory_was_empty
-            || transaction.database_initialization_directory.is_some())
+    transaction.operation == Operation::Install && !transaction.database_was_present
 }
 
 #[cfg(windows)]
@@ -6263,6 +6260,35 @@ mod tests {
         drop(held);
         assert!(recover_runtime_before_start(&root).is_ok());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn initial_install_initializes_missing_and_empty_database_directories() {
+        let mut transaction = Transaction {
+            format_version: TRANSACTION_VERSION,
+            operation_id: "test".to_owned(),
+            operation: Operation::Install,
+            stage: Stage::Preparing,
+            previous_release: None,
+            candidate_release: None,
+            backup_root: None,
+            previous_config: None,
+            migration_started: false,
+            database_was_present: false,
+            database_directory_was_empty: false,
+            database_initialization_directory: None,
+            database_initialization_owned: false,
+            database_initialization_published: false,
+            failure: None,
+        };
+        assert!(should_initialize_database(&transaction));
+        transaction.database_directory_was_empty = true;
+        assert!(should_initialize_database(&transaction));
+        transaction.database_was_present = true;
+        assert!(!should_initialize_database(&transaction));
+        transaction.database_was_present = false;
+        transaction.operation = Operation::Update;
+        assert!(!should_initialize_database(&transaction));
     }
 
     #[test]
