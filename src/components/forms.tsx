@@ -1715,11 +1715,7 @@ export function ItemsEditor({
         if (focusedEdit && initialEdit?.index !== index) return null;
         const projects = deviceProjects(rules, device);
         const match = matchRule(rules, device, item.project);
-        const priceOptions = eligiblePriceOptions(
-          match,
-          device,
-          item.project,
-        );
+        const priceOptions = eligiblePriceOptions(match, device, item.project);
         const draftProduct = availableProducts.find(
           (product) => product.id === item.draftPriceOption?.productId,
         );
