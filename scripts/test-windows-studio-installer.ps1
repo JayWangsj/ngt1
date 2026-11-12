@@ -269,20 +269,27 @@ try {
     Invoke-NgtBusinessDataProbe -ReleaseRoot $releaseRoot -Action "seed" `
       -Code $businessCode -SnapshotPath $businessSnapshotPath
 
+    $updateStatusPath = Join-Path $installRoot "state\update-status.json"
     $updateId = [guid]::NewGuid().ToString()
     $reserveOutput = & $managerPath reserve-update $updateId $ExpectedVersion 2>&1
     $reserveExitCode = $LASTEXITCODE
     $reserveText = (@($reserveOutput) -join "`n").Trim()
     $reserveStatus = $null
-    try { $reserveStatus = $reserveText | ConvertFrom-Json } catch { }
+    if (Test-Path -LiteralPath $updateStatusPath -PathType Leaf) {
+      try { $reserveStatus = Get-Content -LiteralPath $updateStatusPath -Raw | ConvertFrom-Json } catch { }
+    }
     if ($reserveExitCode -ne 0 -or -not $reserveStatus -or
         $reserveStatus.updateId -ne $updateId -or
         $reserveStatus.targetVersion -ne $ExpectedVersion -or
         $reserveStatus.status -ne "starting") {
-      $failureDetails = Protect-NgtAcceptanceDiagnosticText -Text $reserveText -Secrets $diagnosticSecrets
+      $failureDetails = $reserveText
+      if ([string]::IsNullOrWhiteSpace($failureDetails) -and (Test-Path -LiteralPath $updateStatusPath -PathType Leaf)) {
+        $failureDetails = Get-Content -LiteralPath $updateStatusPath -Raw -ErrorAction SilentlyContinue
+      }
+      $failureDetails = Protect-NgtAcceptanceDiagnosticText -Text $failureDetails -Secrets $diagnosticSecrets
       $failureDetails = [regex]::Replace([string]$failureDetails, '[\r\n]+', ' ').Trim()
       if ($failureDetails.Length -gt 400) { $failureDetails = $failureDetails.Substring(0, 400) }
-      if (-not $failureDetails) { $failureDetails = "no manager output" }
+      if (-not $failureDetails) { $failureDetails = "no manager output or update status" }
       throw "NGTManager could not reserve the exact-SHA online update (exit code $reserveExitCode; $failureDetails)."
     }
     $startOutput = & $managerPath start-update $updateId 2>&1
@@ -296,7 +303,6 @@ try {
       throw "NGTManager could not start the Rust online updater."
     }
 
-    $updateStatusPath = Join-Path $installRoot "state\update-status.json"
     $updateDeadline = [DateTime]::UtcNow.AddMinutes(90)
     $updateStatus = $null
     do {
