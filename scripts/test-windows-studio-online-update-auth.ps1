@@ -166,6 +166,7 @@ exit /b %NGT_FAKE_GH_EXIT_CODE%
   $childRequest = [ordered]@{
     environment = @{ GH_CONFIG_DIR = $childConfig }
     ghConfigDirectory = $childConfig
+    transcriptPath = (Join-Path $childRoot "acceptance.transcript.log")
     expectedTokenSha256 = ("0" * 64) -join ""
     verifyGitHubAuth = $false
     parameters = @{}
