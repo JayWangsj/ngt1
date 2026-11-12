@@ -1682,7 +1682,10 @@ test("temporary iPhone 11 projects hide other-model schemes and save drafts on s
     });
     const [message, footer, disabled, fieldErrors] = await Promise.all([
       page.getByRole("alert").textContent().catch(() => null),
-      page.locator(".sticky-order-actions").innerText().catch(() => "unavailable"),
+      page
+        .locator(".sticky-order-actions")
+        .innerText()
+        .catch(() => "unavailable"),
       button.isDisabled().catch(() => true),
       page.locator(".field-error").allTextContents(),
     ]);
