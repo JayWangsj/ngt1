@@ -50,14 +50,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
-Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion
+Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion; AfterInstall: InstallExtractedPackage
 
 [Icons]
 Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 
 [Run]
-Filename: "{tmp}\ngt-package\tools\NGTManager.exe"; Parameters: "{code:ManagerParameters}"; WorkingDir: "{tmp}\ngt-package"; StatusMsg: "Preparing NGTManager safely..."; Flags: runhidden; BeforeInstall: PrepareManagerRun; AfterInstall: FinishManagerRun
 Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "Open {#AppName}"; Flags: runhidden postinstall nowait skipifsilent
 
 [UninstallDelete]
@@ -66,13 +65,27 @@ Type: filesandordirs; Name: "{localappdata}\NGTManager\tools"
 Type: filesandordirs; Name: "{localappdata}\NGTManager\assets"
 
 [Code]
+type
+  TWindowsPoint = record
+    X: LongInt;
+    Y: LongInt;
+  end;
+  TWindowsMessage = record
+    Wnd: HWND;
+    Message: UINT;
+    WParam: LongWord;
+    LParam: LongInt;
+    Time: DWORD;
+    Point: TWindowsPoint;
+  end;
+
 var
   AttemptId: String;
   ResultPath: String;
   CancelPath: String;
   ProgressPath: String;
+  ProcessIdPath: String;
   LastProgressLine: String;
-  ProgressTimerId: UINT_PTR;
   CurrentPhase: String;
   CoreRunning: Boolean;
   CoreCommitted: Boolean;
@@ -85,12 +98,25 @@ var
 function GetTickCount64: Int64;
   external 'GetTickCount64@kernel32.dll stdcall';
 
-function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT;
-  lpTimerFunc: LongWord): UINT_PTR;
-  external 'SetTimer@user32.dll stdcall';
+function OpenProcess(dwDesiredAccess: DWORD; bInheritHandle: BOOL;
+  dwProcessId: DWORD): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
 
-function KillTimer(hWnd: HWND; uIDEvent: UINT_PTR): BOOL;
-  external 'KillTimer@user32.dll stdcall';
+function WaitForSingleObject(hHandle: THandle; dwMilliseconds: DWORD): DWORD;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+
+function CloseHandle(hObject: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function PeekMessage(var lpMsg: TWindowsMessage; hWnd: HWND; wMsgFilterMin,
+  wMsgFilterMax, wRemoveMsg: UINT): BOOL;
+  external 'PeekMessageW@user32.dll stdcall';
+
+function TranslateMessage(const lpMsg: TWindowsMessage): BOOL;
+  external 'TranslateMessage@user32.dll stdcall';
+
+function DispatchMessage(const lpMsg: TWindowsMessage): Longint;
+  external 'DispatchMessageW@user32.dll stdcall';
 
 function SafeOperationId(const Value: String): Boolean;
 var
@@ -213,7 +239,7 @@ begin
     IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId;
 end;
 
-procedure PollManagerProgress(Arg1: HWND; Arg2: UINT; Arg3: UINT_PTR; Arg4: DWORD);
+procedure PollManagerProgress;
 var
   ProgressLine: AnsiString;
 begin
@@ -316,6 +342,7 @@ begin
     ' --result-file "' + ExpandConstant('{tmp}\NGTManager-setup-result-' + AttemptId + '.txt') +
     '" --cancel-file "' + ExpandConstant('{tmp}\NGTManager-' + AttemptId + '.cancel') +
     '" --progress-file "' + ExpandConstant('{tmp}\NGTManager-setup-progress-' + AttemptId + '.txt') +
+    '" --process-id-file "' + ExpandConstant('{tmp}\NGTManager-setup-process-' + AttemptId + '.pid') +
     '" --package-extract-ms ' + IntToStr(ExtractionElapsedMs) +
     ' --package-file-count {#PackageFileCount}';
 end;
@@ -325,9 +352,11 @@ begin
   ResultPath := ExpandConstant('{tmp}\NGTManager-setup-result-' + AttemptId + '.txt');
   CancelPath := ExpandConstant('{tmp}\NGTManager-' + AttemptId + '.cancel');
   ProgressPath := ExpandConstant('{tmp}\NGTManager-setup-progress-' + AttemptId + '.txt');
+  ProcessIdPath := ExpandConstant('{tmp}\NGTManager-setup-process-' + AttemptId + '.pid');
   DeleteFile(ResultPath);
   DeleteFile(CancelPath);
   DeleteFile(ProgressPath);
+  DeleteFile(ProcessIdPath);
   WizardForm.ProgressGauge.Style := npbstMarquee;
   Log('NGTManager package extraction completed; files={#PackageFileCount}');
   CoreRunning := True;
@@ -337,7 +366,6 @@ begin
   WizardForm.FilenameLabel.Caption := 'Attempt ' + AttemptId;
   Log('NGTManager transaction started.');
   LastProgressLine := '';
-  ProgressTimerId := SetTimer(0, 0, 250, CreateCallback(@PollManagerProgress));
 end;
 
 procedure FinishManagerRun;
@@ -348,9 +376,7 @@ var
   DiagnosticPath: String;
   Failure: String;
 begin
-  if ProgressTimerId <> 0 then KillTimer(0, ProgressTimerId);
-  ProgressTimerId := 0;
-  PollManagerProgress(0, 0, 0, 0);
+  PollManagerProgress;
   CoreRunning := False;
   WizardForm.ProgressGauge.Style := npbstNormal;
   Failure := '';
@@ -395,6 +421,73 @@ begin
       WizardForm.Close;
     end;
   end;
+end;
+
+procedure ProcessWizardMessages;
+var
+  Msg: TWindowsMessage;
+begin
+  while PeekMessage(Msg, 0, 0, 0, 1) do
+  begin
+    TranslateMessage(Msg);
+    DispatchMessage(Msg);
+  end;
+end;
+
+procedure InstallExtractedPackage;
+var
+  ManagerPath: String;
+  ProcessIdText: AnsiString;
+  ProcessId: Integer;
+  ProcessHandle: THandle;
+  ResultCode: Integer;
+  Started: Boolean;
+  WaitResult: DWORD;
+  PidDeadline: Int64;
+begin
+  PrepareManagerRun;
+  ManagerPath := ExpandConstant('{tmp}\ngt-package\tools\NGTManager.exe');
+  ResultCode := -1;
+  Started := Exec(ManagerPath, ManagerParameters(''),
+    ExtractFileDir(ManagerPath), SW_HIDE, ewNoWait, ResultCode);
+  if not Started then
+  begin
+    Log('Unable to start NGTManager core: ' + SysErrorMessage(ResultCode));
+    FinishManagerRun;
+    exit;
+  end;
+
+  PidDeadline := GetTickCount64 + 10000;
+  while (not FileExists(ProcessIdPath)) and (GetTickCount64 < PidDeadline) do
+  begin
+    ProcessWizardMessages;
+    PollManagerProgress;
+    Sleep(50);
+  end;
+  if (not LoadStringFromFile(ProcessIdPath, ProcessIdText)) then
+  begin
+    Log('NGTManager core did not publish its process ID.');
+    FinishManagerRun;
+    exit;
+  end;
+  ProcessId := StrToIntDef(Trim(ProcessIdText), 0);
+  ProcessHandle := OpenProcess($00101000, False, ProcessId);
+  if ProcessHandle = 0 then
+  begin
+    Log('Unable to open the NGTManager core process handle.');
+    FinishManagerRun;
+    exit;
+  end;
+
+  repeat
+    WaitResult := WaitForSingleObject(ProcessHandle, 100);
+    ProcessWizardMessages;
+    PollManagerProgress;
+  until WaitResult <> $00000102;
+  CloseHandle(ProcessHandle);
+  if WaitResult <> 0 then
+    Log('Waiting for the NGTManager core failed with code ' + IntToStr(WaitResult) + '.');
+  FinishManagerRun;
 end;
 
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);

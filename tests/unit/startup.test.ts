@@ -547,15 +547,16 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain(
       "function PrepareToInstall(var NeedsRestart: Boolean): String",
     );
-    expect(installer).toContain(
-      'Filename: "{tmp}\\ngt-package\\tools\\NGTManager.exe"',
-    );
-    expect(installer).toContain("BeforeInstall: PrepareManagerRun");
-    expect(installer).toContain("AfterInstall: FinishManagerRun");
+    expect(installer).toContain("Started := Exec(ManagerPath");
+    expect(installer).toContain("AfterInstall: InstallExtractedPackage");
     expect(installer).toContain("--progress-file ");
-    expect(installer).toContain("SetTimer(0, 0, 250");
+    expect(installer).toContain("--process-id-file ");
+    expect(installer).toContain("ewNoWait");
+    expect(installer).toContain("OpenProcess(");
+    expect(installer).toContain("WaitForSingleObject(");
+    expect(installer).toContain("PeekMessage(");
     expect(installer).toContain("procedure PollManagerProgress");
-    expect(installer).not.toContain("AfterInstall: InstallExtractedPackage");
+    expect(installer).not.toContain("SetTimer(0, 0, 250");
     expect(installer).toContain("GetSpaceOnDisk64");
     expect(installer).not.toContain("ExtractTemporaryFiles(");
     expect(installer).toContain("--package-extract-ms ");
@@ -756,5 +757,15 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("if WizardSilent then");
     expect(installer).toContain("RaiseException(Failure)");
     expect(installer).toContain("MsgBox(Failure, mbCriticalError, MB_OK)");
+  });
+
+  it("keeps a cold desktop launch in one persistent manager process", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    const openStart = manager.indexOf("fn open_system(root: &Path)");
+    const openEnd = manager.indexOf("#[cfg(not(windows))]", openStart);
+    const openSystem = manager.slice(openStart, openEnd);
+    expect(openSystem).toContain("run_supervisor(true");
+    expect(openSystem).not.toContain('launch_manager(root, "run")');
+    expect(manager).toContain("open_browser_after_health: bool");
   });
 });

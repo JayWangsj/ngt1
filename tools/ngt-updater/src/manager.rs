@@ -1351,6 +1351,21 @@ fn log_child_exit(root: &Path, component: DiagnosticComponent, status: &std::pro
 fn record_command_failure(root: &Path, arguments: &[String], message: &str) -> Option<String> {
     if let Some(logger) = manager_diagnostics(root) {
         let lower = message.to_ascii_lowercase();
+        if matches!(arguments.first().map(String::as_str), Some("open" | "run")) {
+            let phase = fs::read(root.join("state/runtime/run-state.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RuntimeRunRecord>(&bytes).ok())
+                .map_or_else(|| "runtime-start".to_owned(), |state| state.phase);
+            let component = if lower.contains("database") || lower.contains("postgres") {
+                DiagnosticComponent::Database
+            } else if lower.contains("application") || lower.contains("health") {
+                DiagnosticComponent::Application
+            } else {
+                DiagnosticComponent::Manager
+            };
+            let code = failure_code(message);
+            return Some(logger.record(component, "error", "runtime.start.failed", &phase, &code));
+        }
         let installer_command = arguments.first().is_some_and(|command| {
             matches!(
                 command.as_str(),
@@ -5616,7 +5631,10 @@ fn start_supervised_runtime(
 }
 
 #[cfg(windows)]
-fn run_supervisor() -> Result<String, String> {
+fn run_supervisor(
+    open_browser_after_health: bool,
+    mut open_lock: Option<File>,
+) -> Result<String, String> {
     use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::Threading::WaitForSingleObject;
     let root = stable_root()?;
@@ -5639,7 +5657,12 @@ fn run_supervisor() -> Result<String, String> {
         );
     }
     let Some(_run_lock) = acquire_run_lock(&root)? else {
-        return Ok("NGTManager is already running.".to_owned());
+        drop(open_lock);
+        return if open_browser_after_health {
+            wait_for_runtime_and_open(&root)
+        } else {
+            Ok("NGTManager is already running.".to_owned())
+        };
     };
     drop(operation_lock);
     let stop = create_stop_event()?;
@@ -5649,6 +5672,7 @@ fn run_supervisor() -> Result<String, String> {
     report_unconfirmed_previous_run(&root);
     let mut memory_sampler = memory_sample::MemorySamplingSupervisor::new(&root);
     let mut restarts = 0;
+    let mut should_open_browser = open_browser_after_health;
     loop {
         let mut run_state = RuntimeRunRecord::new(unique_id(), "supervised-runtime");
         write_runtime_run(&root, &run_state)?;
@@ -5669,6 +5693,22 @@ fn run_supervisor() -> Result<String, String> {
         run_state.phase = "running".to_owned();
         write_runtime_run(&root, &run_state)?;
         log_line(&root, "NGTManager runtime is healthy.");
+        if should_open_browser {
+            if let Err(error) = open_browser() {
+                let code = failure_code(&error);
+                if let Some(logger) = manager_diagnostics(&root) {
+                    logger.record(
+                        DiagnosticComponent::Manager,
+                        "error",
+                        "manager.browser.open.failed",
+                        "browser-open",
+                        &code,
+                    );
+                }
+            }
+            should_open_browser = false;
+            drop(open_lock.take());
+        }
         loop {
             if unsafe { WaitForSingleObject(stop.0, 250) } == WAIT_OBJECT_0 {
                 let shutdown_started = Instant::now();
@@ -5786,7 +5826,10 @@ fn recover_runtime_before_start(root: &Path) -> Result<File, String> {
 }
 
 #[cfg(not(windows))]
-fn run_supervisor() -> Result<String, String> {
+fn run_supervisor(
+    _open_browser_after_health: bool,
+    _open_lock: Option<File>,
+) -> Result<String, String> {
     Err("NGTManager runtime is supported only on Windows x64.".to_owned())
 }
 
@@ -5857,48 +5900,35 @@ fn start_memory_sample(root: &Path, request_id: &str) -> Result<String, String> 
 }
 
 #[cfg(windows)]
-fn open_system(root: &Path) -> Result<String, String> {
-    let Some(_open_lock) = acquire_runtime_file_lock(root, "open.lock")? else {
-        return Ok("NGTManager is already being opened.".to_owned());
-    };
+fn open_browser() -> Result<(), String> {
+    let mut command = Command::new("cmd.exe");
+    command
+        .args(["/C", "start", "", "http://127.0.0.1:3000"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Unable to open NGTManager in the browser: {error}"))
+}
+
+#[cfg(windows)]
+fn wait_for_runtime_and_open(root: &Path) -> Result<String, String> {
     let config = read_config(root)?.ok_or_else(|| "NGTManager is not installed.".to_owned())?;
-    let mut supervisor = if runtime_is_active(root)? {
-        None
-    } else {
-        Some(launch_manager(root, "run")?)
-    };
     let client = health_client()?;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         if config.maintenance || root.join("state/update-maintenance.json").exists() {
             return Err("NGTManager is in maintenance. Try opening it after the current operation finishes.".to_owned());
         }
-        if let Some(child) = supervisor.as_mut() {
-            if let Some(exit) = child
-                .try_wait()
-                .map_err(|error| format!("Unable to inspect startup: {error}"))?
-            {
-                if !exit.success() || !runtime_is_active(root)? {
-                    return Err(format!(
-                        "NGTManager stopped during startup (exit {}). See the diagnostic logs.",
-                        status_code(&exit)
-                    ));
-                }
-                supervisor = None;
-            }
-        }
         if health_matches(&client, &config.version) {
-            let mut command = Command::new("cmd.exe");
-            command
-                .args(["/C", "start", "", "http://127.0.0.1:3000"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            hide_console(&mut command);
-            command
-                .spawn()
-                .map_err(|error| format!("Unable to open NGTManager in the browser: {error}"))?;
+            open_browser()?;
             return Ok("NGTManager is open.".to_owned());
+        }
+        if !runtime_is_active(root)? {
+            break;
         }
         thread::sleep(Duration::from_secs(1));
     }
@@ -5907,6 +5937,18 @@ fn open_system(root: &Path) -> Result<String, String> {
         .and_then(|bytes| serde_json::from_slice::<RuntimeRunRecord>(&bytes).ok())
         .map_or_else(|| "unknown".to_owned(), |state| state.phase);
     Err(format!("NGTManager did not become ready within 60 seconds (last phase: {phase}). See the diagnostic logs."))
+}
+
+#[cfg(windows)]
+fn open_system(root: &Path) -> Result<String, String> {
+    let Some(open_lock) = acquire_runtime_file_lock(root, "open.lock")? else {
+        return Ok("NGTManager is already being opened.".to_owned());
+    };
+    if runtime_is_active(root)? {
+        wait_for_runtime_and_open(root)
+    } else {
+        run_supervisor(true, Some(open_lock))
+    }
 }
 
 #[cfg(not(windows))]
@@ -6077,7 +6119,7 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             install_package(Path::new(source), command, Some(operation_id))
         }
-        [command] if command == "run" => run_supervisor(),
+        [command] if command == "run" => run_supervisor(false, None),
         [command] if command == "open" => open_system(&stable_root()?),
         [command] if command == "stop" => stop_supervisor(&stable_root()?),
         [command] if command == "recover" => {
@@ -6252,6 +6294,7 @@ fn validate_result_file_path(path: &Path, arguments: &[String]) -> Result<(), St
         path,
         arguments,
         "NGTManager-setup-result-",
+        ".txt",
         "install result",
     )
 }
@@ -6261,7 +6304,18 @@ fn validate_progress_file_path(path: &Path, arguments: &[String]) -> Result<(), 
         path,
         arguments,
         "NGTManager-setup-progress-",
+        ".txt",
         "install progress",
+    )
+}
+
+fn validate_process_id_file_path(path: &Path, arguments: &[String]) -> Result<(), String> {
+    validate_setup_output_path(
+        path,
+        arguments,
+        "NGTManager-setup-process-",
+        ".pid",
+        "install process ID",
     )
 }
 
@@ -6269,6 +6323,7 @@ fn validate_setup_output_path(
     path: &Path,
     arguments: &[String],
     prefix: &str,
+    suffix: &str,
     description: &str,
 ) -> Result<(), String> {
     if !matches!(
@@ -6289,7 +6344,7 @@ fn validate_setup_output_path(
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
         .ok_or_else(|| format!("A valid operation ID is required for the {description} file."))?;
-    let expected_name = format!("{prefix}{operation_id}.txt");
+    let expected_name = format!("{prefix}{operation_id}{suffix}");
     if path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
         return Err(format!(
             "The {description} file name does not match its operation."
@@ -6328,6 +6383,7 @@ pub fn main() -> std::process::ExitCode {
     let mut result_file = None;
     let mut cancel_file = None;
     let mut progress_file = None;
+    let mut process_id_file = None;
     let mut extraction_elapsed_ms = None;
     let mut extracted_file_count = None;
     let mut args = std::env::args().skip(1);
@@ -6365,6 +6421,18 @@ pub fn main() -> std::process::ExitCode {
                 Some(path) => Some(PathBuf::from(path)),
                 None => {
                     eprintln!("The install progress path is missing.");
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+        } else if argument == "--process-id-file" {
+            if process_id_file.is_some() {
+                eprintln!("The install process ID path was supplied more than once.");
+                return std::process::ExitCode::FAILURE;
+            }
+            process_id_file = match args.next() {
+                Some(path) => Some(PathBuf::from(path)),
+                None => {
+                    eprintln!("The install process ID path is missing.");
                     return std::process::ExitCode::FAILURE;
                 }
             };
@@ -6415,6 +6483,17 @@ pub fn main() -> std::process::ExitCode {
     if let Some(path) = progress_file.as_ref() {
         if let Err(error) = validate_progress_file_path(path, &arguments) {
             eprintln!("{error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
+    if let Some(path) = process_id_file.as_ref() {
+        if let Err(error) = validate_process_id_file_path(path, &arguments) {
+            eprintln!("{error}");
+            return std::process::ExitCode::FAILURE;
+        }
+        let process_id = std::process::id().to_string();
+        if let Err(error) = write_setup_result(path, &process_id) {
+            eprintln!("Unable to publish the install process ID: {error}");
             return std::process::ExitCode::FAILURE;
         }
     }
@@ -6569,6 +6648,7 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let result_path = directory.join("NGTManager-setup-result-attempt-1.txt");
         let progress_path = directory.join("NGTManager-setup-progress-attempt-1.txt");
+        let process_id_path = directory.join("NGTManager-setup-process-attempt-1.pid");
         let arguments = vec![
             "install".to_owned(),
             "package".to_owned(),
@@ -6577,6 +6657,7 @@ mod tests {
 
         validate_result_file_path(&result_path, &arguments).unwrap();
         validate_progress_file_path(&progress_path, &arguments).unwrap();
+        validate_process_id_file_path(&process_id_path, &arguments).unwrap();
         publish_install_progress(
             Some(&progress_path),
             "NGT_PROGRESS|attempt-1|starting|0|0|0",
@@ -6600,6 +6681,7 @@ mod tests {
         let wrong_name = directory.join("business-backup.json");
         assert!(validate_result_file_path(&wrong_name, &arguments).is_err());
         assert!(validate_progress_file_path(&wrong_name, &arguments).is_err());
+        assert!(validate_process_id_file_path(&wrong_name, &arguments).is_err());
         let _ = fs::remove_dir_all(directory);
     }
 
