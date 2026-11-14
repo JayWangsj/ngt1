@@ -152,6 +152,7 @@ function PhaseDescription(const Phase: String): String;
 begin
   if Phase = 'environment_check' then Result := 'Checking Windows and required components'
   else if Phase = 'windows_compatibility_check' then Result := 'Checking Windows 10 compatibility'
+  else if Phase = 'runtime_state_preflight' then Result := 'Checking the previous NGTManager session'
   else if Phase = 'package_source_verification' then Result := 'Verifying the offline package'
   else if Phase = 'runtime_dependency_check' then Result := 'Checking bundled runtime components'
   else if Phase = 'installation_path_check' then Result := 'Checking access to the installation folders'

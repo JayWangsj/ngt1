@@ -976,11 +976,18 @@ fn preflight(
         progress.set_phase("windows_compatibility_check");
     }
     check_windows_build()?;
+    let root = stable_root()?;
+    #[cfg(windows)]
+    {
+        if let Some(progress) = progress {
+            progress.set_phase("runtime_state_preflight");
+        }
+        preflight_runtime_state(&root)?;
+    }
     let manifest = validate_runtime(source, progress)?;
     if let Some(progress) = progress {
         progress.set_phase("installation_path_check");
     }
-    let root = stable_root()?;
     #[cfg(windows)]
     {
         let temporary = ascii_temp_directory()?;
@@ -1299,6 +1306,30 @@ fn failure_code(message: &str) -> String {
         "RUNTIME_START_TIMEOUT"
     } else if message.contains("another operation did not finish") {
         "OPERATION_WAIT_TIMEOUT"
+    } else if message.contains("previous runtime shutdown is unconfirmed") {
+        "PREVIOUS_RUNTIME_UNCONFIRMED"
+    } else if message.contains("runtime stop state version is unsupported") {
+        "RUNTIME_STATE_VERSION_UNSUPPORTED"
+    } else if message.contains("runtime stop state cannot be read") {
+        "RUNTIME_STATE_UNREADABLE"
+    } else if message.contains("runtime stop state is invalid")
+        || message.contains("runtime stop state is not a regular file")
+    {
+        "RUNTIME_STATE_INVALID"
+    } else if message.contains("status tool version does not match") {
+        "POSTGRES_TOOL_VERSION_MISMATCH"
+    } else if message.contains("legacy postgresql version cannot be read") {
+        "POSTGRES_VERSION_UNREADABLE"
+    } else if message.contains("database is still running") {
+        "DATABASE_STILL_RUNNING"
+    } else if message.contains("unable to determine whether the business database is running") {
+        "POSTGRES_STATUS_UNKNOWN"
+    } else if message.contains("inspection tool timed out") {
+        "POSTGRES_STATUS_TIMEOUT"
+    } else if message.contains("preserve the invalid runtime stop state")
+        || message.contains("different invalid runtime stop state")
+    {
+        "RUNTIME_RECOVERY_STATE_WRITE_FAILED"
     } else if message.contains("integrity") || message.contains("checksum") {
         "PACKAGE_INTEGRITY_FAILED"
     } else if message.contains("manifest") || message.contains("package") {
@@ -2272,6 +2303,7 @@ fn wait_for_runtime_stop(
     root: &Path,
     probe_release: Option<&Path>,
     allow_verified_legacy_recovery: bool,
+    recovery_operation_id: Option<&str>,
 ) -> Result<File, String> {
     let lock_path = root.join("state").join("run.lock");
     let deadline = Instant::now() + Duration::from_secs(90);
@@ -2299,9 +2331,10 @@ fn wait_for_runtime_stop(
                     ensure_port_available(DATABASE_PORT)?;
                     ensure_previous_runtime_confirmed_until(
                         root,
-                        deadline,
+                        Instant::now() + Duration::from_secs(120),
                         probe_release,
                         allow_verified_legacy_recovery,
+                        recovery_operation_id,
                     )?;
                     match fs::symlink_metadata(root.join("data/postgres/postmaster.pid")) {
                         Ok(_) if !allow_verified_legacy_recovery => return Err("A PostgreSQL process marker is still present; its shutdown could not be confirmed.".to_owned()),
@@ -2331,7 +2364,44 @@ fn ensure_previous_runtime_confirmed(root: &Path) -> Result<(), String> {
         Instant::now() + Duration::from_secs(30),
         None,
         false,
+        None,
     )
+}
+
+#[cfg(windows)]
+fn preflight_runtime_state(root: &Path) -> Result<(), String> {
+    let path = root.join("state/runtime/run-state.json");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!(
+            "The previous runtime stop state cannot be read; installation was cancelled: {error}"
+        )),
+    };
+    if !metadata.is_file() || is_reparse(&metadata) {
+        return Err(
+            "The previous runtime stop state is not a regular file; installation was cancelled."
+                .to_owned(),
+        );
+    }
+    let bytes = fs::read(&path).map_err(|error| {
+        format!(
+            "The previous runtime stop state cannot be read; installation was cancelled: {error}"
+        )
+    })?;
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        if value
+            .get("formatVersion")
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|version| version != 1)
+        {
+            return Err(
+                "The previous runtime stop state version is unsupported; installation was cancelled."
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -2340,28 +2410,79 @@ fn ensure_previous_runtime_confirmed_until(
     deadline: Instant,
     probe_release: Option<&Path>,
     allow_verified_legacy_recovery: bool,
+    recovery_operation_id: Option<&str>,
 ) -> Result<(), String> {
     let path = root.join("state/runtime/run-state.json");
-    let bytes = match fs::read(path) {
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => Some(metadata),
+        Ok(_) => return Err(
+            "The previous runtime stop state is not a regular file; installation was cancelled."
+                .to_owned(),
+        ),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!(
+            "The previous runtime stop state cannot be read; installation was cancelled: {error}"
+        )),
+    };
+    if metadata.is_none() {
+        return ensure_legacy_runtime_confirmed(
+            root,
+            deadline,
+            probe_release,
+            allow_verified_legacy_recovery,
+        );
+    }
+    let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ensure_legacy_runtime_confirmed(
+        Err(error) => return Err(format!(
+            "The previous runtime stop state cannot be read; installation was cancelled: {error}"
+        )),
+    };
+    let mut record = match serde_json::from_slice::<RuntimeRunRecord>(&bytes) {
+        Ok(record) => record,
+        Err(_) if allow_verified_legacy_recovery => {
+            let recovery_started = Instant::now();
+            let operation_id = recovery_operation_id.ok_or_else(|| {
+                "The previous runtime stop state is invalid; installation was cancelled.".to_owned()
+            })?;
+            preserve_invalid_runtime_state(root, operation_id, &bytes)?;
+            ensure_legacy_runtime_confirmed(root, deadline, probe_release, true)?;
+            let mut recovered =
+                RuntimeRunRecord::new(format!("recovery-{operation_id}"), "maintenance-recovery");
+            mark_runtime_recovered(
+                &mut recovered,
+                "invalid-state",
+                "RUNTIME_RUN_STATE_INVALID_RECOVERED",
+            );
+            write_runtime_run_at(&path, &recovered)?;
+            log_shutdown_phase(
                 root,
-                deadline,
-                probe_release,
-                allow_verified_legacy_recovery,
-            )
+                "warning",
+                "runtime.shutdown.recovered",
+                "invalid-state",
+                "RUNTIME_RUN_STATE_INVALID_RECOVERED",
+                recovery_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            );
+            return Ok(());
         }
         Err(_) => {
             return Err(
-                "The previous runtime stop state cannot be read; installation was cancelled."
+                "The previous runtime stop state is invalid; installation was cancelled."
                     .to_owned(),
             )
         }
     };
-    let record = serde_json::from_slice::<RuntimeRunRecord>(&bytes).map_err(|_| {
-        "The previous runtime stop state is invalid; installation was cancelled.".to_owned()
-    })?;
+    if record.format_version != 1 {
+        return Err(
+            "The previous runtime stop state version is unsupported; installation was cancelled."
+                .to_owned(),
+        );
+    }
+    if !known_runtime_phase(&record.phase) || record.source == "candidate-validation" {
+        return Err(
+            "The previous runtime stop state is invalid; installation was cancelled.".to_owned(),
+        );
+    }
     if record.phase == "completed" && record.ended_at_utc.is_some() {
         Ok(())
     } else if record.phase == "startup-failed" && record.ended_at_utc.is_some() {
@@ -2371,9 +2492,105 @@ fn ensure_previous_runtime_confirmed_until(
             probe_release,
             allow_verified_legacy_recovery,
         )
+    } else if allow_verified_legacy_recovery {
+        let recovery_started = Instant::now();
+        let original_phase = record.phase.clone();
+        ensure_legacy_runtime_confirmed(root, deadline, probe_release, true)?;
+        mark_runtime_recovered(
+            &mut record,
+            &original_phase,
+            "STALE_RUNTIME_STATE_VERIFIED_STOPPED",
+        );
+        write_runtime_run_at(&path, &record)?;
+        log_shutdown_phase(
+            root,
+            "warning",
+            "runtime.shutdown.recovered",
+            &original_phase,
+            "STALE_RUNTIME_STATE_VERIFIED_STOPPED",
+            recovery_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+        );
+        Ok(())
     } else {
         Err("The previous runtime shutdown is unconfirmed; start and stop NGTManager normally before installing, updating, repairing, or uninstalling.".to_owned())
     }
+}
+
+#[cfg(windows)]
+fn known_runtime_phase(phase: &str) -> bool {
+    matches!(
+        phase,
+        "starting"
+            | "database-starting"
+            | "database-started"
+            | "running"
+            | "application-stop-requested"
+            | "database-stop-requested"
+            | "failed"
+            | "unconfirmed"
+            | "startup-failed"
+            | "completed"
+    )
+}
+
+#[cfg(windows)]
+fn mark_runtime_recovered(record: &mut RuntimeRunRecord, phase: &str, reason: &str) {
+    let recovered_at = iso_timestamp();
+    record.phase = "startup-failed".to_owned();
+    record.ended_at_utc = Some(recovered_at.clone());
+    record.recovered_from_phase = Some(phase.to_owned());
+    record.recovered_at_utc = Some(recovered_at);
+    record.recovery_reason = Some(reason.to_owned());
+}
+
+#[cfg(windows)]
+fn preserve_invalid_runtime_state(
+    root: &Path,
+    operation_id: &str,
+    contents: &[u8],
+) -> Result<(), String> {
+    let path = root
+        .join("state/runtime")
+        .join(format!("run-state.invalid-{operation_id}.json"));
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => {}
+                _ => {
+                    return Err(
+                        "The preserved invalid runtime stop state is not a regular file."
+                            .to_owned(),
+                    )
+                }
+            }
+            return fs::read(&path)
+                .map_err(|read_error| {
+                    format!("Unable to read the preserved invalid runtime stop state: {read_error}")
+                })
+                .and_then(|existing| {
+                    if existing == contents {
+                        Ok(())
+                    } else {
+                        Err("A different invalid runtime stop state already belongs to this operation."
+                            .to_owned())
+                    }
+                });
+        }
+        Err(error) => {
+            return Err(format!(
+                "Unable to preserve the invalid runtime stop state: {error}"
+            ))
+        }
+    };
+    if let Err(error) = file.write_all(contents).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(&path);
+        return Err(format!(
+            "Unable to preserve the invalid runtime stop state: {error}"
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -2430,9 +2647,10 @@ fn ensure_legacy_runtime_confirmed(
     if Instant::now() >= deadline {
         return Err("The legacy shutdown check exceeded its time limit.".to_owned());
     }
-    let control_release = legacy_control_release(&release, probe_release)?;
     let job = RuntimeJob::new()?;
     if allow_verified_recovery {
+        let control_release =
+            legacy_control_release(&release, probe_release, "runtime/postgres/bin/pg_ctl.exe")?;
         if !legacy_database_is_stopped(&job, control_release, root, &database, deadline)? {
             return Err(
                 "The legacy database is still running; installation was cancelled.".to_owned(),
@@ -2445,6 +2663,11 @@ fn ensure_legacy_runtime_confirmed(
         return Ok(());
     }
 
+    let control_release = legacy_control_release(
+        &release,
+        probe_release,
+        "runtime/postgres/bin/pg_controldata.exe",
+    )?;
     let tool = control_release.join("runtime/postgres/bin/pg_controldata.exe");
     let version = run_postgres_tool(
         &job,
@@ -2536,6 +2759,24 @@ fn legacy_database_is_stopped(
     database: &Path,
     deadline: Instant,
 ) -> Result<bool, String> {
+    let database_version = fs::read_to_string(database.join("PG_VERSION"))
+        .map_err(|_| "The legacy PostgreSQL version cannot be read.".to_owned())?;
+    let version = run_postgres_tool(
+        job,
+        &release.join("runtime/postgres/bin/pg_ctl.exe"),
+        &[std::ffi::OsString::from("--version")],
+        release,
+        root,
+        deadline,
+    )?;
+    if !version.status.success()
+        || postgres_major_version(&version.stdout) != Some(database_version.trim())
+    {
+        return Err(
+            "The PostgreSQL status tool version does not match the legacy database; installation was cancelled."
+                .to_owned(),
+        );
+    }
     let output = run_postgres_tool(
         job,
         &release.join("runtime/postgres/bin/pg_ctl.exe"),
@@ -2624,13 +2865,13 @@ fn classify_legacy_control_failure(
 fn legacy_control_release<'a>(
     installed: &'a Path,
     candidate: Option<&'a Path>,
+    tool: &str,
 ) -> Result<&'a Path, String> {
-    const TOOL: &str = "runtime/postgres/bin/pg_controldata.exe";
-    if installed.join(TOOL).is_file() {
+    if installed.join(tool).is_file() {
         return Ok(installed);
     }
-    candidate.filter(|path| path.join(TOOL).is_file()).ok_or_else(||
-        "The installed PostgreSQL has no control-data tool and no verified installation candidate supplied one.".to_owned())
+    candidate.filter(|path| path.join(tool).is_file()).ok_or_else(||
+        "The installed PostgreSQL has no required inspection tool and no verified installation candidate supplied one.".to_owned())
 }
 
 fn postgres_cluster_is_clean(output: &str) -> bool {
@@ -2714,6 +2955,12 @@ struct RuntimeRunRecord {
     database_exit_code: Option<i32>,
     database_elapsed_ms: Option<u64>,
     ended_at_utc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovered_from_phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovered_at_utc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery_reason: Option<String>,
 }
 
 #[cfg(windows)]
@@ -2730,6 +2977,9 @@ impl RuntimeRunRecord {
             database_exit_code: None,
             database_elapsed_ms: None,
             ended_at_utc: None,
+            recovered_from_phase: None,
+            recovered_at_utc: None,
+            recovery_reason: None,
         }
     }
 }
@@ -2746,9 +2996,14 @@ fn runtime_run_path(root: &Path, record: &RuntimeRunRecord) -> PathBuf {
 
 #[cfg(windows)]
 fn write_runtime_run(root: &Path, record: &RuntimeRunRecord) -> Result<(), String> {
+    write_runtime_run_at(&runtime_run_path(root, record), record)
+}
+
+#[cfg(windows)]
+fn write_runtime_run_at(path: &Path, record: &RuntimeRunRecord) -> Result<(), String> {
     let contents = serde_json::to_vec(record)
         .map_err(|_| "Unable to encode runtime stop state.".to_owned())?;
-    atomic_write(&runtime_run_path(root, record), &contents)
+    atomic_write(path, &contents)
 }
 
 #[cfg(windows)]
@@ -2834,7 +3089,7 @@ fn report_unconfirmed_previous_run(root: &Path) {
             );
             record.phase = "unconfirmed".to_owned();
             record.ended_at_utc = Some(iso_timestamp());
-            let _ = write_runtime_run(root, &record);
+            let _ = write_runtime_run_at(&path, &record);
         }
     }
 }
@@ -4290,13 +4545,17 @@ impl InstallProgress {
     }
 
     fn set_phase_failure(&self, phase: &str) {
+        self.set_phase_failure_with_code(phase, "INSTALL_PHASE_FAILED");
+    }
+
+    fn set_phase_failure_with_code(&self, phase: &str, error_code: &str) {
         self.transition_phase(
             phase,
             None,
             None,
             "error",
             "installer.phase.failed",
-            "INSTALL_PHASE_FAILED",
+            error_code,
         );
     }
 
@@ -4692,7 +4951,7 @@ fn install_package(
     )?;
     let candidate_stage = root.join("releases").join(format!(".candidate-{id}"));
     let restart_runtime = runtime_is_active(&root)?;
-    let result = (|| {
+    let result: Result<ManagerConfig, String> = (|| {
         progress.set_phase_with_metrics("deploy_candidate", None, Some(preflight.package_bytes));
         fs::create_dir_all(root.join("releases"))
             .map_err(|error| format!("Unable to create releases directory: {error}"))?;
@@ -4717,7 +4976,7 @@ fn install_package(
         }
         write_maintenance(&root, &id, true)?;
         progress.set_phase("stop_runtime");
-        let _runtime_lock = wait_for_runtime_stop(&root, Some(&candidate_stage), true)?;
+        let _runtime_lock = wait_for_runtime_stop(&root, Some(&candidate_stage), true, Some(&id))?;
         progress.check_cancel()?;
         ensure_port_available(APPLICATION_PORT)?;
         ensure_port_available(DATABASE_PORT)?;
@@ -4817,7 +5076,7 @@ fn install_package(
             ))
         }
         Err(error) => {
-            progress.set_phase_failure("recovery");
+            progress.set_phase_failure_with_code("recovery", &failure_code(&error));
             let recovery = rollback_transaction(&root, &mut transaction);
             if let Err(recovery_error) = recovery {
                 progress.finish_failure("recovery_failed");
@@ -5163,7 +5422,7 @@ fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<()
     let _runtime_lock = if abandon {
         None
     } else {
-        Some(wait_for_runtime_stop(root, None, false)?)
+        Some(wait_for_runtime_stop(root, None, false, None)?)
     };
     if transaction.migration_started {
         if let Some(backup_root) = transaction.backup_root.clone() {
@@ -7031,6 +7290,109 @@ mod tests {
             failure_code("another operation did not finish within 180 seconds"),
             "OPERATION_WAIT_TIMEOUT"
         );
+        assert_eq!(
+            failure_code("The previous runtime shutdown is unconfirmed."),
+            "PREVIOUS_RUNTIME_UNCONFIRMED"
+        );
+        assert_eq!(
+            failure_code("The previous runtime stop state version is unsupported."),
+            "RUNTIME_STATE_VERSION_UNSUPPORTED"
+        );
+        assert_eq!(
+            failure_code("The PostgreSQL status tool version does not match the legacy database."),
+            "POSTGRES_TOOL_VERSION_MISMATCH"
+        );
+        assert_eq!(
+            failure_code("Unable to determine whether the business database is running."),
+            "POSTGRES_STATUS_UNKNOWN"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn recovered_runtime_state_remains_readable_by_the_previous_schema() {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PreviousRuntimeRunRecord {
+            format_version: u8,
+            run_id: String,
+            source: String,
+            phase: String,
+            ended_at_utc: Option<String>,
+        }
+
+        let mut record = RuntimeRunRecord::new("run-1".to_owned(), "supervised-runtime");
+        mark_runtime_recovered(
+            &mut record,
+            "running",
+            "STALE_RUNTIME_STATE_VERIFIED_STOPPED",
+        );
+        let encoded = serde_json::to_vec(&record).unwrap();
+        let previous: PreviousRuntimeRunRecord = serde_json::from_slice(&encoded).unwrap();
+
+        assert_eq!(previous.format_version, 1);
+        assert_eq!(previous.run_id, "run-1");
+        assert_eq!(previous.source, "supervised-runtime");
+        assert_eq!(previous.phase, "startup-failed");
+        assert!(previous.ended_at_utc.is_some());
+        assert_eq!(record.recovered_from_phase.as_deref(), Some("running"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_recovery_accepts_only_known_version_one_phases() {
+        for phase in [
+            "starting",
+            "database-starting",
+            "database-started",
+            "running",
+            "application-stop-requested",
+            "database-stop-requested",
+            "failed",
+            "unconfirmed",
+            "startup-failed",
+            "completed",
+        ] {
+            assert!(known_runtime_phase(phase), "missing phase {phase}");
+        }
+        assert!(!known_runtime_phase("recovered-stopped"));
+        assert!(!known_runtime_phase("future-phase"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn invalid_runtime_state_evidence_is_idempotent_for_one_operation() {
+        let root = std::env::temp_dir().join(format!("ngt-invalid-run-state-{}", unique_id()));
+        fs::create_dir_all(root.join("state/runtime")).unwrap();
+
+        preserve_invalid_runtime_state(&root, "attempt-1", b"{broken").unwrap();
+        preserve_invalid_runtime_state(&root, "attempt-1", b"{broken").unwrap();
+        assert!(preserve_invalid_runtime_state(&root, "attempt-1", b"different").is_err());
+        assert_eq!(
+            fs::read(root.join("state/runtime/run-state.invalid-attempt-1.json")).unwrap(),
+            b"{broken"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_state_preflight_defers_malformed_legacy_state_but_rejects_future_versions() {
+        let root = std::env::temp_dir().join(format!("ngt-run-state-preflight-{}", unique_id()));
+        fs::create_dir_all(root.join("state/runtime")).unwrap();
+        let path = root.join("state/runtime/run-state.json");
+
+        fs::write(&path, b"{broken").unwrap();
+        preflight_runtime_state(&root).unwrap();
+        fs::write(&path, br#"{"phase":"running"}"#).unwrap();
+        preflight_runtime_state(&root).unwrap();
+        fs::write(&path, br#"{"formatVersion":2,"phase":"running"}"#).unwrap();
+        assert!(preflight_runtime_state(&root)
+            .unwrap_err()
+            .contains("version is unsupported"));
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]
@@ -7043,16 +7405,23 @@ mod tests {
             fs::create_dir_all(release.join("runtime/postgres/bin")).unwrap();
         }
         let tool = "runtime/postgres/bin/pg_controldata.exe";
-        assert!(legacy_control_release(&installed, None).is_err());
+        assert!(legacy_control_release(&installed, None, tool).is_err());
         fs::write(candidate.join(tool), "").unwrap();
         assert_eq!(
-            legacy_control_release(&installed, Some(&candidate)).unwrap(),
+            legacy_control_release(&installed, Some(&candidate), tool).unwrap(),
             candidate
         );
         fs::write(installed.join(tool), "").unwrap();
         assert_eq!(
-            legacy_control_release(&installed, Some(&candidate)).unwrap(),
+            legacy_control_release(&installed, Some(&candidate), tool).unwrap(),
             installed
+        );
+        let status_tool = "runtime/postgres/bin/pg_ctl.exe";
+        assert!(legacy_control_release(&installed, Some(&candidate), status_tool).is_err());
+        fs::write(candidate.join(status_tool), "").unwrap();
+        assert_eq!(
+            legacy_control_release(&installed, Some(&candidate), status_tool).unwrap(),
+            candidate
         );
         fs::remove_dir_all(root).unwrap();
     }
