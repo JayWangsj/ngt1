@@ -105,12 +105,18 @@ if ($checksum -notmatch '^([A-Fa-f0-9]{64})\s+(.+)$' -or
 
 $installRoot = Join-Path $env:LOCALAPPDATA "NGTManager"
 $runKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$startupNames = @("NGTManager", "NGT Management System")
 if (Test-Path -LiteralPath $installRoot) {
   throw "The disposable user already has an NGTManager directory."
 }
-$runEntry = Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue
-if ($runEntry -and $runEntry.NGTManager) {
-  throw "The disposable user already has an NGTManager startup entry."
+foreach ($startupName in $startupNames) {
+  if (Get-ItemProperty -LiteralPath $runKeyPath -Name $startupName -ErrorAction SilentlyContinue) {
+    throw "The disposable user already has an NGTManager startup entry: $startupName."
+  }
+}
+& schtasks.exe /Query /TN "NGT Management System" *> $null
+if ($LASTEXITCODE -eq 0) {
+  throw "The disposable user already has the legacy NGTManager startup task."
 }
 foreach ($port in @(3000, 55432, 55433)) {
   if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
@@ -205,9 +211,14 @@ try {
       [string]$managerStatus.version -ne [string]$metadata.version) {
     throw "NGTManager did not report a committed installation of the verified release."
   }
-  $runEntry = Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue
-  if ($runEntry -and $runEntry.NGTManager) {
-    throw "NGTManager unexpectedly registered per-user startup."
+  foreach ($startupName in $startupNames) {
+    if (Get-ItemProperty -LiteralPath $runKeyPath -Name $startupName -ErrorAction SilentlyContinue) {
+      throw "NGTManager left a per-user startup entry registered: $startupName."
+    }
+  }
+  & schtasks.exe /Query /TN "NGT Management System" *> $null
+  if ($LASTEXITCODE -eq 0) {
+    throw "NGTManager left the legacy startup task registered."
   }
   if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
     throw "A silent first install unexpectedly started the application."
@@ -506,8 +517,14 @@ try {
             -not (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json"))) {
           throw "The uninstaller did not retain the business database and manager state."
         }
-        if (Get-ItemProperty -LiteralPath $runKeyPath -Name NGTManager -ErrorAction SilentlyContinue) {
-          throw "The uninstaller left the per-user NGTManager startup entry registered."
+        foreach ($startupName in $startupNames) {
+          if (Get-ItemProperty -LiteralPath $runKeyPath -Name $startupName -ErrorAction SilentlyContinue) {
+            throw "The uninstaller left a per-user NGTManager startup entry registered: $startupName."
+          }
+        }
+        & schtasks.exe /Query /TN "NGT Management System" *> $null
+        if ($LASTEXITCODE -eq 0) {
+          throw "The uninstaller left the legacy NGTManager startup task registered."
         }
       } catch {
         $cleanupSafe = $false

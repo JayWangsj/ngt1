@@ -133,7 +133,7 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("allow_verified_legacy_recovery");
     expect(manager).toContain("fn run_postgres_tool(");
     expect(manager).toContain("fn recover_legacy_database_after_backup(");
-    expect(manager).not.toContain("const runner = r#\"");
+    expect(manager).not.toContain('const runner = r#"');
     expect(manager).toContain("pg_controldata.exe");
     expect(manager).toContain("postgres_cluster_is_clean");
     expect(database).toContain('join(workspace, "database-ready.pid")');
@@ -278,7 +278,7 @@ describe("Windows persistent startup", () => {
     }
   });
 
-  it("removes only the legacy per-user Rust manager startup command", async () => {
+  it("removes only verified NGTManager login-start registrations", async () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const autostart = manager.slice(
       manager.indexOf("fn remove_legacy_autostart("),
@@ -291,11 +291,54 @@ describe("Windows persistent startup", () => {
       "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
     );
     expect(autostart).toContain('root.join("tools/NGTManager.exe")');
+    expect(autostart).toContain('("NGT Management System", legacy)');
     expect(autostart).toContain("RegQueryValueExW");
     expect(autostart).toContain("RegDeleteValueW");
+    expect(autostart).toContain(
+      'args(["/Query", "/TN", "NGT Management System", "/XML"])',
+    );
+    expect(autostart).toContain(
+      'args(["/Delete", "/TN", "NGT Management System", "/F"])',
+    );
+    expect(autostart).toContain('xml.contains("wscript.exe")');
+    expect(autostart).toContain("windows-studio-launcher.vbs");
+    expect(autostart).toContain("if status == 2 {\n        let legacy_root");
     expect(autostart).not.toContain("RegSetValueExW");
-    expect(autostart).not.toContain("ScheduledTask");
-    expect(autostart).not.toContain("wscript.exe");
+    expect(autostart).not.toContain('"/Create"');
+
+    const acceptance = await readFile(
+      "scripts/test-windows-studio-installer.ps1",
+      "utf8",
+    );
+    expect(acceptance).toContain(
+      '$startupNames = @("NGTManager", "NGT Management System")',
+    );
+    expect(acceptance).toContain(
+      '& schtasks.exe /Query /TN "NGT Management System"',
+    );
+  });
+
+  it("uses one native startup window and tray owner for open and exit", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    expect(manager).toContain('"NGTManager.RuntimeUi"');
+    expect(manager).toContain("WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX");
+    expect(manager).toContain("Shell_NotifyIconW(NIM_ADD");
+    expect(manager).toContain("RUNTIME_UI_TRAY_MESSAGE");
+    expect(manager).toContain("WM_LBUTTONDBLCLK");
+    expect(manager).toContain("TRAY_EXIT_REQUESTED.store(true");
+    expect(manager).toContain(
+      "update_runtime_ui_phase(RUNTIME_UI_PHASE_DATABASE)",
+    );
+    expect(manager).toContain(
+      "update_runtime_ui_phase(RUNTIME_UI_PHASE_APPLICATION)",
+    );
+    expect(manager).toContain(
+      "update_runtime_ui_phase(RUNTIME_UI_PHASE_HEALTH)",
+    );
+    expect(manager).toContain(
+      "signal_existing_runtime_ui(RUNTIME_UI_SHOW_MESSAGE)",
+    );
+    expect(manager).toContain("match try_lock_state(root)?");
   });
 
   it("runs real Windows release acceptance with a disposable standard user", async () => {

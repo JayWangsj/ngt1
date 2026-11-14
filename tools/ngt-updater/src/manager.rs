@@ -10,7 +10,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 #[cfg(windows)]
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -24,6 +24,35 @@ const APPLICATION_PORT: u16 = 3000;
 static WINDOWS_SESSION_END: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static WINDOWS_SESSION_END_TICK: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_WINDOW: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_STATUS: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_HEALTHY: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static TRAY_EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+const RUNTIME_UI_TRAY_MESSAGE: u32 = 0x8001;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_MESSAGE: u32 = 0x8002;
+#[cfg(windows)]
+const RUNTIME_UI_OPEN_MESSAGE: u32 = 0x8003;
+#[cfg(windows)]
+const RUNTIME_UI_SHOW_MESSAGE: u32 = 0x8004;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_CHECKING: usize = 1;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_DATABASE: usize = 2;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_APPLICATION: usize = 3;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_HEALTH: usize = 4;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_READY: usize = 5;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_EXITING: usize = 6;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -459,7 +488,7 @@ fn is_lock_contention(error: &std::io::Error) -> bool {
     }
 }
 
-fn lock_state(root: &Path) -> Result<File, String> {
+fn try_lock_state(root: &Path) -> Result<Option<File>, String> {
     let state = root.join("state");
     fs::create_dir_all(&state)
         .map_err(|error| format!("Unable to create state directory: {error}"))?;
@@ -472,19 +501,19 @@ fn lock_state(root: &Path) -> Result<File, String> {
         .open(lock_path)
     {
         Ok(lock) => lock,
-        Err(error) if is_lock_contention(&error) => {
-            return Err("Another NGTManager operation is already running.".to_owned());
-        }
+        Err(error) if is_lock_contention(&error) => return Ok(None),
         Err(error) => return Err(format!("Unable to open operation lock: {error}")),
     };
-    lock.try_lock_exclusive().map_err(|error| {
-        if is_lock_contention(&error) {
-            "Another NGTManager operation is already running.".to_owned()
-        } else {
-            format!("Unable to acquire operation lock: {error}")
-        }
-    })?;
-    Ok(lock)
+    match lock.try_lock_exclusive() {
+        Ok(()) => Ok(Some(lock)),
+        Err(error) if is_lock_contention(&error) => Ok(None),
+        Err(error) => Err(format!("Unable to acquire operation lock: {error}")),
+    }
+}
+
+fn lock_state(root: &Path) -> Result<File, String> {
+    try_lock_state(root)?
+        .ok_or_else(|| "Another NGTManager operation is already running.".to_owned())
 }
 
 fn read_transaction(root: &Path) -> Result<Transaction, String> {
@@ -1264,6 +1293,12 @@ fn failure_code(message: &str) -> String {
         "DATABASE_MIGRATION_FAILED"
     } else if message.contains("exited repeatedly") {
         "RESTART_LIMIT_REACHED"
+    } else if message.contains("another ngtmanager operation") {
+        "OPERATION_IN_PROGRESS"
+    } else if message.contains("did not become ready") {
+        "RUNTIME_START_TIMEOUT"
+    } else if message.contains("another operation did not finish") {
+        "OPERATION_WAIT_TIMEOUT"
     } else if message.contains("integrity") || message.contains("checksum") {
         "PACKAGE_INTEGRITY_FAILED"
     } else if message.contains("manifest") || message.contains("package") {
@@ -1725,26 +1760,44 @@ struct SessionEndNotifier {
 
 #[cfg(windows)]
 impl SessionEndNotifier {
-    fn start() -> Result<Self, String> {
+    fn start(root: &Path, show_startup: bool) -> Result<Self, String> {
+        use windows_sys::Win32::Graphics::Gdi::{GetSysColorBrush, COLOR_WINDOW};
         use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::Controls::{
+            InitCommonControlsEx, ICC_PROGRESS_CLASS, INITCOMMONCONTROLSEX, PBM_SETMARQUEE,
+            PBS_MARQUEE,
+        };
+        use windows_sys::Win32::UI::Shell::{
+            Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW,
+        };
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DispatchMessageW, GetMessageW, RegisterClassW, TranslateMessage,
-            WNDCLASSW, WS_OVERLAPPED,
+            CreateWindowExW, DispatchMessageW, GetMessageW, LoadCursorW, LoadImageW,
+            RegisterClassW, SendMessageW, ShowWindow, TranslateMessage, CW_USEDEFAULT, IDC_ARROW,
+            IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SW_SHOW, WM_SETICON, WNDCLASSW,
+            WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
         };
         let (sender, receiver) = mpsc::sync_channel::<Result<u32, String>>(1);
+        let icon_path = root.join("assets/ngt-studio.ico");
         let thread = thread::Builder::new()
-            .name("ngt-session-end-notifier".to_owned())
+            .name("ngt-runtime-ui".to_owned())
             .spawn(move || unsafe {
-                let class_name: Vec<u16> = "NGTManager.SessionEnd"
+                let class_name: Vec<u16> = "NGTManager.RuntimeUi"
                     .encode_utf16()
                     .chain(Some(0))
                     .collect();
+                let title = runtime_ui_text(
+                    "NGTManager 正在启动",
+                    "Avvio di NGTManager",
+                    "NGTManager is starting",
+                );
                 let instance =
                     windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
                 let mut class: WNDCLASSW = std::mem::zeroed();
                 class.lpfnWndProc = Some(session_end_window_proc);
                 class.hInstance = instance;
                 class.lpszClassName = class_name.as_ptr();
+                class.hCursor = LoadCursorW(std::ptr::null_mut(), IDC_ARROW);
+                class.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
                 let registered = RegisterClassW(&class);
                 if registered == 0
                     && windows_sys::Win32::Foundation::GetLastError()
@@ -1758,12 +1811,12 @@ impl SessionEndNotifier {
                 let window = CreateWindowExW(
                     0,
                     class_name.as_ptr(),
-                    class_name.as_ptr(),
-                    WS_OVERLAPPED,
-                    0,
-                    0,
-                    0,
-                    0,
+                    title.as_ptr(),
+                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    460,
+                    190,
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
                     instance,
@@ -1775,6 +1828,99 @@ impl SessionEndNotifier {
                     ));
                     return;
                 }
+                RUNTIME_UI_WINDOW.store(window as isize, Ordering::SeqCst);
+                let controls = INITCOMMONCONTROLSEX {
+                    dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+                    dwICC: ICC_PROGRESS_CLASS,
+                };
+                if InitCommonControlsEx(&controls) == 0 {
+                    RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
+                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
+                    let _ = sender.send(Err(
+                        "Unable to initialize the NGTManager startup controls.".to_owned(),
+                    ));
+                    return;
+                }
+                let status_class: Vec<u16> = "STATIC".encode_utf16().chain(Some(0)).collect();
+                let initial = runtime_ui_phase_text(RUNTIME_UI_PHASE_CHECKING);
+                let status = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    initial.as_ptr(),
+                    WS_CHILD | WS_VISIBLE,
+                    28,
+                    30,
+                    390,
+                    40,
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                let progress_class: Vec<u16> =
+                    "msctls_progress32".encode_utf16().chain(Some(0)).collect();
+                let progress = CreateWindowExW(
+                    0,
+                    progress_class.as_ptr(),
+                    std::ptr::null(),
+                    WS_CHILD | WS_VISIBLE | PBS_MARQUEE,
+                    28,
+                    82,
+                    390,
+                    18,
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                if status.is_null() || progress.is_null() {
+                    RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
+                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
+                    let _ = sender.send(Err(
+                        "Unable to create the NGTManager startup window.".to_owned()
+                    ));
+                    return;
+                }
+                RUNTIME_UI_STATUS.store(status as isize, Ordering::SeqCst);
+                SendMessageW(progress, PBM_SETMARQUEE, 1, 35);
+
+                let icon_wide: Vec<u16> = icon_path
+                    .to_string_lossy()
+                    .encode_utf16()
+                    .chain(Some(0))
+                    .collect();
+                let icon = LoadImageW(
+                    std::ptr::null_mut(),
+                    icon_wide.as_ptr(),
+                    IMAGE_ICON,
+                    0,
+                    0,
+                    LR_LOADFROMFILE | LR_DEFAULTSIZE,
+                ) as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
+                if !icon.is_null() {
+                    SendMessageW(window, WM_SETICON, 0, icon as isize);
+                    SendMessageW(window, WM_SETICON, 1, icon as isize);
+                }
+                let mut tray: NOTIFYICONDATAW = std::mem::zeroed();
+                tray.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+                tray.hWnd = window;
+                tray.uID = 1;
+                tray.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+                tray.uCallbackMessage = RUNTIME_UI_TRAY_MESSAGE;
+                tray.hIcon = icon;
+                let tip: Vec<u16> = "NGTManager".encode_utf16().chain(Some(0)).collect();
+                tray.szTip[..tip.len()].copy_from_slice(&tip);
+                if icon.is_null() || Shell_NotifyIconW(NIM_ADD, &tray) == 0 {
+                    RUNTIME_UI_STATUS.store(0, Ordering::SeqCst);
+                    RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
+                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
+                    let _ =
+                        sender.send(Err("Unable to create the NGTManager tray icon.".to_owned()));
+                    return;
+                }
+                if show_startup {
+                    ShowWindow(window, SW_SHOW);
+                }
                 let thread_id = GetCurrentThreadId();
                 if sender.send(Ok(thread_id)).is_err() {
                     return;
@@ -1784,6 +1930,12 @@ impl SessionEndNotifier {
                     TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
+                let _ = Shell_NotifyIconW(windows_sys::Win32::UI::Shell::NIM_DELETE, &tray);
+                if !icon.is_null() {
+                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(icon);
+                }
+                RUNTIME_UI_STATUS.store(0, Ordering::SeqCst);
+                RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::UnregisterClassW(
                     class_name.as_ptr(),
@@ -1832,8 +1984,12 @@ unsafe extern "system" fn session_end_window_proc(
     wparam: windows_sys::Win32::Foundation::WPARAM,
     lparam: windows_sys::Win32::Foundation::LPARAM,
 ) -> windows_sys::Win32::Foundation::LRESULT {
+    use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        DefWindowProcW, WM_ENDSESSION, WM_QUERYENDSESSION,
+        AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, GetCursorPos, PostMessageW,
+        SetForegroundWindow, SetWindowTextW, ShowWindow, TrackPopupMenu, MF_SEPARATOR, MF_STRING,
+        SW_HIDE, SW_RESTORE, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE, WM_ENDSESSION,
+        WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP,
     };
     match message {
         WM_QUERYENDSESSION => 1,
@@ -1846,8 +2002,172 @@ unsafe extern "system" fn session_end_window_proc(
             let _ = request_runtime_stop();
             0
         }
+        WM_CLOSE => {
+            ShowWindow(window, SW_HIDE);
+            0
+        }
+        RUNTIME_UI_PHASE_MESSAGE => {
+            let phase = wparam;
+            let status =
+                RUNTIME_UI_STATUS.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+            if !status.is_null() {
+                let text = runtime_ui_phase_text(phase);
+                SetWindowTextW(status, text.as_ptr());
+            }
+            if phase == RUNTIME_UI_PHASE_READY {
+                RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
+                ShowWindow(window, SW_HIDE);
+            } else {
+                RUNTIME_HEALTHY.store(false, Ordering::SeqCst);
+                if phase == RUNTIME_UI_PHASE_EXITING {
+                    ShowWindow(window, SW_RESTORE);
+                    SetForegroundWindow(window);
+                }
+            }
+            0
+        }
+        RUNTIME_UI_OPEN_MESSAGE => {
+            if RUNTIME_HEALTHY.load(Ordering::SeqCst) {
+                let _ = thread::Builder::new()
+                    .name("ngt-open-browser".to_owned())
+                    .spawn(|| {
+                        let _ = open_browser();
+                    });
+            } else {
+                ShowWindow(window, SW_RESTORE);
+                SetForegroundWindow(window);
+            }
+            0
+        }
+        RUNTIME_UI_SHOW_MESSAGE => {
+            if !RUNTIME_HEALTHY.load(Ordering::SeqCst) {
+                ShowWindow(window, SW_RESTORE);
+                SetForegroundWindow(window);
+            }
+            0
+        }
+        RUNTIME_UI_TRAY_MESSAGE if lparam as u32 == WM_LBUTTONDBLCLK => {
+            PostMessageW(window, RUNTIME_UI_OPEN_MESSAGE, 0, 0);
+            0
+        }
+        RUNTIME_UI_TRAY_MESSAGE if lparam as u32 == WM_RBUTTONUP => {
+            let menu = CreatePopupMenu();
+            if !menu.is_null() {
+                let open = runtime_ui_text("打开 NGTManager", "Apri NGTManager", "Open NGTManager");
+                let exit =
+                    runtime_ui_text("退出 NGTManager", "Esci da NGTManager", "Exit NGTManager");
+                AppendMenuW(menu, MF_STRING, 1, open.as_ptr());
+                AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+                AppendMenuW(menu, MF_STRING, 2, exit.as_ptr());
+                let mut point: POINT = std::mem::zeroed();
+                GetCursorPos(&mut point);
+                SetForegroundWindow(window);
+                match TrackPopupMenu(
+                    menu,
+                    TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                    point.x,
+                    point.y,
+                    0,
+                    window,
+                    std::ptr::null(),
+                ) {
+                    1 => {
+                        PostMessageW(window, RUNTIME_UI_OPEN_MESSAGE, 0, 0);
+                    }
+                    2 => {
+                        TRAY_EXIT_REQUESTED.store(true, Ordering::SeqCst);
+                        update_runtime_ui_phase(RUNTIME_UI_PHASE_EXITING);
+                        let _ = request_runtime_stop();
+                    }
+                    _ => {}
+                }
+                DestroyMenu(menu);
+            }
+            0
+        }
         _ => DefWindowProcW(window, message, wparam, lparam),
     }
+}
+
+#[cfg(windows)]
+fn runtime_ui_text(zh: &str, it: &str, en: &str) -> Vec<u16> {
+    let language =
+        unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() } & 0x03ff;
+    let value = match language {
+        0x04 => zh,
+        0x10 => it,
+        _ => en,
+    };
+    value.encode_utf16().chain(Some(0)).collect()
+}
+
+#[cfg(windows)]
+fn runtime_ui_phase_text(phase: usize) -> Vec<u16> {
+    match phase {
+        RUNTIME_UI_PHASE_DATABASE => runtime_ui_text(
+            "正在启动数据库…",
+            "Avvio del database…",
+            "Starting the database…",
+        ),
+        RUNTIME_UI_PHASE_APPLICATION => runtime_ui_text(
+            "正在启动应用…",
+            "Avvio dell'applicazione…",
+            "Starting the application…",
+        ),
+        RUNTIME_UI_PHASE_HEALTH => runtime_ui_text(
+            "正在检查系统是否可用…",
+            "Verifica della disponibilità…",
+            "Checking system readiness…",
+        ),
+        RUNTIME_UI_PHASE_READY => runtime_ui_text(
+            "NGTManager 已就绪",
+            "NGTManager è pronto",
+            "NGTManager is ready",
+        ),
+        RUNTIME_UI_PHASE_EXITING => runtime_ui_text(
+            "正在安全退出 NGTManager…",
+            "Chiusura sicura di NGTManager…",
+            "Safely exiting NGTManager…",
+        ),
+        _ => runtime_ui_text(
+            "正在检查安装状态…",
+            "Verifica dell'installazione…",
+            "Checking the installation…",
+        ),
+    }
+}
+
+#[cfg(windows)]
+fn update_runtime_ui_phase(phase: usize) {
+    let window = RUNTIME_UI_WINDOW.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+    if !window.is_null() {
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
+                window,
+                RUNTIME_UI_PHASE_MESSAGE,
+                phase,
+                0,
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+fn signal_existing_runtime_ui(message: u32) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW};
+    let class: Vec<u16> = "NGTManager.RuntimeUi"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    for _ in 0..20 {
+        let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+        if !window.is_null() {
+            unsafe { PostMessageW(window, message, 0, 0) };
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
 }
 
 #[cfg(windows)]
@@ -1924,6 +2244,9 @@ fn request_runtime_stop_with_source(root: &Path, source: &str) -> Result<(), Str
 fn runtime_stop_source(root: &Path) -> &'static str {
     if WINDOWS_SESSION_END.load(Ordering::SeqCst) {
         return "windows-session-end";
+    }
+    if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
+        return "tray-exit";
     }
     let run_id = fs::read(root.join("state/runtime/run-state.json"))
         .ok()
@@ -3299,7 +3622,6 @@ fn remove_legacy_autostart(root: &Path) -> Result<(), String> {
     };
     let wide = |value: &str| value.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-    let name = wide("NGTManager");
     let mut key: HKEY = std::ptr::null_mut();
     let status = unsafe {
         RegOpenKeyExW(
@@ -3311,46 +3633,118 @@ fn remove_legacy_autostart(root: &Path) -> Result<(), String> {
         )
     };
     if status == 2 {
-        return Ok(());
+        let legacy_root = root.parent().unwrap_or(root).join("NGT");
+        return remove_legacy_startup_task(&legacy_root);
     }
     if status != 0 {
         return Err(format!(
             "Unable to open startup registration (os error {status})."
         ));
     }
-    let expected = wide(&format!(
-        "\"{}\" run",
-        root.join("tools/NGTManager.exe").display()
-    ));
-    let mut actual = vec![0u16; expected.len()];
-    let mut size = (actual.len() * 2) as u32;
-    let mut kind = 0;
-    let status = unsafe {
-        RegQueryValueExW(
-            key,
-            name.as_ptr(),
-            std::ptr::null(),
-            &mut kind,
-            actual.as_mut_ptr().cast(),
-            &mut size,
-        )
-    };
-    let status = match status {
-        0 if kind == REG_SZ
-            && size as usize == expected.len() * 2
-            && String::from_utf16_lossy(&actual)
-                .eq_ignore_ascii_case(&String::from_utf16_lossy(&expected)) =>
-        unsafe { RegDeleteValueW(key, name.as_ptr()) },
-        0 | 2 | 234 => 0,
-        other => other,
-    };
+    let current = format!("\"{}\" run", root.join("tools/NGTManager.exe").display());
+    let legacy_root = root.parent().unwrap_or(root).join("NGT");
+    let windows = std::env::var_os("WINDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let legacy = format!(
+        "\"{}\" //B //Nologo \"{}\"",
+        windows.join("System32/wscript.exe").display(),
+        legacy_root
+            .join("service/windows-studio-launcher.vbs")
+            .display()
+    );
+    let mut failure = 0;
+    for (name, expected) in [("NGTManager", current), ("NGT Management System", legacy)] {
+        let name = wide(name);
+        let mut actual = vec![0u16; 1024];
+        let mut size = (actual.len() * 2) as u32;
+        let mut kind = 0;
+        let status = unsafe {
+            RegQueryValueExW(
+                key,
+                name.as_ptr(),
+                std::ptr::null(),
+                &mut kind,
+                actual.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        if status == 0 && kind == REG_SZ {
+            actual.truncate((size as usize / 2).min(actual.len()));
+            let actual = String::from_utf16_lossy(&actual)
+                .trim_end_matches('\0')
+                .to_owned();
+            if actual.eq_ignore_ascii_case(&expected) {
+                let deleted = unsafe { RegDeleteValueW(key, name.as_ptr()) };
+                if deleted != 0 && deleted != 2 {
+                    failure = deleted;
+                    break;
+                }
+            }
+        } else if status != 2 && status != 234 {
+            failure = status;
+            break;
+        }
+    }
     unsafe { RegCloseKey(key) };
-    if status != 0 && status != 2 {
+    if failure != 0 {
         return Err(format!(
-            "Unable to remove startup registration (os error {status})."
+            "Unable to remove startup registration (os error {failure})."
         ));
     }
+    remove_legacy_startup_task(&legacy_root)?;
     Ok(())
+}
+
+#[cfg(windows)]
+fn remove_legacy_startup_task(legacy_root: &Path) -> Result<(), String> {
+    let output = Command::new("schtasks.exe")
+        .args(["/Query", "/TN", "NGT Management System", "/XML"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Unable to inspect the legacy startup task: {error}"))?;
+    if !output.status.success() {
+        return Ok(());
+    }
+    let xml = decode_windows_command_output(&output.stdout).to_ascii_lowercase();
+    let launcher = legacy_root
+        .join("service/windows-studio-launcher.vbs")
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    if !xml.contains("wscript.exe") || !xml.contains(&launcher) {
+        return Ok(());
+    }
+    let mut command = Command::new("schtasks.exe");
+    command
+        .args(["/Delete", "/TN", "NGT Management System", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    let status = command
+        .status()
+        .map_err(|error| format!("Unable to remove the legacy startup task: {error}"))?;
+    if !status.success() {
+        return Err("Unable to remove the verified legacy startup task.".to_owned());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn decode_windows_command_output(bytes: &[u8]) -> String {
+    let utf16 =
+        bytes.starts_with(&[0xff, 0xfe]) || (bytes.len() >= 4 && bytes[1] == 0 && bytes[3] == 0);
+    if utf16 {
+        let start = usize::from(bytes.starts_with(&[0xff, 0xfe])) * 2;
+        let (pairs, _) = bytes[start..].as_chunks::<2>();
+        let units = pairs
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .collect::<Vec<_>>();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
 }
 
 #[cfg(not(windows))]
@@ -5560,8 +5954,10 @@ fn start_supervised_runtime(
     ensure_port_available(APPLICATION_PORT)?;
     ensure_port_available(DATABASE_PORT)?;
     let job = RuntimeJob::new()?;
+    update_runtime_ui_phase(RUNTIME_UI_PHASE_DATABASE);
     let mut database = start_database(&job, &config.active_release, root, Some(stop), run_state)?;
     let application_job = RuntimeJob::new()?;
+    update_runtime_ui_phase(RUNTIME_UI_PHASE_APPLICATION);
     let mut application =
         match start_application(&application_job, &config.active_release, root, Some(stop)) {
             Ok(application) => application,
@@ -5599,6 +5995,7 @@ fn start_supervised_runtime(
                 return Err(error);
             }
         };
+    update_runtime_ui_phase(RUNTIME_UI_PHASE_HEALTH);
     if let Err(error) = wait_for_health(&mut application, &config.version, Some(stop)) {
         let mut children = RuntimeChildren {
             database,
@@ -5634,11 +6031,25 @@ fn start_supervised_runtime(
 fn run_supervisor(
     open_browser_after_health: bool,
     mut open_lock: Option<File>,
+    operation_lock: Option<File>,
 ) -> Result<String, String> {
     use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::Threading::WaitForSingleObject;
     let root = stable_root()?;
-    let operation_lock = recover_runtime_before_start(&root)?;
+    let stop = create_stop_event()?;
+    WINDOWS_SESSION_END.store(false, Ordering::SeqCst);
+    WINDOWS_SESSION_END_TICK.store(0, Ordering::SeqCst);
+    RUNTIME_HEALTHY.store(false, Ordering::SeqCst);
+    TRAY_EXIT_REQUESTED.store(false, Ordering::SeqCst);
+    let _session_notifier = SessionEndNotifier::start(&root, open_browser_after_health)?;
+    update_runtime_ui_phase(RUNTIME_UI_PHASE_CHECKING);
+    let operation_lock = match operation_lock {
+        Some(lock) => {
+            recover_transaction(&root)?;
+            lock
+        }
+        None => recover_runtime_before_start(&root)?,
+    };
     let config = read_config(&root)?.ok_or_else(|| "NGTManager is not installed.".to_owned())?;
     if config.maintenance {
         return Err("The system is in maintenance and cannot be started.".to_owned());
@@ -5658,6 +6069,7 @@ fn run_supervisor(
     }
     let Some(_run_lock) = acquire_run_lock(&root)? else {
         drop(open_lock);
+        drop(_session_notifier);
         return if open_browser_after_health {
             wait_for_runtime_and_open(&root)
         } else {
@@ -5665,10 +6077,6 @@ fn run_supervisor(
         };
     };
     drop(operation_lock);
-    let stop = create_stop_event()?;
-    WINDOWS_SESSION_END.store(false, Ordering::SeqCst);
-    WINDOWS_SESSION_END_TICK.store(0, Ordering::SeqCst);
-    let _session_notifier = SessionEndNotifier::start()?;
     report_unconfirmed_previous_run(&root);
     let mut memory_sampler = memory_sample::MemorySamplingSupervisor::new(&root);
     let mut restarts = 0;
@@ -5693,6 +6101,7 @@ fn run_supervisor(
         run_state.phase = "running".to_owned();
         write_runtime_run(&root, &run_state)?;
         log_line(&root, "NGTManager runtime is healthy.");
+        update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
         if should_open_browser {
             if let Err(error) = open_browser() {
                 let code = failure_code(&error);
@@ -5829,6 +6238,7 @@ fn recover_runtime_before_start(root: &Path) -> Result<File, String> {
 fn run_supervisor(
     _open_browser_after_health: bool,
     _open_lock: Option<File>,
+    _operation_lock: Option<File>,
 ) -> Result<String, String> {
     Err("NGTManager runtime is supported only on Windows x64.".to_owned())
 }
@@ -5918,7 +6328,7 @@ fn open_browser() -> Result<(), String> {
 fn wait_for_runtime_and_open(root: &Path) -> Result<String, String> {
     let config = read_config(root)?.ok_or_else(|| "NGTManager is not installed.".to_owned())?;
     let client = health_client()?;
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(180);
     while Instant::now() < deadline {
         if config.maintenance || root.join("state/update-maintenance.json").exists() {
             return Err("NGTManager is in maintenance. Try opening it after the current operation finishes.".to_owned());
@@ -5936,18 +6346,39 @@ fn wait_for_runtime_and_open(root: &Path) -> Result<String, String> {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<RuntimeRunRecord>(&bytes).ok())
         .map_or_else(|| "unknown".to_owned(), |state| state.phase);
-    Err(format!("NGTManager did not become ready within 60 seconds (last phase: {phase}). See the diagnostic logs."))
+    Err(format!("NGTManager did not become ready within 180 seconds (last phase: {phase}). See the diagnostic logs."))
+}
+
+#[cfg(windows)]
+fn wait_for_start_owner(root: &Path, open_lock: File) -> Result<String, String> {
+    let deadline = Instant::now() + Duration::from_secs(180);
+    signal_existing_runtime_ui(RUNTIME_UI_SHOW_MESSAGE);
+    while Instant::now() < deadline {
+        if runtime_is_active(root)? {
+            return wait_for_runtime_and_open(root);
+        }
+        if let Some(operation_lock) = try_lock_state(root)? {
+            return run_supervisor(true, Some(open_lock), Some(operation_lock));
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    Err("NGTManager could not start because another operation did not finish within 180 seconds. See the diagnostic logs.".to_owned())
 }
 
 #[cfg(windows)]
 fn open_system(root: &Path) -> Result<String, String> {
     let Some(open_lock) = acquire_runtime_file_lock(root, "open.lock")? else {
+        signal_existing_runtime_ui(RUNTIME_UI_SHOW_MESSAGE);
         return Ok("NGTManager is already being opened.".to_owned());
     };
     if runtime_is_active(root)? {
+        signal_existing_runtime_ui(RUNTIME_UI_SHOW_MESSAGE);
         wait_for_runtime_and_open(root)
     } else {
-        run_supervisor(true, Some(open_lock))
+        match try_lock_state(root)? {
+            Some(operation_lock) => run_supervisor(true, Some(open_lock), Some(operation_lock)),
+            None => wait_for_start_owner(root, open_lock),
+        }
     }
 }
 
@@ -6119,7 +6550,7 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             install_package(Path::new(source), command, Some(operation_id))
         }
-        [command] if command == "run" => run_supervisor(false, None),
+        [command] if command == "run" => run_supervisor(false, None, None),
         [command] if command == "open" => open_system(&stable_root()?),
         [command] if command == "stop" => stop_supervisor(&stable_root()?),
         [command] if command == "recover" => {
@@ -6573,6 +7004,34 @@ pub fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn scheduled_task_output_decodes_utf8_and_utf16() {
+        let xml = "<Command>wscript.exe</Command>";
+        assert_eq!(decode_windows_command_output(xml.as_bytes()), xml);
+        let mut utf16 = vec![0xff, 0xfe];
+        for unit in xml.encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        assert_eq!(decode_windows_command_output(&utf16), xml);
+    }
+
+    #[test]
+    fn startup_coordination_failures_keep_specific_codes() {
+        assert_eq!(
+            failure_code("Another NGTManager operation is already running."),
+            "OPERATION_IN_PROGRESS"
+        );
+        assert_eq!(
+            failure_code("NGTManager did not become ready within 180 seconds."),
+            "RUNTIME_START_TIMEOUT"
+        );
+        assert_eq!(
+            failure_code("another operation did not finish within 180 seconds"),
+            "OPERATION_WAIT_TIMEOUT"
+        );
+    }
 
     #[cfg(windows)]
     #[test]
