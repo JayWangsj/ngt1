@@ -2465,7 +2465,7 @@ mod tests {
     fn installer_progress_is_scoped_to_the_active_task() {
         assert_eq!(
             installer_progress(
-                "18:41 NGT_PROGRESS|task|candidate_verification|44|434|0|212|1200",
+                "18:41 NGT_PROGRESS|task|candidate_verification|44|434|0|212|1200|13300|230000000",
                 "task"
             ),
             Some(("candidate_verification".into(), Some(212), Some(1200)))

@@ -57,7 +57,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGT
 Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 
 [Run]
-Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "Open {#AppName}"; Flags: runhidden postinstall nowait skipifsilent
+Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "Open {#AppName}"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\NGTManager\releases"
@@ -163,7 +163,7 @@ begin
   else if Phase = 'deploy_candidate' then Result := 'Verifying and copying program files'
   else if Phase = 'source_copy_verification' then Result := 'Rechecking package files before copying'
   else if Phase = 'candidate_file_copy' then Result := 'Copying program files'
-  else if Phase = 'candidate_verification' then Result := 'Verifying copied program files'
+  else if Phase = 'candidate_verification' then Result := 'Finishing program file deployment'
   else if Phase = 'stop_runtime' then Result := 'Waiting for NGTManager to stop safely'
   else if Phase = 'backup_database' then Result := 'Backing up and verifying business data'
   else if Phase = 'recover_legacy_database' then Result := 'Recovering the previous database safely'
@@ -205,8 +205,13 @@ var
   TotalElapsed: String;
   CancelPending: String;
   ProcessedFiles: String;
+  ProcessedBytes: String;
+  TotalFiles: String;
+  TotalBytes: String;
   PhaseElapsedSeconds: Integer;
   TotalElapsedSeconds: Integer;
+  ProgressValue: Int64;
+  ProgressTotal: Int64;
   StatusText: String;
 begin
   Log(S);
@@ -219,6 +224,9 @@ begin
   TotalElapsed := TakeField(Fields);
   CancelPending := TakeField(Fields);
   ProcessedFiles := TakeField(Fields);
+  ProcessedBytes := TakeField(Fields);
+  TotalFiles := TakeField(Fields);
+  TotalBytes := TakeField(Fields);
   if MessageOperationId <> AttemptId then
     exit;
   CurrentPhase := Phase;
@@ -238,6 +246,23 @@ begin
     'Total elapsed: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
     IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Current step: ' +
     IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId;
+  ProgressValue := StrToInt64Def(ProcessedBytes, -1);
+  ProgressTotal := StrToInt64Def(TotalBytes, -1);
+  if (ProgressValue < 0) or (ProgressTotal <= 0) then
+  begin
+    ProgressValue := StrToInt64Def(ProcessedFiles, -1);
+    ProgressTotal := StrToInt64Def(TotalFiles, -1);
+  end;
+  if (ProgressValue >= 0) and (ProgressTotal > 0) then
+  begin
+    if ProgressValue > ProgressTotal then ProgressValue := ProgressTotal;
+    WizardForm.ProgressGauge.Style := npbstNormal;
+    WizardForm.ProgressGauge.Min := 0;
+    WizardForm.ProgressGauge.Max := 1000;
+    WizardForm.ProgressGauge.Position := (ProgressValue * 1000) div ProgressTotal;
+  end
+  else
+    WizardForm.ProgressGauge.Style := npbstMarquee;
 end;
 
 procedure PollManagerProgress;

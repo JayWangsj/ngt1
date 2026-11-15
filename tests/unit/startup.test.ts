@@ -550,6 +550,12 @@ describe("Windows persistent startup", () => {
       "fn cleanup_initial_database(root: &Path, transaction: &Transaction)",
     );
     expect(manager).toContain("NGT_PROGRESS|");
+    expect(manager).toContain("total_item_count");
+    expect(manager).toContain("total_bytes");
+    expect(manager).toContain("verify_release_for_startup");
+    expect(manager).toContain('"--app=http://127.0.0.1:3000"');
+    expect(manager).toContain("manager.browser.window.close_unconfirmed");
+    expect(manager).toContain("runtime_ui_phase_progress");
     expect(manager).toContain("installer.phase.completed");
     expect(manager).toContain("installer.phase.failed");
     expect(manager).toContain("installer.install.failed");
@@ -599,6 +605,8 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("WaitForSingleObject(");
     expect(installer).toContain("PeekMessage(");
     expect(installer).toContain("procedure PollManagerProgress");
+    expect(installer).toContain("ProgressTotal := StrToInt64Def(TotalBytes, -1)");
+    expect(installer).toContain("WizardForm.ProgressGauge.Position :=");
     expect(installer).not.toContain("SetTimer(0, 0, 250");
     expect(installer).toContain("GetSpaceOnDisk64");
     expect(installer).not.toContain("ExtractTemporaryFiles(");

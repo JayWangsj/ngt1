@@ -19,6 +19,23 @@ const TRANSACTION_VERSION: u32 = 3;
 const CONFIG_VERSION: u32 = 1;
 const DATABASE_PORT: u16 = 55432;
 const APPLICATION_PORT: u16 = 3000;
+const REQUIRED_RUNTIME_FILES: [&str; 15] = [
+    "runtime/node.exe",
+    "runtime/gh.exe",
+    "runtime/postgres/bin/postgres.exe",
+    "runtime/postgres/bin/initdb.exe",
+    "runtime/postgres/bin/pg_ctl.exe",
+    "runtime/postgres/bin/pg_controldata.exe",
+    "tools/NGTManager.exe",
+    "tools/NGTUpdater.exe",
+    "assets/ngt-studio.ico",
+    "scripts/windows-db.mjs",
+    "scripts/start.mjs",
+    "scripts/runtime-start-gate.cjs",
+    "scripts/postgres-runtime.mjs",
+    "scripts/run-pg-ctl.mjs",
+    "node_modules/prisma/build/index.js",
+];
 
 #[cfg(windows)]
 static WINDOWS_SESSION_END: AtomicBool = AtomicBool::new(false);
@@ -29,9 +46,19 @@ static RUNTIME_UI_WINDOW: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static RUNTIME_UI_STATUS: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
+static RUNTIME_UI_DETAIL: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_PROGRESS: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_PHASE_STARTED_TICK: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
 static RUNTIME_HEALTHY: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static TRAY_EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static MANAGED_BROWSER_WINDOW: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static BROWSER_OPENING: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 const RUNTIME_UI_TRAY_MESSAGE: u32 = 0x8001;
@@ -156,7 +183,7 @@ fn inspect_postgres_directory(database: &Path) -> Result<PostgresDirectoryState,
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ReleaseManifest {
     version: String,
@@ -199,37 +226,7 @@ fn verify_release_until(
     progress: Option<&InstallProgress>,
     deadline: Option<Instant>,
 ) -> Result<ReleaseManifest, String> {
-    let root_metadata = fs::symlink_metadata(root)
-        .map_err(|error| format!("Release directory is unavailable: {error}"))?;
-    if !root_metadata.is_dir() || is_reparse(&root_metadata) {
-        return Err("Release root must be a regular directory.".to_owned());
-    }
-    let manifest_path = root.join("studio-release.json");
-    let manifest_metadata = fs::symlink_metadata(&manifest_path)
-        .map_err(|error| format!("Release manifest is unavailable: {error}"))?;
-    if !manifest_metadata.is_file() || is_reparse(&manifest_metadata) {
-        return Err("Release manifest must be a regular file.".to_owned());
-    }
-    let manifest_bytes = fs::read(&manifest_path).map_err(|error| {
-        format!(
-            "Unable to read release manifest {}: {error}",
-            manifest_path.display()
-        )
-    })?;
-    let manifest_bytes = manifest_bytes
-        .strip_prefix(&[0xEF, 0xBB, 0xBF])
-        .unwrap_or(&manifest_bytes);
-    let manifest: ReleaseManifest = serde_json::from_slice(manifest_bytes)
-        .map_err(|error| format!("Release manifest is invalid: {error}"))?;
-    if semver::Version::parse(&manifest.version).is_err()
-        || manifest.commit.len() != 40
-        || !manifest.commit.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
-        return Err("Release manifest has an invalid version or commit.".to_owned());
-    }
-    if manifest.files.is_empty() {
-        return Err("Release manifest does not contain a file inventory.".to_owned());
-    }
+    let manifest = load_release_manifest(root)?;
     let mut expected_paths = BTreeSet::new();
     let mut processed_bytes = 0u64;
     for (index, (relative, expected_hash)) in manifest.files.iter().enumerate() {
@@ -292,6 +289,53 @@ fn verify_release_until(
             missing.map_or("none", String::as_str),
             unexpected.map_or("none", String::as_str)
         ));
+    }
+    Ok(manifest)
+}
+
+fn load_release_manifest(root: &Path) -> Result<ReleaseManifest, String> {
+    let root_metadata = fs::symlink_metadata(root)
+        .map_err(|error| format!("Release directory is unavailable: {error}"))?;
+    if !root_metadata.is_dir() || is_reparse(&root_metadata) {
+        return Err("Release root must be a regular directory.".to_owned());
+    }
+    let manifest_path = root.join("studio-release.json");
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|error| format!("Release manifest is unavailable: {error}"))?;
+    if !manifest_metadata.is_file() || is_reparse(&manifest_metadata) {
+        return Err("Release manifest must be a regular file.".to_owned());
+    }
+    let manifest_bytes = fs::read(&manifest_path).map_err(|error| {
+        format!(
+            "Unable to read release manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let manifest_bytes = manifest_bytes
+        .strip_prefix(&[0xEF, 0xBB, 0xBF])
+        .unwrap_or(&manifest_bytes);
+    let manifest: ReleaseManifest = serde_json::from_slice(manifest_bytes)
+        .map_err(|error| format!("Release manifest is invalid: {error}"))?;
+    if semver::Version::parse(&manifest.version).is_err()
+        || manifest.commit.len() != 40
+        || !manifest.commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("Release manifest has an invalid version or commit.".to_owned());
+    }
+    if manifest.files.is_empty() {
+        return Err("Release manifest does not contain a file inventory.".to_owned());
+    }
+    let mut normalized_paths = BTreeSet::new();
+    for relative in manifest.files.keys() {
+        let path = Path::new(relative);
+        if relative.is_empty()
+            || !path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+            || !normalized_paths.insert(relative.to_ascii_lowercase())
+        {
+            return Err(format!("Release contains an unsafe or duplicate path: {relative}"));
+        }
     }
     Ok(manifest)
 }
@@ -810,24 +854,55 @@ fn copy_release(
     destination: &Path,
     progress: &InstallProgress,
     manifest: &ReleaseManifest,
+    total_bytes: u64,
 ) -> Result<ReleaseManifest, String> {
+    let copy_started = Instant::now();
+    let copied_file_total = total_bytes.saturating_sub(
+        fs::metadata(source.join("studio-release.json"))
+            .map(|metadata| metadata.len())
+            .unwrap_or(0),
+    );
+    if let Some(logger) = stable_root()
+        .ok()
+        .and_then(|root| manager_diagnostics(&root))
+    {
+        logger.record(
+            DiagnosticComponent::Installer,
+            "info",
+            "installer.copy.started",
+            "candidate_file_copy",
+            "none",
+        );
+    }
     progress.set_phase_with_metrics("candidate_file_copy", None, None);
+    progress.set_progress_totals(
+        Some(manifest.files.len().min(u32::MAX as usize) as u32),
+        Some(copied_file_total),
+    );
     fs::create_dir_all(destination)
         .map_err(|error| format!("Unable to create candidate release: {error}"))?;
     let mut copied_bytes = 0u64;
-    for (index, relative) in manifest.files.keys().enumerate() {
+    for (index, (relative, expected_hash)) in manifest.files.iter().enumerate() {
         if index % 32 == 0 {
             progress.check_cancel()?;
         }
         let relative_path = Path::new(relative);
+        verify_path_components(source, relative_path, relative)?;
         let source_file = source.join(relative_path);
         let destination_file = destination.join(relative_path);
         if let Some(parent) = destination_file.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("Unable to create candidate path: {error}"))?;
         }
-        let copied = fs::copy(&source_file, &destination_file)
-            .map_err(|error| format!("Unable to deploy {relative}: {error}"))?;
+        let copied = copy_release_file(
+            &source_file,
+            &destination_file,
+            relative,
+            expected_hash,
+            progress,
+            index,
+            copied_bytes,
+        )?;
         copied_bytes = copied_bytes.saturating_add(copied);
         progress.set_current_metrics(Some((index + 1) as u32), Some(copied_bytes));
     }
@@ -840,12 +915,145 @@ fn copy_release(
         Some(manifest.files.len().min(u32::MAX as usize) as u32),
         Some(copied_bytes),
     );
-    progress.set_phase("candidate_verification");
-    let verified = verify_release_with_progress(destination, Some(progress))?;
-    if &verified != manifest {
-        return Err("The deployed release manifest changed during installation.".to_owned());
+    if let Some(logger) = stable_root()
+        .ok()
+        .and_then(|root| manager_diagnostics(&root))
+    {
+        logger.record_with_metrics(
+            DiagnosticComponent::Installer,
+            "info",
+            "installer.copy.completed",
+            "candidate_file_copy",
+            "none",
+            diagnostics::EventMetrics {
+                elapsed_ms: Some(copy_started.elapsed().as_millis().min(u64::MAX as u128) as u64),
+                phase_item_count: Some(manifest.files.len().min(u32::MAX as usize) as u32),
+                phase_bytes: Some(copied_bytes),
+            },
+        );
     }
-    Ok(verified)
+    progress.set_phase("candidate_verification");
+    let inventory_started = Instant::now();
+    let actual_paths = release_files(destination)?;
+    let expected_paths = manifest
+        .files
+        .keys()
+        .map(|path| path.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    if actual_paths != expected_paths {
+        return Err("The deployed release inventory differs from its manifest.".to_owned());
+    }
+    verify_required_runtime_files(destination, manifest)?;
+    if let Some(logger) = stable_root()
+        .ok()
+        .and_then(|root| manager_diagnostics(&root))
+    {
+        logger.record_with_metrics(
+            DiagnosticComponent::Installer,
+            "info",
+            "installer.candidate_inventory.completed",
+            "candidate_verification",
+            "none",
+            diagnostics::EventMetrics {
+                elapsed_ms: Some(
+                    inventory_started
+                        .elapsed()
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64,
+                ),
+                phase_item_count: Some(actual_paths.len().min(u32::MAX as usize) as u32),
+                ..Default::default()
+            },
+        );
+    }
+    Ok(manifest.clone())
+}
+
+fn copy_release_file(
+    source: &Path,
+    destination: &Path,
+    relative: &str,
+    expected_hash: &str,
+    progress: &InstallProgress,
+    index: usize,
+    previously_copied: u64,
+) -> Result<u64, String> {
+    let mut input = File::open(source)
+        .map_err(|error| format!("Unable to open release file {relative}: {error}"))?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|error| format!("Unable to deploy {relative}: {error}"))?;
+    let mut hash = Sha256::new();
+    let mut copied = 0u64;
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        progress.check_cancel()?;
+        let count = input
+            .read(&mut buffer)
+            .map_err(|error| format!("Unable to read release file {relative}: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+        output
+            .write_all(&buffer[..count])
+            .map_err(|error| format!("Unable to deploy {relative}: {error}"))?;
+        copied = copied.saturating_add(count as u64);
+        progress.set_current_metrics(
+            Some(index.min(u32::MAX as usize) as u32),
+            Some(previously_copied.saturating_add(copied)),
+        );
+    }
+    output
+        .flush()
+        .map_err(|error| format!("Unable to finish deploying {relative}: {error}"))?;
+    if !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(expected_hash) {
+        return Err(format!(
+            "Release file changed while it was being deployed: {relative}"
+        ));
+    }
+    Ok(copied)
+}
+
+fn verify_required_runtime_files(root: &Path, manifest: &ReleaseManifest) -> Result<(), String> {
+    for relative in REQUIRED_RUNTIME_FILES {
+        let expected_hash = manifest
+            .files
+            .get(relative)
+            .ok_or_else(|| format!("Release is missing required runtime file: {relative}"))?;
+        let relative_path = Path::new(relative);
+        verify_path_components(root, relative_path, relative)?;
+        let mut file = File::open(root.join(relative_path))
+            .map_err(|error| format!("Unable to open required runtime file {relative}: {error}"))?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = file.read(&mut buffer).map_err(|error| {
+                format!("Unable to read required runtime file {relative}: {error}")
+            })?;
+            if count == 0 {
+                break;
+            }
+            hash.update(&buffer[..count]);
+        }
+        if !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(expected_hash) {
+            return Err(format!(
+                "Required runtime file failed integrity verification: {relative}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_release_for_startup(root: &Path, version: &str) -> Result<ReleaseManifest, String> {
+    let manifest = load_release_manifest(root)?;
+    if manifest.version != version {
+        return Err("The active release version does not match the installation state.".to_owned());
+    }
+    verify_required_runtime_files(root, &manifest)?;
+    Ok(manifest)
 }
 
 fn verify_pe_x64(path: &Path) -> Result<(), String> {
@@ -888,23 +1096,6 @@ fn validate_runtime(
         progress.set_phase("package_source_verification");
     }
     let manifest = verify_release_with_progress(source, progress)?;
-    let required = [
-        "runtime/node.exe",
-        "runtime/gh.exe",
-        "runtime/postgres/bin/postgres.exe",
-        "runtime/postgres/bin/initdb.exe",
-        "runtime/postgres/bin/pg_ctl.exe",
-        "runtime/postgres/bin/pg_controldata.exe",
-        "tools/NGTManager.exe",
-        "tools/NGTUpdater.exe",
-        "assets/ngt-studio.ico",
-        "scripts/windows-db.mjs",
-        "scripts/start.mjs",
-        "scripts/runtime-start-gate.cjs",
-        "scripts/postgres-runtime.mjs",
-        "scripts/run-pg-ctl.mjs",
-        "node_modules/prisma/build/index.js",
-    ];
     if let Some(progress) = progress {
         progress.set_current_metrics(
             Some(manifest.files.len().min(u32::MAX as usize) as u32),
@@ -912,11 +1103,11 @@ fn validate_runtime(
         );
         progress.set_phase_with_metrics(
             "runtime_dependency_check",
-            Some(required.len() as u32),
+            Some(REQUIRED_RUNTIME_FILES.len() as u32),
             None,
         );
     }
-    for relative in required {
+    for relative in REQUIRED_RUNTIME_FILES {
         if !manifest.files.contains_key(relative) {
             return Err(format!(
                 "Release is missing required runtime file: {relative}"
@@ -1792,19 +1983,28 @@ struct SessionEndNotifier {
 #[cfg(windows)]
 impl SessionEndNotifier {
     fn start(root: &Path, show_startup: bool) -> Result<Self, String> {
-        use windows_sys::Win32::Graphics::Gdi::{GetSysColorBrush, COLOR_WINDOW};
-        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
-        use windows_sys::Win32::UI::Controls::{
-            InitCommonControlsEx, ICC_PROGRESS_CLASS, INITCOMMONCONTROLSEX, PBM_SETMARQUEE,
-            PBS_MARQUEE,
+        use windows_sys::Win32::Graphics::Gdi::{
+            CreateFontW, DeleteObject, GetMonitorInfoW, GetStockObject, GetSysColorBrush,
+            MonitorFromPoint, COLOR_WINDOW, DEFAULT_GUI_FONT, FW_NORMAL, FW_SEMIBOLD, MONITORINFO,
+            MONITOR_DEFAULTTONEAREST,
         };
+        use windows_sys::Win32::System::SystemServices::SS_ICON;
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+        use windows_sys::Win32::UI::Controls::{
+            InitCommonControlsEx, ICC_PROGRESS_CLASS, INITCOMMONCONTROLSEX, PBM_SETBARCOLOR,
+            PBM_SETPOS, PBM_SETRANGE32,
+        };
+        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
         use windows_sys::Win32::UI::Shell::{
             Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW,
         };
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DispatchMessageW, GetMessageW, LoadCursorW, LoadImageW,
-            RegisterClassW, SendMessageW, ShowWindow, TranslateMessage, CW_USEDEFAULT, IDC_ARROW,
-            IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SW_SHOW, WM_SETICON, WNDCLASSW,
+            CreateWindowExW, DispatchMessageW, GetCursorPos, GetMessageW, LoadCursorW, LoadImageW,
+            RegisterClassW, SendMessageW, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow,
+            SystemParametersInfoW, TranslateMessage, CW_USEDEFAULT, HWND_NOTOPMOST, HWND_TOPMOST,
+            IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SPI_GETHIGHCONTRAST,
+            STM_SETIMAGE, SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE, WM_SETFONT, WM_SETICON, WNDCLASSW,
             WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
         };
         let (sender, receiver) = mpsc::sync_channel::<Result<u32, String>>(1);
@@ -1860,6 +2060,31 @@ impl SessionEndNotifier {
                     return;
                 }
                 RUNTIME_UI_WINDOW.store(window as isize, Ordering::SeqCst);
+                let dpi = GetDpiForWindow(window).max(96);
+                let scale = |value: i32| value * dpi as i32 / 96;
+                let window_width = scale(480);
+                let window_height = scale(200);
+                let mut cursor = std::mem::zeroed();
+                GetCursorPos(&mut cursor);
+                let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+                let mut monitor_info: MONITORINFO = std::mem::zeroed();
+                monitor_info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+                if GetMonitorInfoW(monitor, &mut monitor_info) != 0 {
+                    let x = monitor_info.rcWork.left
+                        + (monitor_info.rcWork.right - monitor_info.rcWork.left - window_width) / 2;
+                    let y = monitor_info.rcWork.top
+                        + (monitor_info.rcWork.bottom - monitor_info.rcWork.top - window_height)
+                            / 2;
+                    SetWindowPos(
+                        window,
+                        std::ptr::null_mut(),
+                        x,
+                        y,
+                        window_width,
+                        window_height,
+                        0,
+                    );
+                }
                 let controls = INITCOMMONCONTROLSEX {
                     dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
                     dwICC: ICC_PROGRESS_CLASS,
@@ -1873,16 +2098,46 @@ impl SessionEndNotifier {
                     return;
                 }
                 let status_class: Vec<u16> = "STATIC".encode_utf16().chain(Some(0)).collect();
+                let title_text: Vec<u16> = "NGTManager".encode_utf16().chain(Some(0)).collect();
+                let title = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    title_text.as_ptr(),
+                    WS_CHILD | WS_VISIBLE,
+                    scale(88),
+                    scale(24),
+                    scale(340),
+                    scale(32),
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
                 let initial = runtime_ui_phase_text(RUNTIME_UI_PHASE_CHECKING);
                 let status = CreateWindowExW(
                     0,
                     status_class.as_ptr(),
                     initial.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    28,
-                    30,
-                    390,
-                    40,
+                    scale(88),
+                    scale(58),
+                    scale(340),
+                    scale(24),
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                let detail_text = runtime_ui_elapsed_text(0);
+                let detail = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    detail_text.as_ptr(),
+                    WS_CHILD | WS_VISIBLE,
+                    scale(88),
+                    scale(84),
+                    scale(340),
+                    scale(20),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -1894,17 +2149,17 @@ impl SessionEndNotifier {
                     0,
                     progress_class.as_ptr(),
                     std::ptr::null(),
-                    WS_CHILD | WS_VISIBLE | PBS_MARQUEE,
-                    28,
-                    82,
-                    390,
-                    18,
+                    WS_CHILD | WS_VISIBLE,
+                    scale(24),
+                    scale(122),
+                    scale(420),
+                    scale(12),
                     window,
                     std::ptr::null_mut(),
                     instance,
                     std::ptr::null(),
                 );
-                if status.is_null() || progress.is_null() {
+                if title.is_null() || status.is_null() || detail.is_null() || progress.is_null() {
                     RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                     let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
                     let _ = sender.send(Err(
@@ -1913,7 +2168,100 @@ impl SessionEndNotifier {
                     return;
                 }
                 RUNTIME_UI_STATUS.store(status as isize, Ordering::SeqCst);
-                SendMessageW(progress, PBM_SETMARQUEE, 1, 35);
+                RUNTIME_UI_DETAIL.store(detail as isize, Ordering::SeqCst);
+                RUNTIME_UI_PROGRESS.store(progress as isize, Ordering::SeqCst);
+                RUNTIME_UI_PHASE_STARTED_TICK.store(
+                    windows_sys::Win32::System::SystemInformation::GetTickCount64(),
+                    Ordering::SeqCst,
+                );
+                let face: Vec<u16> = "Segoe UI".encode_utf16().chain(Some(0)).collect();
+                let title_font = CreateFontW(
+                    -scale(20),
+                    0,
+                    0,
+                    0,
+                    FW_SEMIBOLD as i32,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    5,
+                    0,
+                    face.as_ptr(),
+                );
+                let status_font = CreateFontW(
+                    -scale(14),
+                    0,
+                    0,
+                    0,
+                    FW_NORMAL as i32,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    5,
+                    0,
+                    face.as_ptr(),
+                );
+                let detail_font = CreateFontW(
+                    -scale(12),
+                    0,
+                    0,
+                    0,
+                    FW_NORMAL as i32,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    5,
+                    0,
+                    face.as_ptr(),
+                );
+                let fallback_font = GetStockObject(DEFAULT_GUI_FONT);
+                let title_font_handle = if title_font.is_null() {
+                    fallback_font
+                } else {
+                    title_font
+                };
+                let status_font_handle = if status_font.is_null() {
+                    fallback_font
+                } else {
+                    status_font
+                };
+                let detail_font_handle = if detail_font.is_null() {
+                    fallback_font
+                } else {
+                    detail_font
+                };
+                SendMessageW(title, WM_SETFONT, title_font_handle as usize, 1);
+                SendMessageW(status, WM_SETFONT, status_font_handle as usize, 1);
+                SendMessageW(detail, WM_SETFONT, detail_font_handle as usize, 1);
+                SendMessageW(progress, PBM_SETRANGE32, 0, 100);
+                SendMessageW(
+                    progress,
+                    PBM_SETPOS,
+                    runtime_ui_phase_progress(RUNTIME_UI_PHASE_CHECKING),
+                    0,
+                );
+                let mut contrast: HIGHCONTRASTW = std::mem::zeroed();
+                contrast.cbSize = std::mem::size_of::<HIGHCONTRASTW>() as u32;
+                if SystemParametersInfoW(
+                    SPI_GETHIGHCONTRAST,
+                    contrast.cbSize,
+                    &mut contrast as *mut HIGHCONTRASTW as *mut _,
+                    0,
+                ) == 0
+                    || contrast.dwFlags & HCF_HIGHCONTRASTON == 0
+                {
+                    SendMessageW(progress, PBM_SETBARCOLOR, 0, 0x0030C4F4);
+                }
+                SetTimer(window, 1, 1000, None);
 
                 let icon_wide: Vec<u16> = icon_path
                     .to_string_lossy()
@@ -1931,6 +2279,28 @@ impl SessionEndNotifier {
                 if !icon.is_null() {
                     SendMessageW(window, WM_SETICON, 0, icon as isize);
                     SendMessageW(window, WM_SETICON, 1, icon as isize);
+                    let icon_control = CreateWindowExW(
+                        0,
+                        status_class.as_ptr(),
+                        std::ptr::null(),
+                        WS_CHILD | WS_VISIBLE | SS_ICON,
+                        scale(24),
+                        scale(28),
+                        scale(48),
+                        scale(48),
+                        window,
+                        std::ptr::null_mut(),
+                        instance,
+                        std::ptr::null(),
+                    );
+                    if !icon_control.is_null() {
+                        SendMessageW(
+                            icon_control,
+                            STM_SETIMAGE,
+                            IMAGE_ICON as usize,
+                            icon as isize,
+                        );
+                    }
                 }
                 let mut tray: NOTIFYICONDATAW = std::mem::zeroed();
                 tray.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
@@ -1950,7 +2320,10 @@ impl SessionEndNotifier {
                     return;
                 }
                 if show_startup {
-                    ShowWindow(window, SW_SHOW);
+                    ShowWindow(window, SW_RESTORE);
+                    SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    SetForegroundWindow(window);
                 }
                 let thread_id = GetCurrentThreadId();
                 if sender.send(Ok(thread_id)).is_err() {
@@ -1962,12 +2335,19 @@ impl SessionEndNotifier {
                     DispatchMessageW(&message);
                 }
                 let _ = Shell_NotifyIconW(windows_sys::Win32::UI::Shell::NIM_DELETE, &tray);
+                RUNTIME_UI_STATUS.store(0, Ordering::SeqCst);
+                RUNTIME_UI_DETAIL.store(0, Ordering::SeqCst);
+                RUNTIME_UI_PROGRESS.store(0, Ordering::SeqCst);
+                RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
+                let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
                 if !icon.is_null() {
                     let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(icon);
                 }
-                RUNTIME_UI_STATUS.store(0, Ordering::SeqCst);
-                RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
-                let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
+                for font in [title_font, status_font, detail_font] {
+                    if !font.is_null() {
+                        DeleteObject(font as _);
+                    }
+                }
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::UnregisterClassW(
                     class_name.as_ptr(),
                     instance,
@@ -2009,6 +2389,22 @@ impl Drop for SessionEndNotifier {
 }
 
 #[cfg(windows)]
+fn show_runtime_ui_window(window: windows_sys::Win32::Foundation::HWND, foreground: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE,
+        SWP_NOSIZE, SW_RESTORE,
+    };
+    unsafe {
+        ShowWindow(window, SW_RESTORE);
+        if foreground {
+            SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetForegroundWindow(window);
+        }
+    }
+}
+
+#[cfg(windows)]
 unsafe extern "system" fn session_end_window_proc(
     window: windows_sys::Win32::Foundation::HWND,
     message: u32,
@@ -2016,11 +2412,12 @@ unsafe extern "system" fn session_end_window_proc(
     lparam: windows_sys::Win32::Foundation::LPARAM,
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::Controls::PBM_SETPOS;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, GetCursorPos, PostMessageW,
-        SetForegroundWindow, SetWindowTextW, ShowWindow, TrackPopupMenu, MF_SEPARATOR, MF_STRING,
-        SW_HIDE, SW_RESTORE, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE, WM_ENDSESSION,
-        WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP,
+        SendMessageW, SetForegroundWindow, SetWindowTextW, ShowWindow, TrackPopupMenu,
+        MF_SEPARATOR, MF_STRING, SW_HIDE, SW_SHOW, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE,
+        WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER,
     };
     match message {
         WM_QUERYENDSESSION => 1,
@@ -2039,11 +2436,30 @@ unsafe extern "system" fn session_end_window_proc(
         }
         RUNTIME_UI_PHASE_MESSAGE => {
             let phase = wparam;
+            RUNTIME_UI_PHASE_STARTED_TICK.store(
+                windows_sys::Win32::System::SystemInformation::GetTickCount64(),
+                Ordering::SeqCst,
+            );
             let status =
                 RUNTIME_UI_STATUS.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
             if !status.is_null() {
                 let text = runtime_ui_phase_text(phase);
                 SetWindowTextW(status, text.as_ptr());
+            }
+            let detail =
+                RUNTIME_UI_DETAIL.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+            if !detail.is_null() {
+                SetWindowTextW(detail, runtime_ui_elapsed_text(0).as_ptr());
+            }
+            let progress =
+                RUNTIME_UI_PROGRESS.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+            if !progress.is_null() {
+                if phase == RUNTIME_UI_PHASE_EXITING {
+                    ShowWindow(progress, SW_HIDE);
+                } else {
+                    ShowWindow(progress, SW_SHOW);
+                    SendMessageW(progress, PBM_SETPOS, runtime_ui_phase_progress(phase), 0);
+                }
             }
             if phase == RUNTIME_UI_PHASE_READY {
                 RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
@@ -2051,8 +2467,21 @@ unsafe extern "system" fn session_end_window_proc(
             } else {
                 RUNTIME_HEALTHY.store(false, Ordering::SeqCst);
                 if phase == RUNTIME_UI_PHASE_EXITING {
-                    ShowWindow(window, SW_RESTORE);
-                    SetForegroundWindow(window);
+                    show_runtime_ui_window(window, true);
+                }
+            }
+            0
+        }
+        WM_TIMER if wparam == 1 => {
+            let started = RUNTIME_UI_PHASE_STARTED_TICK.load(Ordering::SeqCst);
+            let elapsed = windows_sys::Win32::System::SystemInformation::GetTickCount64()
+                .saturating_sub(started)
+                / 1000;
+            if elapsed >= 3 {
+                let detail = RUNTIME_UI_DETAIL.load(Ordering::SeqCst)
+                    as windows_sys::Win32::Foundation::HWND;
+                if !detail.is_null() {
+                    SetWindowTextW(detail, runtime_ui_elapsed_text(elapsed).as_ptr());
                 }
             }
             0
@@ -2065,15 +2494,13 @@ unsafe extern "system" fn session_end_window_proc(
                         let _ = open_browser();
                     });
             } else {
-                ShowWindow(window, SW_RESTORE);
-                SetForegroundWindow(window);
+                show_runtime_ui_window(window, true);
             }
             0
         }
         RUNTIME_UI_SHOW_MESSAGE => {
             if !RUNTIME_HEALTHY.load(Ordering::SeqCst) {
-                ShowWindow(window, SW_RESTORE);
-                SetForegroundWindow(window);
+                show_runtime_ui_window(window, true);
             }
             0
         }
@@ -2108,7 +2535,14 @@ unsafe extern "system" fn session_end_window_proc(
                     2 => {
                         TRAY_EXIT_REQUESTED.store(true, Ordering::SeqCst);
                         update_runtime_ui_phase(RUNTIME_UI_PHASE_EXITING);
-                        let _ = request_runtime_stop();
+                        let _ = thread::Builder::new()
+                            .name("ngt-tray-exit".to_owned())
+                            .spawn(|| {
+                                if let Ok(root) = stable_root() {
+                                    close_managed_browser_window(&root);
+                                }
+                                let _ = request_runtime_stop();
+                            });
                     }
                     _ => {}
                 }
@@ -2166,6 +2600,29 @@ fn runtime_ui_phase_text(phase: usize) -> Vec<u16> {
             "Checking the installation…",
         ),
     }
+}
+
+#[cfg(windows)]
+fn runtime_ui_phase_progress(phase: usize) -> usize {
+    match phase {
+        RUNTIME_UI_PHASE_DATABASE => 35,
+        RUNTIME_UI_PHASE_APPLICATION => 65,
+        RUNTIME_UI_PHASE_HEALTH => 85,
+        RUNTIME_UI_PHASE_READY => 100,
+        _ => 10,
+    }
+}
+
+#[cfg(windows)]
+fn runtime_ui_elapsed_text(elapsed_seconds: u64) -> Vec<u16> {
+    if elapsed_seconds < 3 {
+        return vec![0];
+    }
+    runtime_ui_text(
+        &format!("当前步骤已用时 {elapsed_seconds} 秒"),
+        &format!("Tempo della fase: {elapsed_seconds} s"),
+        &format!("Current step: {elapsed_seconds}s"),
+    )
 }
 
 #[cfg(windows)]
@@ -2374,9 +2831,11 @@ fn preflight_runtime_state(root: &Path) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!(
+        Err(error) => {
+            return Err(format!(
             "The previous runtime stop state cannot be read; installation was cancelled: {error}"
-        )),
+        ))
+        }
     };
     if !metadata.is_file() || is_reparse(&metadata) {
         return Err(
@@ -2420,9 +2879,11 @@ fn ensure_previous_runtime_confirmed_until(
                 .to_owned(),
         ),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(format!(
+        Err(error) => {
+            return Err(format!(
             "The previous runtime stop state cannot be read; installation was cancelled: {error}"
-        )),
+        ))
+        }
     };
     if metadata.is_none() {
         return ensure_legacy_runtime_confirmed(
@@ -2434,9 +2895,11 @@ fn ensure_previous_runtime_confirmed_until(
     }
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
-        Err(error) => return Err(format!(
+        Err(error) => {
+            return Err(format!(
             "The previous runtime stop state cannot be read; installation was cancelled: {error}"
-        )),
+        ))
+        }
     };
     let mut record = match serde_json::from_slice::<RuntimeRunRecord>(&bytes) {
         Ok(record) => record,
@@ -4449,6 +4912,8 @@ struct ProgressPhase {
     started: Instant,
     item_count: Option<u32>,
     bytes: Option<u64>,
+    total_item_count: Option<u32>,
+    total_bytes: Option<u64>,
 }
 
 impl InstallProgress {
@@ -4466,6 +4931,8 @@ impl InstallProgress {
             started,
             item_count: None,
             bytes: None,
+            total_item_count: None,
+            total_bytes: None,
         }));
         let thread_phase = Arc::clone(&phase);
         let thread_id = operation_id.clone();
@@ -4476,10 +4943,10 @@ impl InstallProgress {
         let heartbeat = thread::Builder::new()
             .name("ngt-install-progress".to_owned())
             .spawn(move || loop {
-                match stop_receiver.recv_timeout(Duration::from_secs(3)) {
+                match stop_receiver.recv_timeout(Duration::from_secs(1)) {
                     Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        let (current, phase_elapsed, files, bytes) = {
+                        let (current, phase_elapsed, files, bytes, total_files, total_bytes) = {
                             let current = thread_phase
                                 .lock()
                                 .unwrap_or_else(|error| error.into_inner());
@@ -4488,6 +4955,8 @@ impl InstallProgress {
                                 current.started.elapsed().as_secs(),
                                 current.item_count,
                                 current.bytes,
+                                current.total_item_count,
+                                current.total_bytes,
                             )
                         };
                         let cancel_pending = thread_cancel_file
@@ -4497,11 +4966,13 @@ impl InstallProgress {
                         publish_install_progress(
                             thread_progress_file.as_deref(),
                             &format!(
-                                "NGT_PROGRESS|{thread_id}|{current}|{phase_elapsed}|{}|{}|{}|{}",
+                                "NGT_PROGRESS|{thread_id}|{current}|{phase_elapsed}|{}|{}|{}|{}|{}|{}",
                                 setup_elapsed_ms / 1000 + thread_started.elapsed().as_secs(),
                                 cancel_pending,
                                 files.map(|v| v.to_string()).unwrap_or_default(),
-                                bytes.map(|v| v.to_string()).unwrap_or_default()
+                                bytes.map(|v| v.to_string()).unwrap_or_default(),
+                                total_files.map(|v| v.to_string()).unwrap_or_default(),
+                                total_bytes.map(|v| v.to_string()).unwrap_or_default()
                             ),
                         );
                     }
@@ -4531,6 +5002,12 @@ impl InstallProgress {
         let mut current = self.phase.lock().unwrap_or_else(|error| error.into_inner());
         current.item_count = item_count;
         current.bytes = bytes;
+    }
+
+    fn set_progress_totals(&self, item_count: Option<u32>, bytes: Option<u64>) {
+        let mut current = self.phase.lock().unwrap_or_else(|error| error.into_inner());
+        current.total_item_count = item_count;
+        current.total_bytes = bytes;
     }
 
     fn set_phase_with_metrics(&self, phase: &str, item_count: Option<u32>, bytes: Option<u64>) {
@@ -4586,6 +5063,8 @@ impl InstallProgress {
             current.started = Instant::now();
             current.item_count = item_count;
             current.bytes = bytes;
+            current.total_item_count = None;
+            current.total_bytes = None;
             previous
         };
         if completed_name != "starting" {
@@ -4959,7 +5438,13 @@ fn install_package(
             .map_err(|error| format!("Unable to create a new candidate directory: {error}"))?;
         transaction.candidate_release = Some(candidate_stage.clone());
         write_transaction(&root, &transaction)?;
-        let manifest = copy_release(source, &candidate_stage, &progress, &preflight.manifest)?;
+        let manifest = copy_release(
+            source,
+            &candidate_stage,
+            &progress,
+            &preflight.manifest,
+            preflight.package_bytes,
+        )?;
         progress.set_current_metrics(
             Some(manifest.files.len().min(u32::MAX as usize) as u32),
             Some(preflight.package_bytes),
@@ -6209,7 +6694,27 @@ fn start_supervised_runtime(
     stop: &StopEvent,
 ) -> Result<(RuntimeJob, RuntimeChildren), String> {
     let root = &config.install_root;
-    verify_release(&config.active_release)?;
+    let verification_started = Instant::now();
+    verify_release_for_startup(&config.active_release, &config.version)?;
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.record_with_metrics(
+            DiagnosticComponent::Manager,
+            "info",
+            "runtime.startup.lightweight_verification.completed",
+            "startup-verification",
+            "none",
+            diagnostics::EventMetrics {
+                elapsed_ms: Some(
+                    verification_started
+                        .elapsed()
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64,
+                ),
+                phase_item_count: Some(REQUIRED_RUNTIME_FILES.len() as u32),
+                ..Default::default()
+            },
+        );
+    }
     ensure_port_available(APPLICATION_PORT)?;
     ensure_port_available(DATABASE_PORT)?;
     let job = RuntimeJob::new()?;
@@ -6341,6 +6846,7 @@ fn run_supervisor(
     let mut restarts = 0;
     let mut should_open_browser = open_browser_after_health;
     loop {
+        let startup_started = Instant::now();
         let mut run_state = RuntimeRunRecord::new(unique_id(), "supervised-runtime");
         write_runtime_run(&root, &run_state)?;
         let (job, mut children) = match start_supervised_runtime(&config, &mut run_state, &stop) {
@@ -6360,6 +6866,21 @@ fn run_supervisor(
         run_state.phase = "running".to_owned();
         write_runtime_run(&root, &run_state)?;
         log_line(&root, "NGTManager runtime is healthy.");
+        if let Some(logger) = manager_diagnostics(&root) {
+            logger.record_with_metrics(
+                DiagnosticComponent::Manager,
+                "info",
+                "manager.startup.completed",
+                "runtime-ready",
+                "none",
+                diagnostics::EventMetrics {
+                    elapsed_ms: Some(
+                        startup_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                    ),
+                    ..Default::default()
+                },
+            );
+        }
         update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
         if should_open_browser {
             if let Err(error) = open_browser() {
@@ -6569,7 +7090,255 @@ fn start_memory_sample(root: &Path, request_id: &str) -> Result<String, String> 
 }
 
 #[cfg(windows)]
+fn browser_window_property() -> Vec<u16> {
+    "NGTManager.ManagedBrowserWindow"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn record_browser_event(event: &str, level: &str, error_code: &str) {
+    let Ok(root) = stable_root() else {
+        return;
+    };
+    if let Some(logger) = manager_diagnostics(&root) {
+        logger.record(
+            DiagnosticComponent::Manager,
+            level,
+            event,
+            "browser-window",
+            error_code,
+        );
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn collect_browser_window(
+    window: windows_sys::Win32::Foundation::HWND,
+    parameter: windows_sys::Win32::Foundation::LPARAM,
+) -> i32 {
+    let windows = &mut *(parameter as *mut Vec<isize>);
+    windows.push(window as isize);
+    1
+}
+
+#[cfg(windows)]
+fn top_level_windows() -> Vec<isize> {
+    let mut windows = Vec::new();
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows(
+            Some(collect_browser_window),
+            &mut windows as *mut Vec<isize> as isize,
+        );
+    }
+    windows
+}
+
+#[cfg(windows)]
+fn browser_window_process_path(window: isize) -> Option<PathBuf> {
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    let mut process_id = 0u32;
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
+            window as windows_sys::Win32::Foundation::HWND,
+            &mut process_id,
+        );
+    }
+    if process_id == 0 {
+        return None;
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    if process.is_null() {
+        return None;
+    }
+    let mut buffer = vec![0u16; 32_768];
+    let mut length = buffer.len() as u32;
+    let succeeded =
+        unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) } != 0;
+    unsafe { windows_sys::Win32::Foundation::CloseHandle(process) };
+    succeeded.then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
+}
+
+#[cfg(windows)]
+fn is_managed_browser_window(window: isize) -> bool {
+    if window == 0
+        || unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(
+                window as windows_sys::Win32::Foundation::HWND,
+            )
+        } == 0
+    {
+        return false;
+    }
+    let property = browser_window_property();
+    !unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetPropW(
+            window as windows_sys::Win32::Foundation::HWND,
+            property.as_ptr(),
+        )
+    }
+    .is_null()
+}
+
+#[cfg(windows)]
+fn find_managed_browser_window() -> Option<isize> {
+    let cached = MANAGED_BROWSER_WINDOW.load(Ordering::SeqCst);
+    if is_managed_browser_window(cached) {
+        return Some(cached);
+    }
+    let found = top_level_windows()
+        .into_iter()
+        .find(|window| is_managed_browser_window(*window));
+    MANAGED_BROWSER_WINDOW.store(found.unwrap_or(0), Ordering::SeqCst);
+    if found.is_some() {
+        record_browser_event("manager.browser.window.adopted", "info", "none");
+    }
+    found
+}
+
+#[cfg(windows)]
+fn show_managed_browser_window(window: isize) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FlashWindow, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST,
+        SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE,
+    };
+    let window = window as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        ShowWindow(window, SW_RESTORE);
+        SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        let foreground = SetForegroundWindow(window) != 0;
+        if !foreground {
+            FlashWindow(window, 1);
+        }
+        foreground
+    }
+}
+
+#[cfg(windows)]
+fn browser_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    for (variable, suffix) in [
+        ("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"),
+        ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
+        ("ProgramFiles", "Google/Chrome/Application/chrome.exe"),
+        ("ProgramFiles(x86)", "Google/Chrome/Application/chrome.exe"),
+        ("LOCALAPPDATA", "Google/Chrome/Application/chrome.exe"),
+    ] {
+        if let Some(base) = std::env::var_os(variable) {
+            let path = PathBuf::from(base).join(suffix);
+            if path.is_file() && !candidates.iter().any(|item| item == &path) {
+                candidates.push(path);
+            }
+        }
+    }
+    candidates
+}
+
+#[cfg(windows)]
+fn launch_managed_browser() -> Result<Option<isize>, String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        AllowSetForegroundWindow, IsWindowVisible, SetPropW,
+    };
+    let before = top_level_windows().into_iter().collect::<BTreeSet<_>>();
+    for executable in browser_candidates() {
+        let child = match Command::new(&executable)
+            .args([
+                "--app=http://127.0.0.1:3000",
+                "--new-window",
+                "--no-first-run",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => continue,
+        };
+        unsafe { AllowSetForegroundWindow(child.id()) };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+            for window in top_level_windows() {
+                if before.contains(&window)
+                    || unsafe { IsWindowVisible(window as windows_sys::Win32::Foundation::HWND) }
+                        == 0
+                    || browser_window_process_path(window)
+                        .as_ref()
+                        .is_none_or(|path| {
+                            !path
+                                .to_string_lossy()
+                                .eq_ignore_ascii_case(&executable.to_string_lossy())
+                        })
+                {
+                    continue;
+                }
+                let property = browser_window_property();
+                if unsafe {
+                    SetPropW(
+                        window as windows_sys::Win32::Foundation::HWND,
+                        property.as_ptr(),
+                        1usize as windows_sys::Win32::Foundation::HANDLE,
+                    )
+                } != 0
+                {
+                    MANAGED_BROWSER_WINDOW.store(window, Ordering::SeqCst);
+                    if !show_managed_browser_window(window) {
+                        record_browser_event(
+                            "manager.browser.window.foreground_denied",
+                            "warning",
+                            "BROWSER_WINDOW_FOREGROUND_DENIED",
+                        );
+                    }
+                    return Ok(Some(window));
+                }
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(windows)]
 fn open_browser() -> Result<(), String> {
+    if let Some(window) = find_managed_browser_window() {
+        let foreground = show_managed_browser_window(window);
+        record_browser_event("manager.browser.window.restored", "info", "none");
+        if !foreground {
+            record_browser_event(
+                "manager.browser.window.foreground_denied",
+                "warning",
+                "BROWSER_WINDOW_FOREGROUND_DENIED",
+            );
+        }
+        return Ok(());
+    }
+    if BROWSER_OPENING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Ok(());
+    }
+    let result = launch_managed_browser();
+    BROWSER_OPENING.store(false, Ordering::SeqCst);
+    if result?.is_some() {
+        record_browser_event("manager.browser.window.created", "info", "none");
+        return Ok(());
+    }
+    if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    record_browser_event(
+        "manager.browser.window.unmanaged",
+        "warning",
+        "BROWSER_WINDOW_UNMANAGED",
+    );
     let mut command = Command::new("cmd.exe");
     command
         .args(["/C", "start", "", "http://127.0.0.1:3000"])
@@ -6581,6 +7350,46 @@ fn open_browser() -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("Unable to open NGTManager in the browser: {error}"))
+}
+
+#[cfg(windows)]
+fn close_managed_browser_window(root: &Path) {
+    let Some(window) = find_managed_browser_window() else {
+        return;
+    };
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
+            window as windows_sys::Win32::Foundation::HWND,
+            windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+            0,
+            0,
+        );
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && is_managed_browser_window(window) {
+        thread::sleep(Duration::from_millis(50));
+    }
+    let closed = !is_managed_browser_window(window);
+    if closed {
+        MANAGED_BROWSER_WINDOW.store(0, Ordering::SeqCst);
+    }
+    if let Some(logger) = manager_diagnostics(root) {
+        logger.record(
+            DiagnosticComponent::Manager,
+            if closed { "info" } else { "warning" },
+            if closed {
+                "manager.browser.window.closed"
+            } else {
+                "manager.browser.window.close_unconfirmed"
+            },
+            "browser-window",
+            if closed {
+                "none"
+            } else {
+                "BROWSER_WINDOW_CLOSE_UNCONFIRMED"
+            },
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -6822,6 +7631,7 @@ fn run(args: &[String]) -> Result<String, String> {
             let _lock = lock_state(&root)?;
             recover_transaction(&root)?;
             ensure_update_operation(&root, command, None)?;
+            close_managed_browser_window(&root);
             stop_supervisor(&root)?;
             let mut transaction = create_transaction(
                 &root,
@@ -7263,6 +8073,7 @@ pub fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[cfg(windows)]
     #[test]
@@ -7703,6 +8514,104 @@ mod tests {
         };
         write_config(&root, &config).unwrap();
         root
+    }
+
+    #[test]
+    fn streamed_release_copy_hashes_the_bytes_it_writes() {
+        let root = std::env::temp_dir().join(format!("ngt-stream-copy-{}", unique_id()));
+        let source = root.join("source.bin");
+        let destination = root.join("destination.bin");
+        fs::create_dir_all(&root).unwrap();
+        let contents = vec![0x5a; 2 * 1024 * 1024 + 17];
+        fs::write(&source, &contents).unwrap();
+        let expected = format!("{:x}", Sha256::digest(&contents));
+        let progress = InstallProgress::new("stream-copy-test");
+
+        assert_eq!(
+            copy_release_file(
+                &source,
+                &destination,
+                "source.bin",
+                &expected,
+                &progress,
+                0,
+                0,
+            )
+            .unwrap(),
+            contents.len() as u64
+        );
+        assert_eq!(fs::read(&destination).unwrap(), contents);
+
+        let mismatched = root.join("mismatched.bin");
+        assert!(copy_release_file(
+            &source,
+            &mismatched,
+            "source.bin",
+            &"0".repeat(64),
+            &progress,
+            0,
+            0,
+        )
+        .unwrap_err()
+        .contains("changed while it was being deployed"));
+        progress.finish("complete");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn daily_startup_verifies_required_files_without_hashing_unrelated_files() {
+        let root = std::env::temp_dir().join(format!("ngt-startup-verify-{}", unique_id()));
+        fs::create_dir_all(&root).unwrap();
+        let mut files = BTreeMap::new();
+        for relative in REQUIRED_RUNTIME_FILES {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let contents = format!("required:{relative}");
+            fs::write(&path, contents.as_bytes()).unwrap();
+            files.insert(
+                relative.to_owned(),
+                format!("{:x}", Sha256::digest(contents.as_bytes())),
+            );
+        }
+        let unrelated = "application/noncritical.txt";
+        let unrelated_path = root.join(unrelated);
+        fs::create_dir_all(unrelated_path.parent().unwrap()).unwrap();
+        fs::write(&unrelated_path, b"original").unwrap();
+        files.insert(
+            unrelated.to_owned(),
+            format!("{:x}", Sha256::digest(b"original")),
+        );
+        let manifest = ReleaseManifest {
+            version: "2.0.25".to_owned(),
+            commit: "a".repeat(40),
+            files,
+        };
+        fs::write(
+            root.join("studio-release.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        verify_release_for_startup(&root, "2.0.25").unwrap();
+        fs::write(&unrelated_path, b"changed").unwrap();
+        verify_release_for_startup(&root, "2.0.25").unwrap();
+        let required = root.join(REQUIRED_RUNTIME_FILES[0]);
+        fs::write(required, b"changed").unwrap();
+        assert!(verify_release_for_startup(&root, "2.0.25")
+            .unwrap_err()
+            .contains("integrity verification"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_window_progress_uses_locked_real_stage_percentages() {
+        assert_eq!(runtime_ui_phase_progress(RUNTIME_UI_PHASE_CHECKING), 10);
+        assert_eq!(runtime_ui_phase_progress(RUNTIME_UI_PHASE_DATABASE), 35);
+        assert_eq!(runtime_ui_phase_progress(RUNTIME_UI_PHASE_APPLICATION), 65);
+        assert_eq!(runtime_ui_phase_progress(RUNTIME_UI_PHASE_HEALTH), 85);
+        assert_eq!(runtime_ui_phase_progress(RUNTIME_UI_PHASE_READY), 100);
     }
 
     #[cfg(windows)]
