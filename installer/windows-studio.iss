@@ -59,7 +59,12 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGT
 Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 
 [Run]
-Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "Open {#AppName}"; Flags: postinstall nowait skipifsilent
+Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "{cm:OpenNGTManager}"; Flags: postinstall nowait skipifsilent
+
+[CustomMessages]
+english.OpenNGTManager=Open NGTManager
+italian.OpenNGTManager=Apri NGTManager
+chinesesimplified.OpenNGTManager=打开 NGTManager
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\NGTManager\releases"
@@ -96,6 +101,18 @@ var
   AttemptStartTick: Int64;
   PostInstallReached: Boolean;
   CancelWithoutPrompt: Boolean;
+  InstallCard: TPanel;
+  InstallBrandLabel: TNewStaticText;
+  InstallVersionLabel: TNewStaticText;
+  FailureDetails: TNewMemo;
+  BrandProgressTrack: TPanel;
+  BrandProgressFill: TPanel;
+  FinishCard: TPanel;
+  FinishBrandLabel: TNewStaticText;
+  FinishVersionLabel: TNewStaticText;
+  BrandProgressDeterminate: Boolean;
+  BrandProgressPosition: Integer;
+  BrandProgressAnimationTick: Int64;
 
 const
   PBM_SETBARCOLOR = $0409;
@@ -128,6 +145,13 @@ function SendMessage(hWnd: HWND; Msg: UINT; wParam: LongWord;
   lParam: LongInt): LongInt;
   external 'SendMessageW@user32.dll stdcall';
 
+function CreateRoundRectRgn(nLeftRect, nTopRect, nRightRect, nBottomRect,
+  nWidthEllipse, nHeightEllipse: Integer): THandle;
+  external 'CreateRoundRectRgn@gdi32.dll stdcall';
+
+function SetWindowRgn(hWnd: HWND; hRgn: THandle; bRedraw: BOOL): Integer;
+  external 'SetWindowRgn@user32.dll stdcall';
+
 function UiText(const Chinese, Italian, English: String): String;
 begin
   if ActiveLanguage = 'italian' then
@@ -138,28 +162,173 @@ begin
     Result := English;
 end;
 
-procedure ApplyDesktopTheme;
+procedure ApplyRoundedCard(Panel: TPanel);
+var
+  Region: THandle;
 begin
+  Region := CreateRoundRectRgn(0, 0, Panel.Width + 1, Panel.Height + 1,
+    ScaleX(28), ScaleY(28));
+  if Region <> 0 then
+    SetWindowRgn(Panel.Handle, Region, True);
+end;
+
+procedure SetBrandProgress(Value, Total: Int64);
+var
+  AvailableWidth: Integer;
+begin
+  if (Total <= 0) or (Value < 0) then
+  begin
+    BrandProgressDeterminate := False;
+    exit;
+  end;
+  if Value > Total then Value := Total;
+  BrandProgressDeterminate := True;
+  BrandProgressPosition := (Value * 1000) div Total;
+  AvailableWidth := BrandProgressTrack.ClientWidth;
+  BrandProgressFill.Left := 0;
+  BrandProgressFill.Width := (AvailableWidth * BrandProgressPosition) div 1000;
+end;
+
+procedure SetBrandProgressActive;
+begin
+  BrandProgressDeterminate := False;
+  BrandProgressAnimationTick := GetTickCount64;
+end;
+
+procedure AnimateBrandProgress;
+var
+  AvailableWidth: Integer;
+  SegmentWidth: Integer;
+  Travel: Integer;
+begin
+  if BrandProgressDeterminate or (BrandProgressTrack = nil) then exit;
+  AvailableWidth := BrandProgressTrack.ClientWidth;
+  SegmentWidth := AvailableWidth div 4;
+  if SegmentWidth < ScaleX(48) then SegmentWidth := ScaleX(48);
+  Travel := AvailableWidth + SegmentWidth;
+  BrandProgressFill.Width := SegmentWidth;
+  BrandProgressFill.Left := ((GetTickCount64 - BrandProgressAnimationTick) div 6) mod Travel - SegmentWidth;
+end;
+
+procedure ApplyDesktopTheme;
+var
+  CardWidth: Integer;
+begin
+  WizardForm.ClientWidth := ScaleX(680);
+  WizardForm.ClientHeight := ScaleY(440);
   WizardForm.Color := clWhite;
   WizardForm.InnerPage.Color := clWhite;
-  WizardForm.MainPanel.Color := $00F7FAFB;
-  WizardForm.PageNameLabel.Font.Name := 'Arial';
-  WizardForm.PageNameLabel.Font.Size := 18;
-  WizardForm.PageNameLabel.Font.Style := [fsBold];
-  WizardForm.PageNameLabel.Font.Color := $001F2729;
-  WizardForm.PageDescriptionLabel.Font.Name := 'Arial';
-  WizardForm.PageDescriptionLabel.Font.Size := 11;
-  WizardForm.PageDescriptionLabel.Font.Color := $00576D70;
+  WizardForm.MainPanel.Visible := False;
+  WizardForm.WizardBitmapImage.Visible := False;
+  WizardForm.WizardSmallBitmapImage.Visible := False;
+
+  CardWidth := WizardForm.InstallingPage.ClientWidth - ScaleX(48);
+  InstallCard := TPanel.Create(WizardForm);
+  InstallCard.Parent := WizardForm.InstallingPage;
+  InstallCard.SetBounds(ScaleX(24), ScaleY(20), CardWidth,
+    WizardForm.InstallingPage.ClientHeight - ScaleY(40));
+  InstallCard.BevelOuter := bvNone;
+  InstallCard.Color := $00F7FAFB;
+  ApplyRoundedCard(InstallCard);
+
+  InstallBrandLabel := TNewStaticText.Create(WizardForm);
+  InstallBrandLabel.Parent := InstallCard;
+  InstallBrandLabel.SetBounds(ScaleX(24), ScaleY(24), CardWidth - ScaleX(48), ScaleY(28));
+  InstallBrandLabel.Caption := 'NGTManager';
+  InstallBrandLabel.Font.Name := 'Arial';
+  InstallBrandLabel.Font.Size := 14;
+  InstallBrandLabel.Font.Style := [fsBold];
+  InstallBrandLabel.Font.Color := $001F2729;
+
+  InstallVersionLabel := TNewStaticText.Create(WizardForm);
+  InstallVersionLabel.Parent := InstallCard;
+  InstallVersionLabel.SetBounds(ScaleX(24), ScaleY(54), CardWidth - ScaleX(48), ScaleY(18));
+  InstallVersionLabel.Caption := 'v{#AppVersion}';
+  InstallVersionLabel.Font.Name := 'Arial';
+  InstallVersionLabel.Font.Size := 9;
+  InstallVersionLabel.Font.Color := $00576D70;
+
+  WizardForm.StatusLabel.Parent := InstallCard;
+  WizardForm.StatusLabel.SetBounds(ScaleX(24), ScaleY(98), CardWidth - ScaleX(48), ScaleY(26));
   WizardForm.StatusLabel.Font.Name := 'Arial';
-  WizardForm.StatusLabel.Font.Size := 14;
+  WizardForm.StatusLabel.Font.Size := 12;
   WizardForm.StatusLabel.Font.Style := [fsBold];
   WizardForm.StatusLabel.Font.Color := $001F2729;
+  WizardForm.StatusLabel.AutoSize := False;
+  WizardForm.StatusLabel.WordWrap := True;
+
+  WizardForm.FilenameLabel.Parent := InstallCard;
+  WizardForm.FilenameLabel.SetBounds(ScaleX(24), ScaleY(134), CardWidth - ScaleX(48), ScaleY(52));
   WizardForm.FilenameLabel.Font.Name := 'Arial';
-  WizardForm.FilenameLabel.Font.Size := 10;
+  WizardForm.FilenameLabel.Font.Size := 9;
   WizardForm.FilenameLabel.Font.Color := $00576D70;
-  WizardForm.ProgressGauge.Height := ScaleY(8);
-  SendMessage(WizardForm.ProgressGauge.Handle, PBM_SETBARCOLOR, 0, $002DC6F4);
-  SendMessage(WizardForm.ProgressGauge.Handle, PBM_SETBKCOLOR, 0, $00F7FAFB);
+  WizardForm.FilenameLabel.AutoSize := False;
+  WizardForm.FilenameLabel.WordWrap := True;
+
+  FailureDetails := TNewMemo.Create(WizardForm);
+  FailureDetails.Parent := InstallCard;
+  FailureDetails.SetBounds(ScaleX(24), ScaleY(134), CardWidth - ScaleX(48), ScaleY(112));
+  FailureDetails.ReadOnly := True;
+  FailureDetails.ScrollBars := ssVertical;
+  FailureDetails.Color := clWhite;
+  FailureDetails.Font.Name := 'Arial';
+  FailureDetails.Font.Size := 9;
+  FailureDetails.Font.Color := $00576D70;
+  FailureDetails.Visible := False;
+
+  WizardForm.ProgressGauge.Visible := False;
+  BrandProgressTrack := TPanel.Create(WizardForm);
+  BrandProgressTrack.Parent := InstallCard;
+  BrandProgressTrack.SetBounds(ScaleX(24), InstallCard.ClientHeight - ScaleY(48),
+    CardWidth - ScaleX(48), ScaleY(8));
+  BrandProgressTrack.BevelOuter := bvNone;
+  BrandProgressTrack.Color := $00E9E7E1;
+  BrandProgressFill := TPanel.Create(WizardForm);
+  BrandProgressFill.Parent := BrandProgressTrack;
+  BrandProgressFill.SetBounds(0, 0, ScaleX(96), BrandProgressTrack.ClientHeight);
+  BrandProgressFill.BevelOuter := bvNone;
+  BrandProgressFill.Color := $002DC6F4;
+  SetBrandProgressActive;
+
+  CardWidth := WizardForm.FinishedPage.ClientWidth - ScaleX(48);
+  FinishCard := TPanel.Create(WizardForm);
+  FinishCard.Parent := WizardForm.FinishedPage;
+  FinishCard.SetBounds(ScaleX(24), ScaleY(20), CardWidth,
+    WizardForm.FinishedPage.ClientHeight - ScaleY(40));
+  FinishCard.BevelOuter := bvNone;
+  FinishCard.Color := $00F7FAFB;
+  ApplyRoundedCard(FinishCard);
+
+  FinishBrandLabel := TNewStaticText.Create(WizardForm);
+  FinishBrandLabel.Parent := FinishCard;
+  FinishBrandLabel.SetBounds(ScaleX(24), ScaleY(24), CardWidth - ScaleX(48), ScaleY(28));
+  FinishBrandLabel.Caption := 'NGTManager';
+  FinishBrandLabel.Font.Name := 'Arial';
+  FinishBrandLabel.Font.Size := 14;
+  FinishBrandLabel.Font.Style := [fsBold];
+  FinishBrandLabel.Font.Color := $001F2729;
+
+  FinishVersionLabel := TNewStaticText.Create(WizardForm);
+  FinishVersionLabel.Parent := FinishCard;
+  FinishVersionLabel.SetBounds(ScaleX(24), ScaleY(54), CardWidth - ScaleX(48), ScaleY(18));
+  FinishVersionLabel.Caption := 'v{#AppVersion}';
+  FinishVersionLabel.Font.Name := 'Arial';
+  FinishVersionLabel.Font.Size := 9;
+  FinishVersionLabel.Font.Color := $00576D70;
+
+  WizardForm.FinishedHeadingLabel.Parent := FinishCard;
+  WizardForm.FinishedHeadingLabel.SetBounds(ScaleX(24), ScaleY(98), CardWidth - ScaleX(48), ScaleY(30));
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Arial';
+  WizardForm.FinishedHeadingLabel.Font.Size := 12;
+  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
+  WizardForm.FinishedHeadingLabel.Font.Color := $001F2729;
+  WizardForm.FinishedLabel.Parent := FinishCard;
+  WizardForm.FinishedLabel.SetBounds(ScaleX(24), ScaleY(138), CardWidth - ScaleX(48), ScaleY(52));
+  WizardForm.FinishedLabel.Font.Name := 'Arial';
+  WizardForm.FinishedLabel.Font.Size := 10;
+  WizardForm.FinishedLabel.Font.Color := $00576D70;
+  WizardForm.RunList.Parent := FinishCard;
+  WizardForm.RunList.SetBounds(ScaleX(24), ScaleY(208), CardWidth - ScaleX(48), ScaleY(44));
 end;
 
 function SafeOperationId(const Value: String): Boolean;
@@ -279,18 +448,32 @@ begin
   TotalElapsedSeconds := StrToIntDef(TotalElapsed, 0);
   StatusText := PhaseDescription(Phase);
   if (StrToIntDef(ProcessedFiles, -1) >= 0) then
-    StatusText := StatusText + ' (' + ProcessedFiles + ' files processed)';
+    StatusText := StatusText + UiText('（已处理 ' + ProcessedFiles + ' 个文件）',
+      ' (' + ProcessedFiles + ' file elaborati)',
+      ' (' + ProcessedFiles + ' files processed)');
   if PhaseElapsedSeconds > 30 then
-    StatusText := StatusText + ' — this step is taking longer than usual';
+    StatusText := StatusText + UiText(' — 此步骤所需时间比平时更长',
+      ' — questa fase sta richiedendo più tempo del previsto',
+      ' — this step is taking longer than usual');
   if (CancelPending = '1') then
-    StatusText := StatusText + '. Cancellation will wait for the current safe step';
+    StatusText := StatusText + UiText('。取消操作将在当前安全步骤结束后执行',
+      '. L''annullamento attenderà il prossimo punto sicuro',
+      '. Cancellation will wait for the current safe step');
   if (CancelPending = '2') then
-    StatusText := StatusText + '. Cancellation arrived too late; finishing safely';
+    StatusText := StatusText + UiText('。当前阶段已无法取消，正在安全完成',
+      '. È troppo tardi per annullare; completamento sicuro in corso',
+      '. Cancellation arrived too late; finishing safely');
   WizardForm.StatusLabel.Caption := StatusText;
-  WizardForm.FilenameLabel.Caption :=
+  WizardForm.FilenameLabel.Caption := UiText(
+    '总耗时：' + IntToStr(TotalElapsedSeconds div 60) + '分 ' +
+      IntToStr(TotalElapsedSeconds mod 60) + '秒  ·  当前步骤：' +
+      IntToStr(PhaseElapsedSeconds) + '秒  ·  操作编号 ' + AttemptId,
+    'Tempo totale: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
+      IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Fase corrente: ' +
+      IntToStr(PhaseElapsedSeconds) + 's  ·  Tentativo ' + AttemptId,
     'Total elapsed: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
-    IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Current step: ' +
-    IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId;
+      IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Current step: ' +
+      IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId);
   ProgressValue := StrToInt64Def(ProcessedBytes, -1);
   ProgressTotal := StrToInt64Def(TotalBytes, -1);
   if (ProgressValue < 0) or (ProgressTotal <= 0) then
@@ -299,15 +482,9 @@ begin
     ProgressTotal := StrToInt64Def(TotalFiles, -1);
   end;
   if (ProgressValue >= 0) and (ProgressTotal > 0) then
-  begin
-    if ProgressValue > ProgressTotal then ProgressValue := ProgressTotal;
-    WizardForm.ProgressGauge.Style := npbstNormal;
-    WizardForm.ProgressGauge.Min := 0;
-    WizardForm.ProgressGauge.Max := 1000;
-    WizardForm.ProgressGauge.Position := (ProgressValue * 1000) div ProgressTotal;
-  end
+    SetBrandProgress(ProgressValue, ProgressTotal)
   else
-    WizardForm.ProgressGauge.Style := npbstMarquee;
+    SetBrandProgressActive;
 end;
 
 procedure PollManagerProgress;
@@ -428,16 +605,18 @@ begin
   DeleteFile(CancelPath);
   DeleteFile(ProgressPath);
   DeleteFile(ProcessIdPath);
-  WizardForm.ProgressGauge.Style := npbstMarquee;
+  SetBrandProgressActive;
   Log('NGTManager package extraction completed; files={#PackageFileCount}');
   CoreRunning := True;
   CancelRequested := False;
   CurrentPhase := 'environment_check';
   WizardForm.StatusLabel.Caption := PhaseDescription(CurrentPhase);
-  WizardForm.FilenameLabel.Caption := 'Attempt ' + AttemptId;
+  WizardForm.FilenameLabel.Caption := UiText('操作编号 ', 'Tentativo ', 'Attempt ') + AttemptId;
   Log('NGTManager transaction started.');
   LastProgressLine := '';
 end;
+
+procedure ProcessWizardMessages; forward;
 
 procedure FinishManagerRun;
 var
@@ -449,7 +628,7 @@ var
 begin
   PollManagerProgress;
   CoreRunning := False;
-  WizardForm.ProgressGauge.Style := npbstNormal;
+  SetBrandProgress(1, 1);
   Failure := '';
   ManagerPath := ExpandConstant('{tmp}\ngt-package\tools\NGTManager.exe');
   if ManagerResultSucceeded then
@@ -483,6 +662,16 @@ begin
   PrepareSucceeded := False;
   if not PrepareSucceeded then
   begin
+    BrandProgressFill.Color := $005252D9;
+    WizardForm.StatusLabel.Caption := UiText(
+      '安装未完成，数据已保留',
+      'Installazione non completata; dati conservati',
+      'Installation did not complete; data was preserved');
+    WizardForm.FilenameLabel.Visible := False;
+    FailureDetails.Text := MessageText + #13#10 +
+      UiText('操作编号：', 'Tentativo: ', 'Attempt ID: ') + AttemptId;
+    FailureDetails.Visible := True;
+    ProcessWizardMessages;
     if WizardSilent then
       RaiseException(Failure)
     else
@@ -498,10 +687,35 @@ procedure ProcessWizardMessages;
 var
   Msg: TWindowsMessage;
 begin
+  AnimateBrandProgress;
   while PeekMessage(Msg, 0, 0, 0, 1) do
   begin
     TranslateMessage(Msg);
     DispatchMessage(Msg);
+  end;
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+begin
+  if not CoreRunning then
+    SetBrandProgress(CurProgress, MaxProgress);
+  ProcessWizardMessages;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  WizardForm.MainPanel.Visible :=
+    (CurPageID <> wpInstalling) and (CurPageID <> wpFinished);
+  if CurPageID = wpFinished then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := UiText(
+      'NGTManager 已准备就绪',
+      'NGTManager è pronto',
+      'NGTManager is ready');
+    WizardForm.FinishedLabel.Caption := UiText(
+      '可通过桌面快捷方式打开 NGTManager；关闭业务窗口后，仍可从系统托盘重新打开或安全退出。',
+      'Apri NGTManager dal collegamento sul desktop. Dopo aver chiuso la finestra, puoi riaprirlo o uscire in sicurezza dall''area di notifica.',
+      'Open NGTManager from the desktop shortcut. After closing the application window, use the tray icon to reopen it or exit safely.');
   end;
 end;
 
@@ -577,16 +791,29 @@ begin
       CancelRequested := True;
       if SaveStringToFile(CancelPath, 'cancel', False) then
       begin
-        WizardForm.StatusLabel.Caption := 'Cancellation requested';
-        WizardForm.FilenameLabel.Caption := 'NGTManager will finish the current safe step before rolling back.';
+        WizardForm.StatusLabel.Caption := UiText(
+          '正在等待安全停止点',
+          'Attesa del punto di arresto sicuro',
+          'Waiting for a safe stopping point');
+        WizardForm.FilenameLabel.Caption := UiText(
+          'NGTManager 将在当前安全步骤结束后回滚，请保持此窗口打开。',
+          'NGTManager completerà la fase sicura corrente prima del ripristino. Tieni aperta questa finestra.',
+          'NGTManager will finish the current safe step before rolling back. Keep this window open.');
+        WizardForm.CancelButton.Enabled := False;
         Log('User requested cancellation; deferring to the next safe transaction checkpoint.');
       end
       else
       begin
         CancelRequested := False;
         Log('Unable to write the cancellation request marker.');
-        WizardForm.StatusLabel.Caption := 'Unable to request cancellation';
-        WizardForm.FilenameLabel.Caption := 'The operation is still running. Keep this window open.';
+        WizardForm.StatusLabel.Caption := UiText(
+          '无法提交取消请求',
+          'Impossibile richiedere l''annullamento',
+          'Unable to request cancellation');
+        WizardForm.FilenameLabel.Caption := UiText(
+          '操作仍在运行，请保持此窗口打开。',
+          'L''operazione è ancora in corso. Tieni aperta questa finestra.',
+          'The operation is still running. Keep this window open.');
       end;
     end;
   end

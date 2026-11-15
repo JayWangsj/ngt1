@@ -71,6 +71,18 @@ static MANAGED_BROWSER_PROCESS_ID: AtomicU64 = AtomicU64::new(0);
 static MANAGED_BROWSER_PROCESS_CREATED: AtomicU64 = AtomicU64::new(0);
 #[cfg(windows)]
 static BROWSER_OPENING: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static BROWSER_WINDOW_EXPECTED: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static PROVISIONAL_BROWSER_WINDOW: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static PROVISIONAL_BROWSER_PROCESS_ID: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
+static PROVISIONAL_BROWSER_PROCESS_CREATED: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_CARD: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_CARD_BRUSH: AtomicIsize = AtomicIsize::new(0);
 
 #[cfg(windows)]
 const RUNTIME_UI_TRAY_MESSAGE: u32 = 0x8001;
@@ -91,7 +103,9 @@ const RUNTIME_UI_PHASE_HEALTH: usize = 4;
 #[cfg(windows)]
 const RUNTIME_UI_PHASE_READY: usize = 5;
 #[cfg(windows)]
-const RUNTIME_UI_PHASE_EXITING: usize = 6;
+const RUNTIME_UI_PHASE_BROWSER_BLOCKED: usize = 6;
+#[cfg(windows)]
+const RUNTIME_UI_PHASE_EXITING: usize = 7;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -1998,9 +2012,9 @@ struct SessionEndNotifier {
 impl SessionEndNotifier {
     fn start(root: &Path, show_startup: bool) -> Result<Self, String> {
         use windows_sys::Win32::Graphics::Gdi::{
-            CreateFontW, DeleteObject, GetMonitorInfoW, GetStockObject, GetSysColorBrush,
-            MonitorFromPoint, COLOR_WINDOW, DEFAULT_GUI_FONT, FW_NORMAL, FW_SEMIBOLD, MONITORINFO,
-            MONITOR_DEFAULTTONEAREST,
+            CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, GetMonitorInfoW,
+            GetStockObject, GetSysColorBrush, MonitorFromPoint, SetWindowRgn, COLOR_WINDOW,
+            DEFAULT_GUI_FONT, FW_NORMAL, FW_SEMIBOLD, MONITORINFO, MONITOR_DEFAULTTONEAREST,
         };
         use windows_sys::Win32::System::SystemServices::SS_ICON;
         use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -2116,6 +2130,30 @@ impl SessionEndNotifier {
                     return;
                 }
                 let status_class: Vec<u16> = "STATIC".encode_utf16().chain(Some(0)).collect();
+                let card_brush = CreateSolidBrush(0x00f7fafb);
+                let card = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    std::ptr::null(),
+                    WS_CHILD | WS_VISIBLE,
+                    scale(12),
+                    scale(12),
+                    scale(496),
+                    scale(196),
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                if !card.is_null() {
+                    let region =
+                        CreateRoundRectRgn(0, 0, scale(496), scale(196), scale(28), scale(28));
+                    if !region.is_null() {
+                        SetWindowRgn(card, region, 1);
+                    }
+                }
+                RUNTIME_UI_CARD.store(card as isize, Ordering::SeqCst);
+                RUNTIME_UI_CARD_BRUSH.store(card_brush as isize, Ordering::SeqCst);
                 let title_text: Vec<u16> = "NGTManager".encode_utf16().chain(Some(0)).collect();
                 let title = CreateWindowExW(
                     0,
@@ -2226,7 +2264,9 @@ impl SessionEndNotifier {
                     instance,
                     std::ptr::null(),
                 );
-                if title.is_null()
+                if card.is_null()
+                    || card_brush.is_null()
+                    || title.is_null()
                     || version.is_null()
                     || heading.is_null()
                     || status.is_null()
@@ -2445,6 +2485,7 @@ impl SessionEndNotifier {
                 RUNTIME_UI_DETAIL.store(0, Ordering::SeqCst);
                 RUNTIME_UI_STEP.store(0, Ordering::SeqCst);
                 RUNTIME_UI_PROGRESS.store(0, Ordering::SeqCst);
+                RUNTIME_UI_CARD.store(0, Ordering::SeqCst);
                 RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
                 if !icon.is_null() {
@@ -2454,6 +2495,10 @@ impl SessionEndNotifier {
                     if !font.is_null() {
                         DeleteObject(font as _);
                     }
+                }
+                let card_brush = RUNTIME_UI_CARD_BRUSH.swap(0, Ordering::SeqCst);
+                if card_brush != 0 {
+                    DeleteObject(card_brush as _);
                 }
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::UnregisterClassW(
                     class_name.as_ptr(),
@@ -2558,7 +2603,12 @@ unsafe extern "system" fn session_end_window_proc(
                     0x00576d70
                 },
             );
-            GetSysColorBrush(COLOR_WINDOW) as isize
+            let card_brush = RUNTIME_UI_CARD_BRUSH.load(Ordering::SeqCst);
+            if card_brush != 0 {
+                card_brush
+            } else {
+                GetSysColorBrush(COLOR_WINDOW) as isize
+            }
         }
         RUNTIME_UI_PHASE_MESSAGE => {
             let phase = wparam;
@@ -2595,6 +2645,8 @@ unsafe extern "system" fn session_end_window_proc(
             if phase == RUNTIME_UI_PHASE_READY {
                 RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
                 SetTimer(window, 2, 300, None);
+            } else if phase == RUNTIME_UI_PHASE_BROWSER_BLOCKED {
+                RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
             } else {
                 RUNTIME_HEALTHY.store(false, Ordering::SeqCst);
                 if phase == RUNTIME_UI_PHASE_EXITING {
@@ -2627,7 +2679,7 @@ unsafe extern "system" fn session_end_window_proc(
                 let _ = thread::Builder::new()
                     .name("ngt-open-browser".to_owned())
                     .spawn(|| {
-                        let _ = open_browser();
+                        let _ = open_browser(false);
                     });
             } else {
                 show_runtime_ui_window(window, true);
@@ -2756,6 +2808,11 @@ fn runtime_ui_phase_text(phase: usize) -> Vec<u16> {
             "NGTManager è pronto",
             "NGTManager is ready",
         ),
+        RUNTIME_UI_PHASE_BROWSER_BLOCKED => runtime_ui_text(
+            "未能确认业务窗口，请检查 Chrome 或 Edge 后从托盘重试",
+            "Impossibile confermare la finestra; controlla Chrome o Edge e riprova dall'area di notifica",
+            "The app window could not be confirmed; check Chrome or Edge and retry from the tray",
+        ),
         RUNTIME_UI_PHASE_EXITING => runtime_ui_text(
             "正在安全退出 NGTManager…",
             "Chiusura sicura di NGTManager…",
@@ -2775,6 +2832,7 @@ fn runtime_ui_phase_progress(phase: usize) -> usize {
         RUNTIME_UI_PHASE_DATABASE => 35,
         RUNTIME_UI_PHASE_APPLICATION => 65,
         RUNTIME_UI_PHASE_HEALTH => 85,
+        RUNTIME_UI_PHASE_BROWSER_BLOCKED => 90,
         RUNTIME_UI_PHASE_READY => 100,
         _ => 10,
     }
@@ -2786,7 +2844,7 @@ fn runtime_ui_step_text(phase: usize) -> Vec<u16> {
         RUNTIME_UI_PHASE_CHECKING => 1,
         RUNTIME_UI_PHASE_DATABASE => 2,
         RUNTIME_UI_PHASE_APPLICATION => 3,
-        RUNTIME_UI_PHASE_HEALTH | RUNTIME_UI_PHASE_READY => 4,
+        RUNTIME_UI_PHASE_HEALTH | RUNTIME_UI_PHASE_READY | RUNTIME_UI_PHASE_BROWSER_BLOCKED => 4,
         _ => 0,
     };
     if step == 0 {
@@ -7207,22 +7265,43 @@ fn run_supervisor(
             );
         }
         if should_open_browser {
-            if let Err(error) = open_browser() {
-                let code = failure_code(&error);
-                if let Some(logger) = manager_diagnostics(&root) {
-                    logger.record(
-                        DiagnosticComponent::Manager,
-                        "error",
-                        "manager.browser.open.failed",
-                        "browser-open",
-                        &code,
-                    );
+            let browser_ready = match open_browser(true) {
+                Ok(ready) => ready,
+                Err(error) => {
+                    let code = failure_code(&error);
+                    if let Some(logger) = manager_diagnostics(&root) {
+                        logger.record(
+                            DiagnosticComponent::Manager,
+                            "error",
+                            "manager.browser.open.failed",
+                            "browser-open",
+                            &code,
+                        );
+                    }
+                    false
                 }
-            }
+            };
             should_open_browser = false;
             drop(open_lock.take());
+            if browser_ready {
+                update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
+                thread::sleep(Duration::from_millis(350));
+                if let Some(window) = find_managed_browser_window() {
+                    if !show_managed_browser_window(window) {
+                        record_browser_event(
+                            "manager.browser.window.foreground_denied",
+                            "warning",
+                            "BROWSER_WINDOW_FOREGROUND_DENIED",
+                        );
+                    }
+                    record_browser_event("manager.startup.ui_completed", "info", "none");
+                }
+            } else {
+                update_runtime_ui_phase(RUNTIME_UI_PHASE_BROWSER_BLOCKED);
+            }
+        } else {
+            update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
         }
-        update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
         loop {
             if unsafe { WaitForSingleObject(stop.0, 250) } == WAIT_OBJECT_0 {
                 let shutdown_started = Instant::now();
@@ -7504,6 +7583,87 @@ fn browser_window_process_identity(window: isize) -> Option<(PathBuf, u32, u64)>
 }
 
 #[cfg(windows)]
+fn browser_window_matches_identity(window: isize, process_id: u32, created: u64) -> bool {
+    window != 0
+        && unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(
+                window as windows_sys::Win32::Foundation::HWND,
+            )
+        } != 0
+        && browser_window_process_identity(window).is_some_and(
+            |(_, actual_process_id, actual_created)| {
+                actual_process_id == process_id && actual_created == created
+            },
+        )
+}
+
+#[cfg(windows)]
+fn browser_window_title_matches(window: isize) -> bool {
+    browser_window_title(window)
+        .to_ascii_lowercase()
+        .contains("ngtmanager")
+}
+
+#[cfg(windows)]
+fn clear_managed_browser_identity() {
+    MANAGED_BROWSER_WINDOW.store(0, Ordering::SeqCst);
+    MANAGED_BROWSER_PROCESS_ID.store(0, Ordering::SeqCst);
+    MANAGED_BROWSER_PROCESS_CREATED.store(0, Ordering::SeqCst);
+}
+
+#[cfg(windows)]
+fn clear_provisional_browser_identity() {
+    PROVISIONAL_BROWSER_WINDOW.store(0, Ordering::SeqCst);
+    PROVISIONAL_BROWSER_PROCESS_ID.store(0, Ordering::SeqCst);
+    PROVISIONAL_BROWSER_PROCESS_CREATED.store(0, Ordering::SeqCst);
+}
+
+#[cfg(windows)]
+fn provisional_browser_window() -> Option<isize> {
+    let window = PROVISIONAL_BROWSER_WINDOW.load(Ordering::SeqCst);
+    let process_id = PROVISIONAL_BROWSER_PROCESS_ID.load(Ordering::SeqCst) as u32;
+    let created = PROVISIONAL_BROWSER_PROCESS_CREATED.load(Ordering::SeqCst);
+    if browser_window_matches_identity(window, process_id, created) {
+        Some(window)
+    } else {
+        clear_provisional_browser_identity();
+        if MANAGED_BROWSER_WINDOW.load(Ordering::SeqCst) == 0
+            && !BROWSER_OPENING.load(Ordering::SeqCst)
+        {
+            BROWSER_WINDOW_EXPECTED.store(false, Ordering::SeqCst);
+        }
+        None
+    }
+}
+
+#[cfg(windows)]
+fn promote_provisional_browser_window() -> Option<isize> {
+    let window = provisional_browser_window()?;
+    if !browser_window_title_matches(window) {
+        return None;
+    }
+    let (_, process_id, created) = browser_window_process_identity(window)?;
+    let property = browser_window_property();
+    if unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetPropW(
+            window as windows_sys::Win32::Foundation::HWND,
+            property.as_ptr(),
+            1usize as windows_sys::Win32::Foundation::HANDLE,
+        )
+    } == 0
+    {
+        return None;
+    }
+    MANAGED_BROWSER_WINDOW.store(window, Ordering::SeqCst);
+    MANAGED_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
+    MANAGED_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
+    clear_provisional_browser_identity();
+    BROWSER_WINDOW_EXPECTED.store(true, Ordering::SeqCst);
+    record_browser_event("manager.browser.window.confirmed", "info", "none");
+    Some(window)
+}
+
+#[cfg(windows)]
 fn is_managed_browser_window(window: isize) -> bool {
     if window == 0
         || unsafe {
@@ -7540,18 +7700,30 @@ fn find_managed_browser_window() -> Option<isize> {
     if is_managed_browser_window(cached) {
         return Some(cached);
     }
+    if cached != 0 {
+        clear_managed_browser_identity();
+    }
     let found = top_level_windows()
         .into_iter()
         .find(|window| is_managed_browser_window(*window));
-    MANAGED_BROWSER_WINDOW.store(found.unwrap_or(0), Ordering::SeqCst);
     if let Some(found_window) = found {
+        MANAGED_BROWSER_WINDOW.store(found_window, Ordering::SeqCst);
         if let Some((_, process_id, created)) = browser_window_process_identity(found_window) {
             MANAGED_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
             MANAGED_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
         }
+        BROWSER_WINDOW_EXPECTED.store(true, Ordering::SeqCst);
         record_browser_event("manager.browser.window.adopted", "info", "none");
+        return Some(found_window);
     }
-    found
+    let promoted = promote_provisional_browser_window();
+    if promoted.is_none()
+        && provisional_browser_window().is_none()
+        && !BROWSER_OPENING.load(Ordering::SeqCst)
+    {
+        BROWSER_WINDOW_EXPECTED.store(false, Ordering::SeqCst);
+    }
+    promoted
 }
 
 #[cfg(windows)]
@@ -7615,7 +7787,7 @@ enum BrowserLaunchOutcome {
 #[cfg(windows)]
 fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AllowSetForegroundWindow, IsWindowVisible, SetPropW,
+        AllowSetForegroundWindow, IsWindowVisible, ShowWindow, SW_HIDE, SW_RESTORE,
     };
     let before = top_level_windows().into_iter().collect::<BTreeSet<_>>();
     for executable in browser_candidates() {
@@ -7629,11 +7801,15 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
             Ok(child) => child,
             Err(_) => continue,
         };
+        BROWSER_WINDOW_EXPECTED.store(true, Ordering::SeqCst);
         unsafe { AllowSetForegroundWindow(child.id()) };
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
                 return Ok(BrowserLaunchOutcome::LaunchedUnconfirmed);
+            }
+            if let Some(window) = promote_provisional_browser_window() {
+                return Ok(BrowserLaunchOutcome::Managed(window));
             }
             for window in top_level_windows() {
                 let identity = browser_window_process_identity(window);
@@ -7645,39 +7821,25 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
                             .to_string_lossy()
                             .eq_ignore_ascii_case(&executable.to_string_lossy())
                     })
-                    || !browser_window_title(window)
-                        .to_ascii_lowercase()
-                        .contains("ngtmanager")
                 {
                     continue;
                 }
-                let property = browser_window_property();
-                if unsafe {
-                    SetPropW(
-                        window as windows_sys::Win32::Foundation::HWND,
-                        property.as_ptr(),
-                        1usize as windows_sys::Win32::Foundation::HANDLE,
-                    )
-                } != 0
-                {
-                    let (_, process_id, created) = identity.expect("identity was checked above");
-                    MANAGED_BROWSER_WINDOW.store(window, Ordering::SeqCst);
-                    MANAGED_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
-                    MANAGED_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
-                    if !show_managed_browser_window(window) {
-                        record_browser_event(
-                            "manager.browser.window.foreground_denied",
-                            "warning",
-                            "BROWSER_WINDOW_FOREGROUND_DENIED",
-                        );
-                    }
-                    return Ok(BrowserLaunchOutcome::Managed(window));
-                }
+                let (_, process_id, created) = identity.expect("identity was checked above");
+                PROVISIONAL_BROWSER_WINDOW.store(window, Ordering::SeqCst);
+                PROVISIONAL_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
+                PROVISIONAL_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
+                unsafe { ShowWindow(window as windows_sys::Win32::Foundation::HWND, SW_HIDE) };
+                record_browser_event("manager.browser.window.provisional", "info", "none");
+                record_browser_event("manager.browser.window.hidden_until_ready", "info", "none");
+                break;
             }
             thread::sleep(Duration::from_millis(100));
         }
+        if let Some(window) = provisional_browser_window() {
+            unsafe { ShowWindow(window as windows_sys::Win32::Foundation::HWND, SW_RESTORE) };
+        }
         record_browser_event(
-            "manager.browser.window.unmanaged",
+            "manager.browser.window.identification_timeout",
             "warning",
             "BROWSER_WINDOW_IDENTIFICATION_TIMEOUT",
         );
@@ -7687,9 +7849,19 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
 }
 
 #[cfg(windows)]
-fn open_browser() -> Result<(), String> {
+fn open_browser(defer_show: bool) -> Result<bool, String> {
     if let Some(window) = find_managed_browser_window() {
-        let foreground = show_managed_browser_window(window);
+        let foreground = if defer_show {
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                    window as windows_sys::Win32::Foundation::HWND,
+                    windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
+                );
+            }
+            true
+        } else {
+            show_managed_browser_window(window)
+        };
         record_browser_event("manager.browser.window.restored", "info", "none");
         if !foreground {
             record_browser_event(
@@ -7698,29 +7870,53 @@ fn open_browser() -> Result<(), String> {
                 "BROWSER_WINDOW_FOREGROUND_DENIED",
             );
         }
-        return Ok(());
+        return Ok(true);
+    }
+    if provisional_browser_window().is_some() || BROWSER_WINDOW_EXPECTED.load(Ordering::SeqCst) {
+        return Ok(false);
     }
     if BROWSER_OPENING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return Ok(());
+        return Ok(find_managed_browser_window().is_some());
     }
     let result = launch_managed_browser();
     BROWSER_OPENING.store(false, Ordering::SeqCst);
     match result? {
         BrowserLaunchOutcome::Managed(window) => {
-            let _ = window;
             record_browser_event("manager.browser.window.created", "info", "none");
+            if !defer_show {
+                let _ = show_managed_browser_window(window);
+            }
+            Ok(true)
         }
-        BrowserLaunchOutcome::LaunchedUnconfirmed => {}
+        BrowserLaunchOutcome::LaunchedUnconfirmed => Ok(false),
     }
-    Ok(())
 }
 
 #[cfg(windows)]
 fn close_managed_browser_window(root: &Path) -> bool {
+    let opening_deadline = Instant::now() + Duration::from_secs(2);
+    while BROWSER_OPENING.load(Ordering::SeqCst) && Instant::now() < opening_deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
     let Some(window) = find_managed_browser_window() else {
+        let expected = BROWSER_WINDOW_EXPECTED.load(Ordering::SeqCst)
+            || provisional_browser_window().is_some()
+            || BROWSER_OPENING.load(Ordering::SeqCst);
+        if expected {
+            if let Some(logger) = manager_diagnostics(root) {
+                logger.record(
+                    DiagnosticComponent::Manager,
+                    "warning",
+                    "manager.browser.window.close_unconfirmed",
+                    "browser-window",
+                    "BROWSER_WINDOW_IDENTITY_UNCONFIRMED",
+                );
+            }
+            return false;
+        }
         return true;
     };
     let request_close = || unsafe {
@@ -7735,12 +7931,22 @@ fn close_managed_browser_window(root: &Path) -> bool {
             &mut result,
         )
     };
+    record_browser_event(
+        "manager.browser.window.close_requested",
+        "info",
+        "first-attempt",
+    );
     request_close();
     let deadline = Instant::now() + Duration::from_millis(2_500);
     while Instant::now() < deadline && is_managed_browser_window(window) {
         thread::sleep(Duration::from_millis(50));
     }
     if is_managed_browser_window(window) {
+        record_browser_event(
+            "manager.browser.window.close_requested",
+            "warning",
+            "second-attempt",
+        );
         request_close();
         let deadline = Instant::now() + Duration::from_millis(2_500);
         while Instant::now() < deadline && is_managed_browser_window(window) {
@@ -7749,9 +7955,9 @@ fn close_managed_browser_window(root: &Path) -> bool {
     }
     let closed = !is_managed_browser_window(window);
     if closed {
-        MANAGED_BROWSER_WINDOW.store(0, Ordering::SeqCst);
-        MANAGED_BROWSER_PROCESS_ID.store(0, Ordering::SeqCst);
-        MANAGED_BROWSER_PROCESS_CREATED.store(0, Ordering::SeqCst);
+        clear_managed_browser_identity();
+        clear_provisional_browser_identity();
+        BROWSER_WINDOW_EXPECTED.store(false, Ordering::SeqCst);
     }
     if let Some(logger) = manager_diagnostics(root) {
         logger.record(
@@ -7783,8 +7989,11 @@ fn wait_for_runtime_and_open(root: &Path) -> Result<String, String> {
             return Err("NGTManager is in maintenance. Try opening it after the current operation finishes.".to_owned());
         }
         if health_matches(&client, &config.version) {
-            open_browser()?;
-            return Ok("NGTManager is open.".to_owned());
+            return if open_browser(false)? {
+                Ok("NGTManager is open.".to_owned())
+            } else {
+                Err("The NGTManager browser window could not be confirmed. Use the tray menu to retry.".to_owned())
+            };
         }
         if !runtime_is_active(root)? {
             break;

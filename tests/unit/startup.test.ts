@@ -630,7 +630,10 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain(
       "ProgressTotal := StrToInt64Def(TotalBytes, -1)",
     );
-    expect(installer).toContain("WizardForm.ProgressGauge.Position :=");
+    expect(installer).toContain("BrandProgressFill.Width :=");
+    expect(installer).toContain("CreateRoundRectRgn");
+    expect(installer).toContain("WizardForm.WizardBitmapImage.Visible := False");
+    expect(installer).toContain('Description: "{cm:OpenNGTManager}"');
     expect(installer).not.toContain("SetTimer(0, 0, 250");
     expect(installer).toContain("GetSpaceOnDisk64");
     expect(installer).not.toContain("ExtractTemporaryFiles(");
@@ -859,5 +862,26 @@ describe("Windows persistent startup", () => {
     expect(openSystem).toContain("run_supervisor(true");
     expect(openSystem).not.toContain('launch_manager(root, "run")');
     expect(manager).toContain("open_browser_after_health: bool");
+  });
+
+  it("holds the browser window until startup UI completes and fails closed on tray exit", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    expect(manager).toContain("PROVISIONAL_BROWSER_WINDOW");
+    expect(manager).toContain("manager.browser.window.provisional");
+    expect(manager).toContain("manager.browser.window.hidden_until_ready");
+    expect(manager).toContain("manager.browser.window.confirmed");
+    expect(manager).toContain("manager.startup.ui_completed");
+    expect(manager.indexOf("open_browser(true)")).toBeLessThan(
+      manager.indexOf(
+        "update_runtime_ui_phase(RUNTIME_UI_PHASE_READY)",
+        manager.indexOf("open_browser(true)"),
+      ),
+    );
+    const closeStart = manager.indexOf("fn close_managed_browser_window");
+    const closeEnd = manager.indexOf("fn wait_for_runtime_and_open", closeStart);
+    const closeWindow = manager.slice(closeStart, closeEnd);
+    expect(closeWindow).toContain("BROWSER_WINDOW_IDENTITY_UNCONFIRMED");
+    expect(closeWindow).toContain("return false;");
+    expect(closeWindow).toContain("manager.browser.window.close_requested");
   });
 });
