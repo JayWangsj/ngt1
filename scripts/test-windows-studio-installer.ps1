@@ -104,16 +104,40 @@ if ($checksum -notmatch '^([A-Fa-f0-9]{64})\s+(.+)$' -or
 }
 
 $installRoot = Join-Path $env:LOCALAPPDATA "NGTManager"
-$runKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $startupNames = @("NGTManager", "NGT Management System")
+$startupRegistryPaths = @(
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32",
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+)
+$startupFolderPaths = @(
+  [Environment]::GetFolderPath("Startup"),
+  [Environment]::GetFolderPath("CommonStartup")
+)
+
+function Assert-NoNgtStartupRegistration {
+  param([string]$Context)
+  foreach ($startupName in $startupNames) {
+    foreach ($registryPath in $startupRegistryPaths) {
+      if (Get-ItemProperty -LiteralPath $registryPath -Name $startupName -ErrorAction SilentlyContinue) {
+        throw "$Context left an NGTManager startup entry in ${registryPath}: $startupName."
+      }
+    }
+    foreach ($folderPath in $startupFolderPaths) {
+      if (-not [string]::IsNullOrWhiteSpace($folderPath) -and
+          (Test-Path -LiteralPath (Join-Path $folderPath "$startupName.lnk") -PathType Leaf)) {
+        throw "$Context left an NGTManager startup shortcut in ${folderPath}: $startupName."
+      }
+    }
+  }
+}
+
 if (Test-Path -LiteralPath $installRoot) {
   throw "The disposable user already has an NGTManager directory."
 }
-foreach ($startupName in $startupNames) {
-  if (Get-ItemProperty -LiteralPath $runKeyPath -Name $startupName -ErrorAction SilentlyContinue) {
-    throw "The disposable user already has an NGTManager startup entry: $startupName."
-  }
-}
+Assert-NoNgtStartupRegistration -Context "The disposable user already"
 & schtasks.exe /Query /TN "NGT Management System" *> $null
 if ($LASTEXITCODE -eq 0) {
   throw "The disposable user already has the legacy NGTManager startup task."
@@ -211,11 +235,7 @@ try {
       [string]$managerStatus.version -ne [string]$metadata.version) {
     throw "NGTManager did not report a committed installation of the verified release."
   }
-  foreach ($startupName in $startupNames) {
-    if (Get-ItemProperty -LiteralPath $runKeyPath -Name $startupName -ErrorAction SilentlyContinue) {
-      throw "NGTManager left a per-user startup entry registered: $startupName."
-    }
-  }
+  Assert-NoNgtStartupRegistration -Context "NGTManager"
   & schtasks.exe /Query /TN "NGT Management System" *> $null
   if ($LASTEXITCODE -eq 0) {
     throw "NGTManager left the legacy startup task registered."
@@ -517,11 +537,7 @@ try {
             -not (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json"))) {
           throw "The uninstaller did not retain the business database and manager state."
         }
-        foreach ($startupName in $startupNames) {
-          if (Get-ItemProperty -LiteralPath $runKeyPath -Name $startupName -ErrorAction SilentlyContinue) {
-            throw "The uninstaller left a per-user NGTManager startup entry registered: $startupName."
-          }
-        }
+        Assert-NoNgtStartupRegistration -Context "The uninstaller"
         & schtasks.exe /Query /TN "NGT Management System" *> $null
         if ($LASTEXITCODE -eq 0) {
           throw "The uninstaller left the legacy NGTManager startup task registered."

@@ -44,9 +44,15 @@ static WINDOWS_SESSION_END_TICK: AtomicU64 = AtomicU64::new(0);
 #[cfg(windows)]
 static RUNTIME_UI_WINDOW: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
+static RUNTIME_UI_TITLE: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_HEADING: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
 static RUNTIME_UI_STATUS: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static RUNTIME_UI_DETAIL: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static RUNTIME_UI_STEP: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static RUNTIME_UI_PROGRESS: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
@@ -54,9 +60,15 @@ static RUNTIME_UI_PHASE_STARTED_TICK: AtomicU64 = AtomicU64::new(0);
 #[cfg(windows)]
 static RUNTIME_HEALTHY: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
+static RUNTIME_UI_HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
 static TRAY_EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static MANAGED_BROWSER_WINDOW: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static MANAGED_BROWSER_PROCESS_ID: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
+static MANAGED_BROWSER_PROCESS_CREATED: AtomicU64 = AtomicU64::new(0);
 #[cfg(windows)]
 static BROWSER_OPENING: AtomicBool = AtomicBool::new(false);
 
@@ -334,7 +346,9 @@ fn load_release_manifest(root: &Path) -> Result<ReleaseManifest, String> {
                 .all(|component| matches!(component, Component::Normal(_)))
             || !normalized_paths.insert(relative.to_ascii_lowercase())
         {
-            return Err(format!("Release contains an unsafe or duplicate path: {relative}"));
+            return Err(format!(
+                "Release contains an unsafe or duplicate path: {relative}"
+            ));
         }
     }
     Ok(manifest)
@@ -1993,7 +2007,7 @@ impl SessionEndNotifier {
         use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
         use windows_sys::Win32::UI::Controls::{
             InitCommonControlsEx, ICC_PROGRESS_CLASS, INITCOMMONCONTROLSEX, PBM_SETBARCOLOR,
-            PBM_SETPOS, PBM_SETRANGE32,
+            PBM_SETPOS, PBM_SETRANGE32, PBS_SMOOTH,
         };
         use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
         use windows_sys::Win32::UI::Shell::{
@@ -2009,6 +2023,10 @@ impl SessionEndNotifier {
         };
         let (sender, receiver) = mpsc::sync_channel::<Result<u32, String>>(1);
         let icon_path = root.join("assets/ngt-studio.ico");
+        let version_text = read_config(root)
+            .ok()
+            .flatten()
+            .map_or_else(String::new, |config| format!("v{}", config.version));
         let thread = thread::Builder::new()
             .name("ngt-runtime-ui".to_owned())
             .spawn(move || unsafe {
@@ -2062,8 +2080,8 @@ impl SessionEndNotifier {
                 RUNTIME_UI_WINDOW.store(window as isize, Ordering::SeqCst);
                 let dpi = GetDpiForWindow(window).max(96);
                 let scale = |value: i32| value * dpi as i32 / 96;
-                let window_width = scale(480);
-                let window_height = scale(200);
+                let window_width = scale(520);
+                let window_height = scale(240);
                 let mut cursor = std::mem::zeroed();
                 GetCursorPos(&mut cursor);
                 let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
@@ -2105,9 +2123,43 @@ impl SessionEndNotifier {
                     title_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
                     scale(88),
+                    scale(20),
+                    scale(360),
+                    scale(28),
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                let version_text: Vec<u16> = version_text.encode_utf16().chain(Some(0)).collect();
+                let version = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    version_text.as_ptr(),
+                    WS_CHILD | WS_VISIBLE,
+                    scale(88),
+                    scale(48),
+                    scale(360),
+                    scale(18),
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                let heading_text = runtime_ui_text(
+                    "正在启动工作台",
+                    "Avvio dell'area di lavoro",
+                    "Starting your workspace",
+                );
+                let heading = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    heading_text.as_ptr(),
+                    WS_CHILD | WS_VISIBLE,
                     scale(24),
-                    scale(340),
-                    scale(32),
+                    scale(72),
+                    scale(456),
+                    scale(28),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2119,10 +2171,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     initial.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(88),
-                    scale(58),
-                    scale(340),
                     scale(24),
+                    scale(104),
+                    scale(456),
+                    scale(22),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2134,9 +2186,9 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     detail_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(88),
-                    scale(84),
-                    scale(340),
+                    scale(24),
+                    scale(130),
+                    scale(456),
                     scale(20),
                     window,
                     std::ptr::null_mut(),
@@ -2149,17 +2201,39 @@ impl SessionEndNotifier {
                     0,
                     progress_class.as_ptr(),
                     std::ptr::null(),
-                    WS_CHILD | WS_VISIBLE,
+                    WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
                     scale(24),
-                    scale(122),
-                    scale(420),
-                    scale(12),
+                    scale(166),
+                    scale(456),
+                    scale(8),
                     window,
                     std::ptr::null_mut(),
                     instance,
                     std::ptr::null(),
                 );
-                if title.is_null() || status.is_null() || detail.is_null() || progress.is_null() {
+                let step_text = runtime_ui_step_text(RUNTIME_UI_PHASE_CHECKING);
+                let step = CreateWindowExW(
+                    0,
+                    status_class.as_ptr(),
+                    step_text.as_ptr(),
+                    WS_CHILD | WS_VISIBLE,
+                    scale(24),
+                    scale(182),
+                    scale(456),
+                    scale(20),
+                    window,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                if title.is_null()
+                    || version.is_null()
+                    || heading.is_null()
+                    || status.is_null()
+                    || detail.is_null()
+                    || progress.is_null()
+                    || step.is_null()
+                {
                     RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                     let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
                     let _ = sender.send(Err(
@@ -2167,8 +2241,11 @@ impl SessionEndNotifier {
                     ));
                     return;
                 }
+                RUNTIME_UI_TITLE.store(title as isize, Ordering::SeqCst);
+                RUNTIME_UI_HEADING.store(heading as isize, Ordering::SeqCst);
                 RUNTIME_UI_STATUS.store(status as isize, Ordering::SeqCst);
                 RUNTIME_UI_DETAIL.store(detail as isize, Ordering::SeqCst);
+                RUNTIME_UI_STEP.store(step as isize, Ordering::SeqCst);
                 RUNTIME_UI_PROGRESS.store(progress as isize, Ordering::SeqCst);
                 RUNTIME_UI_PHASE_STARTED_TICK.store(
                     windows_sys::Win32::System::SystemInformation::GetTickCount64(),
@@ -2207,6 +2284,22 @@ impl SessionEndNotifier {
                     0,
                     face.as_ptr(),
                 );
+                let heading_font = CreateFontW(
+                    -scale(18),
+                    0,
+                    0,
+                    0,
+                    FW_SEMIBOLD as i32,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    5,
+                    0,
+                    face.as_ptr(),
+                );
                 let detail_font = CreateFontW(
                     -scale(12),
                     0,
@@ -2234,14 +2327,22 @@ impl SessionEndNotifier {
                 } else {
                     status_font
                 };
+                let heading_font_handle = if heading_font.is_null() {
+                    fallback_font
+                } else {
+                    heading_font
+                };
                 let detail_font_handle = if detail_font.is_null() {
                     fallback_font
                 } else {
                     detail_font
                 };
                 SendMessageW(title, WM_SETFONT, title_font_handle as usize, 1);
+                SendMessageW(version, WM_SETFONT, detail_font_handle as usize, 1);
+                SendMessageW(heading, WM_SETFONT, heading_font_handle as usize, 1);
                 SendMessageW(status, WM_SETFONT, status_font_handle as usize, 1);
                 SendMessageW(detail, WM_SETFONT, detail_font_handle as usize, 1);
+                SendMessageW(step, WM_SETFONT, detail_font_handle as usize, 1);
                 SendMessageW(progress, PBM_SETRANGE32, 0, 100);
                 SendMessageW(
                     progress,
@@ -2259,7 +2360,10 @@ impl SessionEndNotifier {
                 ) == 0
                     || contrast.dwFlags & HCF_HIGHCONTRASTON == 0
                 {
-                    SendMessageW(progress, PBM_SETBARCOLOR, 0, 0x0030C4F4);
+                    SendMessageW(progress, PBM_SETBARCOLOR, 0, 0x002DC6F4);
+                    RUNTIME_UI_HIGH_CONTRAST.store(false, Ordering::SeqCst);
+                } else {
+                    RUNTIME_UI_HIGH_CONTRAST.store(true, Ordering::SeqCst);
                 }
                 SetTimer(window, 1, 1000, None);
 
@@ -2285,9 +2389,9 @@ impl SessionEndNotifier {
                         std::ptr::null(),
                         WS_CHILD | WS_VISIBLE | SS_ICON,
                         scale(24),
-                        scale(28),
-                        scale(48),
-                        scale(48),
+                        scale(20),
+                        scale(40),
+                        scale(40),
                         window,
                         std::ptr::null_mut(),
                         instance,
@@ -2336,14 +2440,17 @@ impl SessionEndNotifier {
                 }
                 let _ = Shell_NotifyIconW(windows_sys::Win32::UI::Shell::NIM_DELETE, &tray);
                 RUNTIME_UI_STATUS.store(0, Ordering::SeqCst);
+                RUNTIME_UI_TITLE.store(0, Ordering::SeqCst);
+                RUNTIME_UI_HEADING.store(0, Ordering::SeqCst);
                 RUNTIME_UI_DETAIL.store(0, Ordering::SeqCst);
+                RUNTIME_UI_STEP.store(0, Ordering::SeqCst);
                 RUNTIME_UI_PROGRESS.store(0, Ordering::SeqCst);
                 RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
                 if !icon.is_null() {
                     let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(icon);
                 }
-                for font in [title_font, status_font, detail_font] {
+                for font in [title_font, heading_font, status_font, detail_font] {
                     if !font.is_null() {
                         DeleteObject(font as _);
                     }
@@ -2412,12 +2519,16 @@ unsafe extern "system" fn session_end_window_proc(
     lparam: windows_sys::Win32::Foundation::LPARAM,
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetSysColorBrush, SetBkMode, SetTextColor, COLOR_WINDOW, TRANSPARENT,
+    };
     use windows_sys::Win32::UI::Controls::PBM_SETPOS;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, GetCursorPos, PostMessageW,
-        SendMessageW, SetForegroundWindow, SetWindowTextW, ShowWindow, TrackPopupMenu,
+        SendMessageW, SetForegroundWindow, SetTimer, SetWindowTextW, ShowWindow, TrackPopupMenu,
         MF_SEPARATOR, MF_STRING, SW_HIDE, SW_SHOW, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE,
-        WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER,
+        WM_CTLCOLORSTATIC, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP,
+        WM_TIMER,
     };
     match message {
         WM_QUERYENDSESSION => 1,
@@ -2433,6 +2544,21 @@ unsafe extern "system" fn session_end_window_proc(
         WM_CLOSE => {
             ShowWindow(window, SW_HIDE);
             0
+        }
+        WM_CTLCOLORSTATIC if !RUNTIME_UI_HIGH_CONTRAST.load(Ordering::SeqCst) => {
+            let control = lparam;
+            let title = RUNTIME_UI_TITLE.load(Ordering::SeqCst);
+            let heading = RUNTIME_UI_HEADING.load(Ordering::SeqCst);
+            SetBkMode(wparam as _, TRANSPARENT as i32);
+            SetTextColor(
+                wparam as _,
+                if control == title || control == heading {
+                    0x001f2729
+                } else {
+                    0x00576d70
+                },
+            );
+            GetSysColorBrush(COLOR_WINDOW) as isize
         }
         RUNTIME_UI_PHASE_MESSAGE => {
             let phase = wparam;
@@ -2451,6 +2577,11 @@ unsafe extern "system" fn session_end_window_proc(
             if !detail.is_null() {
                 SetWindowTextW(detail, runtime_ui_elapsed_text(0).as_ptr());
             }
+            let step =
+                RUNTIME_UI_STEP.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+            if !step.is_null() {
+                SetWindowTextW(step, runtime_ui_step_text(phase).as_ptr());
+            }
             let progress =
                 RUNTIME_UI_PROGRESS.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
             if !progress.is_null() {
@@ -2463,13 +2594,18 @@ unsafe extern "system" fn session_end_window_proc(
             }
             if phase == RUNTIME_UI_PHASE_READY {
                 RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
-                ShowWindow(window, SW_HIDE);
+                SetTimer(window, 2, 300, None);
             } else {
                 RUNTIME_HEALTHY.store(false, Ordering::SeqCst);
                 if phase == RUNTIME_UI_PHASE_EXITING {
                     show_runtime_ui_window(window, true);
                 }
             }
+            0
+        }
+        WM_TIMER if wparam == 2 => {
+            windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(window, 2);
+            ShowWindow(window, SW_HIDE);
             0
         }
         WM_TIMER if wparam == 1 => {
@@ -2538,10 +2674,16 @@ unsafe extern "system" fn session_end_window_proc(
                         let _ = thread::Builder::new()
                             .name("ngt-tray-exit".to_owned())
                             .spawn(|| {
-                                if let Ok(root) = stable_root() {
-                                    close_managed_browser_window(&root);
+                                let closed = stable_root()
+                                    .map(|root| close_managed_browser_window(&root))
+                                    .unwrap_or(false);
+                                if closed {
+                                    let _ = request_runtime_stop();
+                                } else {
+                                    TRAY_EXIT_REQUESTED.store(false, Ordering::SeqCst);
+                                    update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
+                                    show_browser_close_blocked();
                                 }
-                                let _ = request_runtime_stop();
                             });
                     }
                     _ => {}
@@ -2551,6 +2693,31 @@ unsafe extern "system" fn session_end_window_proc(
             0
         }
         _ => DefWindowProcW(window, message, wparam, lparam),
+    }
+}
+
+#[cfg(windows)]
+fn show_browser_close_blocked() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND,
+    };
+    let title = runtime_ui_text(
+        "NGTManager 未退出",
+        "NGTManager non è stato chiuso",
+        "NGTManager is still running",
+    );
+    let message = runtime_ui_text(
+        "应用窗口未能安全关闭。后台和业务数据仍在运行，请关闭窗口后从托盘重试。",
+        "La finestra dell'app non si è chiusa in modo sicuro. NGTManager e i dati restano attivi; chiudi la finestra e riprova dal menu dell'area di notifica.",
+        "The application window did not close safely. NGTManager and its data remain running; close the window and retry from the tray menu.",
+    );
+    unsafe {
+        MessageBoxW(
+            RUNTIME_UI_WINDOW.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND,
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONWARNING | MB_SETFOREGROUND,
+        );
     }
 }
 
@@ -2611,6 +2778,29 @@ fn runtime_ui_phase_progress(phase: usize) -> usize {
         RUNTIME_UI_PHASE_READY => 100,
         _ => 10,
     }
+}
+
+#[cfg(windows)]
+fn runtime_ui_step_text(phase: usize) -> Vec<u16> {
+    let step = match phase {
+        RUNTIME_UI_PHASE_CHECKING => 1,
+        RUNTIME_UI_PHASE_DATABASE => 2,
+        RUNTIME_UI_PHASE_APPLICATION => 3,
+        RUNTIME_UI_PHASE_HEALTH | RUNTIME_UI_PHASE_READY => 4,
+        _ => 0,
+    };
+    if step == 0 {
+        return runtime_ui_text(
+            "安全退出进行中",
+            "Chiusura sicura in corso",
+            "Safe exit in progress",
+        );
+    }
+    runtime_ui_text(
+        &format!("步骤 {step}/4"),
+        &format!("Passaggio {step}/4"),
+        &format!("Step {step}/4"),
+    )
 }
 
 #[cfg(windows)]
@@ -4333,82 +4523,214 @@ fn pg_ctl_status(exit_code: Option<i32>) -> Result<bool, String> {
 }
 
 #[cfg(windows)]
+fn owned_autostart_command(command: &str, root: &Path, legacy_root: &Path) -> bool {
+    let normalize = |value: &str| value.replace('/', "\\").to_ascii_lowercase();
+    let mut command = normalize(command);
+    for (variable, value) in [
+        ("%localappdata%", std::env::var("LOCALAPPDATA").ok()),
+        ("%windir%", std::env::var("WINDIR").ok()),
+    ] {
+        if let Some(value) = value {
+            command = command.replace(variable, &normalize(&value));
+        }
+    }
+    let command = command.trim();
+    let (program, arguments) = if let Some(quoted) = command.strip_prefix('"') {
+        let Some(end) = quoted.find('"') else {
+            return false;
+        };
+        (&quoted[..end], quoted[end + 1..].trim())
+    } else {
+        command
+            .split_once(char::is_whitespace)
+            .map_or((command, ""), |(program, arguments)| {
+                (program, arguments.trim())
+            })
+    };
+    let current = normalize(&root.join("tools/NGTManager.exe").to_string_lossy());
+    if program == current {
+        return true;
+    }
+    let legacy = normalize(
+        &legacy_root
+            .join("service/windows-studio-launcher.vbs")
+            .to_string_lossy(),
+    );
+    program == legacy
+        || (Path::new(program)
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("wscript.exe"))
+            && (arguments.trim_matches('"') == legacy
+                || arguments.contains(&format!("\"{legacy}\""))))
+}
+
+#[cfg(windows)]
+fn remove_owned_startup_shortcuts(
+    root: &Path,
+    legacy_root: &Path,
+    blocked: &mut [bool; 2],
+) -> Result<(), String> {
+    let folders = [
+        std::env::var_os("APPDATA")
+            .map(|base| PathBuf::from(base).join("Microsoft/Windows/Start Menu/Programs/Startup")),
+        std::env::var_os("ProgramData")
+            .map(|base| PathBuf::from(base).join("Microsoft/Windows/Start Menu/Programs/Startup")),
+    ];
+    for folder in folders.into_iter().flatten() {
+        for (index, name) in ["NGTManager", "NGT Management System"].iter().enumerate() {
+            let shortcut = folder.join(format!("{name}.lnk"));
+            if !shortcut.is_file() {
+                continue;
+            }
+            let mut command = Command::new("powershell.exe");
+            command
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$OutputEncoding=[Text.UTF8Encoding]::new($false);$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:NGT_SHORTCUT_PATH);[Console]::Write('\"'+$s.TargetPath+'\" '+$s.Arguments)",
+                ])
+                .env("NGT_SHORTCUT_PATH", &shortcut)
+                .stdin(Stdio::null());
+            hide_console(&mut command);
+            let output = command.output().map_err(|error| {
+                format!("Unable to inspect an NGTManager startup shortcut: {error}")
+            })?;
+            if output.status.success()
+                && owned_autostart_command(
+                    &String::from_utf8_lossy(&output.stdout),
+                    root,
+                    legacy_root,
+                )
+            {
+                fs::remove_file(&shortcut).map_err(|error| {
+                    format!("Unable to remove an NGTManager startup shortcut: {error}")
+                })?;
+            } else {
+                blocked[index] = true;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 fn remove_legacy_autostart(root: &Path) -> Result<(), String> {
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
-        KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
+        KEY_QUERY_VALUE, KEY_SET_VALUE, REG_EXPAND_SZ, REG_SZ,
     };
     let wide = |value: &str| value.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
-    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-    let mut key: HKEY = std::ptr::null_mut();
-    let status = unsafe {
-        RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            subkey.as_ptr(),
-            0,
-            KEY_QUERY_VALUE | KEY_SET_VALUE,
-            &mut key,
-        )
-    };
-    if status == 2 {
-        let legacy_root = root.parent().unwrap_or(root).join("NGT");
-        return remove_legacy_startup_task(&legacy_root);
-    }
-    if status != 0 {
-        return Err(format!(
-            "Unable to open startup registration (os error {status})."
-        ));
-    }
-    let current = format!("\"{}\" run", root.join("tools/NGTManager.exe").display());
     let legacy_root = root.parent().unwrap_or(root).join("NGT");
-    let windows = std::env::var_os("WINDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-    let legacy = format!(
-        "\"{}\" //B //Nologo \"{}\"",
-        windows.join("System32/wscript.exe").display(),
-        legacy_root
-            .join("service/windows-studio-launcher.vbs")
-            .display()
-    );
-    let mut failure = 0;
-    for (name, expected) in [("NGTManager", current), ("NGT Management System", legacy)] {
-        let name = wide(name);
-        let mut actual = vec![0u16; 1024];
-        let mut size = (actual.len() * 2) as u32;
-        let mut kind = 0;
+    let names = ["NGTManager", "NGT Management System"];
+    let mut blocked = [false; 2];
+    for subkey in [
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
+    ] {
+        let subkey = wide(subkey);
+        let mut key: HKEY = std::ptr::null_mut();
         let status = unsafe {
-            RegQueryValueExW(
-                key,
-                name.as_ptr(),
-                std::ptr::null(),
-                &mut kind,
-                actual.as_mut_ptr().cast(),
-                &mut size,
+            RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                KEY_QUERY_VALUE | KEY_SET_VALUE,
+                &mut key,
             )
         };
-        if status == 0 && kind == REG_SZ {
-            actual.truncate((size as usize / 2).min(actual.len()));
-            let actual = String::from_utf16_lossy(&actual)
-                .trim_end_matches('\0')
-                .to_owned();
-            if actual.eq_ignore_ascii_case(&expected) {
-                let deleted = unsafe { RegDeleteValueW(key, name.as_ptr()) };
-                if deleted != 0 && deleted != 2 {
-                    failure = deleted;
-                    break;
-                }
-            }
-        } else if status != 2 && status != 234 {
-            failure = status;
-            break;
+        if status == 2 {
+            continue;
         }
+        if status != 0 {
+            return Err(format!(
+                "Unable to open startup registration (os error {status})."
+            ));
+        }
+        for (index, name) in names.iter().enumerate() {
+            let name_wide = wide(name);
+            let mut actual = vec![0u16; 32_768];
+            let mut size = (actual.len() * 2) as u32;
+            let mut kind = 0;
+            let status = unsafe {
+                RegQueryValueExW(
+                    key,
+                    name_wide.as_ptr(),
+                    std::ptr::null(),
+                    &mut kind,
+                    actual.as_mut_ptr().cast(),
+                    &mut size,
+                )
+            };
+            if status == 0 && (kind == REG_SZ || kind == REG_EXPAND_SZ) {
+                actual.truncate((size as usize / 2).min(actual.len()));
+                let actual = String::from_utf16_lossy(&actual)
+                    .trim_end_matches('\0')
+                    .to_owned();
+                if owned_autostart_command(&actual, root, &legacy_root) {
+                    let deleted = unsafe { RegDeleteValueW(key, name_wide.as_ptr()) };
+                    if deleted != 0 && deleted != 2 {
+                        unsafe { RegCloseKey(key) };
+                        return Err(format!(
+                            "Unable to remove startup registration (os error {deleted})."
+                        ));
+                    }
+                } else {
+                    blocked[index] = true;
+                }
+            } else if status != 2 {
+                blocked[index] = true;
+            }
+        }
+        unsafe { RegCloseKey(key) };
     }
-    unsafe { RegCloseKey(key) };
-    if failure != 0 {
-        return Err(format!(
-            "Unable to remove startup registration (os error {failure})."
-        ));
+
+    remove_owned_startup_shortcuts(root, &legacy_root, &mut blocked)?;
+
+    for subkey in [
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run32",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder",
+    ] {
+        let subkey = wide(subkey);
+        let mut key: HKEY = std::ptr::null_mut();
+        let status = unsafe {
+            RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                KEY_SET_VALUE,
+                &mut key,
+            )
+        };
+        if status == 2 {
+            continue;
+        }
+        if status != 0 {
+            return Err(format!(
+                "Unable to open startup approval metadata (os error {status})."
+            ));
+        }
+        for (index, name) in names.iter().enumerate() {
+            if blocked[index] {
+                continue;
+            }
+            let deleted = unsafe { RegDeleteValueW(key, wide(name).as_ptr()) };
+            if deleted != 0 && deleted != 2 {
+                unsafe { RegCloseKey(key) };
+                return Err(format!(
+                    "Unable to remove startup approval metadata (os error {deleted})."
+                ));
+            }
+            let deleted = unsafe { RegDeleteValueW(key, wide(&format!("{name}.lnk")).as_ptr()) };
+            if deleted != 0 && deleted != 2 {
+                unsafe { RegCloseKey(key) };
+                return Err(format!(
+                    "Unable to remove startup approval metadata (os error {deleted})."
+                ));
+            }
+        }
+        unsafe { RegCloseKey(key) };
     }
     remove_legacy_startup_task(&legacy_root)?;
     Ok(())
@@ -6800,6 +7122,9 @@ fn run_supervisor(
     use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::Threading::WaitForSingleObject;
     let root = stable_root()?;
+    if let Err(error) = remove_legacy_autostart(&root) {
+        log_line(&root, &format!("Deferred legacy startup cleanup: {error}"));
+    }
     let stop = create_stop_event()?;
     WINDOWS_SESSION_END.store(false, Ordering::SeqCst);
     WINDOWS_SESSION_END_TICK.store(0, Ordering::SeqCst);
@@ -6881,7 +7206,6 @@ fn run_supervisor(
                 },
             );
         }
-        update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
         if should_open_browser {
             if let Err(error) = open_browser() {
                 let code = failure_code(&error);
@@ -6898,6 +7222,7 @@ fn run_supervisor(
             should_open_browser = false;
             drop(open_lock.take());
         }
+        update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
         loop {
             if unsafe { WaitForSingleObject(stop.0, 250) } == WAIT_OBJECT_0 {
                 let shutdown_started = Instant::now();
@@ -7136,9 +7461,9 @@ fn top_level_windows() -> Vec<isize> {
 }
 
 #[cfg(windows)]
-fn browser_window_process_path(window: isize) -> Option<PathBuf> {
+fn browser_window_process_identity(window: isize) -> Option<(PathBuf, u32, u64)> {
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     let mut process_id = 0u32;
     unsafe {
@@ -7156,10 +7481,26 @@ fn browser_window_process_path(window: isize) -> Option<PathBuf> {
     }
     let mut buffer = vec![0u16; 32_768];
     let mut length = buffer.len() as u32;
-    let succeeded =
-        unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) } != 0;
+    let empty_time = || windows_sys::Win32::Foundation::FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut created = empty_time();
+    let mut exited = empty_time();
+    let mut kernel = empty_time();
+    let mut user = empty_time();
+    let succeeded = unsafe {
+        QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) != 0
+            && GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) != 0
+    };
     unsafe { windows_sys::Win32::Foundation::CloseHandle(process) };
-    succeeded.then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
+    succeeded.then(|| {
+        (
+            PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])),
+            process_id,
+            ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64,
+        )
+    })
 }
 
 #[cfg(windows)]
@@ -7170,6 +7511,16 @@ fn is_managed_browser_window(window: isize) -> bool {
                 window as windows_sys::Win32::Foundation::HWND,
             )
         } == 0
+    {
+        return false;
+    }
+    let Some((_, process_id, created)) = browser_window_process_identity(window) else {
+        return false;
+    };
+    let expected_process_id = MANAGED_BROWSER_PROCESS_ID.load(Ordering::SeqCst) as u32;
+    let expected_created = MANAGED_BROWSER_PROCESS_CREATED.load(Ordering::SeqCst);
+    if (expected_process_id != 0 && process_id != expected_process_id)
+        || (expected_created != 0 && created != expected_created)
     {
         return false;
     }
@@ -7193,7 +7544,11 @@ fn find_managed_browser_window() -> Option<isize> {
         .into_iter()
         .find(|window| is_managed_browser_window(*window));
     MANAGED_BROWSER_WINDOW.store(found.unwrap_or(0), Ordering::SeqCst);
-    if found.is_some() {
+    if let Some(found_window) = found {
+        if let Some((_, process_id, created)) = browser_window_process_identity(found_window) {
+            MANAGED_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
+            MANAGED_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
+        }
         record_browser_event("manager.browser.window.adopted", "info", "none");
     }
     found
@@ -7222,11 +7577,11 @@ fn show_managed_browser_window(window: isize) -> bool {
 fn browser_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     for (variable, suffix) in [
-        ("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"),
-        ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
         ("ProgramFiles", "Google/Chrome/Application/chrome.exe"),
         ("ProgramFiles(x86)", "Google/Chrome/Application/chrome.exe"),
         ("LOCALAPPDATA", "Google/Chrome/Application/chrome.exe"),
+        ("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"),
+        ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
     ] {
         if let Some(base) = std::env::var_os(variable) {
             let path = PathBuf::from(base).join(suffix);
@@ -7239,18 +7594,33 @@ fn browser_candidates() -> Vec<PathBuf> {
 }
 
 #[cfg(windows)]
-fn launch_managed_browser() -> Result<Option<isize>, String> {
+fn browser_window_title(window: isize) -> String {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
+    let window = window as windows_sys::Win32::Foundation::HWND;
+    let length = unsafe { GetWindowTextLengthW(window) };
+    if length <= 0 {
+        return String::new();
+    }
+    let mut buffer = vec![0u16; length as usize + 1];
+    let copied = unsafe { GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
+    String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
+}
+
+#[cfg(windows)]
+enum BrowserLaunchOutcome {
+    Managed(isize),
+    LaunchedUnconfirmed,
+}
+
+#[cfg(windows)]
+fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AllowSetForegroundWindow, IsWindowVisible, SetPropW,
     };
     let before = top_level_windows().into_iter().collect::<BTreeSet<_>>();
     for executable in browser_candidates() {
         let child = match Command::new(&executable)
-            .args([
-                "--app=http://127.0.0.1:3000",
-                "--new-window",
-                "--no-first-run",
-            ])
+            .args(["--app=http://127.0.0.1:3000", "--no-first-run"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -7260,22 +7630,24 @@ fn launch_managed_browser() -> Result<Option<isize>, String> {
             Err(_) => continue,
         };
         unsafe { AllowSetForegroundWindow(child.id()) };
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
-                return Ok(None);
+                return Ok(BrowserLaunchOutcome::LaunchedUnconfirmed);
             }
             for window in top_level_windows() {
+                let identity = browser_window_process_identity(window);
                 if before.contains(&window)
                     || unsafe { IsWindowVisible(window as windows_sys::Win32::Foundation::HWND) }
                         == 0
-                    || browser_window_process_path(window)
-                        .as_ref()
-                        .is_none_or(|path| {
-                            !path
-                                .to_string_lossy()
-                                .eq_ignore_ascii_case(&executable.to_string_lossy())
-                        })
+                    || identity.as_ref().is_none_or(|(path, _, _)| {
+                        !path
+                            .to_string_lossy()
+                            .eq_ignore_ascii_case(&executable.to_string_lossy())
+                    })
+                    || !browser_window_title(window)
+                        .to_ascii_lowercase()
+                        .contains("ngtmanager")
                 {
                     continue;
                 }
@@ -7288,7 +7660,10 @@ fn launch_managed_browser() -> Result<Option<isize>, String> {
                     )
                 } != 0
                 {
+                    let (_, process_id, created) = identity.expect("identity was checked above");
                     MANAGED_BROWSER_WINDOW.store(window, Ordering::SeqCst);
+                    MANAGED_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
+                    MANAGED_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
                     if !show_managed_browser_window(window) {
                         record_browser_event(
                             "manager.browser.window.foreground_denied",
@@ -7296,13 +7671,19 @@ fn launch_managed_browser() -> Result<Option<isize>, String> {
                             "BROWSER_WINDOW_FOREGROUND_DENIED",
                         );
                     }
-                    return Ok(Some(window));
+                    return Ok(BrowserLaunchOutcome::Managed(window));
                 }
             }
             thread::sleep(Duration::from_millis(100));
         }
+        record_browser_event(
+            "manager.browser.window.unmanaged",
+            "warning",
+            "BROWSER_WINDOW_IDENTIFICATION_TIMEOUT",
+        );
+        return Ok(BrowserLaunchOutcome::LaunchedUnconfirmed);
     }
-    Ok(None)
+    Err("Google Chrome or Microsoft Edge is required to open NGTManager.".to_owned())
 }
 
 #[cfg(windows)]
@@ -7327,51 +7708,50 @@ fn open_browser() -> Result<(), String> {
     }
     let result = launch_managed_browser();
     BROWSER_OPENING.store(false, Ordering::SeqCst);
-    if result?.is_some() {
-        record_browser_event("manager.browser.window.created", "info", "none");
-        return Ok(());
+    match result? {
+        BrowserLaunchOutcome::Managed(window) => {
+            let _ = window;
+            record_browser_event("manager.browser.window.created", "info", "none");
+        }
+        BrowserLaunchOutcome::LaunchedUnconfirmed => {}
     }
-    if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-    record_browser_event(
-        "manager.browser.window.unmanaged",
-        "warning",
-        "BROWSER_WINDOW_UNMANAGED",
-    );
-    let mut command = Command::new("cmd.exe");
-    command
-        .args(["/C", "start", "", "http://127.0.0.1:3000"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    hide_console(&mut command);
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("Unable to open NGTManager in the browser: {error}"))
+    Ok(())
 }
 
 #[cfg(windows)]
-fn close_managed_browser_window(root: &Path) {
+fn close_managed_browser_window(root: &Path) -> bool {
     let Some(window) = find_managed_browser_window() else {
-        return;
+        return true;
     };
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
+    let request_close = || unsafe {
+        let mut result = 0usize;
+        windows_sys::Win32::UI::WindowsAndMessaging::SendMessageTimeoutW(
             window as windows_sys::Win32::Foundation::HWND,
             windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE,
             0,
             0,
-        );
-    }
-    let deadline = Instant::now() + Duration::from_secs(2);
+            windows_sys::Win32::UI::WindowsAndMessaging::SMTO_ABORTIFHUNG,
+            2_000,
+            &mut result,
+        )
+    };
+    request_close();
+    let deadline = Instant::now() + Duration::from_millis(2_500);
     while Instant::now() < deadline && is_managed_browser_window(window) {
         thread::sleep(Duration::from_millis(50));
+    }
+    if is_managed_browser_window(window) {
+        request_close();
+        let deadline = Instant::now() + Duration::from_millis(2_500);
+        while Instant::now() < deadline && is_managed_browser_window(window) {
+            thread::sleep(Duration::from_millis(50));
+        }
     }
     let closed = !is_managed_browser_window(window);
     if closed {
         MANAGED_BROWSER_WINDOW.store(0, Ordering::SeqCst);
+        MANAGED_BROWSER_PROCESS_ID.store(0, Ordering::SeqCst);
+        MANAGED_BROWSER_PROCESS_CREATED.store(0, Ordering::SeqCst);
     }
     if let Some(logger) = manager_diagnostics(root) {
         logger.record(
@@ -7390,6 +7770,7 @@ fn close_managed_browser_window(root: &Path) {
             },
         );
     }
+    closed
 }
 
 #[cfg(windows)]
@@ -7631,7 +8012,12 @@ fn run(args: &[String]) -> Result<String, String> {
             let _lock = lock_state(&root)?;
             recover_transaction(&root)?;
             ensure_update_operation(&root, command, None)?;
-            close_managed_browser_window(&root);
+            if !close_managed_browser_window(&root) {
+                return Err(
+                    "The NGTManager application window did not close; the runtime was left running."
+                        .to_owned(),
+                );
+            }
             stop_supervisor(&root)?;
             let mut transaction = create_transaction(
                 &root,
@@ -8085,6 +8471,33 @@ mod tests {
             utf16.extend_from_slice(&unit.to_le_bytes());
         }
         assert_eq!(decode_windows_command_output(&utf16), xml);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn login_start_ownership_accepts_only_product_paths() {
+        let root = PathBuf::from(r"C:\Users\Test\AppData\Local\NGTManager");
+        let legacy = PathBuf::from(r"C:\Users\Test\AppData\Local\NGT");
+        assert!(owned_autostart_command(
+            r#""C:\Users\Test\AppData\Local\NGTManager\tools\NGTManager.exe" run"#,
+            &root,
+            &legacy,
+        ));
+        assert!(owned_autostart_command(
+            r#"wscript.exe //B //Nologo "C:\Users\Test\AppData\Local\NGT\service\windows-studio-launcher.vbs""#,
+            &root,
+            &legacy,
+        ));
+        assert!(!owned_autostart_command(
+            r#"C:\Other\evil.exe "C:\Users\Test\AppData\Local\NGTManager\tools\NGTManager.exe""#,
+            &root,
+            &legacy,
+        ));
+        assert!(!owned_autostart_command(
+            r#"C:\Other\NGTManager.exe"#,
+            &root,
+            &legacy,
+        ));
     }
 
     #[test]

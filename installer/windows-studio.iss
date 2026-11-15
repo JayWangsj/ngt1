@@ -47,6 +47,8 @@ UninstallDisplayIcon={localappdata}\NGTManager\assets\ngt-studio.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
+Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [Files]
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
@@ -95,6 +97,10 @@ var
   PostInstallReached: Boolean;
   CancelWithoutPrompt: Boolean;
 
+const
+  PBM_SETBARCOLOR = $0409;
+  PBM_SETBKCOLOR = $2001;
+
 function GetTickCount64: Int64;
   external 'GetTickCount64@kernel32.dll stdcall';
 
@@ -117,6 +123,44 @@ function TranslateMessage(const lpMsg: TWindowsMessage): BOOL;
 
 function DispatchMessage(const lpMsg: TWindowsMessage): Longint;
   external 'DispatchMessageW@user32.dll stdcall';
+
+function SendMessage(hWnd: HWND; Msg: UINT; wParam: LongWord;
+  lParam: LongInt): LongInt;
+  external 'SendMessageW@user32.dll stdcall';
+
+function UiText(const Chinese, Italian, English: String): String;
+begin
+  if ActiveLanguage = 'italian' then
+    Result := Italian
+  else if ActiveLanguage = 'chinesesimplified' then
+    Result := Chinese
+  else
+    Result := English;
+end;
+
+procedure ApplyDesktopTheme;
+begin
+  WizardForm.Color := clWhite;
+  WizardForm.InnerPage.Color := clWhite;
+  WizardForm.MainPanel.Color := $00F7FAFB;
+  WizardForm.PageNameLabel.Font.Name := 'Arial';
+  WizardForm.PageNameLabel.Font.Size := 18;
+  WizardForm.PageNameLabel.Font.Style := [fsBold];
+  WizardForm.PageNameLabel.Font.Color := $001F2729;
+  WizardForm.PageDescriptionLabel.Font.Name := 'Arial';
+  WizardForm.PageDescriptionLabel.Font.Size := 11;
+  WizardForm.PageDescriptionLabel.Font.Color := $00576D70;
+  WizardForm.StatusLabel.Font.Name := 'Arial';
+  WizardForm.StatusLabel.Font.Size := 14;
+  WizardForm.StatusLabel.Font.Style := [fsBold];
+  WizardForm.StatusLabel.Font.Color := $001F2729;
+  WizardForm.FilenameLabel.Font.Name := 'Arial';
+  WizardForm.FilenameLabel.Font.Size := 10;
+  WizardForm.FilenameLabel.Font.Color := $00576D70;
+  WizardForm.ProgressGauge.Height := ScaleY(8);
+  SendMessage(WizardForm.ProgressGauge.Handle, PBM_SETBARCOLOR, 0, $002DC6F4);
+  SendMessage(WizardForm.ProgressGauge.Handle, PBM_SETBKCOLOR, 0, $00F7FAFB);
+end;
 
 function SafeOperationId(const Value: String): Boolean;
 var
@@ -146,37 +190,38 @@ begin
       ExpandConstant('{tmp}') +
       ParamStr(0) + IntToStr(Random(2147483647))), 1, 32);
   WizardForm.BorderIcons := [biSystemMenu, biMinimize];
+  ApplyDesktopTheme;
 end;
 
 function PhaseDescription(const Phase: String): String;
 begin
-  if Phase = 'environment_check' then Result := 'Checking Windows and required components'
-  else if Phase = 'windows_compatibility_check' then Result := 'Checking Windows 10 compatibility'
-  else if Phase = 'runtime_state_preflight' then Result := 'Checking the previous NGTManager session'
-  else if Phase = 'package_source_verification' then Result := 'Verifying the offline package'
-  else if Phase = 'runtime_dependency_check' then Result := 'Checking bundled runtime components'
-  else if Phase = 'installation_path_check' then Result := 'Checking access to the installation folders'
-  else if Phase = 'disk_usage_scan' then Result := 'Measuring package and existing data'
-  else if Phase = 'disk_space_check' then Result := 'Checking required disk space'
-  else if Phase = 'operation_lock' then Result := 'Checking the existing installation'
-  else if Phase = 'recovery' then Result := 'Recovering or safely stopping an earlier operation'
-  else if Phase = 'deploy_candidate' then Result := 'Verifying and copying program files'
-  else if Phase = 'source_copy_verification' then Result := 'Rechecking package files before copying'
-  else if Phase = 'candidate_file_copy' then Result := 'Copying program files'
-  else if Phase = 'candidate_verification' then Result := 'Finishing program file deployment'
-  else if Phase = 'stop_runtime' then Result := 'Waiting for NGTManager to stop safely'
-  else if Phase = 'backup_database' then Result := 'Backing up and verifying business data'
-  else if Phase = 'recover_legacy_database' then Result := 'Recovering the previous database safely'
-  else if Phase = 'initialize_database' then Result := 'Preparing the first database'
-  else if Phase = 'database_ready' then Result := 'Starting the database'
-  else if Phase = 'database_migration' then Result := 'Updating the database structure'
-  else if Phase = 'application_health' then Result := 'Checking that NGTManager starts correctly'
-  else if Phase = 'commit_preparation' then Result := 'Checking the final safe cancellation point'
-  else if Phase = 'commit_release' then Result := 'Finishing installation'
-  else if Phase = 'complete' then Result := 'Installation completed'
-  else if Phase = 'failed' then Result := 'Installation stopped; restoring the previous state'
-  else if Phase = 'recovery_failed' then Result := 'Recovery needs attention; data has been preserved'
-  else Result := 'Preparing NGTManager';
+  if Phase = 'environment_check' then Result := UiText('正在检查 Windows 和必要组件', 'Verifica di Windows e dei componenti richiesti', 'Checking Windows and required components')
+  else if Phase = 'windows_compatibility_check' then Result := UiText('正在检查 Windows 兼容性', 'Verifica della compatibilità di Windows', 'Checking Windows compatibility')
+  else if Phase = 'runtime_state_preflight' then Result := UiText('正在检查上次运行状态', 'Verifica della sessione precedente', 'Checking the previous NGTManager session')
+  else if Phase = 'package_source_verification' then Result := UiText('正在校验离线安装包', 'Verifica del pacchetto offline', 'Verifying the offline package')
+  else if Phase = 'runtime_dependency_check' then Result := UiText('正在检查运行组件', 'Verifica dei componenti inclusi', 'Checking bundled runtime components')
+  else if Phase = 'installation_path_check' then Result := UiText('正在检查安装目录', 'Verifica delle cartelle di installazione', 'Checking the installation folders')
+  else if Phase = 'disk_usage_scan' then Result := UiText('正在计算所需空间', 'Calcolo dello spazio necessario', 'Measuring required space')
+  else if Phase = 'disk_space_check' then Result := UiText('正在检查磁盘空间', 'Verifica dello spazio su disco', 'Checking required disk space')
+  else if Phase = 'operation_lock' then Result := UiText('正在检查现有安装', 'Verifica dell''installazione esistente', 'Checking the existing installation')
+  else if Phase = 'recovery' then Result := UiText('正在安全恢复上次操作', 'Ripristino sicuro dell''operazione precedente', 'Recovering the previous operation safely')
+  else if Phase = 'deploy_candidate' then Result := UiText('正在部署程序文件', 'Distribuzione dei file del programma', 'Deploying program files')
+  else if Phase = 'source_copy_verification' then Result := UiText('正在复核安装包文件', 'Verifica dei file del pacchetto', 'Rechecking package files')
+  else if Phase = 'candidate_file_copy' then Result := UiText('正在复制程序文件', 'Copia dei file del programma', 'Copying program files')
+  else if Phase = 'candidate_verification' then Result := UiText('正在完成程序文件部署', 'Completamento della distribuzione', 'Finishing program file deployment')
+  else if Phase = 'stop_runtime' then Result := UiText('正在安全停止 NGTManager', 'Arresto sicuro di NGTManager', 'Stopping NGTManager safely')
+  else if Phase = 'backup_database' then Result := UiText('正在备份并校验业务数据', 'Backup e verifica dei dati', 'Backing up and verifying business data')
+  else if Phase = 'recover_legacy_database' then Result := UiText('正在安全恢复原数据库', 'Ripristino sicuro del database precedente', 'Recovering the previous database safely')
+  else if Phase = 'initialize_database' then Result := UiText('正在准备数据库', 'Preparazione del database', 'Preparing the database')
+  else if Phase = 'database_ready' then Result := UiText('正在启动数据库', 'Avvio del database', 'Starting the database')
+  else if Phase = 'database_migration' then Result := UiText('正在更新数据库结构', 'Aggiornamento della struttura dati', 'Updating the database structure')
+  else if Phase = 'application_health' then Result := UiText('正在检查 NGTManager 是否可用', 'Verifica dell''avvio di NGTManager', 'Checking that NGTManager starts correctly')
+  else if Phase = 'commit_preparation' then Result := UiText('正在检查最终安全状态', 'Verifica dello stato finale', 'Checking the final safe state')
+  else if Phase = 'commit_release' then Result := UiText('正在完成安装', 'Completamento dell''installazione', 'Finishing installation')
+  else if Phase = 'complete' then Result := UiText('安装已完成', 'Installazione completata', 'Installation completed')
+  else if Phase = 'failed' then Result := UiText('安装已停止，正在恢复原状态', 'Installazione interrotta; ripristino in corso', 'Installation stopped; restoring the previous state')
+  else if Phase = 'recovery_failed' then Result := UiText('恢复需要处理，数据已保留', 'Il ripristino richiede attenzione; dati conservati', 'Recovery needs attention; data has been preserved')
+  else Result := UiText('正在准备 NGTManager', 'Preparazione di NGTManager', 'Preparing NGTManager');
 end;
 
 function TakeField(var Value: String): String;

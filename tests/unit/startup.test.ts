@@ -281,7 +281,7 @@ describe("Windows persistent startup", () => {
   it("removes only verified NGTManager login-start registrations", async () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const autostart = manager.slice(
-      manager.indexOf("fn remove_legacy_autostart("),
+      manager.indexOf("fn owned_autostart_command("),
       manager.indexOf(
         "fn read_build_number(",
         manager.indexOf("fn remove_legacy_autostart("),
@@ -290,10 +290,19 @@ describe("Windows persistent startup", () => {
     expect(autostart).toContain(
       "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
     );
+    expect(autostart).toContain(
+      "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\RunOnce",
+    );
+    expect(autostart).toContain("owned_autostart_command");
     expect(autostart).toContain('root.join("tools/NGTManager.exe")');
-    expect(autostart).toContain('("NGT Management System", legacy)');
+    expect(autostart).toContain('"NGT Management System"');
     expect(autostart).toContain("RegQueryValueExW");
     expect(autostart).toContain("RegDeleteValueW");
+    expect(autostart).toContain("StartupApproved\\\\Run");
+    expect(autostart).toContain("StartupApproved\\\\Run32");
+    expect(autostart).toContain("StartupApproved\\\\StartupFolder");
+    expect(autostart).toContain("remove_owned_startup_shortcuts");
+    expect(autostart).toContain("WScript.Shell");
     expect(autostart).toContain(
       'args(["/Query", "/TN", "NGT Management System", "/XML"])',
     );
@@ -302,7 +311,6 @@ describe("Windows persistent startup", () => {
     );
     expect(autostart).toContain('xml.contains("wscript.exe")');
     expect(autostart).toContain("windows-studio-launcher.vbs");
-    expect(autostart).toContain("if status == 2 {\n        let legacy_root");
     expect(autostart).not.toContain("RegSetValueExW");
     expect(autostart).not.toContain('"/Create"');
 
@@ -554,8 +562,22 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("total_bytes");
     expect(manager).toContain("verify_release_for_startup");
     expect(manager).toContain('"--app=http://127.0.0.1:3000"');
+    expect(manager).toContain(
+      '("ProgramFiles", "Google/Chrome/Application/chrome.exe")',
+    );
+    expect(manager).toContain(
+      '("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe")',
+    );
+    expect(manager).not.toContain('"--new-window"');
+    expect(manager).not.toContain('args(["/C", "start"');
+    expect(manager).toContain("SendMessageTimeoutW");
+    expect(manager).toContain("GetProcessTimes");
+    expect(manager).toContain("MANAGED_BROWSER_PROCESS_CREATED");
     expect(manager).toContain("manager.browser.window.close_unconfirmed");
     expect(manager).toContain("runtime_ui_phase_progress");
+    expect(manager).toContain("WM_CTLCOLORSTATIC");
+    expect(manager).toContain("PBS_SMOOTH");
+    expect(manager).toContain("runtime_ui_step_text");
     expect(manager).toContain("installer.phase.completed");
     expect(manager).toContain("installer.phase.failed");
     expect(manager).toContain("installer.install.failed");
@@ -605,7 +627,9 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("WaitForSingleObject(");
     expect(installer).toContain("PeekMessage(");
     expect(installer).toContain("procedure PollManagerProgress");
-    expect(installer).toContain("ProgressTotal := StrToInt64Def(TotalBytes, -1)");
+    expect(installer).toContain(
+      "ProgressTotal := StrToInt64Def(TotalBytes, -1)",
+    );
     expect(installer).toContain("WizardForm.ProgressGauge.Position :=");
     expect(installer).not.toContain("SetTimer(0, 0, 250");
     expect(installer).toContain("GetSpaceOnDisk64");
@@ -808,6 +832,23 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("if WizardSilent then");
     expect(installer).toContain("RaiseException(Failure)");
     expect(installer).toContain("MsgBox(Failure, mbCriticalError, MB_OK)");
+  });
+
+  it("ships fixed Chinese and Italian installer resources with shared brand color", async () => {
+    const [installer, manager, styles, chinese, license] = await Promise.all([
+      readFile("installer/windows-studio.iss", "utf8"),
+      readFile("tools/ngt-updater/src/manager.rs", "utf8"),
+      readFile("src/app/globals.css", "utf8"),
+      readFile("installer/languages/ChineseSimplified.isl", "utf8"),
+      readFile("installer/languages/ChineseSimplified.LICENSE", "utf8"),
+    ]);
+    expect(installer).toContain('Name: "italian"');
+    expect(installer).toContain('Name: "chinesesimplified"');
+    expect(chinese).toContain("[LangOptions]");
+    expect(license).toContain("MIT License");
+    expect(styles).toContain("--action-primary: #f4c62d");
+    expect(installer).toContain("$002DC6F4");
+    expect(manager).toContain("0x002DC6F4");
   });
 
   it("keeps a cold desktop launch in one persistent manager process", async () => {
