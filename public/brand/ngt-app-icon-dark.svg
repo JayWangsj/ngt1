@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 194 194" role="img" aria-labelledby="title desc">
+  <title id="title">NGT</title>
+  <desc id="desc">NGT transparent application icon for dark surfaces</desc>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="49" y="18" width="96" height="158" rx="25" stroke="#ffffff" stroke-width="14"/>
+    <path d="M78 24h38" stroke="#ffffff" stroke-width="10"/>
+    <circle cx="97" cy="151" r="8" fill="#ffffff" stroke="none"/>
+    <path d="M42 132L152 55" stroke="#f4c62d" stroke-width="18"/>
+  </g>
+</svg>

@@ -208,6 +208,8 @@ Copy-Item -LiteralPath "prisma" -Destination (Join-Path $stage "prisma") -Recurs
 $stageAssets = Join-Path $stage "assets"
 New-Item -ItemType Directory -Path $stageAssets -Force | Out-Null
 Copy-Item -LiteralPath "assets\ngt-studio.ico" -Destination $stageAssets -Force
+Copy-Item -LiteralPath "assets\ngt-studio-light.ico" -Destination $stageAssets -Force
+Copy-Item -LiteralPath "assets\ngt-studio-dark.ico" -Destination $stageAssets -Force
 $stageTools = Join-Path $stage "tools"
 New-Item -ItemType Directory -Path $stageTools -Force | Out-Null
 Copy-Item -LiteralPath $updaterBinary -Destination (Join-Path $stageTools "NGTUpdater.exe") -Force

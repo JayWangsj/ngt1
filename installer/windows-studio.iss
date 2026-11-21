@@ -7,6 +7,12 @@
 #ifndef IconPath
   #error IconPath is required
 #endif
+#ifndef IconBitmapPath
+  #error IconBitmapPath is required
+#endif
+#ifndef RailBitmapPath
+  #error RailBitmapPath is required
+#endif
 #ifndef OutputDir
   #error OutputDir is required
 #endif
@@ -51,12 +57,16 @@ Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [Files]
+Source: "{#IconBitmapPath}"; Flags: dontcopy
+Source: "{#RailBitmapPath}"; Flags: dontcopy
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion; AfterInstall: InstallExtractedPackage
 
 [Icons]
-Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
-Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
+Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-light.ico"; Check: ShellUsesLightTheme
+Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-dark.ico"; Check: not ShellUsesLightTheme
+Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-light.ico"; Check: ShellUsesLightTheme
+Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-dark.ico"; Check: not ShellUsesLightTheme
 
 [Run]
 Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "{cm:OpenNGTManager}"; Flags: postinstall nowait skipifsilent
@@ -102,12 +112,31 @@ var
   PostInstallReached: Boolean;
   CancelWithoutPrompt: Boolean;
   InstallCard: TPanel;
+  InstallRail: TPanel;
+  InstallRailBackground: TBitmapImage;
+  InstallMetrics: TPanel;
+  InstallBrandImage: TBitmapImage;
   InstallBrandLabel: TNewStaticText;
   InstallVersionLabel: TNewStaticText;
+  InstallEyebrowLabel: TNewStaticText;
+  InstallStageIconPanel: TPanel;
+  InstallStageIconLabel: TNewStaticText;
+  InstallDescriptionLabel: TNewStaticText;
+  InstallWarningLabel: TNewStaticText;
+  InstallFilesLabel: TNewStaticText;
+  InstallFilesValue: TNewStaticText;
+  InstallTotalLabel: TNewStaticText;
+  InstallTotalValue: TNewStaticText;
+  InstallPhaseLabel: TNewStaticText;
+  InstallPhaseValue: TNewStaticText;
   FailureDetails: TNewMemo;
   BrandProgressTrack: TPanel;
   BrandProgressFill: TPanel;
   FinishCard: TPanel;
+  FinishRail: TPanel;
+  FinishRailBackground: TBitmapImage;
+  FinishBrandImage: TBitmapImage;
+  FinishInfo: TPanel;
   FinishBrandLabel: TNewStaticText;
   FinishVersionLabel: TNewStaticText;
   BrandProgressDeterminate: Boolean;
@@ -162,6 +191,30 @@ begin
     Result := English;
 end;
 
+function ShellUsesLightTheme: Boolean;
+var
+  ThemeValue: Cardinal;
+begin
+  Result := True;
+  if RegQueryDWordValue(HKCU,
+    'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+    'SystemUsesLightTheme', ThemeValue) then
+    Result := ThemeValue <> 0;
+end;
+
+function TwoDigits(Value: Integer): String;
+begin
+  if Value < 10 then
+    Result := '0' + IntToStr(Value)
+  else
+    Result := IntToStr(Value);
+end;
+
+function ElapsedText(Seconds: Integer): String;
+begin
+  Result := TwoDigits(Seconds div 60) + ':' + TwoDigits(Seconds mod 60);
+end;
+
 procedure ApplyRoundedCard(Panel: TPanel);
 var
   Region: THandle;
@@ -212,66 +265,123 @@ end;
 
 procedure ApplyDesktopTheme;
 var
-  CardWidth: Integer;
+  ContentWidth: Integer;
 begin
-  WizardForm.ClientWidth := ScaleX(680);
-  WizardForm.ClientHeight := ScaleY(440);
+  WizardForm.ClientWidth := ScaleX(730);
+  WizardForm.ClientHeight := ScaleY(330);
+  SetWindowRgn(WizardForm.Handle,
+    CreateRoundRectRgn(0, 0, WizardForm.Width + 1, WizardForm.Height + 1,
+      ScaleX(24), ScaleY(24)), True);
   WizardForm.Color := clWhite;
   WizardForm.InnerPage.Color := clWhite;
   WizardForm.MainPanel.Visible := False;
   WizardForm.WizardBitmapImage.Visible := False;
   WizardForm.WizardSmallBitmapImage.Visible := False;
 
-  CardWidth := WizardForm.InstallingPage.ClientWidth - ScaleX(48);
+  ContentWidth := WizardForm.InstallingPage.ClientWidth - ScaleX(180);
   InstallCard := TPanel.Create(WizardForm);
   InstallCard.Parent := WizardForm.InstallingPage;
-  InstallCard.SetBounds(ScaleX(24), ScaleY(20), CardWidth,
-    WizardForm.InstallingPage.ClientHeight - ScaleY(40));
+  InstallCard.SetBounds(0, 0, WizardForm.InstallingPage.ClientWidth,
+    WizardForm.InstallingPage.ClientHeight);
   InstallCard.BevelOuter := bvNone;
-  InstallCard.Color := $00F7FAFB;
-  ApplyRoundedCard(InstallCard);
+  InstallCard.Color := clWhite;
+
+  InstallRail := TPanel.Create(WizardForm);
+  InstallRail.Parent := InstallCard;
+  InstallRail.SetBounds(0, 0, ScaleX(180), InstallCard.ClientHeight);
+  InstallRail.BevelOuter := bvNone;
+  InstallRail.Color := $00F7FAFB;
+
+  InstallRailBackground := TBitmapImage.Create(WizardForm);
+  InstallRailBackground.Parent := InstallRail;
+  InstallRailBackground.SetBounds(0, 0, InstallRail.ClientWidth, InstallRail.ClientHeight);
+  InstallRailBackground.Stretch := True;
+  InstallRailBackground.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer-rail.bmp'));
+
+  InstallBrandImage := TBitmapImage.Create(WizardForm);
+  InstallBrandImage.Parent := InstallRail;
+  InstallBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
+  InstallBrandImage.Stretch := True;
+  InstallBrandImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer.bmp'));
 
   InstallBrandLabel := TNewStaticText.Create(WizardForm);
-  InstallBrandLabel.Parent := InstallCard;
-  InstallBrandLabel.SetBounds(ScaleX(24), ScaleY(24), CardWidth - ScaleX(48), ScaleY(28));
+  InstallBrandLabel.Parent := InstallRail;
+  InstallBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(130), ScaleY(28));
   InstallBrandLabel.Caption := 'NGTManager';
-  InstallBrandLabel.Font.Name := 'Arial';
-  InstallBrandLabel.Font.Size := 14;
+  InstallBrandLabel.Font.Name := 'Segoe UI';
+  InstallBrandLabel.Font.Size := 15;
   InstallBrandLabel.Font.Style := [fsBold];
   InstallBrandLabel.Font.Color := $001F2729;
 
   InstallVersionLabel := TNewStaticText.Create(WizardForm);
-  InstallVersionLabel.Parent := InstallCard;
-  InstallVersionLabel.SetBounds(ScaleX(24), ScaleY(54), CardWidth - ScaleX(48), ScaleY(18));
+  InstallVersionLabel.Parent := InstallRail;
+  InstallVersionLabel.SetBounds(ScaleX(30), ScaleY(112), ScaleX(82), ScaleY(22));
   InstallVersionLabel.Caption := 'v{#AppVersion}';
-  InstallVersionLabel.Font.Name := 'Arial';
+  InstallVersionLabel.Font.Name := 'Segoe UI';
   InstallVersionLabel.Font.Size := 9;
   InstallVersionLabel.Font.Color := $00576D70;
 
+  InstallEyebrowLabel := TNewStaticText.Create(WizardForm);
+  InstallEyebrowLabel.Parent := InstallCard;
+  InstallEyebrowLabel.SetBounds(ScaleX(208), ScaleY(22), ContentWidth - ScaleX(52), ScaleY(18));
+  InstallEyebrowLabel.Caption := UiText('安装', 'INSTALLAZIONE', 'INSTALLATION');
+  InstallEyebrowLabel.Font.Name := 'Segoe UI';
+  InstallEyebrowLabel.Font.Size := 9;
+  InstallEyebrowLabel.Font.Style := [fsBold];
+  InstallEyebrowLabel.Font.Color := $0000789A;
+
+  InstallStageIconPanel := TPanel.Create(WizardForm);
+  InstallStageIconPanel.Parent := InstallCard;
+  InstallStageIconPanel.SetBounds(ScaleX(208), ScaleY(48), ScaleX(44), ScaleY(44));
+  InstallStageIconPanel.BevelOuter := bvNone;
+  InstallStageIconPanel.Color := $00FFF2E4;
+  ApplyRoundedCard(InstallStageIconPanel);
+
+  InstallStageIconLabel := TNewStaticText.Create(WizardForm);
+  InstallStageIconLabel.Parent := InstallStageIconPanel;
+  InstallStageIconLabel.SetBounds(0, ScaleY(7), InstallStageIconPanel.ClientWidth, ScaleY(28));
+  InstallStageIconLabel.Alignment := taCenter;
+  InstallStageIconLabel.Caption := '●';
+  InstallStageIconLabel.Font.Name := 'Segoe UI Symbol';
+  InstallStageIconLabel.Font.Size := 15;
+  InstallStageIconLabel.Font.Color := $00D4852B;
+
   WizardForm.StatusLabel.Parent := InstallCard;
-  WizardForm.StatusLabel.SetBounds(ScaleX(24), ScaleY(98), CardWidth - ScaleX(48), ScaleY(26));
-  WizardForm.StatusLabel.Font.Name := 'Arial';
-  WizardForm.StatusLabel.Font.Size := 12;
+  WizardForm.StatusLabel.SetBounds(ScaleX(264), ScaleY(48), ContentWidth - ScaleX(108), ScaleY(30));
+  WizardForm.StatusLabel.Font.Name := 'Segoe UI';
+  WizardForm.StatusLabel.Font.Size := 15;
   WizardForm.StatusLabel.Font.Style := [fsBold];
   WizardForm.StatusLabel.Font.Color := $001F2729;
   WizardForm.StatusLabel.AutoSize := False;
   WizardForm.StatusLabel.WordWrap := True;
 
-  WizardForm.FilenameLabel.Parent := InstallCard;
-  WizardForm.FilenameLabel.SetBounds(ScaleX(24), ScaleY(134), CardWidth - ScaleX(48), ScaleY(52));
-  WizardForm.FilenameLabel.Font.Name := 'Arial';
-  WizardForm.FilenameLabel.Font.Size := 9;
-  WizardForm.FilenameLabel.Font.Color := $00576D70;
-  WizardForm.FilenameLabel.AutoSize := False;
-  WizardForm.FilenameLabel.WordWrap := True;
+  InstallDescriptionLabel := TNewStaticText.Create(WizardForm);
+  InstallDescriptionLabel.Parent := InstallCard;
+  InstallDescriptionLabel.SetBounds(ScaleX(264), ScaleY(78), ContentWidth - ScaleX(108), ScaleY(22));
+  InstallDescriptionLabel.Caption := UiText('正在准备安装所需文件。',
+    'Preparazione dei file necessari per l''installazione.',
+    'Preparing the files required for installation.');
+  InstallDescriptionLabel.Font.Name := 'Segoe UI';
+  InstallDescriptionLabel.Font.Size := 10;
+  InstallDescriptionLabel.Font.Color := $00576D70;
+
+  InstallWarningLabel := TNewStaticText.Create(WizardForm);
+  InstallWarningLabel.Parent := InstallCard;
+  InstallWarningLabel.SetBounds(ScaleX(208), ScaleY(102), ContentWidth - ScaleX(52), ScaleY(20));
+  InstallWarningLabel.Font.Name := 'Segoe UI';
+  InstallWarningLabel.Font.Size := 9;
+  InstallWarningLabel.Font.Color := $00004FBA;
+  InstallWarningLabel.Visible := False;
+
+  WizardForm.FilenameLabel.Visible := False;
 
   FailureDetails := TNewMemo.Create(WizardForm);
   FailureDetails.Parent := InstallCard;
-  FailureDetails.SetBounds(ScaleX(24), ScaleY(134), CardWidth - ScaleX(48), ScaleY(112));
+  FailureDetails.SetBounds(ScaleX(208), ScaleY(78), ContentWidth - ScaleX(52), ScaleY(118));
   FailureDetails.ReadOnly := True;
   FailureDetails.ScrollBars := ssVertical;
   FailureDetails.Color := clWhite;
-  FailureDetails.Font.Name := 'Arial';
+  FailureDetails.Font.Name := 'Segoe UI';
   FailureDetails.Font.Size := 9;
   FailureDetails.Font.Color := $00576D70;
   FailureDetails.Visible := False;
@@ -279,8 +389,8 @@ begin
   WizardForm.ProgressGauge.Visible := False;
   BrandProgressTrack := TPanel.Create(WizardForm);
   BrandProgressTrack.Parent := InstallCard;
-  BrandProgressTrack.SetBounds(ScaleX(24), InstallCard.ClientHeight - ScaleY(48),
-    CardWidth - ScaleX(48), ScaleY(8));
+  BrandProgressTrack.SetBounds(ScaleX(208), ScaleY(128),
+    ContentWidth - ScaleX(52), ScaleY(8));
   BrandProgressTrack.BevelOuter := bvNone;
   BrandProgressTrack.Color := $00E9E7E1;
   BrandProgressFill := TPanel.Create(WizardForm);
@@ -290,45 +400,127 @@ begin
   BrandProgressFill.Color := $002DC6F4;
   SetBrandProgressActive;
 
-  CardWidth := WizardForm.FinishedPage.ClientWidth - ScaleX(48);
+  InstallMetrics := TPanel.Create(WizardForm);
+  InstallMetrics.Parent := InstallCard;
+  InstallMetrics.SetBounds(ScaleX(208), ScaleY(150),
+    ContentWidth - ScaleX(52), ScaleY(58));
+  InstallMetrics.BevelOuter := bvNone;
+  InstallMetrics.Color := $00EAF6FB;
+  ApplyRoundedCard(InstallMetrics);
+
+  InstallFilesLabel := TNewStaticText.Create(WizardForm);
+  InstallFilesLabel.Parent := InstallMetrics;
+  InstallFilesLabel.SetBounds(ScaleX(18), ScaleY(9), ScaleX(135), ScaleY(42));
+  InstallFilesLabel.Font.Name := 'Segoe UI';
+  InstallFilesLabel.Font.Size := 9;
+  InstallFilesLabel.Font.Color := $00576D70;
+  InstallFilesLabel.Caption := UiText('已处理文件', 'File elaborati', 'Files processed');
+
+  InstallFilesValue := TNewStaticText.Create(WizardForm);
+  InstallFilesValue.Parent := InstallMetrics;
+  InstallFilesValue.SetBounds(ScaleX(18), ScaleY(26), ScaleX(135), ScaleY(25));
+  InstallFilesValue.Caption := '0';
+  InstallFilesValue.Font.Name := 'Segoe UI';
+  InstallFilesValue.Font.Size := 13;
+  InstallFilesValue.Font.Style := [fsBold];
+  InstallFilesValue.Font.Color := $001F2729;
+
+  InstallTotalLabel := TNewStaticText.Create(WizardForm);
+  InstallTotalLabel.Parent := InstallMetrics;
+  InstallTotalLabel.SetBounds(ScaleX(170), ScaleY(9), ScaleX(135), ScaleY(42));
+  InstallTotalLabel.Font.Name := 'Segoe UI';
+  InstallTotalLabel.Font.Size := 9;
+  InstallTotalLabel.Font.Color := $00576D70;
+  InstallTotalLabel.Caption := UiText('总耗时', 'Tempo totale', 'Total time');
+
+  InstallTotalValue := TNewStaticText.Create(WizardForm);
+  InstallTotalValue.Parent := InstallMetrics;
+  InstallTotalValue.SetBounds(ScaleX(170), ScaleY(26), ScaleX(135), ScaleY(25));
+  InstallTotalValue.Caption := '00:00';
+  InstallTotalValue.Font.Name := 'Segoe UI';
+  InstallTotalValue.Font.Size := 13;
+  InstallTotalValue.Font.Style := [fsBold];
+  InstallTotalValue.Font.Color := $001F2729;
+
+  InstallPhaseLabel := TNewStaticText.Create(WizardForm);
+  InstallPhaseLabel.Parent := InstallMetrics;
+  InstallPhaseLabel.SetBounds(ScaleX(322), ScaleY(9), ScaleX(135), ScaleY(42));
+  InstallPhaseLabel.Font.Name := 'Segoe UI';
+  InstallPhaseLabel.Font.Size := 9;
+  InstallPhaseLabel.Font.Color := $00576D70;
+  InstallPhaseLabel.Caption := UiText('当前阶段', 'Fase corrente', 'Current phase');
+
+  InstallPhaseValue := TNewStaticText.Create(WizardForm);
+  InstallPhaseValue.Parent := InstallMetrics;
+  InstallPhaseValue.SetBounds(ScaleX(322), ScaleY(26), ScaleX(135), ScaleY(25));
+  InstallPhaseValue.Caption := '00:00';
+  InstallPhaseValue.Font.Name := 'Segoe UI';
+  InstallPhaseValue.Font.Size := 13;
+  InstallPhaseValue.Font.Style := [fsBold];
+  InstallPhaseValue.Font.Color := $001F2729;
+
   FinishCard := TPanel.Create(WizardForm);
   FinishCard.Parent := WizardForm.FinishedPage;
-  FinishCard.SetBounds(ScaleX(24), ScaleY(20), CardWidth,
-    WizardForm.FinishedPage.ClientHeight - ScaleY(40));
+  FinishCard.SetBounds(0, 0, WizardForm.FinishedPage.ClientWidth,
+    WizardForm.FinishedPage.ClientHeight);
   FinishCard.BevelOuter := bvNone;
-  FinishCard.Color := $00F7FAFB;
-  ApplyRoundedCard(FinishCard);
+  FinishCard.Color := clWhite;
+
+  FinishRail := TPanel.Create(WizardForm);
+  FinishRail.Parent := FinishCard;
+  FinishRail.SetBounds(0, 0, ScaleX(180), FinishCard.ClientHeight);
+  FinishRail.BevelOuter := bvNone;
+  FinishRail.Color := $00F7FAFB;
+
+  FinishRailBackground := TBitmapImage.Create(WizardForm);
+  FinishRailBackground.Parent := FinishRail;
+  FinishRailBackground.SetBounds(0, 0, FinishRail.ClientWidth, FinishRail.ClientHeight);
+  FinishRailBackground.Stretch := True;
+  FinishRailBackground.Bitmap.Assign(InstallRailBackground.Bitmap);
+
+  FinishBrandImage := TBitmapImage.Create(WizardForm);
+  FinishBrandImage.Parent := FinishRail;
+  FinishBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
+  FinishBrandImage.Stretch := True;
+  FinishBrandImage.Bitmap.Assign(InstallBrandImage.Bitmap);
 
   FinishBrandLabel := TNewStaticText.Create(WizardForm);
-  FinishBrandLabel.Parent := FinishCard;
-  FinishBrandLabel.SetBounds(ScaleX(24), ScaleY(24), CardWidth - ScaleX(48), ScaleY(28));
+  FinishBrandLabel.Parent := FinishRail;
+  FinishBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(130), ScaleY(28));
   FinishBrandLabel.Caption := 'NGTManager';
-  FinishBrandLabel.Font.Name := 'Arial';
-  FinishBrandLabel.Font.Size := 14;
+  FinishBrandLabel.Font.Name := 'Segoe UI';
+  FinishBrandLabel.Font.Size := 15;
   FinishBrandLabel.Font.Style := [fsBold];
   FinishBrandLabel.Font.Color := $001F2729;
 
   FinishVersionLabel := TNewStaticText.Create(WizardForm);
-  FinishVersionLabel.Parent := FinishCard;
-  FinishVersionLabel.SetBounds(ScaleX(24), ScaleY(54), CardWidth - ScaleX(48), ScaleY(18));
+  FinishVersionLabel.Parent := FinishRail;
+  FinishVersionLabel.SetBounds(ScaleX(30), ScaleY(112), ScaleX(82), ScaleY(22));
   FinishVersionLabel.Caption := 'v{#AppVersion}';
-  FinishVersionLabel.Font.Name := 'Arial';
+  FinishVersionLabel.Font.Name := 'Segoe UI';
   FinishVersionLabel.Font.Size := 9;
   FinishVersionLabel.Font.Color := $00576D70;
 
   WizardForm.FinishedHeadingLabel.Parent := FinishCard;
-  WizardForm.FinishedHeadingLabel.SetBounds(ScaleX(24), ScaleY(98), CardWidth - ScaleX(48), ScaleY(30));
-  WizardForm.FinishedHeadingLabel.Font.Name := 'Arial';
-  WizardForm.FinishedHeadingLabel.Font.Size := 12;
+  WizardForm.FinishedHeadingLabel.SetBounds(ScaleX(208), ScaleY(42), ContentWidth - ScaleX(52), ScaleY(34));
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedHeadingLabel.Font.Size := 16;
   WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
   WizardForm.FinishedHeadingLabel.Font.Color := $001F2729;
   WizardForm.FinishedLabel.Parent := FinishCard;
-  WizardForm.FinishedLabel.SetBounds(ScaleX(24), ScaleY(138), CardWidth - ScaleX(48), ScaleY(52));
-  WizardForm.FinishedLabel.Font.Name := 'Arial';
+  WizardForm.FinishedLabel.SetBounds(ScaleX(208), ScaleY(78), ContentWidth - ScaleX(52), ScaleY(44));
+  WizardForm.FinishedLabel.Font.Name := 'Segoe UI';
   WizardForm.FinishedLabel.Font.Size := 10;
   WizardForm.FinishedLabel.Font.Color := $00576D70;
+  FinishInfo := TPanel.Create(WizardForm);
+  FinishInfo.Parent := FinishCard;
+  FinishInfo.SetBounds(ScaleX(208), ScaleY(132), ContentWidth - ScaleX(52), ScaleY(58));
+  FinishInfo.BevelOuter := bvNone;
+  FinishInfo.Color := $00EAF6FB;
+  ApplyRoundedCard(FinishInfo);
+
   WizardForm.RunList.Parent := FinishCard;
-  WizardForm.RunList.SetBounds(ScaleX(24), ScaleY(208), CardWidth - ScaleX(48), ScaleY(44));
+  WizardForm.RunList.SetBounds(ScaleX(224), ScaleY(146), ContentWidth - ScaleX(84), ScaleY(34));
 end;
 
 function SafeOperationId(const Value: String): Boolean;
@@ -350,6 +542,8 @@ procedure InitializeWizard;
 var
   UpdateId: String;
 begin
+  ExtractTemporaryFile('ngt-studio-installer.bmp');
+  ExtractTemporaryFile('ngt-studio-installer-rail.bmp');
   UpdateId := ExpandConstant('{param:NGTUpdateId|}');
   if UpdateId <> '' then
     AttemptId := UpdateId
@@ -391,6 +585,33 @@ begin
   else if Phase = 'failed' then Result := UiText('安装已停止，正在恢复原状态', 'Installazione interrotta; ripristino in corso', 'Installation stopped; restoring the previous state')
   else if Phase = 'recovery_failed' then Result := UiText('恢复需要处理，数据已保留', 'Il ripristino richiede attenzione; dati conservati', 'Recovery needs attention; data has been preserved')
   else Result := UiText('正在准备 NGTManager', 'Preparazione di NGTManager', 'Preparing NGTManager');
+end;
+
+procedure UpdateStageIcon(const Phase: String);
+begin
+  InstallStageIconLabel.Caption := '●';
+  InstallStageIconPanel.Color := $00FFF2E4;
+  InstallStageIconLabel.Font.Color := $00D4852B;
+  if Phase = 'complete' then
+  begin
+    InstallStageIconLabel.Caption := '✓';
+    InstallStageIconPanel.Color := $00E2F4DF;
+    InstallStageIconLabel.Font.Color := $004AAB42;
+  end
+  else if (Phase = 'failed') or (Phase = 'recovery_failed') then
+  begin
+    InstallStageIconLabel.Caption := '!';
+    InstallStageIconPanel.Color := $00E6E6FF;
+    InstallStageIconLabel.Font.Color := $005252D9;
+  end
+  else if (Phase = 'package_source_verification') or
+    (Phase = 'source_copy_verification') or
+    (Phase = 'candidate_verification') then
+  begin
+    InstallStageIconLabel.Caption := '✓';
+    InstallStageIconPanel.Color := $00FFEFE2;
+    InstallStageIconLabel.Font.Color := $00D5893C;
+  end;
 end;
 
 function TakeField(var Value: String): String;
@@ -444,36 +665,38 @@ begin
   if MessageOperationId <> AttemptId then
     exit;
   CurrentPhase := Phase;
+  UpdateStageIcon(Phase);
   PhaseElapsedSeconds := StrToIntDef(PhaseElapsed, 0);
   TotalElapsedSeconds := StrToIntDef(TotalElapsed, 0);
   StatusText := PhaseDescription(Phase);
-  if (StrToIntDef(ProcessedFiles, -1) >= 0) then
-    StatusText := StatusText + UiText('（已处理 ' + ProcessedFiles + ' 个文件）',
-      ' (' + ProcessedFiles + ' file elaborati)',
-      ' (' + ProcessedFiles + ' files processed)');
-  if PhaseElapsedSeconds > 30 then
-    StatusText := StatusText + UiText(' — 此步骤所需时间比平时更长',
-      ' — questa fase sta richiedendo più tempo del previsto',
-      ' — this step is taking longer than usual');
+  InstallWarningLabel.Visible := PhaseElapsedSeconds > 30;
+  if InstallWarningLabel.Visible then
+    InstallWarningLabel.Caption := UiText(
+      'ⓘ 此阶段所需时间比预计更长，操作仍在继续。',
+      'ⓘ Questa fase sta richiedendo più tempo del previsto.',
+      'ⓘ This phase is taking longer than expected.');
   if (CancelPending = '1') then
-    StatusText := StatusText + UiText('。取消操作将在当前安全步骤结束后执行',
-      '. L''annullamento attenderà il prossimo punto sicuro',
-      '. Cancellation will wait for the current safe step');
+    InstallWarningLabel.Caption := UiText(
+      'ⓘ 正在等待安全停止点，随后将自动回滚。',
+      'ⓘ In attesa del prossimo punto sicuro prima del ripristino.',
+      'ⓘ Waiting for a safe stop point before rolling back.');
   if (CancelPending = '2') then
-    StatusText := StatusText + UiText('。当前阶段已无法取消，正在安全完成',
-      '. È troppo tardi per annullare; completamento sicuro in corso',
-      '. Cancellation arrived too late; finishing safely');
+    InstallWarningLabel.Caption := UiText(
+      'ⓘ 当前阶段已无法取消，正在安全完成操作。',
+      'ⓘ È troppo tardi per annullare; completamento sicuro in corso.',
+      'ⓘ It is too late to cancel; finishing safely.');
+  if CancelPending <> '0' then InstallWarningLabel.Visible := True;
   WizardForm.StatusLabel.Caption := StatusText;
-  WizardForm.FilenameLabel.Caption := UiText(
-    '总耗时：' + IntToStr(TotalElapsedSeconds div 60) + '分 ' +
-      IntToStr(TotalElapsedSeconds mod 60) + '秒  ·  当前步骤：' +
-      IntToStr(PhaseElapsedSeconds) + '秒  ·  操作编号 ' + AttemptId,
-    'Tempo totale: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
-      IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Fase corrente: ' +
-      IntToStr(PhaseElapsedSeconds) + 's  ·  Tentativo ' + AttemptId,
-    'Total elapsed: ' + IntToStr(TotalElapsedSeconds div 60) + 'm ' +
-      IntToStr(TotalElapsedSeconds mod 60) + 's  ·  Current step: ' +
-      IntToStr(PhaseElapsedSeconds) + 's  ·  Attempt ' + AttemptId);
+  InstallDescriptionLabel.Caption := UiText(
+    '正在安全处理安装文件，请勿关闭电脑。',
+    'Operazione sicura sui file di installazione in corso.',
+    'Safely processing the installation files.');
+  if StrToIntDef(ProcessedFiles, -1) >= 0 then
+    InstallFilesValue.Caption := ProcessedFiles
+  else
+    InstallFilesValue.Caption := '—';
+  InstallTotalValue.Caption := ElapsedText(TotalElapsedSeconds);
+  InstallPhaseValue.Caption := ElapsedText(PhaseElapsedSeconds);
   ProgressValue := StrToInt64Def(ProcessedBytes, -1);
   ProgressTotal := StrToInt64Def(TotalBytes, -1);
   if (ProgressValue < 0) or (ProgressTotal <= 0) then
@@ -610,8 +833,15 @@ begin
   CoreRunning := True;
   CancelRequested := False;
   CurrentPhase := 'environment_check';
+  UpdateStageIcon(CurrentPhase);
   WizardForm.StatusLabel.Caption := PhaseDescription(CurrentPhase);
-  WizardForm.FilenameLabel.Caption := UiText('操作编号 ', 'Tentativo ', 'Attempt ') + AttemptId;
+  InstallDescriptionLabel.Caption := UiText('正在准备安装所需文件。',
+    'Preparazione dei file necessari per l''installazione.',
+    'Preparing the files required for installation.');
+  InstallWarningLabel.Visible := False;
+  InstallFilesValue.Caption := '—';
+  InstallTotalValue.Caption := '00:00';
+  InstallPhaseValue.Caption := '00:00';
   Log('NGTManager transaction started.');
   LastProgressLine := '';
 end;
@@ -667,6 +897,11 @@ begin
       '安装未完成，数据已保留',
       'Installazione non completata; dati conservati',
       'Installation did not complete; data was preserved');
+    UpdateStageIcon('failed');
+    InstallDescriptionLabel.Visible := False;
+    InstallWarningLabel.Visible := False;
+    BrandProgressTrack.Visible := False;
+    InstallMetrics.Visible := False;
     WizardForm.FilenameLabel.Visible := False;
     FailureDetails.Text := MessageText + #13#10 +
       UiText('操作编号：', 'Tentativo: ', 'Attempt ID: ') + AttemptId;
@@ -708,6 +943,7 @@ begin
     (CurPageID <> wpInstalling) and (CurPageID <> wpFinished);
   if CurPageID = wpFinished then
   begin
+    FinishCard.BringToFront;
     WizardForm.FinishedHeadingLabel.Caption := UiText(
       'NGTManager 已准备就绪',
       'NGTManager è pronto',
@@ -795,7 +1031,7 @@ begin
           '正在等待安全停止点',
           'Attesa del punto di arresto sicuro',
           'Waiting for a safe stopping point');
-        WizardForm.FilenameLabel.Caption := UiText(
+        InstallDescriptionLabel.Caption := UiText(
           'NGTManager 将在当前安全步骤结束后回滚，请保持此窗口打开。',
           'NGTManager completerà la fase sicura corrente prima del ripristino. Tieni aperta questa finestra.',
           'NGTManager will finish the current safe step before rolling back. Keep this window open.');
@@ -810,7 +1046,7 @@ begin
           '无法提交取消请求',
           'Impossibile richiedere l''annullamento',
           'Unable to request cancellation');
-        WizardForm.FilenameLabel.Caption := UiText(
+        InstallDescriptionLabel.Caption := UiText(
           '操作仍在运行，请保持此窗口打开。',
           'L''operazione è ancora in corso. Tieni aperta questa finestra.',
           'The operation is still running. Keep this window open.');

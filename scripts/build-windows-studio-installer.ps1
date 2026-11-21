@@ -11,6 +11,8 @@ $version = [string]$package.version
 $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
 $installerDefinition = Join-Path $projectRoot "installer\windows-studio.iss"
 $iconPath = Join-Path $projectRoot "assets\ngt-studio.ico"
+$iconBitmapPath = Join-Path $projectRoot "assets\ngt-studio-installer.bmp"
+$railBitmapPath = Join-Path $projectRoot "assets\ngt-studio-installer-rail.bmp"
 $packageDirectory = Join-Path $projectRoot ".local\studio-package"
 
 if (-not (Test-Path -LiteralPath (Join-Path $packageDirectory "studio-release.json"))) {
@@ -21,6 +23,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $packageDirectory "tools\NGTManager.
 }
 if (-not (Test-Path -LiteralPath $iconPath)) {
   throw "Studio package icon is missing: $iconPath"
+}
+if (-not (Test-Path -LiteralPath $iconBitmapPath)) {
+  throw "Studio installer bitmap is missing: $iconBitmapPath"
+}
+if (-not (Test-Path -LiteralPath $railBitmapPath)) {
+  throw "Studio installer rail bitmap is missing: $railBitmapPath"
 }
 if (-not (Test-Path -LiteralPath $installerDefinition)) {
   throw "Installer definition is missing: $installerDefinition"
@@ -66,6 +74,8 @@ try {
     ("/DPackageBytes=" + [long]$packageFiles.Sum) `
     ("/DPackageFileCount=" + $packageFiles.Count) `
     ("/DIconPath=" + $iconPath) `
+    ("/DIconBitmapPath=" + $iconBitmapPath) `
+    ("/DRailBitmapPath=" + $railBitmapPath) `
     ("/DOutputDir=" + $outputRoot) `
     $installerDefinition
   if ($LASTEXITCODE -ne 0) {

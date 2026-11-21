@@ -641,7 +641,7 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("--package-file-count ");
     expect(installer).toContain("record-installer-registration ");
     expect(installer).toContain(
-      "Cancellation will wait for the current safe step",
+      "Waiting for a safe stop point before rolling back.",
     );
     expect(installer).toContain("WizardForm.CancelButton.Enabled := False");
     expect(installer).not.toContain(
@@ -871,12 +871,17 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("manager.browser.window.hidden_until_ready");
     expect(manager).toContain("manager.browser.window.confirmed");
     expect(manager).toContain("manager.startup.ui_completed");
-    expect(manager.indexOf("open_browser(true)")).toBeLessThan(
-      manager.indexOf(
-        "update_runtime_ui_phase(RUNTIME_UI_PHASE_READY)",
-        manager.indexOf("open_browser(true)"),
-      ),
+    const startupStart = manager.indexOf("let browser_ready = match open_browser(true)");
+    const startupEnd = manager.indexOf("if open_browser_after_health", startupStart + 20);
+    const startupFlow = manager.slice(startupStart, startupEnd);
+    expect(startupFlow.indexOf("open_browser(true)")).toBeLessThan(
+      startupFlow.indexOf("complete_and_hide_runtime_ui()"),
     );
+    expect(startupFlow.indexOf("complete_and_hide_runtime_ui()")).toBeLessThan(
+      startupFlow.indexOf("show_managed_browser_window(window)"),
+    );
+    expect(manager).toContain("RUNTIME_UI_HIDE_MESSAGE");
+    expect(manager).not.toContain("SetTimer(window, 2, 300");
     const closeStart = manager.indexOf("fn close_managed_browser_window");
     const closeEnd = manager.indexOf("fn wait_for_runtime_and_open", closeStart);
     const closeWindow = manager.slice(closeStart, closeEnd);

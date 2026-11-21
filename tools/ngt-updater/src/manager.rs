@@ -19,7 +19,7 @@ const TRANSACTION_VERSION: u32 = 3;
 const CONFIG_VERSION: u32 = 1;
 const DATABASE_PORT: u16 = 55432;
 const APPLICATION_PORT: u16 = 3000;
-const REQUIRED_RUNTIME_FILES: [&str; 15] = [
+const REQUIRED_RUNTIME_FILES: [&str; 17] = [
     "runtime/node.exe",
     "runtime/gh.exe",
     "runtime/postgres/bin/postgres.exe",
@@ -29,6 +29,8 @@ const REQUIRED_RUNTIME_FILES: [&str; 15] = [
     "tools/NGTManager.exe",
     "tools/NGTUpdater.exe",
     "assets/ngt-studio.ico",
+    "assets/ngt-studio-light.ico",
+    "assets/ngt-studio-dark.ico",
     "scripts/windows-db.mjs",
     "scripts/start.mjs",
     "scripts/runtime-start-gate.cjs",
@@ -92,6 +94,8 @@ const RUNTIME_UI_PHASE_MESSAGE: u32 = 0x8002;
 const RUNTIME_UI_OPEN_MESSAGE: u32 = 0x8003;
 #[cfg(windows)]
 const RUNTIME_UI_SHOW_MESSAGE: u32 = 0x8004;
+#[cfg(windows)]
+const RUNTIME_UI_HIDE_MESSAGE: u32 = 0x8005;
 #[cfg(windows)]
 const RUNTIME_UI_PHASE_CHECKING: usize = 1;
 #[cfg(windows)]
@@ -1271,6 +1275,8 @@ fn preflight(
             "tools/NGTManager.exe",
             "tools/NGTUpdater.exe",
             "assets/ngt-studio.ico",
+            "assets/ngt-studio-light.ico",
+            "assets/ngt-studio-dark.ico",
         ] {
             match fs::symlink_metadata(root.join(name)) {
                 Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => {}
@@ -2009,6 +2015,44 @@ struct SessionEndNotifier {
 }
 
 #[cfg(windows)]
+fn windows_system_uses_light_theme() -> bool {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, REG_DWORD,
+    };
+    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let value_name: Vec<u16> = "SystemUsesLightTheme"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        let mut key = std::ptr::null_mut();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut key) != 0 {
+            return true;
+        }
+        let mut kind = 0u32;
+        let mut value = 1u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let result = RegQueryValueExW(
+            key,
+            value_name.as_ptr(),
+            std::ptr::null(),
+            &mut kind,
+            &mut value as *mut u32 as *mut u8,
+            &mut size,
+        );
+        RegCloseKey(key);
+        if result == 0 && kind == REG_DWORD {
+            value != 0
+        } else {
+            true
+        }
+    }
+}
+
+#[cfg(windows)]
 impl SessionEndNotifier {
     fn start(root: &Path, show_startup: bool) -> Result<Self, String> {
         use windows_sys::Win32::Graphics::Gdi::{
@@ -2031,12 +2075,17 @@ impl SessionEndNotifier {
             CreateWindowExW, DispatchMessageW, GetCursorPos, GetMessageW, LoadCursorW, LoadImageW,
             RegisterClassW, SendMessageW, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow,
             SystemParametersInfoW, TranslateMessage, CW_USEDEFAULT, HWND_NOTOPMOST, HWND_TOPMOST,
-            IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SPI_GETHIGHCONTRAST,
-            STM_SETIMAGE, SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE, WM_SETFONT, WM_SETICON, WNDCLASSW,
-            WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
+            IDC_ARROW, IMAGE_ICON, LR_LOADFROMFILE, SPI_GETHIGHCONTRAST, STM_SETIMAGE, SWP_NOMOVE,
+            SWP_NOSIZE, SW_HIDE, SW_RESTORE, WM_SETFONT, WM_SETICON, WNDCLASSW, WS_CAPTION,
+            WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
         };
         let (sender, receiver) = mpsc::sync_channel::<Result<u32, String>>(1);
-        let icon_path = root.join("assets/ngt-studio.ico");
+        let surface_icon_path = root.join(if windows_system_uses_light_theme() {
+            "assets/ngt-studio-light.ico"
+        } else {
+            "assets/ngt-studio-dark.ico"
+        });
+        let body_icon_path = root.join("assets/ngt-studio-light.ico");
         let version_text = read_config(root)
             .ok()
             .flatten()
@@ -2094,8 +2143,8 @@ impl SessionEndNotifier {
                 RUNTIME_UI_WINDOW.store(window as isize, Ordering::SeqCst);
                 let dpi = GetDpiForWindow(window).max(96);
                 let scale = |value: i32| value * dpi as i32 / 96;
-                let window_width = scale(520);
-                let window_height = scale(240);
+                let window_width = scale(750);
+                let window_height = scale(300);
                 let mut cursor = std::mem::zeroed();
                 GetCursorPos(&mut cursor);
                 let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
@@ -2117,6 +2166,11 @@ impl SessionEndNotifier {
                         0,
                     );
                 }
+                let window_region =
+                    CreateRoundRectRgn(0, 0, window_width, window_height, scale(24), scale(24));
+                if !window_region.is_null() {
+                    SetWindowRgn(window, window_region, 1);
+                }
                 let controls = INITCOMMONCONTROLSEX {
                     dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
                     dwICC: ICC_PROGRESS_CLASS,
@@ -2136,10 +2190,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     std::ptr::null(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(12),
-                    scale(12),
-                    scale(496),
-                    scale(196),
+                    0,
+                    0,
+                    scale(750),
+                    scale(272),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2147,10 +2201,11 @@ impl SessionEndNotifier {
                 );
                 if !card.is_null() {
                     let region =
-                        CreateRoundRectRgn(0, 0, scale(496), scale(196), scale(28), scale(28));
+                        CreateRoundRectRgn(0, 0, scale(750), scale(272), scale(28), scale(28));
                     if !region.is_null() {
                         SetWindowRgn(card, region, 1);
                     }
+                    ShowWindow(card, SW_HIDE);
                 }
                 RUNTIME_UI_CARD.store(card as isize, Ordering::SeqCst);
                 RUNTIME_UI_CARD_BRUSH.store(card_brush as isize, Ordering::SeqCst);
@@ -2160,10 +2215,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     title_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(88),
-                    scale(20),
-                    scale(360),
+                    scale(100),
                     scale(28),
+                    scale(570),
+                    scale(34),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2175,10 +2230,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     version_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(88),
-                    scale(48),
-                    scale(360),
-                    scale(18),
+                    scale(100),
+                    scale(62),
+                    scale(570),
+                    scale(20),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2194,10 +2249,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     heading_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(24),
-                    scale(72),
-                    scale(456),
-                    scale(28),
+                    scale(36),
+                    scale(102),
+                    scale(650),
+                    scale(36),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2209,10 +2264,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     initial.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(24),
-                    scale(104),
-                    scale(456),
-                    scale(22),
+                    scale(36),
+                    scale(142),
+                    scale(650),
+                    scale(28),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2224,10 +2279,10 @@ impl SessionEndNotifier {
                     status_class.as_ptr(),
                     detail_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(24),
-                    scale(130),
-                    scale(456),
-                    scale(20),
+                    scale(36),
+                    scale(174),
+                    scale(650),
+                    scale(22),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2240,25 +2295,32 @@ impl SessionEndNotifier {
                     progress_class.as_ptr(),
                     std::ptr::null(),
                     WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
-                    scale(24),
-                    scale(166),
-                    scale(456),
-                    scale(8),
+                    scale(36),
+                    scale(220),
+                    scale(654),
+                    scale(10),
                     window,
                     std::ptr::null_mut(),
                     instance,
                     std::ptr::null(),
                 );
+                if !progress.is_null() {
+                    let progress_region =
+                        CreateRoundRectRgn(0, 0, scale(654), scale(10), scale(10), scale(10));
+                    if !progress_region.is_null() {
+                        SetWindowRgn(progress, progress_region, 1);
+                    }
+                }
                 let step_text = runtime_ui_step_text(RUNTIME_UI_PHASE_CHECKING);
                 let step = CreateWindowExW(
                     0,
                     status_class.as_ptr(),
                     step_text.as_ptr(),
                     WS_CHILD | WS_VISIBLE,
-                    scale(24),
-                    scale(182),
-                    scale(456),
-                    scale(20),
+                    scale(36),
+                    scale(240),
+                    scale(654),
+                    scale(22),
                     window,
                     std::ptr::null_mut(),
                     instance,
@@ -2293,7 +2355,7 @@ impl SessionEndNotifier {
                 );
                 let face: Vec<u16> = "Segoe UI".encode_utf16().chain(Some(0)).collect();
                 let title_font = CreateFontW(
-                    -scale(20),
+                    -scale(24),
                     0,
                     0,
                     0,
@@ -2309,7 +2371,7 @@ impl SessionEndNotifier {
                     face.as_ptr(),
                 );
                 let status_font = CreateFontW(
-                    -scale(14),
+                    -scale(16),
                     0,
                     0,
                     0,
@@ -2325,7 +2387,7 @@ impl SessionEndNotifier {
                     face.as_ptr(),
                 );
                 let heading_font = CreateFontW(
-                    -scale(18),
+                    -scale(24),
                     0,
                     0,
                     0,
@@ -2341,7 +2403,7 @@ impl SessionEndNotifier {
                     face.as_ptr(),
                 );
                 let detail_font = CreateFontW(
-                    -scale(12),
+                    -scale(13),
                     0,
                     0,
                     0,
@@ -2407,31 +2469,55 @@ impl SessionEndNotifier {
                 }
                 SetTimer(window, 1, 1000, None);
 
-                let icon_wide: Vec<u16> = icon_path
+                let surface_icon_wide: Vec<u16> = surface_icon_path
                     .to_string_lossy()
                     .encode_utf16()
                     .chain(Some(0))
                     .collect();
-                let icon = LoadImageW(
+                let body_icon_wide: Vec<u16> = body_icon_path
+                    .to_string_lossy()
+                    .encode_utf16()
+                    .chain(Some(0))
+                    .collect();
+                let small_icon = LoadImageW(
                     std::ptr::null_mut(),
-                    icon_wide.as_ptr(),
+                    surface_icon_wide.as_ptr(),
                     IMAGE_ICON,
-                    0,
-                    0,
-                    LR_LOADFROMFILE | LR_DEFAULTSIZE,
-                ) as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
-                if !icon.is_null() {
-                    SendMessageW(window, WM_SETICON, 0, icon as isize);
-                    SendMessageW(window, WM_SETICON, 1, icon as isize);
+                    scale(16),
+                    scale(16),
+                    LR_LOADFROMFILE,
+                )
+                    as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
+                let big_icon = LoadImageW(
+                    std::ptr::null_mut(),
+                    surface_icon_wide.as_ptr(),
+                    IMAGE_ICON,
+                    scale(32),
+                    scale(32),
+                    LR_LOADFROMFILE,
+                )
+                    as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
+                let body_icon = LoadImageW(
+                    std::ptr::null_mut(),
+                    body_icon_wide.as_ptr(),
+                    IMAGE_ICON,
+                    scale(48),
+                    scale(48),
+                    LR_LOADFROMFILE,
+                )
+                    as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
+                if !small_icon.is_null() && !big_icon.is_null() && !body_icon.is_null() {
+                    SendMessageW(window, WM_SETICON, 0, small_icon as isize);
+                    SendMessageW(window, WM_SETICON, 1, big_icon as isize);
                     let icon_control = CreateWindowExW(
                         0,
                         status_class.as_ptr(),
                         std::ptr::null(),
                         WS_CHILD | WS_VISIBLE | SS_ICON,
-                        scale(24),
-                        scale(20),
-                        scale(40),
-                        scale(40),
+                        scale(36),
+                        scale(28),
+                        scale(48),
+                        scale(48),
                         window,
                         std::ptr::null_mut(),
                         instance,
@@ -2442,7 +2528,7 @@ impl SessionEndNotifier {
                             icon_control,
                             STM_SETIMAGE,
                             IMAGE_ICON as usize,
-                            icon as isize,
+                            body_icon as isize,
                         );
                     }
                 }
@@ -2452,10 +2538,14 @@ impl SessionEndNotifier {
                 tray.uID = 1;
                 tray.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
                 tray.uCallbackMessage = RUNTIME_UI_TRAY_MESSAGE;
-                tray.hIcon = icon;
+                tray.hIcon = small_icon;
                 let tip: Vec<u16> = "NGTManager".encode_utf16().chain(Some(0)).collect();
                 tray.szTip[..tip.len()].copy_from_slice(&tip);
-                if icon.is_null() || Shell_NotifyIconW(NIM_ADD, &tray) == 0 {
+                if small_icon.is_null()
+                    || big_icon.is_null()
+                    || body_icon.is_null()
+                    || Shell_NotifyIconW(NIM_ADD, &tray) == 0
+                {
                     RUNTIME_UI_STATUS.store(0, Ordering::SeqCst);
                     RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                     let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
@@ -2488,8 +2578,10 @@ impl SessionEndNotifier {
                 RUNTIME_UI_CARD.store(0, Ordering::SeqCst);
                 RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
                 let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(window);
-                if !icon.is_null() {
-                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(icon);
+                for icon in [small_icon, big_icon, body_icon] {
+                    if !icon.is_null() {
+                        let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(icon);
+                    }
                 }
                 for font in [title_font, heading_font, status_font, detail_font] {
                     if !font.is_null() {
@@ -2565,15 +2657,16 @@ unsafe extern "system" fn session_end_window_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
-        GetSysColorBrush, SetBkMode, SetTextColor, COLOR_WINDOW, TRANSPARENT,
+        BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetSysColorBrush, Polygon,
+        SetBkMode, SetTextColor, COLOR_WINDOW, TRANSPARENT,
     };
     use windows_sys::Win32::UI::Controls::PBM_SETPOS;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, GetCursorPos, PostMessageW,
-        SendMessageW, SetForegroundWindow, SetTimer, SetWindowTextW, ShowWindow, TrackPopupMenu,
-        MF_SEPARATOR, MF_STRING, SW_HIDE, SW_SHOW, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE,
-        WM_CTLCOLORSTATIC, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP,
-        WM_TIMER,
+        AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, GetClientRect, GetCursorPos,
+        PostMessageW, SendMessageW, SetForegroundWindow, SetWindowTextW, ShowWindow,
+        TrackPopupMenu, MF_SEPARATOR, MF_STRING, SW_HIDE, SW_SHOW, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+        WM_CLOSE, WM_CTLCOLORSTATIC, WM_ENDSESSION, WM_ERASEBKGND, WM_LBUTTONDBLCLK, WM_PAINT,
+        WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER,
     };
     match message {
         WM_QUERYENDSESSION => 1,
@@ -2584,6 +2677,65 @@ unsafe extern "system" fn session_end_window_proc(
             );
             WINDOWS_SESSION_END.store(true, Ordering::SeqCst);
             let _ = request_runtime_stop();
+            0
+        }
+        WM_ERASEBKGND => 1,
+        WM_PAINT if !RUNTIME_UI_HIGH_CONTRAST.load(Ordering::SeqCst) => {
+            let mut paint = std::mem::zeroed();
+            let dc = BeginPaint(window, &mut paint);
+            let mut client = std::mem::zeroed();
+            GetClientRect(window, &mut client);
+            let background = CreateSolidBrush(0x00f7fafb);
+            FillRect(dc, &client, background);
+            let width = client.right;
+            let height = client.bottom;
+            let wave_back = CreateSolidBrush(0x00dcf7ff);
+            let wave_front = CreateSolidBrush(0x00b8f0ff);
+            let back_points = [
+                POINT {
+                    x: width * 2 / 3,
+                    y: height,
+                },
+                POINT {
+                    x: width * 4 / 5,
+                    y: height * 2 / 3,
+                },
+                POINT {
+                    x: width,
+                    y: height / 2,
+                },
+                POINT {
+                    x: width,
+                    y: height,
+                },
+            ];
+            let front_points = [
+                POINT {
+                    x: width * 3 / 4,
+                    y: height,
+                },
+                POINT {
+                    x: width * 9 / 10,
+                    y: height * 3 / 4,
+                },
+                POINT {
+                    x: width,
+                    y: height * 2 / 3,
+                },
+                POINT {
+                    x: width,
+                    y: height,
+                },
+            ];
+            let old = windows_sys::Win32::Graphics::Gdi::SelectObject(dc, wave_back as _);
+            Polygon(dc, back_points.as_ptr(), back_points.len() as i32);
+            windows_sys::Win32::Graphics::Gdi::SelectObject(dc, wave_front as _);
+            Polygon(dc, front_points.as_ptr(), front_points.len() as i32);
+            windows_sys::Win32::Graphics::Gdi::SelectObject(dc, old);
+            DeleteObject(background as _);
+            DeleteObject(wave_back as _);
+            DeleteObject(wave_front as _);
+            EndPaint(window, &paint);
             0
         }
         WM_CLOSE => {
@@ -2644,7 +2796,6 @@ unsafe extern "system" fn session_end_window_proc(
             }
             if phase == RUNTIME_UI_PHASE_READY {
                 RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
-                SetTimer(window, 2, 300, None);
             } else if phase == RUNTIME_UI_PHASE_BROWSER_BLOCKED {
                 RUNTIME_HEALTHY.store(true, Ordering::SeqCst);
             } else {
@@ -2690,6 +2841,11 @@ unsafe extern "system" fn session_end_window_proc(
             if !RUNTIME_HEALTHY.load(Ordering::SeqCst) {
                 show_runtime_ui_window(window, true);
             }
+            0
+        }
+        RUNTIME_UI_HIDE_MESSAGE => {
+            windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(window, 2);
+            ShowWindow(window, SW_HIDE);
             0
         }
         RUNTIME_UI_TRAY_MESSAGE if lparam as u32 == WM_LBUTTONDBLCLK => {
@@ -2886,6 +3042,36 @@ fn update_runtime_ui_phase(phase: usize) {
             );
         }
     }
+}
+
+#[cfg(windows)]
+fn complete_and_hide_runtime_ui() -> bool {
+    use windows_sys::Win32::Graphics::Gdi::UpdateWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IsWindowVisible, SendMessageTimeoutW, SMTO_ABORTIFHUNG,
+    };
+    let window = RUNTIME_UI_WINDOW.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+    if window.is_null() {
+        return true;
+    }
+    let send = |message, wparam| unsafe {
+        let mut result = 0usize;
+        SendMessageTimeoutW(
+            window,
+            message,
+            wparam,
+            0,
+            SMTO_ABORTIFHUNG,
+            1_000,
+            &mut result,
+        ) != 0
+    };
+    if !send(RUNTIME_UI_PHASE_MESSAGE, RUNTIME_UI_PHASE_READY) {
+        return false;
+    }
+    unsafe { UpdateWindow(window) };
+    thread::sleep(Duration::from_millis(300));
+    send(RUNTIME_UI_HIDE_MESSAGE, 0) && unsafe { IsWindowVisible(window) == 0 }
 }
 
 #[cfg(windows)]
@@ -5897,6 +6083,14 @@ fn install_package(
             &source.join("assets/ngt-studio.ico"),
             &root.join("assets/ngt-studio.ico"),
         )?;
+        copy_file_atomically(
+            &source.join("assets/ngt-studio-light.ico"),
+            &root.join("assets/ngt-studio-light.ico"),
+        )?;
+        copy_file_atomically(
+            &source.join("assets/ngt-studio-dark.ico"),
+            &root.join("assets/ngt-studio-dark.ico"),
+        )?;
 
         let config = ManagerConfig {
             format_version: CONFIG_VERSION,
@@ -6256,6 +6450,8 @@ fn can_abandon_candidate(root: &Path, transaction: &Transaction) -> Result<bool,
             "tools/NGTManager.exe",
             "tools/NGTUpdater.exe",
             "assets/ngt-studio.ico",
+            "assets/ngt-studio-light.ico",
+            "assets/ngt-studio-dark.ico",
         ] {
             let active = fs::read(config.active_release.join(relative));
             let stable = fs::read(root.join(relative));
@@ -6323,6 +6519,8 @@ fn rollback_transaction(root: &Path, transaction: &mut Transaction) -> Result<()
                 "tools/NGTManager.exe",
                 "tools/NGTUpdater.exe",
                 "assets/ngt-studio.ico",
+                "assets/ngt-studio-light.ico",
+                "assets/ngt-studio-dark.ico",
             ] {
                 let source = restored.active_release.join(relative);
                 let target = root.join(relative);
@@ -7284,23 +7482,30 @@ fn run_supervisor(
             should_open_browser = false;
             drop(open_lock.take());
             if browser_ready {
-                update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
-                thread::sleep(Duration::from_millis(350));
-                if let Some(window) = find_managed_browser_window() {
-                    if !show_managed_browser_window(window) {
-                        record_browser_event(
-                            "manager.browser.window.foreground_denied",
-                            "warning",
-                            "BROWSER_WINDOW_FOREGROUND_DENIED",
-                        );
+                if complete_and_hide_runtime_ui() {
+                    if let Some(window) = find_managed_browser_window() {
+                        if !show_managed_browser_window(window) {
+                            record_browser_event(
+                                "manager.browser.window.foreground_denied",
+                                "warning",
+                                "BROWSER_WINDOW_FOREGROUND_DENIED",
+                            );
+                        }
+                        record_browser_event("manager.startup.ui_completed", "info", "none");
                     }
-                    record_browser_event("manager.startup.ui_completed", "info", "none");
+                } else {
+                    record_browser_event(
+                        "manager.startup.ui_hide_failed",
+                        "error",
+                        "STARTUP_WINDOW_HIDE_UNCONFIRMED",
+                    );
+                    update_runtime_ui_phase(RUNTIME_UI_PHASE_BROWSER_BLOCKED);
                 }
             } else {
                 update_runtime_ui_phase(RUNTIME_UI_PHASE_BROWSER_BLOCKED);
             }
         } else {
-            update_runtime_ui_phase(RUNTIME_UI_PHASE_READY);
+            let _ = complete_and_hide_runtime_ui();
         }
         loop {
             if unsafe { WaitForSingleObject(stop.0, 250) } == WAIT_OBJECT_0 {
@@ -7502,6 +7707,27 @@ fn browser_window_property() -> Vec<u16> {
 }
 
 #[cfg(windows)]
+fn provisional_browser_window_property() -> Vec<u16> {
+    "NGTManager.ProvisionalBrowserWindow"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn set_browser_window_cloaked(window: isize, cloaked: bool) -> bool {
+    let value = i32::from(cloaked);
+    unsafe {
+        windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+            window as windows_sys::Win32::Foundation::HWND,
+            13,
+            &value as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        ) >= 0
+    }
+}
+
+#[cfg(windows)]
 fn record_browser_event(event: &str, level: &str, error_code: &str) {
     let Ok(root) = stable_root() else {
         return;
@@ -7613,6 +7839,16 @@ fn clear_managed_browser_identity() {
 
 #[cfg(windows)]
 fn clear_provisional_browser_identity() {
+    let window = PROVISIONAL_BROWSER_WINDOW.load(Ordering::SeqCst);
+    if window != 0 {
+        let property = provisional_browser_window_property();
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::RemovePropW(
+                window as windows_sys::Win32::Foundation::HWND,
+                property.as_ptr(),
+            );
+        }
+    }
     PROVISIONAL_BROWSER_WINDOW.store(0, Ordering::SeqCst);
     PROVISIONAL_BROWSER_PROCESS_ID.store(0, Ordering::SeqCst);
     PROVISIONAL_BROWSER_PROCESS_CREATED.store(0, Ordering::SeqCst);
@@ -7620,7 +7856,32 @@ fn clear_provisional_browser_identity() {
 
 #[cfg(windows)]
 fn provisional_browser_window() -> Option<isize> {
-    let window = PROVISIONAL_BROWSER_WINDOW.load(Ordering::SeqCst);
+    let mut window = PROVISIONAL_BROWSER_WINDOW.load(Ordering::SeqCst);
+    if window == 0 {
+        let property = provisional_browser_window_property();
+        if let Some(found) = top_level_windows().into_iter().find(|candidate| {
+            !unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::GetPropW(
+                    *candidate as windows_sys::Win32::Foundation::HWND,
+                    property.as_ptr(),
+                )
+            }
+            .is_null()
+                && browser_window_process_identity(*candidate).is_some_and(|(path, _, _)| {
+                    browser_candidates().iter().any(|browser| {
+                        path.to_string_lossy()
+                            .eq_ignore_ascii_case(&browser.to_string_lossy())
+                    })
+                })
+        }) {
+            if let Some((_, process_id, created)) = browser_window_process_identity(found) {
+                PROVISIONAL_BROWSER_WINDOW.store(found, Ordering::SeqCst);
+                PROVISIONAL_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
+                PROVISIONAL_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
+                window = found;
+            }
+        }
+    }
     let process_id = PROVISIONAL_BROWSER_PROCESS_ID.load(Ordering::SeqCst) as u32;
     let created = PROVISIONAL_BROWSER_PROCESS_CREATED.load(Ordering::SeqCst);
     if browser_window_matches_identity(window, process_id, created) {
@@ -7734,6 +7995,7 @@ fn show_managed_browser_window(window: isize) -> bool {
     };
     let window = window as windows_sys::Win32::Foundation::HWND;
     unsafe {
+        set_browser_window_cloaked(window as isize, false);
         ShowWindow(window, SW_RESTORE);
         SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -7787,7 +8049,7 @@ enum BrowserLaunchOutcome {
 #[cfg(windows)]
 fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AllowSetForegroundWindow, IsWindowVisible, ShowWindow, SW_HIDE, SW_RESTORE,
+        AllowSetForegroundWindow, IsWindowVisible, SetPropW, ShowWindow, SW_MINIMIZE, SW_RESTORE,
     };
     let before = top_level_windows().into_iter().collect::<BTreeSet<_>>();
     for executable in browser_candidates() {
@@ -7828,7 +8090,19 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
                 PROVISIONAL_BROWSER_WINDOW.store(window, Ordering::SeqCst);
                 PROVISIONAL_BROWSER_PROCESS_ID.store(process_id as u64, Ordering::SeqCst);
                 PROVISIONAL_BROWSER_PROCESS_CREATED.store(created, Ordering::SeqCst);
-                unsafe { ShowWindow(window as windows_sys::Win32::Foundation::HWND, SW_HIDE) };
+                let property = provisional_browser_window_property();
+                unsafe {
+                    SetPropW(
+                        window as windows_sys::Win32::Foundation::HWND,
+                        property.as_ptr(),
+                        1usize as windows_sys::Win32::Foundation::HANDLE,
+                    );
+                }
+                if !set_browser_window_cloaked(window, true) {
+                    unsafe {
+                        ShowWindow(window as windows_sys::Win32::Foundation::HWND, SW_MINIMIZE)
+                    };
+                }
                 record_browser_event("manager.browser.window.provisional", "info", "none");
                 record_browser_event("manager.browser.window.hidden_until_ready", "info", "none");
                 break;
@@ -7836,6 +8110,7 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
             thread::sleep(Duration::from_millis(100));
         }
         if let Some(window) = provisional_browser_window() {
+            set_browser_window_cloaked(window, false);
             unsafe { ShowWindow(window as windows_sys::Win32::Foundation::HWND, SW_RESTORE) };
         }
         record_browser_event(
@@ -7852,13 +8127,7 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
 fn open_browser(defer_show: bool) -> Result<bool, String> {
     if let Some(window) = find_managed_browser_window() {
         let foreground = if defer_show {
-            unsafe {
-                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
-                    window as windows_sys::Win32::Foundation::HWND,
-                    windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
-                );
-            }
-            true
+            set_browser_window_cloaked(window, true)
         } else {
             show_managed_browser_window(window)
         };
@@ -7920,6 +8189,7 @@ fn close_managed_browser_window(root: &Path) -> bool {
         return true;
     };
     let request_close = || unsafe {
+        set_browser_window_cloaked(window, false);
         let mut result = 0usize;
         windows_sys::Win32::UI::WindowsAndMessaging::SendMessageTimeoutW(
             window as windows_sys::Win32::Foundation::HWND,
