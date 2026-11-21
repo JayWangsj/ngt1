@@ -12,9 +12,13 @@ const variants = {
     width: 632,
     height: 238,
   },
-  mark: { src: "/brand/ngt-mark.svg", width: 150, height: 234 },
+  mark: {
+    src: "/brand/ngt-phone-mark-source.png",
+    width: 149,
+    height: 235,
+  },
   "app-icon": {
-    src: "/brand/ngt-app-icon.svg",
+    src: "/brand/ngt-app-icon.png",
     width: 194,
     height: 194,
   },

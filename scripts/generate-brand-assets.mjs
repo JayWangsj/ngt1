@@ -4,14 +4,59 @@ import sharp from "sharp";
 
 const root = process.cwd();
 const brandDirectory = path.join(root, "public", "brand");
-const appIconSource = path.join(brandDirectory, "ngt-app-icon.svg");
-const darkAppIconSource = path.join(
+const horizontalLogoPath = path.join(brandDirectory, "ngt-logo-horizontal.png");
+const phoneSourcePath = path.join(brandDirectory, "ngt-phone-mark-source.png");
+const darkPhoneSourcePath = path.join(
   brandDirectory,
-  "ngt-app-icon-dark.svg",
+  "ngt-phone-mark-source-dark.png",
 );
-const markSource = path.join(brandDirectory, "ngt-mark.svg");
+const phoneCrop = { left: 0, top: 0, width: 149, height: 235 };
 const pngSizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 192, 256, 512];
 const icoSizes = new Set([16, 20, 24, 32, 40, 48, 64, 96, 128, 256]);
+
+async function extractPhoneSources() {
+  const light = await sharp(horizontalLogoPath)
+    .extract(phoneCrop)
+    .ensureAlpha()
+    .png()
+    .toBuffer();
+  const { data, info } = await sharp(light)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const darkPixels = Buffer.from(data);
+  for (let offset = 0; offset < darkPixels.length; offset += 4) {
+    if (darkPixels[offset + 3] === 0) continue;
+    const red = darkPixels[offset];
+    const green = darkPixels[offset + 1];
+    const blue = darkPixels[offset + 2];
+    const isYellow = red > 200 && green > 100 && blue < 64;
+    if (!isYellow) {
+      darkPixels[offset] = 255;
+      darkPixels[offset + 1] = 255;
+      darkPixels[offset + 2] = 255;
+    }
+  }
+  const dark = await sharp(darkPixels, {
+    raw: {
+      width: info.width,
+      height: info.height,
+      channels: 4,
+    },
+  })
+    .png()
+    .toBuffer();
+  await writeFile(phoneSourcePath, light);
+  await writeFile(darkPhoneSourcePath, dark);
+  return { light, dark };
+}
+
+function embeddedPhoneSvg(source, square) {
+  const width = square ? phoneCrop.height : phoneCrop.width;
+  const height = phoneCrop.height;
+  const x = square ? (phoneCrop.height - phoneCrop.width) / 2 : 0;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="NGT"><image x="${x}" y="0" width="${phoneCrop.width}" height="${phoneCrop.height}" href="data:image/png;base64,${source.toString("base64")}"/></svg>\n`;
+}
 
 async function toWindowsIconBitmap(png, size) {
   const pixels = await sharp(png).ensureAlpha().raw().toBuffer();
@@ -46,16 +91,19 @@ async function toWindowsIconBitmap(png, size) {
   return Buffer.concat([bitmapHeader, bitmap, transparencyMask]);
 }
 
-async function renderSvg(source, size) {
-  return sharp(source, { density: 384 })
-    .resize(size, size, { fit: "contain" })
+async function renderPhone(source, size) {
+  return sharp(source)
+    .resize(size, size, {
+      fit: "contain",
+      kernel: sharp.kernel.lanczos3,
+    })
     .png()
     .toBuffer();
 }
 
 async function toInstallerBitmap(source) {
   const size = 96;
-  const pixels = await sharp(source, { density: 384 })
+  const pixels = await sharp(source)
     .resize(size, size, { fit: "contain" })
     .flatten({ background: "#fbfaf7" })
     .raw()
@@ -146,10 +194,23 @@ async function buildIco(images) {
 
 const lightIcoPngs = [];
 const darkIcoPngs = [];
+const phoneSources = await extractPhoneSources();
+await writeFile(
+  path.join(brandDirectory, "ngt-app-icon.svg"),
+  embeddedPhoneSvg(phoneSources.light, true),
+);
+await writeFile(
+  path.join(brandDirectory, "ngt-app-icon-dark.svg"),
+  embeddedPhoneSvg(phoneSources.dark, true),
+);
+await writeFile(
+  path.join(brandDirectory, "ngt-mark.svg"),
+  embeddedPhoneSvg(phoneSources.light, false),
+);
 for (const size of pngSizes) {
-  const appPng = await renderSvg(appIconSource, size);
-  const darkAppPng = await renderSvg(darkAppIconSource, size);
-  const markPng = await renderSvg(markSource, size);
+  const appPng = await renderPhone(phoneSources.light, size);
+  const darkAppPng = await renderPhone(phoneSources.dark, size);
+  const markPng = appPng;
   await writeFile(
     path.join(brandDirectory, `ngt-app-icon-${size}.png`),
     appPng,
@@ -172,7 +233,7 @@ await writeFile(path.join(root, "assets", "ngt-studio-light.ico"), lightIco);
 await writeFile(path.join(root, "assets", "ngt-studio-dark.ico"), darkIco);
 await writeFile(
   path.join(root, "assets", "ngt-studio-installer.bmp"),
-  await toInstallerBitmap(appIconSource),
+  await toInstallerBitmap(phoneSources.light),
 );
 const installerRailSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="272" viewBox="0 0 180 272">
   <rect width="180" height="272" fill="#fbfaf7"/>
@@ -185,15 +246,15 @@ await writeFile(
 );
 await writeFile(
   path.join(brandDirectory, "ngt-app-icon.png"),
-  await renderSvg(appIconSource, 194),
+  await renderPhone(phoneSources.light, 194),
 );
 await writeFile(
   path.join(brandDirectory, "ngt-app-icon-dark.png"),
-  await renderSvg(darkAppIconSource, 194),
+  await renderPhone(phoneSources.dark, 194),
 );
 await writeFile(
   path.join(brandDirectory, "ngt-mark.png"),
-  await renderSvg(markSource, 194),
+  await renderPhone(phoneSources.light, 194),
 );
 await writeFile(
   path.join(root, "assets", "ngt-studio-icon.png"),
@@ -201,5 +262,5 @@ await writeFile(
 );
 await writeFile(
   path.join(root, "assets", "ngt-studio-icon.svg"),
-  await readFile(appIconSource),
+  await readFile(path.join(brandDirectory, "ngt-app-icon.svg")),
 );

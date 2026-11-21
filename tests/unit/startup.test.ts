@@ -854,6 +854,22 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("0x002DC6F4");
   });
 
+  it("switches the native window and tray icons with the Windows theme", async () => {
+    const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
+    expect(manager).toContain("WM_SETTINGCHANGE");
+    expect(manager).toContain("windows_system_uses_light_theme()");
+    expect(manager).toContain('root.join("assets/ngt-studio-light.ico")');
+    expect(manager).toContain('root.join("assets/ngt-studio-dark.ico")');
+    expect(manager).toContain("Shell_NotifyIconW(NIM_MODIFY, &tray)");
+    expect(manager).toContain("previous_small");
+    expect(manager).toContain("previous_big");
+    expect(manager).toContain(
+      "refresh_owned_shortcut_icons(&install_root, light_theme)",
+    );
+    expect(manager).toContain("NGT_SHORTCUT_TARGET");
+    expect(manager).toContain("$s.Arguments.Trim() -ieq 'open'");
+  });
+
   it("keeps a cold desktop launch in one persistent manager process", async () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     const openStart = manager.indexOf("fn open_system(root: &Path)");

@@ -23,7 +23,7 @@ const sidebarPreferenceScript = `try{const d=document.documentElement,w=Number(l
 )})||${SIDEBAR_DEFAULT_WIDTH}),c=localStorage.getItem(${JSON.stringify(
   SIDEBAR_COLLAPSED_KEY,
 )})==="true",v=c?${SIDEBAR_COLLAPSED_WIDTH}:Math.min(${SIDEBAR_MAX_WIDTH},Math.max(${SIDEBAR_MIN_WIDTH},Number.isFinite(w)?w:${SIDEBAR_DEFAULT_WIDTH}));d.style.setProperty("--sidebar-width",v+"px");d.dataset.sidebarCollapsed=String(c)}catch{}`;
-const faviconThemeScript = `try{const q=matchMedia("(prefers-color-scheme: dark)"),l=document.getElementById("ngt-theme-icon"),apply=()=>{if(l)l.href=(q.matches?"/brand/ngt-app-icon-dark.svg":"/brand/ngt-app-icon.svg")+"?v=transparent-1"};apply();q.addEventListener?q.addEventListener("change",apply):q.addListener(apply)}catch{}`;
+const faviconThemeScript = `try{const q=matchMedia("(prefers-color-scheme: dark)"),l=document.getElementById("ngt-theme-icon"),apply=()=>{if(l)l.href=(q.matches?"/brand/ngt-app-icon-dark.svg":"/brand/ngt-app-icon.svg")+"?v=business-logo-1"};apply();q.addEventListener?q.addEventListener("change",apply):q.addListener(apply)}catch{}`;
 
 export const metadata: Metadata = {
   title: { default: "NGTManager", template: "%s · NGTManager" },
@@ -52,17 +52,21 @@ export default async function RootLayout({
           id="ngt-theme-icon"
           rel="icon"
           type="image/svg+xml"
-          href="/brand/ngt-app-icon.svg?v=transparent-1"
+          href="/brand/ngt-app-icon.svg?v=business-logo-1"
         />
         <link
           rel="icon"
           type="image/png"
           sizes="32x32"
-          href="/brand/ngt-app-icon-32.png?v=transparent-1"
+          media="(prefers-color-scheme: light)"
+          href="/brand/ngt-app-icon-32.png?v=business-logo-1"
         />
         <link
-          rel="shortcut icon"
-          href="/brand/ngt-app-icon-32.png?v=transparent-1"
+          rel="icon"
+          type="image/png"
+          sizes="32x32"
+          media="(prefers-color-scheme: dark)"
+          href="/brand/ngt-app-icon-dark-32.png?v=business-logo-1"
         />
         <script dangerouslySetInnerHTML={{ __html: faviconThemeScript }} />
         <script dangerouslySetInnerHTML={{ __html: motionPreferenceScript }} />

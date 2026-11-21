@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const requiredSizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 192, 256, 512];
 
 describe("NGT brand assets", () => {
-  it("keeps the horizontal logo and uses true vector app marks", async () => {
+  it("keeps the horizontal logo and derives the phone mark from it", async () => {
     const reference = await sharp("assets/ngt-brand-reference.png")
       .extract({ left: 154, top: 177, width: 632, height: 238 })
       .removeAlpha()
@@ -22,24 +22,45 @@ describe("NGT brand assets", () => {
     );
     expect(difference / reference.length).toBeLessThan(3);
 
-    const [light, dark, generator] = await Promise.all([
-      readFile("public/brand/ngt-app-icon.svg", "utf8"),
-      readFile("public/brand/ngt-app-icon-dark.svg", "utf8"),
+    const [lightSource, darkSource, sourceCrop, generator] = await Promise.all([
+      sharp("public/brand/ngt-phone-mark-source.png")
+        .ensureAlpha()
+        .raw()
+        .toBuffer(),
+      sharp("public/brand/ngt-phone-mark-source-dark.png")
+        .ensureAlpha()
+        .raw()
+        .toBuffer(),
+      sharp("public/brand/ngt-logo-horizontal.png")
+        .extract({ left: 0, top: 0, width: 149, height: 235 })
+        .ensureAlpha()
+        .raw()
+        .toBuffer(),
       readFile("scripts/generate-brand-assets.mjs", "utf8"),
     ]);
-    for (const svg of [light, dark]) {
-      expect(svg).not.toMatch(/<image|base64|data:image/i);
-      expect(svg).toContain("#f4c62d");
+    expect(lightSource).toEqual(sourceCrop);
+    expect(darkSource.length).toBe(lightSource.length);
+    for (let offset = 0; offset < lightSource.length; offset += 4) {
+      const alpha = lightSource[offset + 3];
+      expect(darkSource[offset + 3]).toBe(alpha);
+      if (alpha === 0) continue;
+      const red = lightSource[offset];
+      const green = lightSource[offset + 1];
+      const blue = lightSource[offset + 2];
+      const isYellow = red > 200 && green > 100 && blue < 64;
+      if (isYellow) {
+        expect(darkSource.subarray(offset, offset + 3)).toEqual(
+          lightSource.subarray(offset, offset + 3),
+        );
+      } else {
+        expect([...darkSource.subarray(offset, offset + 3)]).toEqual([
+          255, 255, 255,
+        ]);
+      }
     }
-    const normalizeIcon = (svg: string, outline: string) =>
-      svg
-        .replace(/<desc[^>]*>.*?<\/desc>/, "")
-        .replaceAll(outline, "outline");
-    expect(normalizeIcon(light, "#111111")).toBe(
-      normalizeIcon(dark, "#ffffff"),
-    );
-    expect(generator).toContain("renderSvg(appIconSource, size)");
-    expect(generator).not.toContain('sharp(path.join(brandDir, "ngt-mark.png"))');
+    expect(generator).toContain("horizontalLogoPath");
+    expect(generator).toContain(".extract(phoneCrop)");
+    expect(generator).not.toContain("M42 132L152 55");
   });
 
   it("provides the required transparent and yellow icon sizes", async () => {
@@ -51,6 +72,44 @@ describe("NGT brand assets", () => {
         expect(metadata.width).toBe(size);
         expect(metadata.height).toBe(size);
       }
+      const [light, dark] = await Promise.all([
+        sharp(`public/brand/ngt-app-icon-${size}.png`)
+          .ensureAlpha()
+          .raw()
+          .toBuffer(),
+        sharp(`public/brand/ngt-app-icon-dark-${size}.png`)
+          .ensureAlpha()
+          .raw()
+          .toBuffer(),
+      ]);
+      let minX = size;
+      let maxX = -1;
+      let minY = size;
+      let maxY = -1;
+      let yellowPixels = 0;
+      for (let offset = 0; offset < light.length; offset += 4) {
+        expect(dark[offset + 3]).toBe(light[offset + 3]);
+        if (light[offset + 3] === 0) continue;
+        const pixel = offset / 4;
+        const x = pixel % size;
+        const y = Math.floor(pixel / size);
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        if (
+          light[offset] > 200 &&
+          light[offset + 1] > 100 &&
+          light[offset + 2] < 64
+        ) {
+          yellowPixels += 1;
+        }
+      }
+      expect(maxX - minX + 1).toBeGreaterThanOrEqual(
+        Math.floor((size * 149) / 235) - 1,
+      );
+      expect(maxY - minY + 1).toBeGreaterThanOrEqual(size - 1);
+      expect(yellowPixels).toBeGreaterThan(0);
     }
 
     for (const name of [
@@ -110,5 +169,13 @@ describe("NGT brand assets", () => {
     expect(packager).toContain(
       'Copy-Item -LiteralPath "public" -Destination (Join-Path $stage "public")',
     );
+  });
+
+  it("provides theme-aware favicon fallbacks from the same phone mark", async () => {
+    const layout = await readFile("src/app/layout.tsx", "utf8");
+    expect(layout).toContain("ngt-app-icon-dark.svg");
+    expect(layout).toContain("ngt-app-icon-dark-32.png");
+    expect(layout).toContain('media="(prefers-color-scheme: dark)"');
+    expect(layout).toContain("?v=business-logo-1");
   });
 });

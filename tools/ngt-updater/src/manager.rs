@@ -2053,6 +2053,35 @@ fn windows_system_uses_light_theme() -> bool {
 }
 
 #[cfg(windows)]
+fn refresh_owned_shortcut_icons(root: &Path, light_theme: bool) {
+    let target = root.join("tools/NGTManager.exe");
+    let icon = root.join(if light_theme {
+        "assets/ngt-studio-light.ico"
+    } else {
+        "assets/ngt-studio-dark.ico"
+    });
+    if !target.is_file() || !icon.is_file() {
+        return;
+    }
+    let mut command = Command::new("powershell.exe");
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$w=New-Object -ComObject WScript.Shell;$target=[IO.Path]::GetFullPath($env:NGT_SHORTCUT_TARGET);$root=[IO.Path]::GetFullPath($env:NGT_SHORTCUT_ROOT);$icon=[IO.Path]::GetFullPath($env:NGT_SHORTCUT_ICON);foreach($folder in @([Environment]::GetFolderPath('DesktopDirectory'),[Environment]::GetFolderPath('Programs'))){if([string]::IsNullOrWhiteSpace($folder)){continue};$path=Join-Path $folder 'NGTManager.lnk';if(-not(Test-Path -LiteralPath $path -PathType Leaf)){continue};$s=$w.CreateShortcut($path);$working=if([string]::IsNullOrWhiteSpace($s.WorkingDirectory)){''}else{[IO.Path]::GetFullPath($s.WorkingDirectory)};if(([IO.Path]::GetFullPath($s.TargetPath) -ieq $target)-and($s.Arguments.Trim() -ieq 'open')-and($working -ieq $root)){$s.IconLocation=$icon+',0';$s.Save()}}",
+        ])
+        .env("NGT_SHORTCUT_TARGET", &target)
+        .env("NGT_SHORTCUT_ROOT", root)
+        .env("NGT_SHORTCUT_ICON", &icon)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    let _ = command.spawn();
+}
+
+#[cfg(windows)]
 impl SessionEndNotifier {
     fn start(root: &Path, show_startup: bool) -> Result<Self, String> {
         use windows_sys::Win32::Graphics::Gdi::{
@@ -2069,22 +2098,27 @@ impl SessionEndNotifier {
         };
         use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
         use windows_sys::Win32::UI::Shell::{
-            Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW,
+            Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_MODIFY, NOTIFYICONDATAW,
         };
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, DispatchMessageW, GetCursorPos, GetMessageW, LoadCursorW, LoadImageW,
             RegisterClassW, SendMessageW, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow,
             SystemParametersInfoW, TranslateMessage, CW_USEDEFAULT, HWND_NOTOPMOST, HWND_TOPMOST,
             IDC_ARROW, IMAGE_ICON, LR_LOADFROMFILE, SPI_GETHIGHCONTRAST, STM_SETIMAGE, SWP_NOMOVE,
-            SWP_NOSIZE, SW_HIDE, SW_RESTORE, WM_SETFONT, WM_SETICON, WNDCLASSW, WS_CAPTION,
-            WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
+            SWP_NOSIZE, SW_HIDE, SW_RESTORE, WM_SETFONT, WM_SETICON, WM_SETTINGCHANGE, WNDCLASSW,
+            WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
         };
         let (sender, receiver) = mpsc::sync_channel::<Result<u32, String>>(1);
-        let surface_icon_path = root.join(if windows_system_uses_light_theme() {
-            "assets/ngt-studio-light.ico"
+        let install_root = root.to_path_buf();
+        let initial_light_theme = windows_system_uses_light_theme();
+        refresh_owned_shortcut_icons(root, initial_light_theme);
+        let light_icon_path = root.join("assets/ngt-studio-light.ico");
+        let dark_icon_path = root.join("assets/ngt-studio-dark.ico");
+        let surface_icon_path = if initial_light_theme {
+            light_icon_path.clone()
         } else {
-            "assets/ngt-studio-dark.ico"
-        });
+            dark_icon_path.clone()
+        };
         let body_icon_path = root.join("assets/ngt-studio-light.ico");
         let version_text = read_config(root)
             .ok()
@@ -2479,7 +2513,7 @@ impl SessionEndNotifier {
                     .encode_utf16()
                     .chain(Some(0))
                     .collect();
-                let small_icon = LoadImageW(
+                let mut small_icon = LoadImageW(
                     std::ptr::null_mut(),
                     surface_icon_wide.as_ptr(),
                     IMAGE_ICON,
@@ -2488,7 +2522,7 @@ impl SessionEndNotifier {
                     LR_LOADFROMFILE,
                 )
                     as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
-                let big_icon = LoadImageW(
+                let mut big_icon = LoadImageW(
                     std::ptr::null_mut(),
                     surface_icon_wide.as_ptr(),
                     IMAGE_ICON,
@@ -2563,8 +2597,72 @@ impl SessionEndNotifier {
                 if sender.send(Ok(thread_id)).is_err() {
                     return;
                 }
+                let mut current_light_theme = initial_light_theme;
                 let mut message = std::mem::zeroed();
                 while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
+                    if message.message == WM_SETTINGCHANGE {
+                        let light_theme = windows_system_uses_light_theme();
+                        if light_theme == current_light_theme {
+                            TranslateMessage(&message);
+                            DispatchMessageW(&message);
+                            continue;
+                        }
+                        let icon_path = if light_theme {
+                            &light_icon_path
+                        } else {
+                            &dark_icon_path
+                        };
+                        refresh_owned_shortcut_icons(&install_root, light_theme);
+                        let icon_path: Vec<u16> = icon_path
+                            .to_string_lossy()
+                            .encode_utf16()
+                            .chain(Some(0))
+                            .collect();
+                        let replacement_small = LoadImageW(
+                            std::ptr::null_mut(),
+                            icon_path.as_ptr(),
+                            IMAGE_ICON,
+                            scale(16),
+                            scale(16),
+                            LR_LOADFROMFILE,
+                        )
+                            as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
+                        let replacement_big = LoadImageW(
+                            std::ptr::null_mut(),
+                            icon_path.as_ptr(),
+                            IMAGE_ICON,
+                            scale(32),
+                            scale(32),
+                            LR_LOADFROMFILE,
+                        )
+                            as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
+                        if !replacement_small.is_null() && !replacement_big.is_null() {
+                            SendMessageW(window, WM_SETICON, 0, replacement_small as isize);
+                            SendMessageW(window, WM_SETICON, 1, replacement_big as isize);
+                            tray.hIcon = replacement_small;
+                            let _ = Shell_NotifyIconW(NIM_MODIFY, &tray);
+                            let previous_small = small_icon;
+                            let previous_big = big_icon;
+                            small_icon = replacement_small;
+                            big_icon = replacement_big;
+                            current_light_theme = light_theme;
+                            let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(
+                                previous_small,
+                            );
+                            let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(
+                                previous_big,
+                            );
+                        } else {
+                            for icon in [replacement_small, replacement_big] {
+                                if !icon.is_null() {
+                                    let _ =
+                                        windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(
+                                            icon,
+                                        );
+                                }
+                            }
+                        }
+                    }
                     TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
