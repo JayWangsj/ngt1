@@ -1314,7 +1314,8 @@ end;
 
 function PhaseDescription(const Phase: String): String;
 begin
-  if Phase = 'environment_check' then Result := UiText('正在检查 Windows 和必要组件', 'Verifica di Windows e dei componenti richiesti', 'Checking Windows and required components')
+  if Phase = 'installed_release_check' then Result := UiText('正在核对已安装版本', 'Controllo della versione installata', 'Checking the installed version')
+  else if Phase = 'environment_check' then Result := UiText('正在检查 Windows 和必要组件', 'Verifica di Windows e dei componenti richiesti', 'Checking Windows and required components')
   else if Phase = 'windows_compatibility_check' then Result := UiText('正在检查 Windows 兼容性', 'Verifica della compatibilità di Windows', 'Checking Windows compatibility')
   else if Phase = 'runtime_state_preflight' then Result := UiText('正在检查上次运行状态', 'Verifica della sessione precedente', 'Checking the previous NGTManager session')
   else if Phase = 'package_source_verification' then Result := UiText('正在校验离线安装包', 'Verifica del pacchetto offline', 'Verifying the offline package')

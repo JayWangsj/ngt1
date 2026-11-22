@@ -254,6 +254,19 @@ fn verify_release(root: &Path) -> Result<ReleaseManifest, String> {
     verify_release_with_progress(root, None)
 }
 
+fn installed_release_is_retry(
+    config: &ManagerConfig,
+    candidate: &ReleaseManifest,
+) -> Result<bool, String> {
+    let active = load_release_manifest(&config.active_release)?;
+    if &active != candidate {
+        return Ok(false);
+    }
+    // Only a no-op retry relies on the old files. A different candidate is
+    // verified independently and must proceed through the normal safe stop.
+    verify_release(&config.active_release).map(|_| true)
+}
+
 fn verify_release_with_progress(
     root: &Path,
     progress: Option<&InstallProgress>,
@@ -6491,13 +6504,7 @@ fn install_package(
                 })
         })
         && previous_config.as_ref().is_some_and(|config| {
-            verify_release(&config.active_release)
-                .map(|active| (active, &preflight.manifest))
-                .is_ok_and(|(active, candidate)| {
-                    active.version == candidate.version
-                        && active.commit == candidate.commit
-                        && active.files == candidate.files
-                })
+            installed_release_is_retry(config, &preflight.manifest).unwrap_or(false)
         });
     if !completed_update_retry {
         ensure_update_operation(&root, requested_operation, requested_id)?;
@@ -6508,12 +6515,8 @@ fn install_package(
             .as_ref()
             .filter(|config| config.version == preflight.manifest.version)
         {
-            let active = verify_release(&config.active_release)?;
-            let candidate = &preflight.manifest;
-            if active.version == candidate.version
-                && active.commit == candidate.commit
-                && active.files == candidate.files
-            {
+            progress.set_phase("installed_release_check");
+            if installed_release_is_retry(config, &preflight.manifest)? {
                 remove_legacy_autostart(&root)?;
                 drop(_operation_lock);
                 if requested_operation == "update" && !runtime_is_active(&root)? {
@@ -10267,6 +10270,39 @@ mod tests {
         };
         write_config(&root, &config).unwrap();
         root
+    }
+
+    #[test]
+    fn different_candidate_does_not_validate_a_live_old_release_for_noop_retry() {
+        let root = create_test_install("2.0.25");
+        let config = read_config(&root).unwrap().unwrap();
+        let mut candidate = load_release_manifest(&config.active_release).unwrap();
+        let cache = config.active_release.join(".next/cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("runtime-cache.bin"), b"generated while running").unwrap();
+        assert!(verify_release(&config.active_release).is_err());
+        candidate.commit = "b".repeat(40);
+        let before = read_config(&root).unwrap();
+        assert!(!installed_release_is_retry(&config, &candidate).unwrap());
+        assert_eq!(read_config(&root).unwrap(), before);
+        assert!(cache.join("runtime-cache.bin").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_candidate_retry_still_requires_full_file_verification() {
+        let root = create_test_install("2.0.25");
+        let config = read_config(&root).unwrap().unwrap();
+        let candidate = load_release_manifest(&config.active_release).unwrap();
+        assert!(installed_release_is_retry(&config, &candidate).unwrap());
+        fs::write(config.active_release.join("application.bin"), b"damaged").unwrap();
+        let error = installed_release_is_retry(&config, &candidate).unwrap_err();
+        assert_eq!(failure_code(&error), "RELEASE_FILE_HASH_MISMATCH");
+        assert_eq!(
+            failure_code("Release file inventory differs from its manifest (unexpected: cache)."),
+            "RELEASE_INVENTORY_MISMATCH"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
