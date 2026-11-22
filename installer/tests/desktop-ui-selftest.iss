@@ -47,6 +47,7 @@ var
   Screen, DC, Bitmap, OldBitmap: THandle;
   Bounds: TRect;
   Y, Borders: Integer;
+  NormalColor, HoverColor, PressedColor: Cardinal;
 begin
   Screen := UiGetDC(0); DC := UiCreateDC(Screen); Bitmap := UiCreateBitmap(Screen, ScaleX(100), ScaleY(30)); OldBitmap := SelectObject(DC, Bitmap);
   try
@@ -60,6 +61,17 @@ begin
     CheckUi(UiGetPixel(DC, 0, 0) = clWhite, 'Primary button outside background');
     for Y := 0 to ScaleY(6) do CheckUi(UiGetPixel(DC, Bounds.Right div 2, Y) <> $0060A5C2, 'Primary button has an unwanted border');
     CheckUi(UiGetPixel(DC, Bounds.Right div 2, ScaleY(4)) = $002DC6F4, 'Primary fill changed');
+    NormalColor := UiGetPixel(DC, Bounds.Right div 2, ScaleY(4));
+    DrawBrandButton(WizardForm.NextButton, DC, Bounds, True, $0040, clWhite);
+    HoverColor := UiGetPixel(DC, Bounds.Right div 2, ScaleY(4));
+    DrawBrandButton(WizardForm.NextButton, DC, Bounds, True, $0001, clWhite);
+    PressedColor := UiGetPixel(DC, Bounds.Right div 2, ScaleY(4));
+    CheckUi((NormalColor <> HoverColor) and (HoverColor <> PressedColor), 'Primary hover/pressed colors missing');
+    DrawBrandButton(WizardForm.CancelButton, DC, Bounds, False, 0, clWhite);
+    NormalColor := UiGetPixel(DC, Bounds.Right div 2, ScaleY(4));
+    DrawBrandButton(WizardForm.CancelButton, DC, Bounds, False, $0040, clWhite);
+    HoverColor := UiGetPixel(DC, Bounds.Right div 2, ScaleY(4));
+    CheckUi(NormalColor <> HoverColor, 'Cancel hover color missing');
   finally
     SelectObject(DC, OldBitmap); DeleteObject(Bitmap); UiDeleteDC(DC); UiReleaseDC(0, Screen);
   end;
@@ -107,11 +119,51 @@ begin
   CheckRoundCard(FinishInfo);
 end;
 
+procedure CheckLanguageDialog;
+var
+  Form: TSetupForm;
+  PreviewPath: String;
+  PreviewUntil: Int64;
+begin
+  Form := CreateLanguageDialog;
+  try
+    CheckUi(Form.Color = clWhite, 'Language dialog must use the wizard page surface');
+    CheckUi(LanguageChoice.Color = $00F7FAFB, 'Language selector surface');
+    CheckUi(LanguageChoice.Left >= ScaleX(156), 'Language dialog missing brand rail');
+    CheckUi(LanguageChoice.Left + LanguageChoice.Width <= Form.ClientWidth - ScaleX(16), 'Language selector overflows');
+    CheckUi(LanguageChoice.Top + LanguageChoice.Height < LanguageAccept.Top, 'Language selector overlaps footer');
+    CheckUi(LanguageAccept.Height = WizardForm.NextButton.Height, 'Language and wizard button sizes differ');
+    SendMessage(LanguageAccept.Handle, $00F4, 1, 1);
+    CheckUi((GetWindowLong(LanguageAccept.Handle, -16) and $000F) = $000B, 'Language default button lost branding');
+    SendMessage(LanguageCancel.Handle, $0200, 0, 0);
+    CheckUi(HoveredBrandButton = LanguageCancel.Handle, 'Language cancel hover missing');
+    SendMessage(LanguageCancel.Handle, $02A3, 0, 0);
+    PreviewPath := ExpandConstant('{param:UiPreview|}');
+    if PreviewPath <> '' then
+    begin
+      Form.Show;
+      ProcessWizardMessages;
+      RedrawWindow(Form.Handle, 0, 0, $0185);
+      SaveStringToFile(PreviewPath, IntToStr(Form.Handle), False);
+      PreviewUntil := GetTickCount64 + 10000;
+      while GetTickCount64 < PreviewUntil do
+      begin
+        ProcessWizardMessages;
+        Sleep(20);
+      end;
+    end;
+  finally
+    SetWindowLong(Form.Handle, -4, OriginalLanguageProc);
+    OriginalLanguageProc := 0; LanguageDialogHandle := 0;
+    Form.Free;
+  end;
+end;
+
 procedure RunDesktopUiSelfTests;
 var
   Tick: Int64;
   Phases: TArrayOfString;
-  I: Integer;
+  I, Loads, Layouts: Integer;
   Output: String;
 begin
   Output := ExpandConstant('{param:UiTestResult|}');
@@ -121,6 +173,12 @@ begin
     if not CompactDesktopLayout then CheckUi(WizardForm.Bevel.Left = ScaleX(144), 'Footer separator crosses the rail');
     CheckUi(WizardForm.RunList.Parent = FinishInfo, 'Open option parent');
     CheckUi(WizardForm.RunList.Color = FinishInfo.Color, 'Open option background');
+    SendMessage(WizardForm.NextButton.Handle, $00F4, 1, 1);
+    CheckUi((GetWindowLong(WizardForm.NextButton.Handle, -16) and $000F) = $000B, 'Default-button change restored the native gray button');
+    SendMessage(WizardForm.CancelButton.Handle, $0200, 0, 0);
+    CheckUi(HoveredBrandButton = WizardForm.CancelButton.Handle, 'Mouse move does not set hover');
+    SendMessage(WizardForm.CancelButton.Handle, $02A3, 0, 0);
+    CheckUi(HoveredBrandButton = 0, 'Mouse leave does not clear hover');
     SetArrayLength(Phases, 8);
     Phases[0] := 'package_extraction';
     Phases[1] := 'package_source_verification';
@@ -136,7 +194,10 @@ begin
       CheckUi(not BrandProgressDeterminate, 'Missing totals must use activity mode');
       BrandProgressAnimationTick := GetTickCount64 - 2000;
       Tick := BrandProgressAnimationTick;
+      Loads := StageIconLoads; Layouts := DesktopLayoutCount;
       ManagerOutput('NGT_PROGRESS|' + AttemptId + '|' + Phases[I] + '|2|2|0|2|20||', False, False);
+      CheckUi(StageIconLoads = Loads, 'Heartbeat reloads the stage bitmap');
+      CheckUi(DesktopLayoutCount = Layouts, 'Heartbeat relayouts and erases the page');
       CheckUi(Tick = BrandProgressAnimationTick, 'Heartbeat restarted activity animation');
       AnimateBrandProgress;
       CheckUi(BrandProgressFill.Width > 0, 'Activity segment missing');
@@ -151,8 +212,17 @@ begin
       CheckUi(BrandProgressPosition = 0, 'New phase did not reset its own progress');
     end;
     CheckButtonPixels;
+    ManagerOutput('NGT_PROGRESS|' + AttemptId + '|package_source_verification|40|40|0|10|100|20|200', False, False);
+    Loads := StageIconLoads;
+    ManagerOutput('NGT_PROGRESS|' + AttemptId + '|package_source_verification|41|41|0|11|110|20|200', False, False);
+    CheckUi(StageIconLoads = Loads, 'Slow-stage clock reloads every heartbeat');
+    InstallMetrics.Visible := False;
+    ManagerOutput('NGT_PROGRESS|' + AttemptId + '|package_source_verification|42|42|0|12|120|20|200', False, False);
+    CheckUi(not InstallMetrics.Visible, 'Progress redraw revealed hidden metrics');
+    InstallMetrics.Visible := True;
+    CheckLanguageDialog;
     CheckCompactLayouts;
-    SaveStringToFile(Output, 'PASS: native progress, single-border button pixels, both card corners, compact resolution/DPI layouts, scroll panes and minimize/restore', False);
+    SaveStringToFile(Output, 'PASS: stable heartbeat rendering, button hover/pressed/default styles, branded language dialog, progress, card corners, compact layouts and minimize/restore', False);
     FinishUiTest(0);
   except
     SaveStringToFile(Output, 'FAIL: ' + GetExceptionMessage, False);

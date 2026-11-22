@@ -109,6 +109,11 @@ type
     Bounds: TRect;
     ItemData: LongWord;
   end;
+  TMouseTracking = record
+    Size, Flags: Cardinal;
+    Window: HWND;
+    HoverTime: Cardinal;
+  end;
 
 var
   AttemptId: String;
@@ -178,6 +183,13 @@ var
   OriginalWizardProc, OriginalLanguageProc: LongInt;
   LanguageDialogHandle: HWND;
   LanguageAccept, LanguageCancel: TNewButton;
+  LanguageChoice: TNewComboBox;
+  HoveredBrandButton: HWND;
+  BrandButtonCallback: LongInt;
+  CurrentStageIcon: String;
+#ifdef DesktopUiTest
+  StageIconLoads, DesktopLayoutCount: Integer;
+#endif
 
 const
   PBM_SETBARCOLOR = $0409;
@@ -245,6 +257,16 @@ function DrawText(DC: THandle; Text: String; Count: Integer; var Bounds: TRect; 
   external 'DrawTextW@user32.dll stdcall';
 function GetStockObject(Index: Integer): THandle;
   external 'GetStockObject@gdi32.dll stdcall';
+function SetWindowSubclass(Wnd: HWND; Callback: LongInt; Id, Data: LongWord): BOOL;
+  external 'SetWindowSubclass@comctl32.dll stdcall';
+function DefSubclassProc(Wnd: HWND; Msg: UINT; WParam: LongWord; LParam: LongInt): LongInt;
+  external 'DefSubclassProc@comctl32.dll stdcall';
+function TrackMouseEvent(var Tracking: TMouseTracking): BOOL;
+  external 'TrackMouseEvent@user32.dll stdcall';
+function InvalidateRect(Wnd: HWND; Rect: LongInt; Erase: BOOL): BOOL;
+  external 'InvalidateRect@user32.dll stdcall';
+function RedrawWindow(Wnd: HWND; Rect, Region: LongInt; Flags: UINT): BOOL;
+  external 'RedrawWindow@user32.dll stdcall';
 
 function UiGetWindowRect(Wnd: HWND; var Bounds: TRect): BOOL;
   external 'GetWindowRect@user32.dll stdcall';
@@ -269,7 +291,9 @@ begin
   ClearBrush := CreateSolidBrush(Background);
   FillRect(DC, Bounds, ClearBrush); DeleteObject(ClearBrush);
   if not Button.Enabled then Brush := CreateSolidBrush($00E9E7E1)
+  else if Primary and ((State and $0001) <> 0) then Brush := CreateSolidBrush($0026B0DC)
   else if (State and $0001) <> 0 then Brush := CreateSolidBrush($00B0DCEB)
+  else if Primary and ((State and $0040) <> 0) then Brush := CreateSolidBrush($0020B6E6)
   else if Primary then Brush := CreateSolidBrush($002DC6F4)
   else if (State and $0040) <> 0 then Brush := CreateSolidBrush($00E7F3FA)
   else Brush := CreateSolidBrush($00F7FAFB);
@@ -315,6 +339,7 @@ begin
     end;
     if Button <> nil then
     begin
+      if HoveredBrandButton = Button.Handle then Item.State := Item.State or $0040;
       DrawBrandButton(Button, Item.DC, Item.Bounds, Primary, Item.State, Background);
       Result := 1; Exit;
     end;
@@ -327,8 +352,40 @@ begin
   end;
 end;
 
+function BrandButtonSubclass(Wnd: HWND; Msg: UINT; WParam: LongWord; LParam: LongInt; Id, Data: LongWord): LongInt;
+var
+  Tracking: TMouseTracking;
+begin
+  { Inno changes the default-button style when focus/page changes. Keep owner draw. }
+  if Msg = $00F4 then
+  begin
+    Result := DefSubclassProc(Wnd, Msg, (WParam and not $000F) or $000B, LParam);
+    Exit;
+  end;
+  if Msg = $0200 then
+  begin
+    if HoveredBrandButton <> Wnd then
+    begin
+      HoveredBrandButton := Wnd;
+      InvalidateRect(Wnd, 0, False);
+      Tracking.Size := SizeOf(Tracking); Tracking.Flags := 2;
+      Tracking.Window := Wnd; Tracking.HoverTime := 0;
+      TrackMouseEvent(Tracking);
+    end;
+  end
+  else if (Msg = $02A3) or (Msg = $0082) then
+  begin
+    if HoveredBrandButton = Wnd then HoveredBrandButton := 0;
+    InvalidateRect(Wnd, 0, False);
+  end;
+  Result := DefSubclassProc(Wnd, Msg, WParam, LParam);
+end;
+
 procedure UseBrandButton(Button: TNewButton);
 begin
+  if HighContrastActive then Exit;
+  if BrandButtonCallback = 0 then BrandButtonCallback := CreateCallback(@BrandButtonSubclass);
+  SetWindowSubclass(Button.Handle, BrandButtonCallback, 1, 0);
   if (GetWindowLong(Button.Handle, -16) and $000F) <> $000B then
   begin
     SetWindowLong(Button.Handle, -16, (GetWindowLong(Button.Handle, -16) and not ($000F or $00800000)) or $000B);
@@ -387,6 +444,9 @@ var
   ShowBrandRail, ShowBrandHeader: Boolean;
 begin
   if (not DesktopLayoutReady) or LayingOutDesktop then Exit;
+#ifdef DesktopUiTest
+  DesktopLayoutCount := DesktopLayoutCount + 1;
+#endif
   LayingOutDesktop := True;
   try
     if DesktopWorkArea(WizardForm.Handle, Area) then
@@ -813,6 +873,7 @@ begin
   InstallMetrics.SetBounds(ScaleX(208), ScaleY(150),
     ContentWidth - ScaleX(52), ScaleY(58));
   InstallMetrics.BevelOuter := bvNone;
+  SetWindowLong(InstallMetrics.Handle, -20, GetWindowLong(InstallMetrics.Handle, -20) or $02000000);
   InstallMetrics.ParentBackground := False;
   InstallMetrics.Color := $00EAF6FB;
   ApplyRoundedCard(InstallMetrics);
@@ -1075,101 +1136,110 @@ begin
   end;
 end;
 
+function CreateLanguageDialog: TSetupForm;
+var
+  Form: TSetupForm;
+  Rail, Footer, Capsule: TPanel;
+  Logo, Decoration: TBitmapImage;
+  Title, Description, Version, Eyebrow: TNewStaticText;
+  LeftEdge: Integer;
+  Compact: Boolean;
+begin
+  ExtractTemporaryFile('ngt-studio-installer.bmp');
+  ExtractTemporaryFile('ngt-studio-installer-white.bmp');
+  ExtractTemporaryFile('ngt-studio-installer-rail.bmp');
+  Form := CreateCustomForm(480, 220, True, True);
+  Form.Width := ScaleX(480); Form.Height := ScaleY(220);
+  Form.Caption := 'NGTManager'; Form.Color := clWhite;
+  Form.Font.Name := 'Segoe UI'; Form.Font.Size := 10;
+  Form.BorderIcons := [biSystemMenu];
+  FitDesktopWindow(Form.Handle);
+  Compact := Form.ClientWidth < ScaleX(440);
+  LeftEdge := ScaleX(156);
+  if Compact then LeftEdge := ScaleX(16);
+  Rail := TPanel.Create(Form); Rail.Parent := Form;
+  Rail.SetBounds(0, 0, ScaleX(136), Form.ClientHeight);
+  Rail.BevelOuter := bvNone; Rail.ParentBackground := False; Rail.Color := $00F7FAFB;
+  Rail.Anchors := [akLeft, akTop, akBottom]; Rail.Visible := not Compact;
+  Decoration := TBitmapImage.Create(Form); Decoration.Parent := Rail;
+  Decoration.SetBounds(0, 0, Rail.Width, Rail.Height); Decoration.Align := alClient; Decoration.Stretch := True;
+  Decoration.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer-rail.bmp'));
+  Logo := TBitmapImage.Create(Form); Logo.Parent := Rail;
+  Logo.SetBounds(ScaleX(20), ScaleY(20), ScaleX(40), ScaleY(40)); Logo.Stretch := True;
+  Logo.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer.bmp'));
+  Title := TNewStaticText.Create(Form); Title.Parent := Rail;
+  Title.SetBounds(ScaleX(12), ScaleY(72), ScaleX(120), ScaleY(24)); Title.Caption := 'NGTManager';
+  Title.Font.Size := 14; Title.Font.Style := [fsBold]; Title.Font.Color := $001F2729;
+  Capsule := TPanel.Create(Form); Capsule.Parent := Rail;
+  Capsule.SetBounds(ScaleX(12), ScaleY(102), ScaleX(64), ScaleY(22));
+  Capsule.BevelOuter := bvNone; Capsule.ParentBackground := False; Capsule.Color := $00EAF6FB;
+  ApplyRoundedCard(Capsule);
+  Version := TNewStaticText.Create(Form); Version.Parent := Capsule;
+  Version.SetBounds(ScaleX(8), ScaleY(2), ScaleX(54), ScaleY(18)); Version.Caption := 'v{#AppVersion}';
+  Version.Font.Size := 9; Version.Font.Color := $00576D70;
+  Eyebrow := TNewStaticText.Create(Form); Eyebrow.Parent := Form;
+  Eyebrow.SetBounds(LeftEdge, ScaleY(16), Form.ClientWidth - LeftEdge - ScaleX(16), ScaleY(18));
+  Eyebrow.Caption := UiText('安装', 'INSTALLAZIONE', 'INSTALLATION');
+  Eyebrow.Font.Size := 9; Eyebrow.Font.Style := [fsBold]; Eyebrow.Font.Color := $0000789D;
+  Description := TNewStaticText.Create(Form); Description.Parent := Form;
+  Description.SetBounds(LeftEdge, ScaleY(42), Form.ClientWidth - LeftEdge - ScaleX(16), ScaleY(48));
+  Description.Anchors := [akLeft, akTop, akRight];
+  Description.Caption := UiText('选择安装语言', 'Scegli la lingua di installazione', 'Choose your installation language');
+  Description.Font.Size := 13; Description.Font.Style := [fsBold]; Description.Font.Color := $001F2729;
+  LanguageChoice := TNewComboBox.Create(Form); LanguageChoice.Parent := Form;
+  LanguageChoice.Style := csDropDownList; LanguageChoice.Color := $00F7FAFB;
+  LanguageChoice.SetBounds(LeftEdge, ScaleY(96), Form.ClientWidth - LeftEdge - ScaleX(16), ScaleY(26));
+  LanguageChoice.Anchors := [akLeft, akTop, akRight];
+  LanguageChoice.Items.Add('简体中文'); LanguageChoice.Items.Add('Italiano'); LanguageChoice.Items.Add('English');
+  LanguageChoice.ItemIndex := 2;
+  if ActiveLanguage = 'chinesesimplified' then LanguageChoice.ItemIndex := 0;
+  if ActiveLanguage = 'italian' then LanguageChoice.ItemIndex := 1;
+  Footer := TPanel.Create(Form); Footer.Parent := Form;
+  Footer.SetBounds(LeftEdge - ScaleX(20), Form.ClientHeight - ScaleY(48), Form.ClientWidth - LeftEdge + ScaleX(20), ScaleY(1));
+  if Compact then Footer.Left := 0;
+  Footer.Anchors := [akLeft, akRight, akBottom]; Footer.BevelOuter := bvNone; Footer.Color := $00E4E9EC;
+  LanguageCancel := TNewButton.Create(Form); LanguageCancel.Parent := Form;
+  LanguageCancel.SetBounds(Form.ClientWidth - ScaleX(116), Form.ClientHeight - ScaleY(39), ScaleX(100), ScaleY(30));
+  LanguageCancel.Anchors := [akRight, akBottom];
+  LanguageCancel.Caption := UiText('取消', 'Annulla', 'Cancel'); LanguageCancel.Cancel := True; LanguageCancel.ModalResult := mrCancel;
+  LanguageAccept := TNewButton.Create(Form); LanguageAccept.Parent := Form;
+  LanguageAccept.SetBounds(LanguageCancel.Left - ScaleX(108), LanguageCancel.Top, ScaleX(100), ScaleY(30));
+  LanguageAccept.Anchors := [akRight, akBottom];
+  LanguageAccept.Caption := UiText('继续', 'Continua', 'Continue'); LanguageAccept.Default := True; LanguageAccept.ModalResult := mrOk;
+  LanguageDialogHandle := Form.Handle;
+  OriginalLanguageProc := SetWindowLong(Form.Handle, -4, CreateCallback(@BrandButtonWindowProc));
+  if HighContrastActive then
+  begin
+    Form.Color := clWindow; Rail.Color := clWindow; Decoration.Visible := False;
+    Capsule.Color := clWindow; LanguageChoice.Color := clWindow;
+    Title.Font.Color := clWindowText; Version.Font.Color := clWindowText;
+    Eyebrow.Font.Color := clWindowText; Description.Font.Color := clWindowText;
+  end
+  else
+  begin
+    UseBrandButton(LanguageAccept); UseBrandButton(LanguageCancel);
+  end;
+  Result := Form;
+end;
+
 function InitializeSetup: Boolean;
 var
   Form: TSetupForm;
-  Logo: TBitmapImage;
-  Title, Description, Version: TNewStaticText;
-  Languages: TNewComboBox;
-  AcceptButton, CancelButton: TNewButton;
   SelectedLanguage, Arguments, Argument: String;
   I, ResultCode: Integer;
-  WorkArea: TRect;
 begin
   Result := True;
   if WizardSilent or (ExpandConstant('{param:NGTLanguageSelected|0}') = '1') then Exit;
   for I := 1 to ParamCount do
     if Pos('/lang=', Lowercase(ParamStr(I))) = 1 then Exit;
-  ExtractTemporaryFile('ngt-studio-installer.bmp');
-  Form := CreateCustomForm(480, 220, True, True);
-  Form.Width := ScaleX(480); Form.Height := ScaleY(220);
+  Form := CreateLanguageDialog;
   try
-    Form.Caption := 'NGTManager';
-    Form.Color := $00F7FAFB;
-    Form.Font.Name := 'Segoe UI';
-    if DesktopWorkArea(Form.Handle, WorkArea) then
-      begin
-        if Form.Width > (WorkArea.Right - WorkArea.Left) * 7 div 10 then Form.Width := (WorkArea.Right - WorkArea.Left) * 7 div 10;
-        if Form.Height > (WorkArea.Bottom - WorkArea.Top) * 6 div 10 then Form.Height := (WorkArea.Bottom - WorkArea.Top) * 6 div 10;
-      end;
-    Form.BorderIcons := [biSystemMenu];
-    Logo := TBitmapImage.Create(Form);
-    Logo.Parent := Form;
-    Logo.SetBounds(ScaleX(16), ScaleY(16), ScaleX(40), ScaleY(40));
-    Logo.Stretch := True;
-    Logo.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer.bmp'));
-    Title := TNewStaticText.Create(Form);
-    Title.Parent := Form;
-    Title.SetBounds(ScaleX(72), ScaleY(16), Form.ClientWidth - ScaleX(88), ScaleY(26));
-    Title.Anchors := [akLeft, akTop, akRight];
-    Title.Caption := 'NGTManager';
-    Title.Font.Name := 'Segoe UI';
-    Title.Font.Size := 15;
-    Title.Font.Style := [fsBold];
-    Title.Font.Color := $001F2729;
-    Version := TNewStaticText.Create(Form);
-    Version.Parent := Form;
-    Version.SetBounds(ScaleX(72), ScaleY(44), ScaleX(160), ScaleY(18));
-    Version.Caption := 'v{#AppVersion}';
-    Version.Font.Color := $00576D70;
-    Description := TNewStaticText.Create(Form);
-    Description.Parent := Form;
-    Description.SetBounds(ScaleX(16), ScaleY(76), Form.ClientWidth - ScaleX(32), ScaleY(20));
-    Description.Anchors := [akLeft, akTop, akRight];
-    Description.Caption := UiText('选择安装语言', 'Scegli la lingua di installazione', 'Choose your installation language');
-    Description.Font.Size := 10;
-    Languages := TNewComboBox.Create(Form);
-    Languages.Parent := Form;
-    Languages.Style := csDropDownList;
-    Languages.SetBounds(ScaleX(16), ScaleY(104), Form.ClientWidth - ScaleX(32), ScaleY(26));
-    Languages.Anchors := [akLeft, akTop, akRight];
-    Languages.Items.Add('简体中文');
-    Languages.Items.Add('Italiano');
-    Languages.Items.Add('English');
-    Languages.ItemIndex := 2;
-    if ActiveLanguage = 'chinesesimplified' then Languages.ItemIndex := 0;
-    if ActiveLanguage = 'italian' then Languages.ItemIndex := 1;
-    AcceptButton := TNewButton.Create(Form);
-    AcceptButton.Parent := Form;
-    AcceptButton.SetBounds(ScaleX(240), Form.ClientHeight - ScaleY(44), ScaleX(100), ScaleY(28));
-    AcceptButton.Anchors := [akRight, akBottom];
-    AcceptButton.Caption := UiText('继续', 'Continua', 'Continue');
-    AcceptButton.Default := True;
-    AcceptButton.ModalResult := mrOk;
-    LanguageAccept := AcceptButton;
-    CancelButton := TNewButton.Create(Form);
-    CancelButton.Parent := Form;
-    CancelButton.SetBounds(ScaleX(352), Form.ClientHeight - ScaleY(44), ScaleX(100), ScaleY(28));
-    CancelButton.Anchors := [akRight, akBottom];
-    CancelButton.Caption := UiText('取消', 'Annulla', 'Cancel');
-    CancelButton.Cancel := True;
-    CancelButton.ModalResult := mrCancel;
-    LanguageCancel := CancelButton;
-    CancelButton.Left := Form.ClientWidth - CancelButton.Width - ScaleX(16);
-    AcceptButton.Left := CancelButton.Left - AcceptButton.Width - ScaleX(12);
-    LanguageDialogHandle := Form.Handle;
-    OriginalLanguageProc := SetWindowLong(Form.Handle, -4, CreateCallback(@BrandButtonWindowProc));
-    if not HighContrastActive then
-    begin
-      UseBrandButton(AcceptButton);
-      UseBrandButton(CancelButton);
-    end;
     if Form.ShowModal <> mrOk then
     begin
       Result := False;
       Exit;
     end;
-    case Languages.ItemIndex of
+    case LanguageChoice.ItemIndex of
       0: SelectedLanguage := 'chinesesimplified';
       1: SelectedLanguage := 'italian';
     else
@@ -1282,7 +1352,13 @@ begin
   else if (Phase = 'failed') or (Phase = 'recovery_failed') then IconName := 'error'
   else if (Phase = 'package_source_verification') or
     (Phase = 'source_copy_verification') or (Phase = 'candidate_verification') then IconName := 'shield';
+  if InstallWarningActive and (IconName <> 'success') and (IconName <> 'error') then IconName := 'clock';
+  if CurrentStageIcon = IconName then Exit;
   InstallStageImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-' + IconName + '.bmp'));
+  CurrentStageIcon := IconName;
+#ifdef DesktopUiTest
+  StageIconLoads := StageIconLoads + 1;
+#endif
 end;
 
 function TakeField(var Value: String): String;
@@ -1319,6 +1395,7 @@ var
   ProgressValue: Int64;
   ProgressTotal: Int64;
   StatusText: String;
+  MetricsVisible: Boolean;
 begin
   Log(S);
   if Copy(S, 1, 13) <> 'NGT_PROGRESS|' then
@@ -1343,15 +1420,11 @@ begin
     SendMessage(CompactSummary.Handle, $00B6, 0, -SendMessage(CompactSummary.Handle, $00CE, 0, 0));
   end;
   CurrentPhase := Phase;
-  UpdateStageIcon(Phase);
   PhaseElapsedSeconds := StrToIntDef(PhaseElapsed, 0);
   TotalElapsedSeconds := StrToIntDef(TotalElapsed, 0);
   StatusText := PhaseDescription(Phase);
   InstallWarningActive := PhaseElapsedSeconds > 30;
-  if InstallWarningActive then
-    InstallStageImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-clock.bmp'));
-  if InstallWarningLabel.Visible then
-    InstallWarningLabel.Caption := UiText(
+  InstallWarningLabel.Caption := UiText(
       'ⓘ 此阶段所需时间比预计更长，操作仍在继续。',
       'ⓘ Questa fase sta richiedendo più tempo del previsto.',
       'ⓘ This phase is taking longer than expected.');
@@ -1366,17 +1439,30 @@ begin
       'ⓘ È troppo tardi per annullare; completamento sicuro in corso.',
       'ⓘ It is too late to cancel; finishing safely.');
   if CancelPending <> '0' then InstallWarningActive := True;
+  UpdateStageIcon(Phase);
   WizardForm.StatusLabel.Caption := StatusText;
   InstallDescriptionLabel.Caption := UiText(
     '正在安全处理安装文件，请勿关闭电脑。',
     'Operazione sicura sui file di installazione in corso.',
     'Safely processing the installation files.');
-  if StrToIntDef(ProcessedFiles, -1) >= 0 then
-    InstallFilesValue.Caption := ProcessedFiles
-  else
-    InstallFilesValue.Caption := '—';
-  InstallTotalValue.Caption := ElapsedText(TotalElapsedSeconds);
-  InstallPhaseValue.Caption := ElapsedText(PhaseElapsedSeconds);
+  MetricsVisible := InstallMetrics.Visible;
+  if MetricsVisible then SendMessage(InstallMetrics.Handle, $000B, 0, 0);
+  try
+    if StrToIntDef(ProcessedFiles, -1) >= 0 then
+      InstallFilesValue.Caption := ProcessedFiles
+    else
+      InstallFilesValue.Caption := '—';
+    InstallTotalValue.Caption := ElapsedText(TotalElapsedSeconds);
+    InstallPhaseValue.Caption := ElapsedText(PhaseElapsedSeconds);
+    UpdateCompactDetails;
+  finally
+    if MetricsVisible then
+    begin
+      SendMessage(InstallMetrics.Handle, $000B, 1, 0);
+      RedrawWindow(InstallMetrics.Handle, 0, 0, $0081);
+    end;
+  end;
+  InstallWarningLabel.Visible := InstallWarningActive and (not CompactDesktopLayout) and (not FailureDetails.Visible);
   ProgressValue := StrToInt64Def(ProcessedBytes, -1);
   ProgressTotal := StrToInt64Def(TotalBytes, -1);
   if (ProgressValue < 0) or (ProgressTotal <= 0) then
@@ -1388,7 +1474,6 @@ begin
     SetBrandProgress(ProgressValue, ProgressTotal)
   else
     SetBrandProgressActive;
-  LayoutDesktopWizard(WizardForm);
 end;
 
 procedure PollManagerProgress;
