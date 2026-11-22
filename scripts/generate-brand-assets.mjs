@@ -259,6 +259,13 @@ for (const [name, shape] of Object.entries(stageIcons)) {
   );
 }
 const darkIcoPngs = [];
+for (const name of ["package", "clock"]) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="56" height="56" fill="#fbf6ea"/><g transform="translate(4 0)" fill="none" stroke="#817d70" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">${stageIcons[name]}</g></svg>`;
+  await writeFile(
+    path.join(root, "assets", `ngt-metric-${name}.bmp`),
+    await rgbBitmap(svg, 112, 112),
+  );
+}
 const phoneSources = await extractPhoneSources();
 const appSource = await renderAppIcon(phoneSources.light, 512);
 await writeFile(

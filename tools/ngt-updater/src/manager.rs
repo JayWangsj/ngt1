@@ -2839,8 +2839,9 @@ unsafe extern "system" fn session_end_window_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetSysColorBrush, Polygon,
-        SetBkMode, SetTextColor, COLOR_WINDOW, TRANSPARENT,
+        BeginPaint, BeginPath, CloseFigure, CreateSolidBrush, DeleteObject, EndPaint, EndPath,
+        FillPath, FillRect, GetSysColorBrush, LineTo, MoveToEx, PolyBezierTo, SetBkMode,
+        SetTextColor, COLOR_WINDOW, TRANSPARENT,
     };
     use windows_sys::Win32::UI::Controls::PBM_SETPOS;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -2879,44 +2880,48 @@ unsafe extern "system" fn session_end_window_proc(
             let wave_front = CreateSolidBrush(0x00b8f0ff);
             let back_points = [
                 POINT {
-                    x: width * 2 / 3,
-                    y: height,
-                },
-                POINT {
-                    x: width * 4 / 5,
-                    y: height * 2 / 3,
-                },
-                POINT {
-                    x: width,
+                    x: width * 3 / 4,
                     y: height / 2,
                 },
                 POINT {
+                    x: width * 4 / 5,
+                    y: height * 4 / 5,
+                },
+                POINT {
                     x: width,
-                    y: height,
+                    y: height * 2 / 5,
                 },
             ];
             let front_points = [
                 POINT {
-                    x: width * 3 / 4,
-                    y: height,
+                    x: width * 9 / 10,
+                    y: height * 4 / 5,
                 },
                 POINT {
                     x: width * 9 / 10,
-                    y: height * 3 / 4,
+                    y: height / 3,
                 },
                 POINT {
                     x: width,
-                    y: height * 2 / 3,
-                },
-                POINT {
-                    x: width,
-                    y: height,
+                    y: height / 4,
                 },
             ];
             let old = windows_sys::Win32::Graphics::Gdi::SelectObject(dc, wave_back as _);
-            Polygon(dc, back_points.as_ptr(), back_points.len() as i32);
+            BeginPath(dc);
+            MoveToEx(dc, width * 3 / 5, height, std::ptr::null_mut());
+            PolyBezierTo(dc, back_points.as_ptr(), back_points.len() as u32);
+            LineTo(dc, width, height);
+            CloseFigure(dc);
+            EndPath(dc);
+            FillPath(dc);
             windows_sys::Win32::Graphics::Gdi::SelectObject(dc, wave_front as _);
-            Polygon(dc, front_points.as_ptr(), front_points.len() as i32);
+            BeginPath(dc);
+            MoveToEx(dc, width * 4 / 5, height, std::ptr::null_mut());
+            PolyBezierTo(dc, front_points.as_ptr(), front_points.len() as u32);
+            LineTo(dc, width, height);
+            CloseFigure(dc);
+            EndPath(dc);
+            FillPath(dc);
             windows_sys::Win32::Graphics::Gdi::SelectObject(dc, old);
             DeleteObject(background as _);
             DeleteObject(wave_back as _);

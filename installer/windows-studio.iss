@@ -46,6 +46,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
+ShowLanguageDialog=no
+DefaultDialogFontName=Segoe UI
 CloseApplications=no
 RestartApplications=no
 UninstallDisplayName={#AppName}
@@ -60,6 +62,7 @@ Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 Source: "{#IconBitmapPath}"; Flags: dontcopy
 Source: "{#RailBitmapPath}"; Flags: dontcopy
 Source: "..\assets\ngt-stage-*.bmp"; Flags: dontcopy
+Source: "..\assets\ngt-metric-*.bmp"; Flags: dontcopy
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion; AfterInstall: InstallExtractedPackage
 
@@ -93,6 +96,12 @@ type
     LParam: LongInt;
     Time: DWORD;
     Point: TWindowsPoint;
+  end;
+  TButtonDrawItem = record
+    ControlType, ControlId, ItemId, Action, State: Cardinal;
+    Window, DC: THandle;
+    Bounds: TRect;
+    ItemData: LongWord;
   end;
 
 var
@@ -143,6 +152,21 @@ var
   BrandProgressPosition: Integer;
   BrandProgressAnimationTick: Int64;
   DesktopLayoutReady: Boolean;
+  ReadyCard: TPanel;
+  ReadyHeading: TNewStaticText;
+  ReadyDescription: TNewStaticText;
+  ReadyBrand: TBitmapImage;
+  ReadyRail: TPanel;
+  ReadyStage: TBitmapImage;
+  ReadyProduct: TNewStaticText;
+  ReadyEyebrow: TNewStaticText;
+  FinishStage: TBitmapImage;
+  MetricIcons: array[0..2] of TBitmapImage;
+  MetricDividers: array[0..1] of TPanel;
+  MetricSurface: TPanel;
+  OriginalWizardProc, OriginalLanguageProc: LongInt;
+  LanguageDialogHandle: HWND;
+  LanguageAccept, LanguageCancel: TNewButton;
 
 const
   PBM_SETBARCOLOR = $0409;
@@ -182,13 +206,114 @@ function CreateRoundRectRgn(nLeftRect, nTopRect, nRightRect, nBottomRect,
 function SetWindowRgn(hWnd: HWND; hRgn: THandle; bRedraw: BOOL): Integer;
   external 'SetWindowRgn@user32.dll stdcall';
 
+function GetWindowLong(Wnd: HWND; Index: Integer): LongInt;
+  external 'GetWindowLongW@user32.dll stdcall';
+function SetWindowLong(Wnd: HWND; Index: Integer; Value: LongInt): LongInt;
+  external 'SetWindowLongW@user32.dll stdcall';
+function CallWindowProc(Previous: LongInt; Wnd: HWND; Msg: UINT; WParam: LongWord; LParam: LongInt): LongInt;
+  external 'CallWindowProcW@user32.dll stdcall';
+procedure ReadDrawItem(var Item: TButtonDrawItem; Source: LongInt; Count: Cardinal);
+  external 'RtlMoveMemory@kernel32.dll stdcall';
+function CreateSolidBrush(Color: Cardinal): THandle;
+  external 'CreateSolidBrush@gdi32.dll stdcall';
+function CreatePen(Style, Width: Integer; Color: Cardinal): THandle;
+  external 'CreatePen@gdi32.dll stdcall';
+function SelectObject(DC, Item: THandle): THandle;
+  external 'SelectObject@gdi32.dll stdcall';
+function DeleteObject(Item: THandle): BOOL;
+  external 'DeleteObject@gdi32.dll stdcall';
+function FillRect(DC: THandle; const Bounds: TRect; Brush: THandle): Integer;
+  external 'FillRect@user32.dll stdcall';
+function RoundRect(DC: THandle; Left, Top, Right, Bottom, RadiusX, RadiusY: Integer): BOOL;
+  external 'RoundRect@gdi32.dll stdcall';
+function SetBkMode(DC: THandle; Mode: Integer): Integer;
+  external 'SetBkMode@gdi32.dll stdcall';
+function SetTextColor(DC: THandle; Color: Cardinal): Cardinal;
+  external 'SetTextColor@gdi32.dll stdcall';
+function DrawText(DC: THandle; Text: String; Count: Integer; var Bounds: TRect; Format: Cardinal): Integer;
+  external 'DrawTextW@user32.dll stdcall';
+function DrawFocusRect(DC: THandle; const Bounds: TRect): BOOL;
+  external 'DrawFocusRect@user32.dll stdcall';
+
+function BrandButtonWindowProc(Wnd: HWND; Msg: UINT; WParam: LongWord; LParam: LongInt): LongInt;
+var
+  Item: TButtonDrawItem;
+  Button: TNewButton;
+  Primary: Boolean;
+  Brush, Pen, OldBrush, OldPen, OldFont, ClearBrush: THandle;
+  Bounds: TRect;
+  Text: String;
+  Previous: LongInt;
+begin
+  if Wnd = LanguageDialogHandle then Previous := OriginalLanguageProc
+  else Previous := OriginalWizardProc;
+  if Msg = $002B then
+  begin
+    ReadDrawItem(Item, LParam, SizeOf(Item));
+    Button := nil;
+    Primary := False;
+    if Wnd = LanguageDialogHandle then
+    begin
+      if Item.Window = LanguageAccept.Handle then begin Button := LanguageAccept; Primary := True; end
+      else if Item.Window = LanguageCancel.Handle then Button := LanguageCancel;
+    end
+    else
+    begin
+      if Item.Window = WizardForm.NextButton.Handle then begin Button := WizardForm.NextButton; Primary := True; end
+      else if Item.Window = WizardForm.CancelButton.Handle then Button := WizardForm.CancelButton;
+    end;
+    if Button <> nil then
+    begin
+      Bounds := Item.Bounds;
+      ClearBrush := CreateSolidBrush($00F7FAFB);
+      FillRect(Item.DC, Bounds, ClearBrush);
+      DeleteObject(ClearBrush);
+      if not Button.Enabled then Brush := CreateSolidBrush($00E9E7E1)
+      else if Primary then Brush := CreateSolidBrush($002DC6F4)
+      else Brush := CreateSolidBrush($00F0F8FD);
+      Pen := CreatePen(0, ScaleX(1), $0060A5C2);
+      OldBrush := SelectObject(Item.DC, Brush);
+      OldPen := SelectObject(Item.DC, Pen);
+      RoundRect(Item.DC, Bounds.Left, Bounds.Top, Bounds.Right, Bounds.Bottom, ScaleX(12), ScaleY(12));
+      SetBkMode(Item.DC, 1);
+      SetTextColor(Item.DC, $001F2729);
+      OldFont := SelectObject(Item.DC, SendMessage(Button.Handle, $0031, 0, 0));
+      Text := Button.Caption;
+      DrawText(Item.DC, Text, Length(Text), Bounds, $0001 or $0004 or $0020);
+      SelectObject(Item.DC, OldFont);
+      if (Item.State and $0010) <> 0 then
+      begin
+        Bounds.Left := Bounds.Left + ScaleX(4); Bounds.Top := Bounds.Top + ScaleY(4);
+        Bounds.Right := Bounds.Right - ScaleX(4); Bounds.Bottom := Bounds.Bottom - ScaleY(4);
+        DrawFocusRect(Item.DC, Bounds);
+      end;
+      SelectObject(Item.DC, OldBrush); SelectObject(Item.DC, OldPen);
+      DeleteObject(Brush); DeleteObject(Pen);
+      Result := 1;
+      Exit;
+    end;
+  end;
+  Result := CallWindowProc(Previous, Wnd, Msg, WParam, LParam);
+end;
+
+procedure UseBrandButton(Button: TNewButton);
+begin
+  if (GetWindowLong(Button.Handle, -16) and $000F) <> $000B then
+  begin
+    SetWindowLong(Button.Handle, -16, (GetWindowLong(Button.Handle, -16) and not $000F) or $000B);
+    Button.Invalidate;
+  end;
+end;
+
 function SystemParametersInfo(Action, Param: UINT; var Area: TRect; Flags: UINT): BOOL;
   external 'SystemParametersInfoW@user32.dll stdcall';
+
+procedure ApplyRoundedCard(Panel: TPanel); forward;
 
 procedure LayoutDesktopWizard(Sender: TObject);
 var
   Area: TRect;
-  PageWidth, PageHeight, LeftEdge, ContentWidth, ColumnWidth: Integer;
+  PageWidth, PageHeight, LeftEdge, ContentWidth, ColumnWidth, I: Integer;
 begin
   if not DesktopLayoutReady then Exit;
   WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth, WizardForm.ClientHeight - ScaleY(60));
@@ -197,9 +322,11 @@ begin
   PageHeight := WizardForm.InstallingPage.ClientHeight;
   InstallCard.SetBounds(0, 0, PageWidth, PageHeight);
   FinishCard.SetBounds(0, 0, PageWidth, PageHeight);
+  ReadyCard.SetBounds(0, 0, PageWidth, PageHeight);
   LeftEdge := ScaleX(208);
   InstallRail.Visible := PageWidth >= ScaleX(640);
   FinishRail.Visible := InstallRail.Visible;
+  ReadyRail.Visible := InstallRail.Visible;
   if not InstallRail.Visible then LeftEdge := ScaleX(24);
   if InstallRail.Visible then
   begin
@@ -225,6 +352,28 @@ begin
   end;
   InstallEyebrowLabel.Visible := InstallRail.Visible;
   ContentWidth := PageWidth - LeftEdge - ScaleX(24);
+  ReadyRail.Height := PageHeight;
+  ReadyStage.Left := LeftEdge;
+  ReadyEyebrow.Left := LeftEdge;
+  ReadyEyebrow.Visible := ReadyRail.Visible;
+  ReadyHeading.Left := LeftEdge + ScaleX(64);
+  ReadyHeading.Width := ContentWidth - ScaleX(64);
+  ReadyDescription.Left := ReadyHeading.Left;
+  ReadyDescription.Width := ReadyHeading.Width;
+  if ReadyRail.Visible then
+  begin
+    ReadyBrand.Parent := ReadyRail;
+    ReadyBrand.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
+    ReadyProduct.Parent := ReadyRail;
+    ReadyProduct.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
+  end
+  else
+  begin
+    ReadyBrand.Parent := ReadyCard;
+    ReadyBrand.SetBounds(ScaleX(24), ScaleY(8), ScaleX(32), ScaleY(32));
+    ReadyProduct.Parent := ReadyCard;
+    ReadyProduct.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
+  end;
   InstallRail.Height := PageHeight;
   FinishRail.Height := PageHeight;
   InstallEyebrowLabel.Left := LeftEdge;
@@ -239,17 +388,26 @@ begin
   BrandProgressTrack.Width := ContentWidth;
   InstallMetrics.Left := LeftEdge;
   InstallMetrics.Width := ContentWidth;
+  MetricSurface.SetBounds(ScaleX(1), ScaleY(1), ContentWidth - ScaleX(2), InstallMetrics.Height - ScaleY(2));
+  ApplyRoundedCard(InstallMetrics);
+  ApplyRoundedCard(MetricSurface);
+  ApplyRoundedCard(BrandProgressTrack);
   ColumnWidth := ContentWidth div 3;
-  InstallFilesLabel.SetBounds(ScaleX(12), ScaleY(8), ColumnWidth - ScaleX(16), ScaleY(18));
+  InstallFilesLabel.SetBounds(ScaleX(48), ScaleY(8), ColumnWidth - ScaleX(52), ScaleY(18));
   InstallFilesValue.Left := InstallFilesLabel.Left;
-  InstallTotalLabel.SetBounds(ColumnWidth + ScaleX(12), ScaleY(8), ColumnWidth - ScaleX(16), ScaleY(18));
+  InstallTotalLabel.SetBounds(ColumnWidth + ScaleX(48), ScaleY(8), ColumnWidth - ScaleX(52), ScaleY(18));
   InstallTotalValue.Left := InstallTotalLabel.Left;
-  InstallPhaseLabel.SetBounds(ColumnWidth * 2 + ScaleX(12), ScaleY(8), ColumnWidth - ScaleX(16), ScaleY(18));
+  InstallPhaseLabel.SetBounds(ColumnWidth * 2 + ScaleX(48), ScaleY(8), ColumnWidth - ScaleX(52), ScaleY(18));
   InstallPhaseValue.Left := InstallPhaseLabel.Left;
-  WizardForm.FinishedHeadingLabel.Left := LeftEdge;
-  WizardForm.FinishedHeadingLabel.Width := ContentWidth;
-  WizardForm.FinishedLabel.Left := LeftEdge;
-  WizardForm.FinishedLabel.Width := ContentWidth;
+  for I := 0 to 2 do
+    MetricIcons[I].SetBounds(ColumnWidth * I + ScaleX(12), ScaleY(16), ScaleX(24), ScaleY(24));
+  for I := 0 to 1 do
+    MetricDividers[I].SetBounds(ColumnWidth * (I + 1), ScaleY(14), ScaleX(1), ScaleY(30));
+  FinishStage.Left := LeftEdge;
+  WizardForm.FinishedHeadingLabel.Left := LeftEdge + ScaleX(64);
+  WizardForm.FinishedHeadingLabel.Width := ContentWidth - ScaleX(64);
+  WizardForm.FinishedLabel.Left := LeftEdge + ScaleX(64);
+  WizardForm.FinishedLabel.Width := ContentWidth - ScaleX(64);
   FinishInfo.Left := LeftEdge;
   FinishInfo.Width := ContentWidth;
   WizardForm.RunList.Left := LeftEdge + ScaleX(16);
@@ -354,10 +512,17 @@ end;
 
 procedure ApplyDesktopTheme;
 var
-  ContentWidth: Integer;
+  ContentWidth, I: Integer;
+  VersionCapsule: TPanel;
+  ReadyBackground: TBitmapImage;
+  ReadyVersion: TNewStaticText;
 begin
-  WizardForm.ClientWidth := ScaleX(730);
-  WizardForm.ClientHeight := ScaleY(330);
+  WizardForm.Width := ScaleX(730);
+  WizardForm.Height := ScaleY(330);
+  WizardForm.NextButton.Width := ScaleX(108);
+  WizardForm.NextButton.Height := ScaleY(32);
+  WizardForm.CancelButton.Width := ScaleX(108);
+  WizardForm.CancelButton.Height := ScaleY(32);
   WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth,
     WizardForm.ClientHeight - ScaleY(60));
   WizardForm.InnerNotebook.SetBounds(0, 0, WizardForm.OuterNotebook.Width,
@@ -369,10 +534,8 @@ begin
   WizardForm.NextButton.Left := WizardForm.CancelButton.Left - WizardForm.NextButton.Width - ScaleX(8);
   WizardForm.BackButton.Top := WizardForm.CancelButton.Top;
   WizardForm.BackButton.Left := WizardForm.NextButton.Left - WizardForm.BackButton.Width - ScaleX(8);
-  SetWindowRgn(WizardForm.Handle,
-    CreateRoundRectRgn(0, 0, WizardForm.Width + 1, WizardForm.Height + 1,
-      ScaleX(24), ScaleY(24)), True);
   WizardForm.Color := clWhite;
+  WizardForm.Font.Name := 'Segoe UI';
   WizardForm.InnerPage.Color := clWhite;
   WizardForm.MainPanel.Visible := False;
   WizardForm.WizardBitmapImage.Visible := False;
@@ -384,12 +547,14 @@ begin
   InstallCard.SetBounds(0, 0, WizardForm.InstallingPage.ClientWidth,
     WizardForm.InstallingPage.ClientHeight);
   InstallCard.BevelOuter := bvNone;
+  InstallCard.ParentBackground := False;
   InstallCard.Color := clWhite;
 
   InstallRail := TPanel.Create(WizardForm);
   InstallRail.Parent := InstallCard;
   InstallRail.SetBounds(0, 0, ScaleX(180), InstallCard.ClientHeight);
   InstallRail.BevelOuter := bvNone;
+  InstallRail.ParentBackground := False;
   InstallRail.Color := $00F7FAFB;
 
   InstallRailBackground := TBitmapImage.Create(WizardForm);
@@ -420,6 +585,16 @@ begin
   InstallVersionLabel.Font.Name := 'Segoe UI';
   InstallVersionLabel.Font.Size := 9;
   InstallVersionLabel.Font.Color := $00576D70;
+  VersionCapsule := TPanel.Create(WizardForm);
+  VersionCapsule.Parent := InstallRail;
+  VersionCapsule.SetBounds(ScaleX(28), ScaleY(112), ScaleX(64), ScaleY(22));
+  VersionCapsule.BevelOuter := bvNone;
+  VersionCapsule.ParentBackground := False;
+  VersionCapsule.Color := $00DFF0FC;
+  ApplyRoundedCard(VersionCapsule);
+  InstallVersionLabel.Parent := VersionCapsule;
+  InstallVersionLabel.SetBounds(ScaleX(8), ScaleY(3), ScaleX(52), ScaleY(18));
+  InstallVersionLabel.Color := VersionCapsule.Color;
 
   InstallEyebrowLabel := TNewStaticText.Create(WizardForm);
   InstallEyebrowLabel.Parent := InstallCard;
@@ -434,6 +609,7 @@ begin
   InstallStageIconPanel.Parent := InstallCard;
   InstallStageIconPanel.SetBounds(ScaleX(208), ScaleY(48), ScaleX(44), ScaleY(44));
   InstallStageIconPanel.BevelOuter := bvNone;
+  InstallStageIconPanel.ParentBackground := False;
   InstallStageIconPanel.Color := $00FFF2E4;
   ApplyRoundedCard(InstallStageIconPanel);
 
@@ -497,11 +673,13 @@ begin
   BrandProgressTrack.SetBounds(ScaleX(208), ScaleY(128),
     ContentWidth - ScaleX(52), ScaleY(8));
   BrandProgressTrack.BevelOuter := bvNone;
+  BrandProgressTrack.ParentBackground := False;
   BrandProgressTrack.Color := $00E9E7E1;
   BrandProgressFill := TPanel.Create(WizardForm);
   BrandProgressFill.Parent := BrandProgressTrack;
   BrandProgressFill.SetBounds(0, 0, ScaleX(96), BrandProgressTrack.ClientHeight);
   BrandProgressFill.BevelOuter := bvNone;
+  BrandProgressFill.ParentBackground := False;
   BrandProgressFill.Color := $002DC6F4;
   SetBrandProgressActive;
 
@@ -510,71 +688,104 @@ begin
   InstallMetrics.SetBounds(ScaleX(208), ScaleY(150),
     ContentWidth - ScaleX(52), ScaleY(58));
   InstallMetrics.BevelOuter := bvNone;
+  InstallMetrics.ParentBackground := False;
   InstallMetrics.Color := $00EAF6FB;
   ApplyRoundedCard(InstallMetrics);
+  MetricSurface := TPanel.Create(WizardForm);
+  MetricSurface.Parent := InstallMetrics;
+  MetricSurface.ParentBackground := False;
+  MetricSurface.BevelOuter := bvNone;
+  MetricSurface.Color := InstallMetrics.Color;
+  InstallMetrics.Color := $00CEDFE9;
+  for I := 0 to 2 do
+  begin
+    MetricIcons[I] := TBitmapImage.Create(WizardForm);
+    MetricIcons[I].Parent := MetricSurface;
+    MetricIcons[I].Stretch := True;
+    if I = 0 then
+      MetricIcons[I].Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-metric-package.bmp'))
+    else
+      MetricIcons[I].Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-metric-clock.bmp'));
+  end;
+  for I := 0 to 1 do
+  begin
+    MetricDividers[I] := TPanel.Create(WizardForm);
+    MetricDividers[I].Parent := MetricSurface;
+    MetricDividers[I].BevelOuter := bvNone;
+    MetricDividers[I].ParentBackground := False;
+    MetricDividers[I].Color := $00CEDFE9;
+  end;
 
   InstallFilesLabel := TNewStaticText.Create(WizardForm);
-  InstallFilesLabel.Parent := InstallMetrics;
+  InstallFilesLabel.Parent := MetricSurface;
   InstallFilesLabel.SetBounds(ScaleX(18), ScaleY(9), ScaleX(135), ScaleY(42));
   InstallFilesLabel.Font.Name := 'Segoe UI';
   InstallFilesLabel.Font.Size := 9;
   InstallFilesLabel.Font.Color := $00576D70;
   InstallFilesLabel.Caption := UiText('已处理文件', 'File elaborati', 'Files processed');
+  InstallFilesLabel.Color := MetricSurface.Color;
 
   InstallFilesValue := TNewStaticText.Create(WizardForm);
-  InstallFilesValue.Parent := InstallMetrics;
+  InstallFilesValue.Parent := MetricSurface;
   InstallFilesValue.SetBounds(ScaleX(18), ScaleY(26), ScaleX(135), ScaleY(25));
   InstallFilesValue.Caption := '0';
   InstallFilesValue.Font.Name := 'Segoe UI';
   InstallFilesValue.Font.Size := 13;
   InstallFilesValue.Font.Style := [fsBold];
   InstallFilesValue.Font.Color := $001F2729;
+  InstallFilesValue.Color := MetricSurface.Color;
 
   InstallTotalLabel := TNewStaticText.Create(WizardForm);
-  InstallTotalLabel.Parent := InstallMetrics;
+  InstallTotalLabel.Parent := MetricSurface;
   InstallTotalLabel.SetBounds(ScaleX(170), ScaleY(9), ScaleX(135), ScaleY(42));
   InstallTotalLabel.Font.Name := 'Segoe UI';
   InstallTotalLabel.Font.Size := 9;
   InstallTotalLabel.Font.Color := $00576D70;
   InstallTotalLabel.Caption := UiText('总耗时', 'Tempo totale', 'Total time');
+  InstallTotalLabel.Color := MetricSurface.Color;
 
   InstallTotalValue := TNewStaticText.Create(WizardForm);
-  InstallTotalValue.Parent := InstallMetrics;
+  InstallTotalValue.Parent := MetricSurface;
   InstallTotalValue.SetBounds(ScaleX(170), ScaleY(26), ScaleX(135), ScaleY(25));
   InstallTotalValue.Caption := '00:00';
   InstallTotalValue.Font.Name := 'Segoe UI';
   InstallTotalValue.Font.Size := 13;
   InstallTotalValue.Font.Style := [fsBold];
   InstallTotalValue.Font.Color := $001F2729;
+  InstallTotalValue.Color := MetricSurface.Color;
 
   InstallPhaseLabel := TNewStaticText.Create(WizardForm);
-  InstallPhaseLabel.Parent := InstallMetrics;
+  InstallPhaseLabel.Parent := MetricSurface;
   InstallPhaseLabel.SetBounds(ScaleX(322), ScaleY(9), ScaleX(135), ScaleY(42));
   InstallPhaseLabel.Font.Name := 'Segoe UI';
   InstallPhaseLabel.Font.Size := 9;
   InstallPhaseLabel.Font.Color := $00576D70;
   InstallPhaseLabel.Caption := UiText('当前阶段', 'Fase corrente', 'Current phase');
+  InstallPhaseLabel.Color := MetricSurface.Color;
 
   InstallPhaseValue := TNewStaticText.Create(WizardForm);
-  InstallPhaseValue.Parent := InstallMetrics;
+  InstallPhaseValue.Parent := MetricSurface;
   InstallPhaseValue.SetBounds(ScaleX(322), ScaleY(26), ScaleX(135), ScaleY(25));
   InstallPhaseValue.Caption := '00:00';
   InstallPhaseValue.Font.Name := 'Segoe UI';
   InstallPhaseValue.Font.Size := 13;
   InstallPhaseValue.Font.Style := [fsBold];
   InstallPhaseValue.Font.Color := $001F2729;
+  InstallPhaseValue.Color := MetricSurface.Color;
 
   FinishCard := TPanel.Create(WizardForm);
   FinishCard.Parent := WizardForm.FinishedPage;
   FinishCard.SetBounds(0, 0, WizardForm.FinishedPage.ClientWidth,
     WizardForm.FinishedPage.ClientHeight);
   FinishCard.BevelOuter := bvNone;
+  FinishCard.ParentBackground := False;
   FinishCard.Color := clWhite;
 
   FinishRail := TPanel.Create(WizardForm);
   FinishRail.Parent := FinishCard;
   FinishRail.SetBounds(0, 0, ScaleX(180), FinishCard.ClientHeight);
   FinishRail.BevelOuter := bvNone;
+  FinishRail.ParentBackground := False;
   FinishRail.Color := $00F7FAFB;
 
   FinishRailBackground := TBitmapImage.Create(WizardForm);
@@ -605,6 +816,21 @@ begin
   FinishVersionLabel.Font.Name := 'Segoe UI';
   FinishVersionLabel.Font.Size := 9;
   FinishVersionLabel.Font.Color := $00576D70;
+  VersionCapsule := TPanel.Create(WizardForm);
+  VersionCapsule.Parent := FinishRail;
+  VersionCapsule.SetBounds(ScaleX(28), ScaleY(112), ScaleX(64), ScaleY(22));
+  VersionCapsule.BevelOuter := bvNone;
+  VersionCapsule.ParentBackground := False;
+  VersionCapsule.Color := $00DFF0FC;
+  ApplyRoundedCard(VersionCapsule);
+  FinishVersionLabel.Parent := VersionCapsule;
+  FinishVersionLabel.SetBounds(ScaleX(8), ScaleY(3), ScaleX(52), ScaleY(18));
+  FinishVersionLabel.Color := VersionCapsule.Color;
+  FinishStage := TBitmapImage.Create(WizardForm);
+  FinishStage.Parent := FinishCard;
+  FinishStage.SetBounds(ScaleX(208), ScaleY(42), ScaleX(48), ScaleY(48));
+  FinishStage.Stretch := True;
+  FinishStage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-success.bmp'));
 
   WizardForm.FinishedHeadingLabel.Parent := FinishCard;
   WizardForm.FinishedHeadingLabel.SetBounds(ScaleX(208), ScaleY(42), ContentWidth - ScaleX(52), ScaleY(34));
@@ -621,11 +847,85 @@ begin
   FinishInfo.Parent := FinishCard;
   FinishInfo.SetBounds(ScaleX(208), ScaleY(132), ContentWidth - ScaleX(52), ScaleY(58));
   FinishInfo.BevelOuter := bvNone;
+  FinishInfo.ParentBackground := False;
   FinishInfo.Color := $00EAF6FB;
   ApplyRoundedCard(FinishInfo);
 
   WizardForm.RunList.Parent := FinishCard;
   WizardForm.RunList.SetBounds(ScaleX(224), ScaleY(146), ContentWidth - ScaleX(84), ScaleY(34));
+  ReadyCard := TPanel.Create(WizardForm);
+  ReadyCard.Parent := WizardForm.ReadyPage;
+  ReadyCard.SetBounds(0, 0, WizardForm.ReadyPage.ClientWidth, WizardForm.ReadyPage.ClientHeight);
+  ReadyCard.BevelOuter := bvNone;
+  ReadyCard.ParentBackground := False;
+  ReadyCard.Color := clWhite;
+  ReadyRail := TPanel.Create(WizardForm);
+  ReadyRail.Parent := ReadyCard;
+  ReadyRail.SetBounds(0, 0, ScaleX(180), ReadyCard.Height);
+  ReadyRail.BevelOuter := bvNone;
+  ReadyRail.ParentBackground := False;
+  ReadyRail.Color := $00F7FAFB;
+  ReadyBackground := TBitmapImage.Create(WizardForm);
+  ReadyBackground.Parent := ReadyRail;
+  ReadyBackground.SetBounds(0, 0, ReadyRail.Width, ReadyRail.Height);
+  ReadyBackground.Stretch := True;
+  ReadyBackground.Bitmap.Assign(InstallRailBackground.Bitmap);
+  ReadyBrand := TBitmapImage.Create(WizardForm);
+  ReadyBrand.Parent := ReadyRail;
+  ReadyBrand.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
+  ReadyBrand.Stretch := True;
+  ReadyBrand.Bitmap.Assign(InstallBrandImage.Bitmap);
+  ReadyProduct := TNewStaticText.Create(WizardForm);
+  ReadyProduct.Parent := ReadyRail;
+  ReadyProduct.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
+  ReadyProduct.Caption := 'NGTManager';
+  ReadyProduct.Font.Name := 'Segoe UI';
+  ReadyProduct.Font.Size := 15;
+  ReadyProduct.Font.Style := [fsBold];
+  ReadyProduct.Font.Color := $001F2729;
+  ReadyProduct.Color := ReadyRail.Color;
+  ReadyVersion := TNewStaticText.Create(WizardForm);
+  ReadyVersion.Parent := ReadyRail;
+  ReadyVersion.SetBounds(ScaleX(28), ScaleY(112), ScaleX(100), ScaleY(22));
+  ReadyVersion.Caption := 'v{#AppVersion}';
+  ReadyVersion.Font.Color := $00576D70;
+  ReadyVersion.Color := ReadyRail.Color;
+  ReadyStage := TBitmapImage.Create(WizardForm);
+  ReadyStage.Parent := ReadyCard;
+  ReadyStage.SetBounds(ScaleX(208), ScaleY(48), ScaleX(48), ScaleY(48));
+  ReadyStage.Stretch := True;
+  ReadyStage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-shield.bmp'));
+  ReadyEyebrow := TNewStaticText.Create(WizardForm);
+  ReadyEyebrow.Parent := ReadyCard;
+  ReadyEyebrow.SetBounds(ScaleX(208), ScaleY(22), ScaleX(420), ScaleY(18));
+  ReadyEyebrow.Caption := UiText('安装', 'INSTALLAZIONE', 'INSTALLATION');
+  ReadyEyebrow.Font.Name := 'Segoe UI';
+  ReadyEyebrow.Font.Size := 9;
+  ReadyEyebrow.Font.Style := [fsBold];
+  ReadyEyebrow.Font.Color := $0000789A;
+  ReadyHeading := TNewStaticText.Create(WizardForm);
+  ReadyHeading.Parent := ReadyCard;
+  ReadyHeading.SetBounds(ScaleX(272), ScaleY(48), ScaleX(420), ScaleY(34));
+  ReadyHeading.Caption := UiText('准备安装 NGTManager', 'Pronto per installare NGTManager', 'Ready to install NGTManager');
+  ReadyHeading.Font.Name := 'Segoe UI';
+  ReadyHeading.Font.Size := 15;
+  ReadyHeading.Font.Style := [fsBold];
+  ReadyHeading.Font.Color := $001F2729;
+  ReadyHeading.AutoSize := False;
+  ReadyHeading.WordWrap := True;
+  ReadyDescription := TNewStaticText.Create(WizardForm);
+  ReadyDescription.Parent := ReadyCard;
+  ReadyDescription.SetBounds(ScaleX(272), ScaleY(94), ScaleX(420), ScaleY(82));
+  ReadyDescription.WordWrap := True;
+  ReadyDescription.AutoSize := False;
+  ReadyDescription.Font.Name := 'Segoe UI';
+  ReadyDescription.Font.Size := 10;
+  ReadyDescription.Font.Color := $00576D70;
+  ReadyDescription.Caption := UiText('点击“安装”继续。现有业务数据和备份将保留。',
+    'Fai clic su Installa per continuare. I dati e i backup esistenti verranno conservati.',
+    'Click Install to continue. Existing business data and backups will be preserved.');
+  WizardForm.ReadyMemo.Visible := False;
+  WizardForm.ReadyLabel.Visible := False;
 end;
 
 function SafeOperationId(const Value: String): Boolean;
@@ -643,6 +943,127 @@ begin
   end;
 end;
 
+function InitializeSetup: Boolean;
+var
+  Form: TSetupForm;
+  Logo: TBitmapImage;
+  Title, Description, Version: TNewStaticText;
+  Languages: TNewComboBox;
+  AcceptButton, CancelButton: TNewButton;
+  SelectedLanguage, Arguments, Argument: String;
+  I, ResultCode: Integer;
+  WorkArea: TRect;
+begin
+  Result := True;
+  if WizardSilent or (ExpandConstant('{param:NGTLanguageSelected|0}') = '1') then Exit;
+  for I := 1 to ParamCount do
+    if Pos('/lang=', Lowercase(ParamStr(I))) = 1 then Exit;
+  ExtractTemporaryFile('ngt-studio-installer.bmp');
+  Form := CreateCustomForm(520, 250, True, True);
+  try
+    Form.Caption := 'NGTManager';
+    Form.Color := $00F7FAFB;
+    Form.Font.Name := 'Segoe UI';
+    if SystemParametersInfo(48, 0, WorkArea, 0) then
+      if Form.Width > (WorkArea.Right - WorkArea.Left) * 9 div 10 then
+        Form.Width := (WorkArea.Right - WorkArea.Left) * 9 div 10;
+    Form.BorderIcons := [biSystemMenu];
+    Logo := TBitmapImage.Create(Form);
+    Logo.Parent := Form;
+    Logo.SetBounds(ScaleX(28), ScaleY(28), ScaleX(48), ScaleY(48));
+    Logo.Stretch := True;
+    Logo.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer.bmp'));
+    Title := TNewStaticText.Create(Form);
+    Title.Parent := Form;
+    Title.SetBounds(ScaleX(92), ScaleY(28), ScaleX(390), ScaleY(28));
+    Title.Caption := 'NGTManager';
+    Title.Font.Name := 'Segoe UI';
+    Title.Font.Size := 15;
+    Title.Font.Style := [fsBold];
+    Title.Font.Color := $001F2729;
+    Version := TNewStaticText.Create(Form);
+    Version.Parent := Form;
+    Version.SetBounds(ScaleX(92), ScaleY(58), ScaleX(160), ScaleY(20));
+    Version.Caption := 'v{#AppVersion}';
+    Version.Font.Color := $00576D70;
+    Description := TNewStaticText.Create(Form);
+    Description.Parent := Form;
+    Description.SetBounds(ScaleX(28), ScaleY(100), ScaleX(464), ScaleY(24));
+    Description.Caption := UiText('选择安装语言', 'Scegli la lingua di installazione', 'Choose your installation language');
+    Description.Font.Size := 11;
+    Languages := TNewComboBox.Create(Form);
+    Languages.Parent := Form;
+    Languages.Style := csDropDownList;
+    Languages.SetBounds(ScaleX(28), ScaleY(134), ScaleX(464), ScaleY(30));
+    Languages.Width := Form.ClientWidth - ScaleX(56);
+    Languages.Items.Add('简体中文');
+    Languages.Items.Add('Italiano');
+    Languages.Items.Add('English');
+    Languages.ItemIndex := 2;
+    if ActiveLanguage = 'chinesesimplified' then Languages.ItemIndex := 0;
+    if ActiveLanguage = 'italian' then Languages.ItemIndex := 1;
+    AcceptButton := TNewButton.Create(Form);
+    AcceptButton.Parent := Form;
+    AcceptButton.SetBounds(ScaleX(272), ScaleY(198), ScaleX(104), ScaleY(32));
+    AcceptButton.Caption := UiText('继续', 'Continua', 'Continue');
+    AcceptButton.Default := True;
+    AcceptButton.ModalResult := mrOk;
+    LanguageAccept := AcceptButton;
+    CancelButton := TNewButton.Create(Form);
+    CancelButton.Parent := Form;
+    CancelButton.SetBounds(ScaleX(388), ScaleY(198), ScaleX(104), ScaleY(32));
+    CancelButton.Caption := UiText('取消', 'Annulla', 'Cancel');
+    CancelButton.Cancel := True;
+    CancelButton.ModalResult := mrCancel;
+    LanguageCancel := CancelButton;
+    CancelButton.Left := Form.ClientWidth - CancelButton.Width - ScaleX(28);
+    AcceptButton.Left := CancelButton.Left - AcceptButton.Width - ScaleX(12);
+    if not HighContrastActive then
+    begin
+      LanguageDialogHandle := Form.Handle;
+      OriginalLanguageProc := SetWindowLong(Form.Handle, -4, CreateCallback(@BrandButtonWindowProc));
+      UseBrandButton(AcceptButton);
+      UseBrandButton(CancelButton);
+    end;
+    if Form.ShowModal <> mrOk then
+    begin
+      Result := False;
+      Exit;
+    end;
+    case Languages.ItemIndex of
+      0: SelectedLanguage := 'chinesesimplified';
+      1: SelectedLanguage := 'italian';
+    else
+      SelectedLanguage := 'english';
+    end;
+  finally
+    if OriginalLanguageProc <> 0 then
+    begin
+      SetWindowLong(Form.Handle, -4, OriginalLanguageProc);
+      OriginalLanguageProc := 0;
+      LanguageDialogHandle := 0;
+    end;
+    Form.Free;
+  end;
+  if SelectedLanguage <> ActiveLanguage then
+  begin
+    Arguments := '';
+    for I := 1 to ParamCount do
+    begin
+      Argument := ParamStr(I);
+      if (Pos('/lang=', Lowercase(Argument)) <> 1) and
+        (Pos('/ngtlanguageselected=', Lowercase(Argument)) <> 1) then
+        Arguments := Arguments + ' ' + AddQuotes(Argument);
+    end;
+    if not Exec(ExpandConstant('{srcexe}'), Arguments + ' /LANG=' + SelectedLanguage +
+      ' /NGTLanguageSelected=1', '', SW_SHOWNORMAL, ewNoWait, ResultCode) then
+      MsgBox(UiText('无法切换安装语言，请重新打开安装器。',
+        'Impossibile cambiare lingua. Riapri il programma di installazione.',
+        'Unable to switch language. Please reopen the installer.'), mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
 procedure InitializeWizard;
 var
   UpdateId: String;
@@ -654,6 +1075,8 @@ begin
   ExtractTemporaryFile('ngt-stage-clock.bmp');
   ExtractTemporaryFile('ngt-stage-success.bmp');
   ExtractTemporaryFile('ngt-stage-error.bmp');
+  ExtractTemporaryFile('ngt-metric-package.bmp');
+  ExtractTemporaryFile('ngt-metric-clock.bmp');
   UpdateId := ExpandConstant('{param:NGTUpdateId|}');
   if UpdateId <> '' then
     AttemptId := UpdateId
@@ -667,6 +1090,12 @@ begin
   DesktopLayoutReady := True;
   WizardForm.OnResize := @LayoutDesktopWizard;
   LayoutDesktopWizard(WizardForm);
+  if not HighContrastActive then
+  begin
+    OriginalWizardProc := SetWindowLong(WizardForm.Handle, -4, CreateCallback(@BrandButtonWindowProc));
+    UseBrandButton(WizardForm.NextButton);
+    UseBrandButton(WizardForm.CancelButton);
+  end;
 end;
 
 function PhaseDescription(const Phase: String): String;
@@ -1022,6 +1451,11 @@ procedure ProcessWizardMessages;
 var
   Msg: TWindowsMessage;
 begin
+  if OriginalWizardProc <> 0 then
+  begin
+    UseBrandButton(WizardForm.NextButton);
+    UseBrandButton(WizardForm.CancelButton);
+  end;
   AnimateBrandProgress;
   while PeekMessage(Msg, 0, 0, 0, 1) do
   begin
@@ -1039,8 +1473,16 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  if OriginalWizardProc <> 0 then
+  begin
+    UseBrandButton(WizardForm.NextButton);
+    UseBrandButton(WizardForm.CancelButton);
+  end;
+  if not WizardForm.CancelButton.Visible then
+    WizardForm.NextButton.Left := WizardForm.CancelButton.Left;
   WizardForm.MainPanel.Visible :=
-    (CurPageID <> wpInstalling) and (CurPageID <> wpFinished);
+    (CurPageID <> wpInstalling) and (CurPageID <> wpFinished) and (CurPageID <> wpReady);
+  if CurPageID = wpReady then ReadyCard.BringToFront;
   if CurPageID = wpFinished then
   begin
     FinishCard.BringToFront;
@@ -1199,6 +1641,11 @@ end;
 
 procedure DeinitializeSetup;
 begin
+  if OriginalWizardProc <> 0 then
+  begin
+    SetWindowLong(WizardForm.Handle, -4, OriginalWizardProc);
+    OriginalWizardProc := 0;
+  end;
   if PrepareSucceeded and not PostInstallReached then
     ReportInstallerRegistration('incomplete');
 end;
