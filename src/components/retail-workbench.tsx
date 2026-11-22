@@ -304,6 +304,12 @@ export function RetailWorkbench({
             </div>
           </div>
           <div className="retail-product-grid">
+            <div className="retail-new-product">
+              <NewProductDialogButton
+                categories={productCategories}
+                mode="retail"
+              />
+            </div>
             {filtered.map((product) => {
               const unavailable =
                 !product.unlimitedStock && product.stockQuantity <= 0;
@@ -368,12 +374,6 @@ export function RetailWorkbench({
                 <b>{money(service.defaultPrice)}</b>
               </button>
             ))}
-            <div className="retail-new-product">
-              <NewProductDialogButton
-                categories={productCategories}
-                mode="retail"
-              />
-            </div>
           </div>
         </section>
         <aside className="panel retail-cart">

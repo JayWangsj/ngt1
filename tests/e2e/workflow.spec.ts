@@ -5245,6 +5245,42 @@ test("creates and edits a product directly in the inventory row", async ({
   await expect(batchControls).not.toContainText("selezionati");
 });
 
+test("keeps the new retail product entry first across filters and widths", async ({
+  page,
+}) => {
+  await page.goto("/retail");
+  const grid = page.locator(".retail-product-grid");
+  const addProduct = grid.locator(":scope > .retail-new-product");
+  await expect(addProduct).toBeVisible();
+  await expect(grid.locator(".retail-product-card").first()).toBeVisible();
+  for (const width of [1280, 768]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.screenshot({
+      path: test.info().outputPath(`retail-entry-${width}.png`),
+    });
+    for (const tab of await page.locator(".retail-tabs button").all()) {
+      await tab.click();
+      await expect(grid.locator(":scope > *").first()).toHaveClass(
+        "retail-new-product",
+      );
+      const first = await addProduct.boundingBox();
+      const cards = await grid.locator(":scope > .retail-product-card").all();
+      for (const card of cards) {
+        const bounds = await card.boundingBox();
+        expect(bounds!.y).toBeGreaterThanOrEqual(first!.y);
+        if (Math.abs(bounds!.y - first!.y) < 1)
+          expect(bounds!.x).toBeGreaterThan(first!.x);
+      }
+    }
+  }
+  await page
+    .locator(".retail-toolbar input")
+    .fill("no-match-new-product-entry");
+  await expect(grid.locator(":scope > *")).toHaveCount(1);
+  await addProduct.getByRole("button").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+});
+
 test("creates and sells a retail product with unlimited stock", async ({
   page,
 }) => {
