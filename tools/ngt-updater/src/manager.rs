@@ -48,6 +48,8 @@ static RUNTIME_UI_WINDOW: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static RUNTIME_UI_TITLE: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
+static RUNTIME_UI_VERSION: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
 static RUNTIME_UI_HEADING: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static RUNTIME_UI_STATUS: AtomicIsize = AtomicIsize::new(0);
@@ -2053,13 +2055,9 @@ fn windows_system_uses_light_theme() -> bool {
 }
 
 #[cfg(windows)]
-fn refresh_owned_shortcut_icons(root: &Path, light_theme: bool) {
+fn refresh_owned_shortcut_icons(root: &Path, _light_theme: bool) {
     let target = root.join("tools/NGTManager.exe");
-    let icon = root.join(if light_theme {
-        "assets/ngt-studio-light.ico"
-    } else {
-        "assets/ngt-studio-dark.ico"
-    });
+    let icon = root.join("assets/ngt-studio.ico");
     if !target.is_file() || !icon.is_file() {
         return;
     }
@@ -2109,7 +2107,6 @@ impl SessionEndNotifier {
             WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
         };
         let (sender, receiver) = mpsc::sync_channel::<Result<u32, String>>(1);
-        let install_root = root.to_path_buf();
         let initial_light_theme = windows_system_uses_light_theme();
         refresh_owned_shortcut_icons(root, initial_light_theme);
         let light_icon_path = root.join("assets/ngt-studio-light.ico");
@@ -2177,14 +2174,18 @@ impl SessionEndNotifier {
                 RUNTIME_UI_WINDOW.store(window as isize, Ordering::SeqCst);
                 let dpi = GetDpiForWindow(window).max(96);
                 let scale = |value: i32| value * dpi as i32 / 96;
-                let window_width = scale(750);
-                let window_height = scale(300);
+                let mut window_width = scale(750);
+                let mut window_height = scale(300);
                 let mut cursor = std::mem::zeroed();
                 GetCursorPos(&mut cursor);
                 let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
                 let mut monitor_info: MONITORINFO = std::mem::zeroed();
                 monitor_info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
                 if GetMonitorInfoW(monitor, &mut monitor_info) != 0 {
+                    window_width = window_width
+                        .min((monitor_info.rcWork.right - monitor_info.rcWork.left) * 9 / 10);
+                    window_height = window_height
+                        .min((monitor_info.rcWork.bottom - monitor_info.rcWork.top) * 9 / 10);
                     let x = monitor_info.rcWork.left
                         + (monitor_info.rcWork.right - monitor_info.rcWork.left - window_width) / 2;
                     let y = monitor_info.rcWork.top
@@ -2378,6 +2379,7 @@ impl SessionEndNotifier {
                     return;
                 }
                 RUNTIME_UI_TITLE.store(title as isize, Ordering::SeqCst);
+                RUNTIME_UI_VERSION.store(version as isize, Ordering::SeqCst);
                 RUNTIME_UI_HEADING.store(heading as isize, Ordering::SeqCst);
                 RUNTIME_UI_STATUS.store(status as isize, Ordering::SeqCst);
                 RUNTIME_UI_DETAIL.store(detail as isize, Ordering::SeqCst);
@@ -2588,6 +2590,7 @@ impl SessionEndNotifier {
                     return;
                 }
                 if show_startup {
+                    layout_runtime_ui(window);
                     ShowWindow(window, SW_RESTORE);
                     SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                     SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -2612,7 +2615,6 @@ impl SessionEndNotifier {
                         } else {
                             &dark_icon_path
                         };
-                        refresh_owned_shortcut_icons(&install_root, light_theme);
                         let icon_path: Vec<u16> = icon_path
                             .to_string_lossy()
                             .encode_utf16()
@@ -2747,6 +2749,88 @@ fn show_runtime_ui_window(window: windows_sys::Win32::Foundation::HWND, foregrou
 }
 
 #[cfg(windows)]
+fn layout_runtime_ui(window: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetClientRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+    };
+    let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(window) }.max(96) as i32;
+    let scale = |value: i32| value * dpi / 96;
+    let mut area = unsafe { std::mem::zeroed() };
+    unsafe { GetClientRect(window, &mut area) };
+    let width = area.right - area.left;
+    let height = area.bottom - area.top;
+    let margin = scale(if width < scale(640) { 24 } else { 36 });
+    let text_width = (width - margin * 2).max(scale(120));
+    let progress_y = (height - scale(52)).max(scale(186));
+    for (control, x, y, w, h) in [
+        (
+            &RUNTIME_UI_TITLE,
+            scale(100),
+            scale(24),
+            width - scale(124),
+            scale(34),
+        ),
+        (
+            &RUNTIME_UI_VERSION,
+            scale(100),
+            scale(60),
+            width - scale(124),
+            scale(22),
+        ),
+        (
+            &RUNTIME_UI_HEADING,
+            margin,
+            scale(96),
+            text_width,
+            scale(36),
+        ),
+        (
+            &RUNTIME_UI_STATUS,
+            margin,
+            scale(134),
+            text_width,
+            scale(44),
+        ),
+        (
+            &RUNTIME_UI_DETAIL,
+            margin,
+            progress_y - scale(30),
+            text_width,
+            scale(22),
+        ),
+        (
+            &RUNTIME_UI_PROGRESS,
+            margin,
+            progress_y,
+            text_width,
+            scale(8),
+        ),
+        (
+            &RUNTIME_UI_STEP,
+            margin,
+            progress_y + scale(16),
+            text_width,
+            scale(22),
+        ),
+    ] {
+        let handle = control.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
+        if !handle.is_null() {
+            unsafe {
+                SetWindowPos(
+                    handle,
+                    std::ptr::null_mut(),
+                    x,
+                    y,
+                    w.max(1),
+                    h,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            };
+        }
+    }
+}
+
+#[cfg(windows)]
 unsafe extern "system" fn session_end_window_proc(
     window: windows_sys::Win32::Foundation::HWND,
     message: u32,
@@ -2767,6 +2851,10 @@ unsafe extern "system" fn session_end_window_proc(
         WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER,
     };
     match message {
+        windows_sys::Win32::UI::WindowsAndMessaging::WM_SIZE => {
+            layout_runtime_ui(window);
+            0
+        }
         WM_QUERYENDSESSION => 1,
         WM_ENDSESSION if wparam != 0 => {
             WINDOWS_SESSION_END_TICK.store(
@@ -7606,6 +7694,16 @@ fn run_supervisor(
             let _ = complete_and_hide_runtime_ui();
         }
         loop {
+            if !TRAY_EXIT_REQUESTED.load(Ordering::SeqCst)
+                && !BROWSER_OPENING.load(Ordering::SeqCst)
+            {
+                if let Some(window) = promote_provisional_browser_window() {
+                    if complete_and_hide_runtime_ui() {
+                        let _ = show_managed_browser_window(window);
+                        record_browser_event("manager.startup.ui_completed", "info", "none");
+                    }
+                }
+            }
             if unsafe { WaitForSingleObject(stop.0, 250) } == WAIT_OBJECT_0 {
                 let shutdown_started = Instant::now();
                 memory_sampler.interrupt_for_shutdown();
@@ -7929,6 +8027,19 @@ fn browser_window_title_matches(window: isize) -> bool {
 }
 
 #[cfg(windows)]
+fn is_chromium_application_window(window: isize) -> bool {
+    let mut class = [0u16; 256];
+    let length = unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(
+            window as windows_sys::Win32::Foundation::HWND,
+            class.as_mut_ptr(),
+            class.len() as i32,
+        )
+    };
+    length > 0 && String::from_utf16_lossy(&class[..length as usize]) == "Chrome_WidgetWin_1"
+}
+
+#[cfg(windows)]
 fn clear_managed_browser_identity() {
     MANAGED_BROWSER_WINDOW.store(0, Ordering::SeqCst);
     MANAGED_BROWSER_PROCESS_ID.store(0, Ordering::SeqCst);
@@ -8147,7 +8258,7 @@ enum BrowserLaunchOutcome {
 #[cfg(windows)]
 fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AllowSetForegroundWindow, IsWindowVisible, SetPropW, ShowWindow, SW_MINIMIZE, SW_RESTORE,
+        AllowSetForegroundWindow, IsWindowVisible, SetPropW, ShowWindow, SW_MINIMIZE,
     };
     let before = top_level_windows().into_iter().collect::<BTreeSet<_>>();
     for executable in browser_candidates() {
@@ -8171,9 +8282,14 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
             if let Some(window) = promote_provisional_browser_window() {
                 return Ok(BrowserLaunchOutcome::Managed(window));
             }
+            if provisional_browser_window().is_some() {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
             for window in top_level_windows() {
                 let identity = browser_window_process_identity(window);
                 if before.contains(&window)
+                    || !is_chromium_application_window(window)
                     || unsafe { IsWindowVisible(window as windows_sys::Win32::Foundation::HWND) }
                         == 0
                     || identity.as_ref().is_none_or(|(path, _, _)| {
@@ -8182,6 +8298,10 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
                             .eq_ignore_ascii_case(&executable.to_string_lossy())
                     })
                 {
+                    continue;
+                }
+                let title = browser_window_title(window);
+                if !title.is_empty() && !browser_window_title_matches(window) {
                     continue;
                 }
                 let (_, process_id, created) = identity.expect("identity was checked above");
@@ -8207,10 +8327,6 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
             }
             thread::sleep(Duration::from_millis(100));
         }
-        if let Some(window) = provisional_browser_window() {
-            set_browser_window_cloaked(window, false);
-            unsafe { ShowWindow(window as windows_sys::Win32::Foundation::HWND, SW_RESTORE) };
-        }
         record_browser_event(
             "manager.browser.window.identification_timeout",
             "warning",
@@ -8223,11 +8339,12 @@ fn launch_managed_browser() -> Result<BrowserLaunchOutcome, String> {
 
 #[cfg(windows)]
 fn open_browser(defer_show: bool) -> Result<bool, String> {
+    let _ = promote_provisional_browser_window();
     if let Some(window) = find_managed_browser_window() {
         let foreground = if defer_show {
             set_browser_window_cloaked(window, true)
         } else {
-            show_managed_browser_window(window)
+            complete_and_hide_runtime_ui() && show_managed_browser_window(window)
         };
         record_browser_event("manager.browser.window.restored", "info", "none");
         if !foreground {
@@ -8254,6 +8371,9 @@ fn open_browser(defer_show: bool) -> Result<bool, String> {
         BrowserLaunchOutcome::Managed(window) => {
             record_browser_event("manager.browser.window.created", "info", "none");
             if !defer_show {
+                if !complete_and_hide_runtime_ui() {
+                    return Err("Startup window could not finish; retry from the tray.".to_owned());
+                }
                 let _ = show_managed_browser_window(window);
             }
             Ok(true)
@@ -9303,7 +9423,8 @@ mod tests {
             "ERROR\ninstall failed"
         );
 
-        let unrelated_path = std::env::current_dir()
+        let unrelated_path = std::env::temp_dir()
+            .parent()
             .unwrap()
             .join("NGTManager-setup-result-attempt-1.txt");
         assert!(validate_result_file_path(&unrelated_path, &arguments).is_err());
@@ -9681,7 +9802,9 @@ mod tests {
         let mut manifest_bytes = vec![0xEF, 0xBB, 0xBF];
         manifest_bytes.extend(serde_json::to_vec(&manifest).unwrap());
         fs::write(root.join("studio-release.json"), manifest_bytes).unwrap();
-        assert!(verify_release(&root).unwrap_err().contains("unsafe path"));
+        assert!(verify_release(&root)
+            .unwrap_err()
+            .contains("unsafe or duplicate path"));
         fs::remove_dir_all(root).unwrap();
     }
 

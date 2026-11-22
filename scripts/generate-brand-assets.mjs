@@ -95,8 +95,38 @@ async function renderPhone(source, size) {
   return sharp(source)
     .resize(size, size, {
       fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
       kernel: sharp.kernel.lanczos3,
     })
+    .png()
+    .toBuffer();
+}
+
+async function renderAppIcon(source, size) {
+  const { data, info } = await sharp(source)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] > 200 && data[i + 1] > 100 && data[i + 2] < 64) {
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+    }
+  }
+  const inset = Math.round(size * 0.14);
+  const phone = await sharp(data, { raw: info })
+    .resize(size - inset * 2, size - inset * 2, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toBuffer();
+  const background = Buffer.from(
+    `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect width="${size}" height="${size}" rx="${size * 0.22}" fill="#f4c62d"/></svg>`,
+  );
+  return sharp(background)
+    .composite([{ input: phone, left: inset, top: inset }])
     .png()
     .toBuffer();
 }
@@ -104,7 +134,10 @@ async function renderPhone(source, size) {
 async function toInstallerBitmap(source) {
   const size = 96;
   const pixels = await sharp(source)
-    .resize(size, size, { fit: "contain" })
+    .resize(size, size, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
     .flatten({ background: "#fbfaf7" })
     .raw()
     .toBuffer();
@@ -193,24 +226,57 @@ async function buildIco(images) {
 }
 
 const lightIcoPngs = [];
+const stageIcons = {
+  package:
+    '<path d="m12 19 12-6 12 6v19l-12 6-12-6zM12 19l12 6 12-6M24 25v19M18 16l12 6"/>',
+  shield:
+    '<path d="M24 10c5 4 10 5 15 6v13c0 10-10 16-15 19-5-3-15-9-15-19V16c5-1 10-2 15-6Z"/><path d="m17 28 5 5 10-11"/>',
+  clock: '<circle cx="24" cy="28" r="16"/><path d="M24 17v12l8 5"/>',
+  success: '<circle cx="24" cy="28" r="16"/><path d="m15 28 6 6 13-14"/>',
+  error: '<circle cx="24" cy="28" r="16"/><path d="m18 22 12 12m0-12L18 34"/>',
+};
+for (const [name, shape] of Object.entries(stageIcons)) {
+  const color =
+    name === "clock"
+      ? "#ec7900"
+      : name === "success"
+        ? "#479b28"
+        : name === "error"
+          ? "#c43838"
+          : "#258cd9";
+  const background =
+    name === "clock"
+      ? "#fff0df"
+      : name === "success"
+        ? "#eaf5df"
+        : name === "error"
+          ? "#fff0ee"
+          : "#e8f3fc";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="56" height="56" rx="12" fill="${background}"/><g transform="translate(4 0)" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">${shape}</g></svg>`;
+  await writeFile(
+    path.join(root, "assets", `ngt-stage-${name}.bmp`),
+    await rgbBitmap(svg, 112, 112),
+  );
+}
 const darkIcoPngs = [];
 const phoneSources = await extractPhoneSources();
+const appSource = await renderAppIcon(phoneSources.light, 512);
 await writeFile(
   path.join(brandDirectory, "ngt-app-icon.svg"),
-  embeddedPhoneSvg(phoneSources.light, true),
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><image width="512" height="512" href="data:image/png;base64,${appSource.toString("base64")}"/></svg>`,
 );
 await writeFile(
   path.join(brandDirectory, "ngt-app-icon-dark.svg"),
-  embeddedPhoneSvg(phoneSources.dark, true),
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><image width="512" height="512" href="data:image/png;base64,${appSource.toString("base64")}"/></svg>`,
 );
 await writeFile(
   path.join(brandDirectory, "ngt-mark.svg"),
   embeddedPhoneSvg(phoneSources.light, false),
 );
 for (const size of pngSizes) {
-  const appPng = await renderPhone(phoneSources.light, size);
-  const darkAppPng = await renderPhone(phoneSources.dark, size);
-  const markPng = appPng;
+  const appPng = await renderAppIcon(phoneSources.light, size);
+  const darkAppPng = appPng;
+  const markPng = await renderPhone(phoneSources.light, size);
   await writeFile(
     path.join(brandDirectory, `ngt-app-icon-${size}.png`),
     appPng,
@@ -233,7 +299,7 @@ await writeFile(path.join(root, "assets", "ngt-studio-light.ico"), lightIco);
 await writeFile(path.join(root, "assets", "ngt-studio-dark.ico"), darkIco);
 await writeFile(
   path.join(root, "assets", "ngt-studio-installer.bmp"),
-  await toInstallerBitmap(phoneSources.light),
+  await toInstallerBitmap(appSource),
 );
 const installerRailSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="272" viewBox="0 0 180 272">
   <rect width="180" height="272" fill="#fbfaf7"/>
@@ -246,11 +312,11 @@ await writeFile(
 );
 await writeFile(
   path.join(brandDirectory, "ngt-app-icon.png"),
-  await renderPhone(phoneSources.light, 194),
+  await renderAppIcon(phoneSources.light, 194),
 );
 await writeFile(
   path.join(brandDirectory, "ngt-app-icon-dark.png"),
-  await renderPhone(phoneSources.dark, 194),
+  await renderAppIcon(phoneSources.light, 194),
 );
 await writeFile(
   path.join(brandDirectory, "ngt-mark.png"),

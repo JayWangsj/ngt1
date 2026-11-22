@@ -863,9 +863,10 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("Shell_NotifyIconW(NIM_MODIFY, &tray)");
     expect(manager).toContain("previous_small");
     expect(manager).toContain("previous_big");
-    expect(manager).toContain(
+    expect(manager).not.toContain(
       "refresh_owned_shortcut_icons(&install_root, light_theme)",
     );
+    expect(manager).toContain('let icon = root.join("assets/ngt-studio.ico")');
     expect(manager).toContain("NGT_SHORTCUT_TARGET");
     expect(manager).toContain("$s.Arguments.Trim() -ieq 'open'");
   });

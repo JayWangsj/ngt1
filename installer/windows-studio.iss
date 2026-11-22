@@ -59,14 +59,13 @@ Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 [Files]
 Source: "{#IconBitmapPath}"; Flags: dontcopy
 Source: "{#RailBitmapPath}"; Flags: dontcopy
+Source: "..\assets\ngt-stage-*.bmp"; Flags: dontcopy
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageDirectory}\studio-release.json"; DestDir: "{tmp}\ngt-package"; Flags: deleteafterinstall ignoreversion; AfterInstall: InstallExtractedPackage
 
 [Icons]
-Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-light.ico"; Check: ShellUsesLightTheme
-Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-dark.ico"; Check: not ShellUsesLightTheme
-Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-light.ico"; Check: ShellUsesLightTheme
-Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio-dark.ico"; Check: not ShellUsesLightTheme
+Name: "{autodesktop}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
+Name: "{autoprograms}\{#AppName}"; Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; WorkingDir: "{localappdata}\NGTManager"; IconFilename: "{localappdata}\NGTManager\assets\ngt-studio.ico"
 
 [Run]
 Filename: "{localappdata}\NGTManager\tools\NGTManager.exe"; Parameters: "open"; Description: "{cm:OpenNGTManager}"; Flags: postinstall nowait skipifsilent
@@ -121,6 +120,7 @@ var
   InstallEyebrowLabel: TNewStaticText;
   InstallStageIconPanel: TPanel;
   InstallStageIconLabel: TNewStaticText;
+  InstallStageImage: TBitmapImage;
   InstallDescriptionLabel: TNewStaticText;
   InstallWarningLabel: TNewStaticText;
   InstallFilesLabel: TNewStaticText;
@@ -142,6 +142,7 @@ var
   BrandProgressDeterminate: Boolean;
   BrandProgressPosition: Integer;
   BrandProgressAnimationTick: Int64;
+  DesktopLayoutReady: Boolean;
 
 const
   PBM_SETBARCOLOR = $0409;
@@ -180,6 +181,94 @@ function CreateRoundRectRgn(nLeftRect, nTopRect, nRightRect, nBottomRect,
 
 function SetWindowRgn(hWnd: HWND; hRgn: THandle; bRedraw: BOOL): Integer;
   external 'SetWindowRgn@user32.dll stdcall';
+
+function SystemParametersInfo(Action, Param: UINT; var Area: TRect; Flags: UINT): BOOL;
+  external 'SystemParametersInfoW@user32.dll stdcall';
+
+procedure LayoutDesktopWizard(Sender: TObject);
+var
+  Area: TRect;
+  PageWidth, PageHeight, LeftEdge, ContentWidth, ColumnWidth: Integer;
+begin
+  if not DesktopLayoutReady then Exit;
+  WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth, WizardForm.ClientHeight - ScaleY(60));
+  WizardForm.InnerNotebook.SetBounds(0, 0, WizardForm.OuterNotebook.Width, WizardForm.OuterNotebook.Height);
+  PageWidth := WizardForm.InstallingPage.ClientWidth;
+  PageHeight := WizardForm.InstallingPage.ClientHeight;
+  InstallCard.SetBounds(0, 0, PageWidth, PageHeight);
+  FinishCard.SetBounds(0, 0, PageWidth, PageHeight);
+  LeftEdge := ScaleX(208);
+  InstallRail.Visible := PageWidth >= ScaleX(640);
+  FinishRail.Visible := InstallRail.Visible;
+  if not InstallRail.Visible then LeftEdge := ScaleX(24);
+  if InstallRail.Visible then
+  begin
+    InstallBrandImage.Parent := InstallRail;
+    InstallBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
+    InstallBrandLabel.Parent := InstallRail;
+    InstallBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
+    FinishBrandImage.Parent := FinishRail;
+    FinishBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
+    FinishBrandLabel.Parent := FinishRail;
+    FinishBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
+  end
+  else
+  begin
+    InstallBrandImage.Parent := InstallCard;
+    InstallBrandImage.SetBounds(ScaleX(24), ScaleY(8), ScaleX(32), ScaleY(32));
+    InstallBrandLabel.Parent := InstallCard;
+    InstallBrandLabel.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
+    FinishBrandImage.Parent := FinishCard;
+    FinishBrandImage.SetBounds(ScaleX(24), ScaleY(8), ScaleX(32), ScaleY(32));
+    FinishBrandLabel.Parent := FinishCard;
+    FinishBrandLabel.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
+  end;
+  InstallEyebrowLabel.Visible := InstallRail.Visible;
+  ContentWidth := PageWidth - LeftEdge - ScaleX(24);
+  InstallRail.Height := PageHeight;
+  FinishRail.Height := PageHeight;
+  InstallEyebrowLabel.Left := LeftEdge;
+  InstallStageIconPanel.Left := LeftEdge;
+  WizardForm.StatusLabel.Left := LeftEdge + ScaleX(56);
+  WizardForm.StatusLabel.Width := ContentWidth - ScaleX(56);
+  InstallDescriptionLabel.Left := WizardForm.StatusLabel.Left;
+  InstallDescriptionLabel.Width := WizardForm.StatusLabel.Width;
+  InstallWarningLabel.Left := LeftEdge;
+  InstallWarningLabel.Width := ContentWidth;
+  BrandProgressTrack.Left := LeftEdge;
+  BrandProgressTrack.Width := ContentWidth;
+  InstallMetrics.Left := LeftEdge;
+  InstallMetrics.Width := ContentWidth;
+  ColumnWidth := ContentWidth div 3;
+  InstallFilesLabel.SetBounds(ScaleX(12), ScaleY(8), ColumnWidth - ScaleX(16), ScaleY(18));
+  InstallFilesValue.Left := InstallFilesLabel.Left;
+  InstallTotalLabel.SetBounds(ColumnWidth + ScaleX(12), ScaleY(8), ColumnWidth - ScaleX(16), ScaleY(18));
+  InstallTotalValue.Left := InstallTotalLabel.Left;
+  InstallPhaseLabel.SetBounds(ColumnWidth * 2 + ScaleX(12), ScaleY(8), ColumnWidth - ScaleX(16), ScaleY(18));
+  InstallPhaseValue.Left := InstallPhaseLabel.Left;
+  WizardForm.FinishedHeadingLabel.Left := LeftEdge;
+  WizardForm.FinishedHeadingLabel.Width := ContentWidth;
+  WizardForm.FinishedLabel.Left := LeftEdge;
+  WizardForm.FinishedLabel.Width := ContentWidth;
+  FinishInfo.Left := LeftEdge;
+  FinishInfo.Width := ContentWidth;
+  WizardForm.RunList.Left := LeftEdge + ScaleX(16);
+  WizardForm.RunList.Width := ContentWidth - ScaleX(32);
+  WizardForm.Bevel.Top := WizardForm.ClientHeight - ScaleY(60);
+  WizardForm.CancelButton.Top := WizardForm.ClientHeight - ScaleY(44);
+  WizardForm.CancelButton.Left := WizardForm.ClientWidth - WizardForm.CancelButton.Width - ScaleX(20);
+  WizardForm.NextButton.Top := WizardForm.CancelButton.Top;
+  WizardForm.NextButton.Left := WizardForm.CancelButton.Left - WizardForm.NextButton.Width - ScaleX(8);
+  WizardForm.BackButton.Top := WizardForm.CancelButton.Top;
+  WizardForm.BackButton.Left := WizardForm.NextButton.Left - WizardForm.BackButton.Width - ScaleX(8);
+  if SystemParametersInfo(48, 0, Area, 0) then
+  begin
+    if WizardForm.Width > (Area.Right - Area.Left) * 9 div 10 then
+      WizardForm.Width := (Area.Right - Area.Left) * 9 div 10;
+    if WizardForm.Height > (Area.Bottom - Area.Top) * 9 div 10 then
+      WizardForm.Height := (Area.Bottom - Area.Top) * 9 div 10;
+  end;
+end;
 
 function UiText(const Chinese, Italian, English: String): String;
 begin
@@ -269,6 +358,17 @@ var
 begin
   WizardForm.ClientWidth := ScaleX(730);
   WizardForm.ClientHeight := ScaleY(330);
+  WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth,
+    WizardForm.ClientHeight - ScaleY(60));
+  WizardForm.InnerNotebook.SetBounds(0, 0, WizardForm.OuterNotebook.Width,
+    WizardForm.OuterNotebook.Height);
+  WizardForm.Bevel.Top := WizardForm.ClientHeight - ScaleY(60);
+  WizardForm.CancelButton.Top := WizardForm.ClientHeight - ScaleY(44);
+  WizardForm.CancelButton.Left := WizardForm.ClientWidth - WizardForm.CancelButton.Width - ScaleX(20);
+  WizardForm.NextButton.Top := WizardForm.CancelButton.Top;
+  WizardForm.NextButton.Left := WizardForm.CancelButton.Left - WizardForm.NextButton.Width - ScaleX(8);
+  WizardForm.BackButton.Top := WizardForm.CancelButton.Top;
+  WizardForm.BackButton.Left := WizardForm.NextButton.Left - WizardForm.BackButton.Width - ScaleX(8);
   SetWindowRgn(WizardForm.Handle,
     CreateRoundRectRgn(0, 0, WizardForm.Width + 1, WizardForm.Height + 1,
       ScaleX(24), ScaleY(24)), True);
@@ -339,9 +439,14 @@ begin
 
   InstallStageIconLabel := TNewStaticText.Create(WizardForm);
   InstallStageIconLabel.Parent := InstallStageIconPanel;
+  InstallStageIconLabel.Visible := False;
+  InstallStageImage := TBitmapImage.Create(WizardForm);
+  InstallStageImage.Parent := InstallStageIconPanel;
+  InstallStageImage.SetBounds(0, 0, InstallStageIconPanel.ClientWidth, InstallStageIconPanel.ClientHeight);
+  InstallStageImage.Stretch := True;
+  InstallStageImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-package.bmp'));
   InstallStageIconLabel.SetBounds(0, ScaleY(7), InstallStageIconPanel.ClientWidth, ScaleY(28));
   InstallStageIconLabel.Alignment := taCenter;
-  InstallStageIconLabel.Caption := '●';
   InstallStageIconLabel.Font.Name := 'Segoe UI Symbol';
   InstallStageIconLabel.Font.Size := 15;
   InstallStageIconLabel.Font.Color := $00D4852B;
@@ -544,6 +649,11 @@ var
 begin
   ExtractTemporaryFile('ngt-studio-installer.bmp');
   ExtractTemporaryFile('ngt-studio-installer-rail.bmp');
+  ExtractTemporaryFile('ngt-stage-package.bmp');
+  ExtractTemporaryFile('ngt-stage-shield.bmp');
+  ExtractTemporaryFile('ngt-stage-clock.bmp');
+  ExtractTemporaryFile('ngt-stage-success.bmp');
+  ExtractTemporaryFile('ngt-stage-error.bmp');
   UpdateId := ExpandConstant('{param:NGTUpdateId|}');
   if UpdateId <> '' then
     AttemptId := UpdateId
@@ -554,6 +664,9 @@ begin
       ParamStr(0) + IntToStr(Random(2147483647))), 1, 32);
   WizardForm.BorderIcons := [biSystemMenu, biMinimize];
   ApplyDesktopTheme;
+  DesktopLayoutReady := True;
+  WizardForm.OnResize := @LayoutDesktopWizard;
+  LayoutDesktopWizard(WizardForm);
 end;
 
 function PhaseDescription(const Phase: String): String;
@@ -588,30 +701,15 @@ begin
 end;
 
 procedure UpdateStageIcon(const Phase: String);
+var
+  IconName: String;
 begin
-  InstallStageIconLabel.Caption := '●';
-  InstallStageIconPanel.Color := $00FFF2E4;
-  InstallStageIconLabel.Font.Color := $00D4852B;
-  if Phase = 'complete' then
-  begin
-    InstallStageIconLabel.Caption := '✓';
-    InstallStageIconPanel.Color := $00E2F4DF;
-    InstallStageIconLabel.Font.Color := $004AAB42;
-  end
-  else if (Phase = 'failed') or (Phase = 'recovery_failed') then
-  begin
-    InstallStageIconLabel.Caption := '!';
-    InstallStageIconPanel.Color := $00E6E6FF;
-    InstallStageIconLabel.Font.Color := $005252D9;
-  end
+  IconName := 'package';
+  if Phase = 'complete' then IconName := 'success'
+  else if (Phase = 'failed') or (Phase = 'recovery_failed') then IconName := 'error'
   else if (Phase = 'package_source_verification') or
-    (Phase = 'source_copy_verification') or
-    (Phase = 'candidate_verification') then
-  begin
-    InstallStageIconLabel.Caption := '✓';
-    InstallStageIconPanel.Color := $00FFEFE2;
-    InstallStageIconLabel.Font.Color := $00D5893C;
-  end;
+    (Phase = 'source_copy_verification') or (Phase = 'candidate_verification') then IconName := 'shield';
+  InstallStageImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-' + IconName + '.bmp'));
 end;
 
 function TakeField(var Value: String): String;
@@ -670,6 +768,8 @@ begin
   TotalElapsedSeconds := StrToIntDef(TotalElapsed, 0);
   StatusText := PhaseDescription(Phase);
   InstallWarningLabel.Visible := PhaseElapsedSeconds > 30;
+  if InstallWarningLabel.Visible then
+    InstallStageImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-clock.bmp'));
   if InstallWarningLabel.Visible then
     InstallWarningLabel.Caption := UiText(
       'ⓘ 此阶段所需时间比预计更长，操作仍在继续。',

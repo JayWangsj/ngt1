@@ -82,13 +82,21 @@ describe("NGT brand assets", () => {
           .raw()
           .toBuffer(),
       ]);
+      expect(dark).toEqual(light);
+      const mark = await sharp(`public/brand/ngt-mark-${size}.png`)
+        .ensureAlpha()
+        .raw()
+        .toBuffer();
+      for (let y = 0; y < size; y += 1) {
+        expect(mark[y * size * 4 + 3]).toBe(0);
+        expect(mark[(y * size + size - 1) * 4 + 3]).toBe(0);
+      }
       let minX = size;
       let maxX = -1;
       let minY = size;
       let maxY = -1;
       let yellowPixels = 0;
       for (let offset = 0; offset < light.length; offset += 4) {
-        expect(dark[offset + 3]).toBe(light[offset + 3]);
         if (light[offset + 3] === 0) continue;
         const pixel = offset / 4;
         const x = pixel % size;
@@ -171,11 +179,11 @@ describe("NGT brand assets", () => {
     );
   });
 
-  it("provides theme-aware favicon fallbacks from the same phone mark", async () => {
+  it("provides the stable yellow application favicon and compatible fallbacks", async () => {
     const layout = await readFile("src/app/layout.tsx", "utf8");
-    expect(layout).toContain("ngt-app-icon-dark.svg");
+    expect(layout).toContain("/brand/ngt-app-icon.svg?v=yellow-app-2");
     expect(layout).toContain("ngt-app-icon-dark-32.png");
     expect(layout).toContain('media="(prefers-color-scheme: dark)"');
-    expect(layout).toContain("?v=business-logo-1");
+    expect(layout).toContain("?v=yellow-app-2");
   });
 });
