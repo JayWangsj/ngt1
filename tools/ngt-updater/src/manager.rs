@@ -8442,6 +8442,18 @@ fn browser_executable_matches(actual: &Path, requested: &Path) -> bool {
 }
 
 #[cfg(windows)]
+fn browser_window_was_destroyed(window: isize, process_id: u32, created: u64) -> bool {
+    if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(window as _) } == 0 {
+        return true;
+    }
+    process_id != 0
+        && created != 0
+        && browser_window_process_identity(window).is_some_and(|(_, actual_pid, actual_created)| {
+            actual_pid != process_id || actual_created != created
+        })
+}
+
+#[cfg(windows)]
 fn browser_window_title_matches(window: isize) -> bool {
     browser_window_title(window)
         .to_ascii_lowercase()
@@ -8593,8 +8605,13 @@ fn find_managed_browser_window() -> Option<isize> {
         return Some(cached);
     }
     if cached != 0 {
+        let closed = browser_window_was_destroyed(
+            cached,
+            MANAGED_BROWSER_PROCESS_ID.load(Ordering::SeqCst) as u32,
+            MANAGED_BROWSER_PROCESS_CREATED.load(Ordering::SeqCst),
+        );
         clear_managed_browser_identity();
-        BROWSER_WINDOW_EXPECTED.store(false, Ordering::SeqCst);
+        BROWSER_WINDOW_EXPECTED.store(!closed, Ordering::SeqCst);
     }
     let found = top_level_windows()
         .into_iter()
@@ -8873,6 +8890,10 @@ fn close_managed_browser_window(root: &Path) -> bool {
         }
         return true;
     };
+    let Some((_, closing_pid, closing_created)) = browser_window_process_identity(window) else {
+        return false;
+    };
+    let destroyed = || browser_window_was_destroyed(window, closing_pid, closing_created);
     let request_close = || unsafe {
         if !is_managed_browser_window(window) || Instant::now() >= budget_end {
             return;
@@ -8898,10 +8919,10 @@ fn close_managed_browser_window(root: &Path) -> bool {
     );
     request_close();
     let deadline = budget_end.min(Instant::now() + Duration::from_millis(1_500));
-    while Instant::now() < deadline && is_managed_browser_window(window) {
+    while Instant::now() < deadline && !destroyed() {
         thread::sleep(Duration::from_millis(50));
     }
-    if is_managed_browser_window(window) {
+    if !destroyed() {
         record_browser_event(
             "manager.browser.window.close_requested",
             "warning",
@@ -8909,11 +8930,11 @@ fn close_managed_browser_window(root: &Path) -> bool {
         );
         request_close();
         let deadline = budget_end;
-        while Instant::now() < deadline && is_managed_browser_window(window) {
+        while Instant::now() < deadline && !destroyed() {
             thread::sleep(Duration::from_millis(50));
         }
     }
-    let closed = !is_managed_browser_window(window);
+    let closed = destroyed();
     if closed {
         clear_managed_browser_identity();
         clear_provisional_browser_identity();
@@ -10333,6 +10354,40 @@ mod tests {
             &root.join("missing.exe")
         ));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_missing_ownership_property_is_not_proof_that_a_window_closed() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let class: Vec<u16> = "STATIC".encode_utf16().chain(Some(0)).collect();
+        let window = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_POPUP,
+                -32000,
+                -32000,
+                8,
+                8,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        assert!(!window.is_null());
+        let (_, pid, created) = browser_window_process_identity(window as _).unwrap();
+        let was_alive = !browser_window_was_destroyed(window as _, pid, created);
+        unsafe {
+            DestroyWindow(window);
+        }
+        assert!(
+            was_alive,
+            "an unmarked live HWND was mistaken for a closed window"
+        );
+        assert!(browser_window_was_destroyed(window as _, pid, created));
     }
 
     #[test]
