@@ -131,14 +131,14 @@ async function renderAppIcon(source, size) {
     .toBuffer();
 }
 
-async function toInstallerBitmap(source) {
+async function toInstallerBitmap(source, surface = "#fbfaf7") {
   const size = 96;
   const pixels = await sharp(source)
     .resize(size, size, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     })
-    .flatten({ background: "#fbfaf7" })
+    .flatten({ background: surface })
     .raw()
     .toBuffer();
   const rowBytes = Math.ceil((size * 3) / 4) * 4;
@@ -165,10 +165,10 @@ async function toInstallerBitmap(source) {
   return bitmap;
 }
 
-async function rgbBitmap(source, width, height) {
+async function rgbBitmap(source, width, height, surface = "#fbfaf7") {
   const pixels = await sharp(Buffer.from(source), { density: 192 })
     .resize(width, height, { fit: "fill" })
-    .flatten({ background: "#fbfaf7" })
+    .flatten({ background: surface })
     .raw()
     .toBuffer();
   const rowBytes = Math.ceil((width * 3) / 4) * 4;
@@ -255,7 +255,7 @@ for (const [name, shape] of Object.entries(stageIcons)) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="56" height="56" rx="12" fill="${background}"/><g transform="translate(4 0)" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">${shape}</g></svg>`;
   await writeFile(
     path.join(root, "assets", `ngt-stage-${name}.bmp`),
-    await rgbBitmap(svg, 112, 112),
+    await rgbBitmap(svg, 112, 112, "#ffffff"),
   );
 }
 const darkIcoPngs = [];
@@ -307,6 +307,10 @@ await writeFile(path.join(root, "assets", "ngt-studio-dark.ico"), darkIco);
 await writeFile(
   path.join(root, "assets", "ngt-studio-installer.bmp"),
   await toInstallerBitmap(appSource),
+);
+await writeFile(
+  path.join(root, "assets", "ngt-studio-installer-white.bmp"),
+  await toInstallerBitmap(appSource, "#ffffff"),
 );
 const installerRailSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="272" viewBox="0 0 180 272">
   <rect width="180" height="272" fill="#fbfaf7"/>

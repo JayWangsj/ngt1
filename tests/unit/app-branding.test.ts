@@ -31,4 +31,28 @@ describe("NGTManager naming", () => {
     }
     expect(installer).toContain("DefaultDirName={localappdata}\\NGTManager");
   });
+  it("keeps rounded desktop-stage bitmap corners equal to their white parent surface", () => {
+    for (const file of [
+      ...["package", "shield", "clock", "success", "error"].map(
+        (name) => `assets/ngt-stage-${name}.bmp`,
+      ),
+      "assets/ngt-studio-installer-white.bmp",
+    ]) {
+      const bitmap = readFileSync(file);
+      expect(bitmap.readUInt16LE(28)).toBe(24);
+      const width = bitmap.readInt32LE(18),
+        height = bitmap.readInt32LE(22);
+      const stride = Math.ceil((width * 3) / 4) * 4,
+        offset = bitmap.readUInt32LE(10);
+      for (const [x, y] of [
+        [0, 0],
+        [width - 1, 0],
+        [0, height - 1],
+        [width - 1, height - 1],
+      ]) {
+        const pixel = offset + (height - 1 - y) * stride + x * 3;
+        expect([...bitmap.subarray(pixel, pixel + 3)]).toEqual([255, 255, 255]);
+      }
+    }
+  });
 });

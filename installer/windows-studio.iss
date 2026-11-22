@@ -61,6 +61,7 @@ Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 [Files]
 Source: "{#IconBitmapPath}"; Flags: dontcopy
 Source: "{#RailBitmapPath}"; Flags: dontcopy
+Source: "..\assets\ngt-studio-installer-white.bmp"; Flags: dontcopy
 Source: "..\assets\ngt-stage-*.bmp"; Flags: dontcopy
 Source: "..\assets\ngt-metric-*.bmp"; Flags: dontcopy
 Source: "{#PackageDirectory}\*"; DestDir: "{tmp}\ngt-package"; Excludes: "\studio-release.json"; Flags: deleteafterinstall ignoreversion recursesubdirs createallsubdirs
@@ -129,6 +130,8 @@ var
   InstallRailBackground: TBitmapImage;
   InstallMetrics: TPanel;
   InstallBrandImage: TBitmapImage;
+  BrandRailBitmap, BrandPageBitmap: TBitmapImage;
+  BrandAssetsOnWhite: Boolean;
   InstallBrandLabel: TNewStaticText;
   InstallVersionLabel: TNewStaticText;
   InstallEyebrowLabel: TNewStaticText;
@@ -144,6 +147,8 @@ var
   InstallPhaseLabel: TNewStaticText;
   InstallPhaseValue: TNewStaticText;
   FailureDetails: TNewMemo;
+  CompactSummary, FinishDetails: TNewMemo;
+  CompactDesktopLayout, LayingOutDesktop, InstallWarningActive: Boolean;
   BrandProgressTrack: TPanel;
   BrandProgressFill: TPanel;
   FinishCard: TPanel;
@@ -238,26 +243,66 @@ function SetTextColor(DC: THandle; Color: Cardinal): Cardinal;
   external 'SetTextColor@gdi32.dll stdcall';
 function DrawText(DC: THandle; Text: String; Count: Integer; var Bounds: TRect; Format: Cardinal): Integer;
   external 'DrawTextW@user32.dll stdcall';
-function DrawFocusRect(DC: THandle; const Bounds: TRect): BOOL;
-  external 'DrawFocusRect@user32.dll stdcall';
+function GetStockObject(Index: Integer): THandle;
+  external 'GetStockObject@gdi32.dll stdcall';
+
+function UiGetWindowRect(Wnd: HWND; var Bounds: TRect): BOOL;
+  external 'GetWindowRect@user32.dll stdcall';
+function UiSetWindowPos(Wnd, After: HWND; X, Y, W, H: Integer; Flags: UINT): BOOL;
+  external 'SetWindowPos@user32.dll stdcall';
+procedure FitDesktopWindow(Wnd: HWND); forward;
+procedure LayoutDesktopWizard(Sender: TObject); forward;
+
+function ButtonShowsKeyboardFocus(Button: TNewButton; State: Cardinal): Boolean;
+begin
+  Result := ((State and $0010) <> 0) and ((State and $0200) = 0) and
+    ((SendMessage(Button.Handle, $0129, 0, 0) and 1) = 0);
+end;
+
+procedure DrawBrandButton(Button: TNewButton; DC: THandle; Bounds: TRect; Primary: Boolean; State: Cardinal; Background: TColor);
+var
+  Brush, Pen, OldBrush, OldPen, OldFont, ClearBrush: THandle;
+  OwnedPen: Boolean;
+  TextBounds: TRect;
+  Text: String;
+begin
+  ClearBrush := CreateSolidBrush(Background);
+  FillRect(DC, Bounds, ClearBrush); DeleteObject(ClearBrush);
+  if not Button.Enabled then Brush := CreateSolidBrush($00E9E7E1)
+  else if (State and $0001) <> 0 then Brush := CreateSolidBrush($00B0DCEB)
+  else if Primary then Brush := CreateSolidBrush($002DC6F4)
+  else if (State and $0040) <> 0 then Brush := CreateSolidBrush($00E7F3FA)
+  else Brush := CreateSolidBrush($00F7FAFB);
+  OwnedPen := (not Primary) or ButtonShowsKeyboardFocus(Button, State);
+  Pen := GetStockObject(8);
+  if OwnedPen then
+  begin
+    if ButtonShowsKeyboardFocus(Button, State) then Pen := CreatePen(0, 1, $0022677E)
+    else Pen := CreatePen(0, 1, $0060A5C2);
+  end;
+  OldBrush := SelectObject(DC, Brush); OldPen := SelectObject(DC, Pen);
+  RoundRect(DC, Bounds.Left + 1, Bounds.Top + 1, Bounds.Right - 1, Bounds.Bottom - 1, ScaleX(16), ScaleY(16));
+  SetBkMode(DC, 1); SetTextColor(DC, $001F2729);
+  OldFont := SelectObject(DC, SendMessage(Button.Handle, $0031, 0, 0));
+  Text := Button.Caption; TextBounds := Bounds;
+  DrawText(DC, Text, Length(Text), TextBounds, $0001 or $0004 or $0020);
+  SelectObject(DC, OldFont); SelectObject(DC, OldBrush); SelectObject(DC, OldPen);
+  DeleteObject(Brush); if OwnedPen then DeleteObject(Pen);
+end;
 
 function BrandButtonWindowProc(Wnd: HWND; Msg: UINT; WParam: LongWord; LParam: LongInt): LongInt;
 var
   Item: TButtonDrawItem;
   Button: TNewButton;
   Primary: Boolean;
-  Brush, Pen, OldBrush, OldPen, OldFont, ClearBrush: THandle;
-  Bounds: TRect;
-  Text: String;
   Previous: LongInt;
+  Background: TColor;
 begin
-  if Wnd = LanguageDialogHandle then Previous := OriginalLanguageProc
-  else Previous := OriginalWizardProc;
+  if Wnd = LanguageDialogHandle then begin Previous := OriginalLanguageProc; Background := $00F7FAFB; end
+  else begin Previous := OriginalWizardProc; Background := WizardForm.Color; end;
   if Msg = $002B then
   begin
-    ReadDrawItem(Item, LParam, SizeOf(Item));
-    Button := nil;
-    Primary := False;
+    ReadDrawItem(Item, LParam, SizeOf(Item)); Button := nil; Primary := False;
     if Wnd = LanguageDialogHandle then
     begin
       if Item.Window = LanguageAccept.Handle then begin Button := LanguageAccept; Primary := True; end
@@ -270,46 +315,24 @@ begin
     end;
     if Button <> nil then
     begin
-      Bounds := Item.Bounds;
-      ClearBrush := CreateSolidBrush($00F7FAFB);
-      FillRect(Item.DC, Bounds, ClearBrush);
-      DeleteObject(ClearBrush);
-      if not Button.Enabled then Brush := CreateSolidBrush($00E9E7E1)
-      else if (Item.State and $0001) <> 0 then Brush := CreateSolidBrush($00B0DCEB)
-      else if Primary then Brush := CreateSolidBrush($002DC6F4)
-      else if (Item.State and $0040) <> 0 then Brush := CreateSolidBrush($00E7F3FA)
-      else Brush := CreateSolidBrush($00F7FAFB);
-      Pen := CreatePen(0, ScaleX(1), $0060A5C2);
-      OldBrush := SelectObject(Item.DC, Brush);
-      OldPen := SelectObject(Item.DC, Pen);
-      RoundRect(Item.DC, Bounds.Left, Bounds.Top, Bounds.Right, Bounds.Bottom, ScaleX(12), ScaleY(12));
-      SetBkMode(Item.DC, 1);
-      SetTextColor(Item.DC, $001F2729);
-      OldFont := SelectObject(Item.DC, SendMessage(Button.Handle, $0031, 0, 0));
-      Text := Button.Caption;
-      DrawText(Item.DC, Text, Length(Text), Bounds, $0001 or $0004 or $0020);
-      SelectObject(Item.DC, OldFont);
-      if ((Item.State and $0010) <> 0) and ((Item.State and $0200) = 0) and
-         ((SendMessage(Button.Handle, $0129, 0, 0) and 1) = 0) then
-      begin
-        Bounds.Left := Bounds.Left + ScaleX(4); Bounds.Top := Bounds.Top + ScaleY(4);
-        Bounds.Right := Bounds.Right - ScaleX(4); Bounds.Bottom := Bounds.Bottom - ScaleY(4);
-        DrawFocusRect(Item.DC, Bounds);
-      end;
-      SelectObject(Item.DC, OldBrush); SelectObject(Item.DC, OldPen);
-      DeleteObject(Brush); DeleteObject(Pen);
-      Result := 1;
-      Exit;
+      DrawBrandButton(Button, Item.DC, Item.Bounds, Primary, Item.State, Background);
+      Result := 1; Exit;
     end;
   end;
   Result := CallWindowProc(Previous, Wnd, Msg, WParam, LParam);
+  if (Msg = $0232) or (Msg = $001A) then
+  begin
+    FitDesktopWindow(Wnd);
+    if DesktopLayoutReady and (Wnd = WizardForm.Handle) then LayoutDesktopWizard(WizardForm);
+  end;
 end;
 
 procedure UseBrandButton(Button: TNewButton);
 begin
   if (GetWindowLong(Button.Handle, -16) and $000F) <> $000B then
   begin
-    SetWindowLong(Button.Handle, -16, (GetWindowLong(Button.Handle, -16) and not $000F) or $000B);
+    SetWindowLong(Button.Handle, -16, (GetWindowLong(Button.Handle, -16) and not ($000F or $00800000)) or $000B);
+    SetWindowLong(Button.Handle, -20, GetWindowLong(Button.Handle, -20) and not ($0200 or $00020000));
     Button.Invalidate;
   end;
 end;
@@ -332,7 +355,27 @@ begin
   else Result := SystemParametersInfo(48, 0, Area, 0);
 end;
 
+procedure FitDesktopWindow(Wnd: HWND);
+var
+  Area, Bounds: TRect;
+  W, H, X, Y: Integer;
+begin
+  if not DesktopWorkArea(Wnd, Area) then Exit;
+  if not UiGetWindowRect(Wnd, Bounds) then Exit;
+  W := Bounds.Right - Bounds.Left; H := Bounds.Bottom - Bounds.Top;
+  if W > (Area.Right - Area.Left) * 7 div 10 then W := (Area.Right - Area.Left) * 7 div 10;
+  if H > (Area.Bottom - Area.Top) * 6 div 10 then H := (Area.Bottom - Area.Top) * 6 div 10;
+  X := Bounds.Left; Y := Bounds.Top;
+  if X < Area.Left then X := Area.Left;
+  if Y < Area.Top then Y := Area.Top;
+  if X + W > Area.Right then X := Area.Right - W;
+  if Y + H > Area.Bottom then Y := Area.Bottom - H;
+  if (X <> Bounds.Left) or (Y <> Bounds.Top) or (W <> Bounds.Right - Bounds.Left) or (H <> Bounds.Bottom - Bounds.Top) then
+    UiSetWindowPos(Wnd, 0, X, Y, W, H, $0004 or $0010);
+end;
+
 procedure ApplyRoundedCard(Panel: TPanel); forward;
+procedure UpdateCompactDetails; forward;
 #ifdef DesktopUiTest
 procedure RunDesktopUiSelfTests; forward;
 #endif
@@ -340,128 +383,146 @@ procedure RunDesktopUiSelfTests; forward;
 procedure LayoutDesktopWizard(Sender: TObject);
 var
   Area: TRect;
-  PageWidth, PageHeight, LeftEdge, ContentWidth, ColumnWidth, I: Integer;
-  ShowBrandRail: Boolean;
+  W, H, LeftEdge, ContentWidth, ColumnWidth, I, StageY, IconSize, TextLeft, DetailY, ProgressY, InfoY: Integer;
+  ShowBrandRail, ShowBrandHeader: Boolean;
 begin
-  if not DesktopLayoutReady then Exit;
-  WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth, WizardForm.ClientHeight - ScaleY(60));
-  WizardForm.InnerNotebook.SetBounds(0, 0, WizardForm.OuterNotebook.Width, WizardForm.OuterNotebook.Height);
-  PageWidth := WizardForm.InstallingPage.ClientWidth;
-  PageHeight := WizardForm.InstallingPage.ClientHeight;
-  InstallCard.SetBounds(0, 0, PageWidth, PageHeight);
-  FinishCard.SetBounds(0, 0, PageWidth, PageHeight);
-  ReadyCard.SetBounds(0, 0, PageWidth, PageHeight);
-  LeftEdge := ScaleX(208);
-  ShowBrandRail := PageWidth >= ScaleX(640);
-  if not ShowBrandRail then LeftEdge := ScaleX(24);
-  if ShowBrandRail then
-  begin
-    InstallBrandImage.Parent := InstallRail;
-    InstallBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
-    InstallBrandLabel.Parent := InstallRail;
-    InstallBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
-    FinishBrandImage.Parent := FinishRail;
-    FinishBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
-    FinishBrandLabel.Parent := FinishRail;
-    FinishBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
-  end
-  else
-  begin
-    InstallBrandImage.Parent := InstallCard;
-    InstallBrandImage.SetBounds(ScaleX(24), ScaleY(8), ScaleX(32), ScaleY(32));
-    InstallBrandLabel.Parent := InstallCard;
-    InstallBrandLabel.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
-    FinishBrandImage.Parent := FinishCard;
-    FinishBrandImage.SetBounds(ScaleX(24), ScaleY(8), ScaleX(32), ScaleY(32));
-    FinishBrandLabel.Parent := FinishCard;
-    FinishBrandLabel.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
-  end;
-  InstallEyebrowLabel.Visible := ShowBrandRail;
-  ContentWidth := PageWidth - LeftEdge - ScaleX(24);
-  ReadyRail.Height := WizardForm.ClientHeight;
-  ReadyStage.Left := LeftEdge;
-  ReadyEyebrow.Left := LeftEdge;
-  ReadyEyebrow.Visible := ShowBrandRail;
-  ReadyHeading.Left := LeftEdge + ScaleX(64);
-  ReadyHeading.Width := ContentWidth - ScaleX(64);
-  ReadyDescription.Left := ReadyHeading.Left;
-  ReadyDescription.Width := ReadyHeading.Width;
-  if ShowBrandRail then
-  begin
-    ReadyBrand.Parent := ReadyRail;
-    ReadyBrand.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
-    ReadyProduct.Parent := ReadyRail;
-    ReadyProduct.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
-  end
-  else
-  begin
-    ReadyBrand.Parent := ReadyCard;
-    ReadyBrand.SetBounds(ScaleX(24), ScaleY(8), ScaleX(32), ScaleY(32));
-    ReadyProduct.Parent := ReadyCard;
-    ReadyProduct.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
-  end;
-  InstallRail.Height := WizardForm.ClientHeight;
-  FinishRail.Height := WizardForm.ClientHeight;
-  InstallEyebrowLabel.Left := LeftEdge;
-  InstallStageIconPanel.Left := LeftEdge;
-  WizardForm.StatusLabel.Left := LeftEdge + ScaleX(56);
-  WizardForm.StatusLabel.Width := ContentWidth - ScaleX(56);
-  InstallDescriptionLabel.Left := WizardForm.StatusLabel.Left;
-  InstallDescriptionLabel.Width := WizardForm.StatusLabel.Width;
-  InstallWarningLabel.Left := LeftEdge;
-  InstallWarningLabel.Width := ContentWidth;
-  BrandProgressTrack.Left := LeftEdge;
-  BrandProgressTrack.Width := ContentWidth;
-  InstallMetrics.Left := LeftEdge;
-  InstallMetrics.Width := ContentWidth;
-  MetricSurface.SetBounds(ScaleX(1), ScaleY(1), ContentWidth - ScaleX(2), InstallMetrics.Height - ScaleY(2));
-  ApplyRoundedCard(InstallMetrics);
-  ApplyRoundedCard(MetricSurface);
-  ApplyRoundedCard(BrandProgressTrack);
-  ColumnWidth := ContentWidth div 3;
-  InstallFilesLabel.SetBounds(ScaleX(48), ScaleY(8), ColumnWidth - ScaleX(52), ScaleY(18));
-  InstallFilesValue.Left := InstallFilesLabel.Left;
-  InstallTotalLabel.SetBounds(ColumnWidth + ScaleX(48), ScaleY(8), ColumnWidth - ScaleX(52), ScaleY(18));
-  InstallTotalValue.Left := InstallTotalLabel.Left;
-  InstallPhaseLabel.SetBounds(ColumnWidth * 2 + ScaleX(48), ScaleY(8), ColumnWidth - ScaleX(52), ScaleY(18));
-  InstallPhaseValue.Left := InstallPhaseLabel.Left;
-  for I := 0 to 2 do
-    MetricIcons[I].SetBounds(ColumnWidth * I + ScaleX(12), ScaleY(16), ScaleX(24), ScaleY(24));
-  for I := 0 to 1 do
-    MetricDividers[I].SetBounds(ColumnWidth * (I + 1), ScaleY(14), ScaleX(1), ScaleY(30));
-  FinishStage.Left := LeftEdge;
-  WizardForm.FinishedHeadingLabel.Left := LeftEdge + ScaleX(64);
-  WizardForm.FinishedHeadingLabel.Width := ContentWidth - ScaleX(64);
-  WizardForm.FinishedLabel.Left := LeftEdge + ScaleX(64);
-  WizardForm.FinishedLabel.Width := ContentWidth - ScaleX(64);
-  FinishInfo.Left := LeftEdge;
-  FinishInfo.Width := ContentWidth;
-  WizardForm.RunList.Left := ScaleX(16);
-  WizardForm.RunList.Width := ContentWidth - ScaleX(32);
-  InstallRail.Visible := ShowBrandRail and (ActiveBrandPage = wpInstalling);
-  FinishRail.Visible := ShowBrandRail and (ActiveBrandPage = wpFinished);
-  ReadyRail.Visible := ShowBrandRail and (ActiveBrandPage = wpReady);
-  InstallRailBackground.Height := InstallRail.Height;
-  FinishRailBackground.Height := FinishRail.Height;
-  if InstallRail.Visible then InstallRail.BringToFront;
-  if FinishRail.Visible then FinishRail.BringToFront;
-  if ReadyRail.Visible then ReadyRail.BringToFront;
-  WizardForm.Bevel.Left := 0;
-  if ShowBrandRail then WizardForm.Bevel.Left := ScaleX(180);
-  WizardForm.Bevel.Width := WizardForm.ClientWidth - WizardForm.Bevel.Left;
-  WizardForm.Bevel.Top := WizardForm.ClientHeight - ScaleY(60);
-  WizardForm.CancelButton.Top := WizardForm.ClientHeight - ScaleY(44);
-  WizardForm.CancelButton.Left := WizardForm.ClientWidth - WizardForm.CancelButton.Width - ScaleX(20);
-  WizardForm.NextButton.Top := WizardForm.CancelButton.Top;
-  WizardForm.NextButton.Left := WizardForm.CancelButton.Left - WizardForm.NextButton.Width - ScaleX(8);
-  WizardForm.BackButton.Top := WizardForm.CancelButton.Top;
-  WizardForm.BackButton.Left := WizardForm.NextButton.Left - WizardForm.BackButton.Width - ScaleX(8);
-  if DesktopWorkArea(WizardForm.Handle, Area) then
-  begin
-    if WizardForm.Width > (Area.Right - Area.Left) * 9 div 10 then
-      WizardForm.Width := (Area.Right - Area.Left) * 9 div 10;
-    if WizardForm.Height > (Area.Bottom - Area.Top) * 9 div 10 then
-      WizardForm.Height := (Area.Bottom - Area.Top) * 9 div 10;
+  if (not DesktopLayoutReady) or LayingOutDesktop then Exit;
+  LayingOutDesktop := True;
+  try
+    if DesktopWorkArea(WizardForm.Handle, Area) then
+    begin
+      if WizardForm.Width > (Area.Right - Area.Left) * 7 div 10 then WizardForm.Width := (Area.Right - Area.Left) * 7 div 10;
+      if WizardForm.Height > (Area.Bottom - Area.Top) * 6 div 10 then WizardForm.Height := (Area.Bottom - Area.Top) * 6 div 10;
+    end;
+    WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth, WizardForm.ClientHeight - ScaleY(48));
+    WizardForm.InnerNotebook.SetBounds(0, 0, WizardForm.OuterNotebook.Width, WizardForm.OuterNotebook.Height);
+    W := WizardForm.InstallingPage.ClientWidth;
+    H := WizardForm.InstallingPage.ClientHeight;
+    InstallCard.SetBounds(0, 0, W, H);
+    FinishCard.SetBounds(0, 0, W, H);
+    ReadyCard.SetBounds(0, 0, W, H);
+    CompactDesktopLayout := (W < ScaleX(580)) or (WizardForm.ClientHeight < ScaleY(220)) or (H < ScaleY(208));
+    ShowBrandRail := not CompactDesktopLayout;
+    if BrandAssetsOnWhite <> CompactDesktopLayout then
+    begin
+      if CompactDesktopLayout then
+      begin
+        InstallBrandImage.Bitmap.Assign(BrandPageBitmap.Bitmap); FinishBrandImage.Bitmap.Assign(BrandPageBitmap.Bitmap); ReadyBrand.Bitmap.Assign(BrandPageBitmap.Bitmap);
+      end
+      else
+      begin
+        InstallBrandImage.Bitmap.Assign(BrandRailBitmap.Bitmap); FinishBrandImage.Bitmap.Assign(BrandRailBitmap.Bitmap); ReadyBrand.Bitmap.Assign(BrandRailBitmap.Bitmap);
+      end;
+      BrandAssetsOnWhite := CompactDesktopLayout;
+    end;
+    ShowBrandHeader := CompactDesktopLayout and (H >= ScaleY(172));
+    LeftEdge := ScaleX(164);
+    StageY := ScaleY(36);
+    IconSize := ScaleX(40);
+    if CompactDesktopLayout then
+    begin
+      LeftEdge := ScaleX(12);
+      StageY := ScaleY(8);
+      if ShowBrandHeader then StageY := ScaleY(52);
+      IconSize := ScaleX(24);
+    end;
+    ContentWidth := W - LeftEdge - ScaleX(16);
+    TextLeft := LeftEdge + IconSize + ScaleX(8);
+    for I := 0 to 2 do
+    begin
+      if I = 0 then begin InstallRail.SetBounds(0, 0, ScaleX(144), WizardForm.ClientHeight); end;
+      if I = 1 then begin FinishRail.SetBounds(0, 0, ScaleX(144), WizardForm.ClientHeight); end;
+      if I = 2 then begin ReadyRail.SetBounds(0, 0, ScaleX(144), WizardForm.ClientHeight); end;
+    end;
+    if ShowBrandRail then
+    begin
+      InstallBrandImage.Parent := InstallRail; FinishBrandImage.Parent := FinishRail; ReadyBrand.Parent := ReadyRail;
+      InstallBrandLabel.Parent := InstallRail; FinishBrandLabel.Parent := FinishRail; ReadyProduct.Parent := ReadyRail;
+      InstallBrandImage.SetBounds(ScaleX(24), ScaleY(20), ScaleX(48), ScaleY(48));
+      FinishBrandImage.SetBounds(ScaleX(24), ScaleY(20), ScaleX(48), ScaleY(48));
+      ReadyBrand.SetBounds(ScaleX(24), ScaleY(20), ScaleX(48), ScaleY(48));
+      InstallBrandLabel.SetBounds(ScaleX(16), ScaleY(80), ScaleX(128), ScaleY(26));
+      FinishBrandLabel.SetBounds(ScaleX(16), ScaleY(80), ScaleX(128), ScaleY(26));
+      ReadyProduct.SetBounds(ScaleX(16), ScaleY(80), ScaleX(128), ScaleY(26));
+      InstallBrandLabel.Caption := 'NGTManager'; FinishBrandLabel.Caption := 'NGTManager'; ReadyProduct.Caption := 'NGTManager';
+    end
+    else
+    begin
+      InstallBrandImage.Parent := InstallCard; FinishBrandImage.Parent := FinishCard; ReadyBrand.Parent := ReadyCard;
+      InstallBrandLabel.Parent := InstallCard; FinishBrandLabel.Parent := FinishCard; ReadyProduct.Parent := ReadyCard;
+      InstallBrandImage.SetBounds(ScaleX(12), ScaleY(8), ScaleX(32), ScaleY(32));
+      FinishBrandImage.SetBounds(ScaleX(12), ScaleY(8), ScaleX(32), ScaleY(32));
+      ReadyBrand.SetBounds(ScaleX(12), ScaleY(8), ScaleX(32), ScaleY(32));
+      InstallBrandLabel.SetBounds(ScaleX(56), ScaleY(12), W - ScaleX(68), ScaleY(24));
+      FinishBrandLabel.SetBounds(ScaleX(56), ScaleY(12), W - ScaleX(68), ScaleY(24));
+      ReadyProduct.SetBounds(ScaleX(56), ScaleY(12), W - ScaleX(68), ScaleY(24));
+      InstallBrandLabel.Caption := 'NGTManager  v{#AppVersion}'; FinishBrandLabel.Caption := InstallBrandLabel.Caption; ReadyProduct.Caption := InstallBrandLabel.Caption;
+    end;
+    InstallBrandImage.Visible := ShowBrandRail or ShowBrandHeader; InstallBrandLabel.Visible := InstallBrandImage.Visible;
+    FinishBrandImage.Visible := InstallBrandImage.Visible; FinishBrandLabel.Visible := InstallBrandImage.Visible;
+    ReadyBrand.Visible := InstallBrandImage.Visible; ReadyProduct.Visible := InstallBrandImage.Visible;
+    InstallRail.Visible := ShowBrandRail and (ActiveBrandPage = wpInstalling);
+    FinishRail.Visible := ShowBrandRail and (ActiveBrandPage = wpFinished);
+    ReadyRail.Visible := ShowBrandRail and (ActiveBrandPage = wpReady);
+    if InstallRail.Visible then InstallRail.BringToFront;
+    if FinishRail.Visible then FinishRail.BringToFront;
+    if ReadyRail.Visible then ReadyRail.BringToFront;
+    InstallEyebrowLabel.Visible := ShowBrandRail; InstallEyebrowLabel.SetBounds(LeftEdge, ScaleY(12), ContentWidth, ScaleY(18));
+    ReadyEyebrow.Visible := ShowBrandRail; ReadyEyebrow.SetBounds(LeftEdge, ScaleY(12), ContentWidth, ScaleY(18));
+    InstallStageIconPanel.SetBounds(LeftEdge, StageY, IconSize, IconSize);
+    InstallStageImage.SetBounds(0, 0, IconSize, IconSize);
+    InstallStageIconPanel.Color := InstallCard.Color;
+    ApplyRoundedCard(InstallStageIconPanel);
+    ReadyStage.SetBounds(LeftEdge, StageY, IconSize, IconSize);
+    FinishStage.SetBounds(LeftEdge, StageY, IconSize, IconSize);
+    WizardForm.StatusLabel.SetBounds(TextLeft, StageY, W - TextLeft - ScaleX(16), ScaleY(28));
+    ReadyHeading.SetBounds(TextLeft, StageY, W - TextLeft - ScaleX(16), ScaleY(28));
+    WizardForm.FinishedHeadingLabel.SetBounds(TextLeft, StageY, W - TextLeft - ScaleX(16), ScaleY(28));
+    DetailY := StageY + ScaleY(32);
+    ProgressY := H - ScaleY(86);
+    if CompactDesktopLayout then ProgressY := H - ScaleY(16);
+    BrandProgressTrack.SetBounds(LeftEdge, ProgressY, ContentWidth, ScaleY(8));
+    ApplyRoundedCard(BrandProgressTrack);
+    InstallDescriptionLabel.SetBounds(TextLeft, DetailY, W - TextLeft - ScaleX(16), ScaleY(32));
+    InstallDescriptionLabel.Visible := (not CompactDesktopLayout) and (not FailureDetails.Visible);
+    InstallWarningLabel.SetBounds(LeftEdge, ProgressY - ScaleY(22), ContentWidth, ScaleY(18));
+    InstallWarningLabel.Visible := InstallWarningActive and (not CompactDesktopLayout) and (not FailureDetails.Visible);
+    InstallMetrics.SetBounds(LeftEdge, H - ScaleY(66), ContentWidth, ScaleY(54));
+    if CompactDesktopLayout then InstallMetrics.SetBounds(LeftEdge, DetailY, ContentWidth, ProgressY - DetailY - ScaleY(8));
+    InstallMetrics.Visible := not FailureDetails.Visible;
+    MetricSurface.SetBounds(ScaleX(1), ScaleY(1), InstallMetrics.Width - ScaleX(2), InstallMetrics.Height - ScaleY(2));
+    ApplyRoundedCard(InstallMetrics); ApplyRoundedCard(MetricSurface);
+    CompactSummary.SetBounds(ScaleX(8), ScaleY(4), MetricSurface.ClientWidth - ScaleX(16), MetricSurface.ClientHeight - ScaleY(8));
+    CompactSummary.Visible := CompactDesktopLayout;
+    InstallFilesLabel.Visible := not CompactDesktopLayout; InstallFilesValue.Visible := not CompactDesktopLayout;
+    InstallTotalLabel.Visible := not CompactDesktopLayout; InstallTotalValue.Visible := not CompactDesktopLayout;
+    InstallPhaseLabel.Visible := not CompactDesktopLayout; InstallPhaseValue.Visible := not CompactDesktopLayout;
+    ColumnWidth := ContentWidth div 3;
+    InstallFilesLabel.SetBounds(ScaleX(36), ScaleY(6), ColumnWidth - ScaleX(40), ScaleY(18)); InstallFilesValue.SetBounds(ScaleX(36), ScaleY(26), ColumnWidth - ScaleX(40), ScaleY(22));
+    InstallTotalLabel.SetBounds(ColumnWidth + ScaleX(36), ScaleY(6), ColumnWidth - ScaleX(40), ScaleY(18)); InstallTotalValue.SetBounds(InstallTotalLabel.Left, ScaleY(26), ColumnWidth - ScaleX(40), ScaleY(22));
+    InstallPhaseLabel.SetBounds(ColumnWidth * 2 + ScaleX(36), ScaleY(6), ColumnWidth - ScaleX(40), ScaleY(18)); InstallPhaseValue.SetBounds(InstallPhaseLabel.Left, ScaleY(26), ColumnWidth - ScaleX(40), ScaleY(22));
+    for I := 0 to 2 do begin MetricIcons[I].Visible := not CompactDesktopLayout; MetricIcons[I].SetBounds(ColumnWidth * I + ScaleX(10), ScaleY(16), ScaleX(20), ScaleY(20)); end;
+    for I := 0 to 1 do begin MetricDividers[I].Visible := not CompactDesktopLayout; MetricDividers[I].SetBounds(ColumnWidth * (I + 1), ScaleY(12), ScaleX(1), ScaleY(30)); end;
+    FailureDetails.SetBounds(LeftEdge, DetailY, ContentWidth, H - DetailY - ScaleY(12));
+    ReadyDescription.SetBounds(TextLeft, DetailY, W - TextLeft - ScaleX(16), H - DetailY - ScaleY(12));
+    InfoY := ScaleY(132);
+    if CompactDesktopLayout then InfoY := H - ScaleY(44);
+    FinishInfo.SetBounds(LeftEdge, InfoY, ContentWidth, ScaleY(32));
+    if not CompactDesktopLayout then FinishInfo.Height := ScaleY(56);
+    ApplyRoundedCard(FinishInfo);
+    WizardForm.RunList.SetBounds(ScaleX(12), (FinishInfo.Height - ScaleY(24)) div 2, ContentWidth - ScaleX(24), ScaleY(24));
+    WizardForm.FinishedLabel.SetBounds(TextLeft, DetailY, W - TextLeft - ScaleX(16), InfoY - DetailY - ScaleY(8));
+    WizardForm.FinishedLabel.Visible := not CompactDesktopLayout;
+    FinishDetails.SetBounds(LeftEdge, DetailY, ContentWidth, InfoY - DetailY - ScaleY(4)); FinishDetails.Visible := CompactDesktopLayout;
+    UpdateCompactDetails;
+    WizardForm.Bevel.Left := 0; if ShowBrandRail then WizardForm.Bevel.Left := ScaleX(144);
+    WizardForm.Bevel.SetBounds(WizardForm.Bevel.Left, WizardForm.ClientHeight - ScaleY(48), WizardForm.ClientWidth - WizardForm.Bevel.Left, ScaleY(1));
+    WizardForm.CancelButton.SetBounds(WizardForm.ClientWidth - ScaleX(116), WizardForm.ClientHeight - ScaleY(39), ScaleX(100), ScaleY(30));
+    WizardForm.NextButton.SetBounds(WizardForm.CancelButton.Left - ScaleX(108), WizardForm.CancelButton.Top, ScaleX(100), ScaleY(30));
+    if not WizardForm.CancelButton.Visible then WizardForm.NextButton.Left := WizardForm.CancelButton.Left;
+    WizardForm.BackButton.SetBounds(WizardForm.NextButton.Left - ScaleX(108), WizardForm.CancelButton.Top, ScaleX(100), ScaleY(30));
+  finally
+    LayingOutDesktop := False;
   end;
 end;
 
@@ -473,6 +534,24 @@ begin
     Result := Chinese
   else
     Result := English;
+end;
+
+procedure UpdateCompactDetails;
+var
+  Text: String;
+  FirstLine: LongInt;
+begin
+  if CompactSummary = nil then Exit;
+  Text := InstallDescriptionLabel.Caption + #13#10;
+  if InstallWarningActive then Text := InstallWarningLabel.Caption + #13#10 + Text;
+  Text := Text + InstallFilesLabel.Caption + ': ' + InstallFilesValue.Caption + #13#10 + InstallTotalLabel.Caption + ': ' + InstallTotalValue.Caption + #13#10 + InstallPhaseLabel.Caption + ': ' + InstallPhaseValue.Caption;
+  if CompactSummary.Text <> Text then
+  begin
+    FirstLine := SendMessage(CompactSummary.Handle, $00CE, 0, 0);
+    CompactSummary.Text := Text;
+    SendMessage(CompactSummary.Handle, $00B6, 0, FirstLine);
+  end;
+  if FinishDetails.Text <> WizardForm.FinishedLabel.Caption then FinishDetails.Text := WizardForm.FinishedLabel.Caption;
 end;
 
 function ShellUsesLightTheme: Boolean;
@@ -506,7 +585,7 @@ var
 begin
   Diameter := ScaleX(28);
   if Diameter > Panel.Height then Diameter := Panel.Height;
-  Region := CreateRoundRectRgn(0, 0, Panel.Width + 1, Panel.Height + 1,
+  Region := CreateRoundRectRgn(0, 0, Panel.Width, Panel.Height,
     Diameter, Diameter);
   if Region <> 0 then
     SetWindowRgn(Panel.Handle, Region, True);
@@ -560,8 +639,10 @@ var
   ReadyBackground: TBitmapImage;
   ReadyVersion: TNewStaticText;
 begin
-  WizardForm.Width := ScaleX(730);
-  WizardForm.Height := ScaleY(330);
+  BrandRailBitmap := TBitmapImage.Create(WizardForm); BrandRailBitmap.Visible := False; BrandRailBitmap.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer.bmp'));
+  BrandPageBitmap := TBitmapImage.Create(WizardForm); BrandPageBitmap.Visible := False; BrandPageBitmap.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer-white.bmp'));
+  WizardForm.Width := ScaleX(640);
+  WizardForm.Height := ScaleY(300);
   WizardForm.NextButton.Width := ScaleX(108);
   WizardForm.NextButton.Height := ScaleY(32);
   WizardForm.CancelButton.Width := ScaleX(108);
@@ -618,7 +699,7 @@ begin
   InstallBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(130), ScaleY(28));
   InstallBrandLabel.Caption := 'NGTManager';
   InstallBrandLabel.Font.Name := 'Segoe UI';
-  InstallBrandLabel.Font.Size := 15;
+  InstallBrandLabel.Font.Size := 14;
   InstallBrandLabel.Font.Style := [fsBold];
   InstallBrandLabel.Font.Color := $001F2729;
 
@@ -631,7 +712,7 @@ begin
   InstallVersionLabel.Font.Color := $00576D70;
   VersionCapsule := TPanel.Create(WizardForm);
   VersionCapsule.Parent := InstallRail;
-  VersionCapsule.SetBounds(ScaleX(28), ScaleY(112), ScaleX(64), ScaleY(22));
+  VersionCapsule.SetBounds(ScaleX(16), ScaleY(112), ScaleX(64), ScaleY(22));
   VersionCapsule.BevelOuter := bvNone;
   VersionCapsule.ParentBackground := False;
   VersionCapsule.Color := $00DFF0FC;
@@ -654,7 +735,7 @@ begin
   InstallStageIconPanel.SetBounds(ScaleX(208), ScaleY(48), ScaleX(44), ScaleY(44));
   InstallStageIconPanel.BevelOuter := bvNone;
   InstallStageIconPanel.ParentBackground := False;
-  InstallStageIconPanel.Color := $00FFF2E4;
+  InstallStageIconPanel.Color := clWhite;
   ApplyRoundedCard(InstallStageIconPanel);
 
   InstallStageIconLabel := TNewStaticText.Create(WizardForm);
@@ -674,7 +755,7 @@ begin
   WizardForm.StatusLabel.Parent := InstallCard;
   WizardForm.StatusLabel.SetBounds(ScaleX(264), ScaleY(48), ContentWidth - ScaleX(108), ScaleY(30));
   WizardForm.StatusLabel.Font.Name := 'Segoe UI';
-  WizardForm.StatusLabel.Font.Size := 15;
+  WizardForm.StatusLabel.Font.Size := 14;
   WizardForm.StatusLabel.Font.Style := [fsBold];
   WizardForm.StatusLabel.Font.Color := $001F2729;
   WizardForm.StatusLabel.AutoSize := False;
@@ -850,7 +931,7 @@ begin
   FinishBrandLabel.SetBounds(ScaleX(28), ScaleY(82), ScaleX(130), ScaleY(28));
   FinishBrandLabel.Caption := 'NGTManager';
   FinishBrandLabel.Font.Name := 'Segoe UI';
-  FinishBrandLabel.Font.Size := 15;
+  FinishBrandLabel.Font.Size := 14;
   FinishBrandLabel.Font.Style := [fsBold];
   FinishBrandLabel.Font.Color := $001F2729;
 
@@ -863,7 +944,7 @@ begin
   FinishVersionLabel.Font.Color := $00576D70;
   VersionCapsule := TPanel.Create(WizardForm);
   VersionCapsule.Parent := FinishRail;
-  VersionCapsule.SetBounds(ScaleX(28), ScaleY(112), ScaleX(64), ScaleY(22));
+  VersionCapsule.SetBounds(ScaleX(16), ScaleY(112), ScaleX(64), ScaleY(22));
   VersionCapsule.BevelOuter := bvNone;
   VersionCapsule.ParentBackground := False;
   VersionCapsule.Color := $00DFF0FC;
@@ -880,7 +961,7 @@ begin
   WizardForm.FinishedHeadingLabel.Parent := FinishCard;
   WizardForm.FinishedHeadingLabel.SetBounds(ScaleX(208), ScaleY(42), ContentWidth - ScaleX(52), ScaleY(34));
   WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
-  WizardForm.FinishedHeadingLabel.Font.Size := 16;
+  WizardForm.FinishedHeadingLabel.Font.Size := 14;
   WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
   WizardForm.FinishedHeadingLabel.Font.Color := $001F2729;
   WizardForm.FinishedLabel.Parent := FinishCard;
@@ -899,6 +980,10 @@ begin
   WizardForm.RunList.Parent := FinishInfo;
   WizardForm.RunList.Color := FinishInfo.Color;
   WizardForm.RunList.SetBounds(ScaleX(16), ScaleY(14), ContentWidth - ScaleX(84), ScaleY(34));
+  CompactSummary := TNewMemo.Create(WizardForm);
+  CompactSummary.Parent := MetricSurface; CompactSummary.ReadOnly := True; CompactSummary.ScrollBars := ssVertical; CompactSummary.BorderStyle := bsNone; CompactSummary.Color := MetricSurface.Color; CompactSummary.Font.Name := 'Segoe UI'; CompactSummary.Font.Size := 9;
+  FinishDetails := TNewMemo.Create(WizardForm);
+  FinishDetails.Parent := FinishCard; FinishDetails.ReadOnly := True; FinishDetails.ScrollBars := ssVertical; FinishDetails.BorderStyle := bsNone; FinishDetails.Color := FinishCard.Color; FinishDetails.Font.Name := 'Segoe UI'; FinishDetails.Font.Size := 9;
   ReadyCard := TPanel.Create(WizardForm);
   ReadyCard.Parent := WizardForm.ReadyPage;
   ReadyCard.SetBounds(0, 0, WizardForm.ReadyPage.ClientWidth, WizardForm.ReadyPage.ClientHeight);
@@ -927,7 +1012,7 @@ begin
   ReadyProduct.SetBounds(ScaleX(28), ScaleY(82), ScaleX(140), ScaleY(28));
   ReadyProduct.Caption := 'NGTManager';
   ReadyProduct.Font.Name := 'Segoe UI';
-  ReadyProduct.Font.Size := 15;
+  ReadyProduct.Font.Size := 14;
   ReadyProduct.Font.Style := [fsBold];
   ReadyProduct.Font.Color := $001F2729;
   ReadyProduct.Color := ReadyRail.Color;
@@ -955,7 +1040,7 @@ begin
   ReadyHeading.SetBounds(ScaleX(272), ScaleY(48), ScaleX(420), ScaleY(34));
   ReadyHeading.Caption := UiText('准备安装 NGTManager', 'Pronto per installare NGTManager', 'Ready to install NGTManager');
   ReadyHeading.Font.Name := 'Segoe UI';
-  ReadyHeading.Font.Size := 15;
+  ReadyHeading.Font.Size := 14;
   ReadyHeading.Font.Style := [fsBold];
   ReadyHeading.Font.Color := $001F2729;
   ReadyHeading.AutoSize := False;
@@ -1006,23 +1091,27 @@ begin
   for I := 1 to ParamCount do
     if Pos('/lang=', Lowercase(ParamStr(I))) = 1 then Exit;
   ExtractTemporaryFile('ngt-studio-installer.bmp');
-  Form := CreateCustomForm(520, 250, True, True);
+  Form := CreateCustomForm(480, 220, True, True);
+  Form.Width := ScaleX(480); Form.Height := ScaleY(220);
   try
     Form.Caption := 'NGTManager';
     Form.Color := $00F7FAFB;
     Form.Font.Name := 'Segoe UI';
     if DesktopWorkArea(Form.Handle, WorkArea) then
-      if Form.Width > (WorkArea.Right - WorkArea.Left) * 9 div 10 then
-        Form.Width := (WorkArea.Right - WorkArea.Left) * 9 div 10;
+      begin
+        if Form.Width > (WorkArea.Right - WorkArea.Left) * 7 div 10 then Form.Width := (WorkArea.Right - WorkArea.Left) * 7 div 10;
+        if Form.Height > (WorkArea.Bottom - WorkArea.Top) * 6 div 10 then Form.Height := (WorkArea.Bottom - WorkArea.Top) * 6 div 10;
+      end;
     Form.BorderIcons := [biSystemMenu];
     Logo := TBitmapImage.Create(Form);
     Logo.Parent := Form;
-    Logo.SetBounds(ScaleX(28), ScaleY(28), ScaleX(48), ScaleY(48));
+    Logo.SetBounds(ScaleX(16), ScaleY(16), ScaleX(40), ScaleY(40));
     Logo.Stretch := True;
     Logo.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer.bmp'));
     Title := TNewStaticText.Create(Form);
     Title.Parent := Form;
-    Title.SetBounds(ScaleX(92), ScaleY(28), ScaleX(390), ScaleY(28));
+    Title.SetBounds(ScaleX(72), ScaleY(16), Form.ClientWidth - ScaleX(88), ScaleY(26));
+    Title.Anchors := [akLeft, akTop, akRight];
     Title.Caption := 'NGTManager';
     Title.Font.Name := 'Segoe UI';
     Title.Font.Size := 15;
@@ -1030,19 +1119,20 @@ begin
     Title.Font.Color := $001F2729;
     Version := TNewStaticText.Create(Form);
     Version.Parent := Form;
-    Version.SetBounds(ScaleX(92), ScaleY(58), ScaleX(160), ScaleY(20));
+    Version.SetBounds(ScaleX(72), ScaleY(44), ScaleX(160), ScaleY(18));
     Version.Caption := 'v{#AppVersion}';
     Version.Font.Color := $00576D70;
     Description := TNewStaticText.Create(Form);
     Description.Parent := Form;
-    Description.SetBounds(ScaleX(28), ScaleY(100), ScaleX(464), ScaleY(24));
+    Description.SetBounds(ScaleX(16), ScaleY(76), Form.ClientWidth - ScaleX(32), ScaleY(20));
+    Description.Anchors := [akLeft, akTop, akRight];
     Description.Caption := UiText('选择安装语言', 'Scegli la lingua di installazione', 'Choose your installation language');
-    Description.Font.Size := 11;
+    Description.Font.Size := 10;
     Languages := TNewComboBox.Create(Form);
     Languages.Parent := Form;
     Languages.Style := csDropDownList;
-    Languages.SetBounds(ScaleX(28), ScaleY(134), ScaleX(464), ScaleY(30));
-    Languages.Width := Form.ClientWidth - ScaleX(56);
+    Languages.SetBounds(ScaleX(16), ScaleY(104), Form.ClientWidth - ScaleX(32), ScaleY(26));
+    Languages.Anchors := [akLeft, akTop, akRight];
     Languages.Items.Add('简体中文');
     Languages.Items.Add('Italiano');
     Languages.Items.Add('English');
@@ -1051,24 +1141,26 @@ begin
     if ActiveLanguage = 'italian' then Languages.ItemIndex := 1;
     AcceptButton := TNewButton.Create(Form);
     AcceptButton.Parent := Form;
-    AcceptButton.SetBounds(ScaleX(272), ScaleY(198), ScaleX(104), ScaleY(32));
+    AcceptButton.SetBounds(ScaleX(240), Form.ClientHeight - ScaleY(44), ScaleX(100), ScaleY(28));
+    AcceptButton.Anchors := [akRight, akBottom];
     AcceptButton.Caption := UiText('继续', 'Continua', 'Continue');
     AcceptButton.Default := True;
     AcceptButton.ModalResult := mrOk;
     LanguageAccept := AcceptButton;
     CancelButton := TNewButton.Create(Form);
     CancelButton.Parent := Form;
-    CancelButton.SetBounds(ScaleX(388), ScaleY(198), ScaleX(104), ScaleY(32));
+    CancelButton.SetBounds(ScaleX(352), Form.ClientHeight - ScaleY(44), ScaleX(100), ScaleY(28));
+    CancelButton.Anchors := [akRight, akBottom];
     CancelButton.Caption := UiText('取消', 'Annulla', 'Cancel');
     CancelButton.Cancel := True;
     CancelButton.ModalResult := mrCancel;
     LanguageCancel := CancelButton;
-    CancelButton.Left := Form.ClientWidth - CancelButton.Width - ScaleX(28);
+    CancelButton.Left := Form.ClientWidth - CancelButton.Width - ScaleX(16);
     AcceptButton.Left := CancelButton.Left - AcceptButton.Width - ScaleX(12);
+    LanguageDialogHandle := Form.Handle;
+    OriginalLanguageProc := SetWindowLong(Form.Handle, -4, CreateCallback(@BrandButtonWindowProc));
     if not HighContrastActive then
     begin
-      LanguageDialogHandle := Form.Handle;
-      OriginalLanguageProc := SetWindowLong(Form.Handle, -4, CreateCallback(@BrandButtonWindowProc));
       UseBrandButton(AcceptButton);
       UseBrandButton(CancelButton);
     end;
@@ -1117,6 +1209,7 @@ var
 begin
   ExtractTemporaryFile('ngt-studio-installer.bmp');
   ExtractTemporaryFile('ngt-studio-installer-rail.bmp');
+  ExtractTemporaryFile('ngt-studio-installer-white.bmp');
   ExtractTemporaryFile('ngt-stage-package.bmp');
   ExtractTemporaryFile('ngt-stage-shield.bmp');
   ExtractTemporaryFile('ngt-stage-clock.bmp');
@@ -1138,9 +1231,9 @@ begin
   DesktopLayoutReady := True;
   WizardForm.OnResize := @LayoutDesktopWizard;
   LayoutDesktopWizard(WizardForm);
+  OriginalWizardProc := SetWindowLong(WizardForm.Handle, -4, CreateCallback(@BrandButtonWindowProc));
   if not HighContrastActive then
   begin
-    OriginalWizardProc := SetWindowLong(WizardForm.Handle, -4, CreateCallback(@BrandButtonWindowProc));
     UseBrandButton(WizardForm.NextButton);
     UseBrandButton(WizardForm.CancelButton);
   end;
@@ -1247,14 +1340,15 @@ begin
     BrandProgressDeterminate := False;
     BrandProgressPosition := 0;
     BrandProgressAnimationTick := GetTickCount64;
+    SendMessage(CompactSummary.Handle, $00B6, 0, -SendMessage(CompactSummary.Handle, $00CE, 0, 0));
   end;
   CurrentPhase := Phase;
   UpdateStageIcon(Phase);
   PhaseElapsedSeconds := StrToIntDef(PhaseElapsed, 0);
   TotalElapsedSeconds := StrToIntDef(TotalElapsed, 0);
   StatusText := PhaseDescription(Phase);
-  InstallWarningLabel.Visible := PhaseElapsedSeconds > 30;
-  if InstallWarningLabel.Visible then
+  InstallWarningActive := PhaseElapsedSeconds > 30;
+  if InstallWarningActive then
     InstallStageImage.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-stage-clock.bmp'));
   if InstallWarningLabel.Visible then
     InstallWarningLabel.Caption := UiText(
@@ -1271,7 +1365,7 @@ begin
       'ⓘ 当前阶段已无法取消，正在安全完成操作。',
       'ⓘ È troppo tardi per annullare; completamento sicuro in corso.',
       'ⓘ It is too late to cancel; finishing safely.');
-  if CancelPending <> '0' then InstallWarningLabel.Visible := True;
+  if CancelPending <> '0' then InstallWarningActive := True;
   WizardForm.StatusLabel.Caption := StatusText;
   InstallDescriptionLabel.Caption := UiText(
     '正在安全处理安装文件，请勿关闭电脑。',
@@ -1294,6 +1388,7 @@ begin
     SetBrandProgress(ProgressValue, ProgressTotal)
   else
     SetBrandProgressActive;
+  LayoutDesktopWizard(WizardForm);
 end;
 
 procedure PollManagerProgress;
@@ -1485,13 +1580,14 @@ begin
       'Installation did not complete; data was preserved');
     UpdateStageIcon('failed');
     InstallDescriptionLabel.Visible := False;
-    InstallWarningLabel.Visible := False;
+    InstallWarningLabel.Visible := False; InstallWarningActive := False;
     BrandProgressTrack.Visible := False;
     InstallMetrics.Visible := False;
     WizardForm.FilenameLabel.Visible := False;
     FailureDetails.Text := MessageText + #13#10 +
       UiText('操作编号：', 'Tentativo: ', 'Attempt ID: ') + AttemptId;
     FailureDetails.Visible := True;
+    LayoutDesktopWizard(WizardForm);
     ProcessWizardMessages;
     if WizardSilent then
       RaiseException(Failure)
@@ -1531,7 +1627,6 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   ActiveBrandPage := CurPageID;
-  LayoutDesktopWizard(WizardForm);
   if OriginalWizardProc <> 0 then
   begin
     UseBrandButton(WizardForm.NextButton);
@@ -1554,6 +1649,7 @@ begin
       'Apri NGTManager dal collegamento sul desktop. Dopo aver chiuso la finestra, puoi riaprirlo o uscire in sicurezza dall''area di notifica.',
       'Open NGTManager from the desktop shortcut. After closing the application window, use the tray icon to reopen it or exit safely.');
   end;
+  LayoutDesktopWizard(WizardForm);
 end;
 
 procedure InstallExtractedPackage;
