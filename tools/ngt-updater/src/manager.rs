@@ -10298,6 +10298,45 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
+    fn work_area_changes_do_not_resize_a_minimized_restore_placement() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        unsafe {
+            let class: Vec<u16> = "STATIC".encode_utf16().chain(Some(0)).collect();
+            let window = CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_OVERLAPPEDWINDOW,
+                20,
+                20,
+                400,
+                240,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
+            assert!(!window.is_null());
+            let mut before: WINDOWPLACEMENT = std::mem::zeroed();
+            before.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            assert_ne!(GetWindowPlacement(window, &mut before), 0);
+            ShowWindow(window, SW_MINIMIZE);
+            let mut minimized = std::mem::zeroed();
+            GetWindowRect(window, &mut minimized);
+            fit_runtime_ui_to_work_area(window, minimized);
+            let mut after: WINDOWPLACEMENT = std::mem::zeroed();
+            after.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            assert_ne!(GetWindowPlacement(window, &mut after), 0);
+            let still_minimized = IsIconic(window) != 0;
+            DestroyWindow(window);
+            let rect = |r: windows_sys::Win32::Foundation::RECT| (r.left, r.top, r.right, r.bottom);
+            assert!(still_minimized);
+            assert_eq!(rect(before.rcNormalPosition), rect(after.rcNormalPosition));
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
     fn compact_startup_layout_fits_normalized_resolution_and_dpi_matrix() {
         for (w, h) in [(1024, 768), (1280, 720), (1366, 768), (1920, 1080)] {
             for dpi in [96u32, 144, 192] {

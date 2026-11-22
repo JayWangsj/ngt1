@@ -11,6 +11,8 @@ function GetWindowRgn(Wnd: HWND; Rgn: THandle): Integer;
   external 'GetWindowRgn@user32.dll stdcall';
 function PointInRegion(Rgn: THandle; X, Y: Integer): BOOL;
   external 'PtInRegion@gdi32.dll stdcall';
+function UiShowWindow(Wnd: HWND; Command: Integer): BOOL;
+  external 'ShowWindow@user32.dll stdcall';
 function UiGetDC(Wnd: HWND): THandle;
   external 'GetDC@user32.dll stdcall';
 function UiReleaseDC(Wnd: HWND; DC: THandle): Integer;
@@ -65,7 +67,7 @@ end;
 
 procedure CheckCompactLayouts;
 var
-  Resolution, Zoom, W, H, Dpi: Integer;
+  Resolution, Zoom, W, H, Dpi, SavedWidth, SavedHeight: Integer;
 begin
   for Resolution := 0 to 3 do
     for Zoom := 0 to 2 do
@@ -95,6 +97,14 @@ begin
         CheckUi(FinishDetails.Height >= ScaleY(13), 'Finish explanation has no readable row');
       end;
     end;
+  SavedWidth := InstallCard.Width; SavedHeight := InstallCard.Height;
+  UiShowWindow(WizardForm.Handle, 6);
+  LayoutDesktopWizard(WizardForm);
+  UiShowWindow(WizardForm.Handle, 9);
+  UiShowWindow(WizardForm.Handle, 0);
+  LayoutDesktopWizard(WizardForm);
+  CheckUi((InstallCard.Width = SavedWidth) and (InstallCard.Height = SavedHeight), 'Minimize/restore changed page bounds');
+  CheckRoundCard(FinishInfo);
 end;
 
 procedure RunDesktopUiSelfTests;
@@ -142,7 +152,7 @@ begin
     end;
     CheckButtonPixels;
     CheckCompactLayouts;
-    SaveStringToFile(Output, 'PASS: native progress, single-border button pixels, both card corners, compact resolution/DPI layouts and scroll panes', False);
+    SaveStringToFile(Output, 'PASS: native progress, single-border button pixels, both card corners, compact resolution/DPI layouts, scroll panes and minimize/restore', False);
     FinishUiTest(0);
   except
     SaveStringToFile(Output, 'FAIL: ' + GetExceptionMessage, False);
