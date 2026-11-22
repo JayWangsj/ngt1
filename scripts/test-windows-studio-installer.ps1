@@ -134,14 +134,47 @@ function Assert-NoNgtStartupRegistration {
   }
 }
 
+function Assert-NoLegacyNgtStartupTask {
+  param([Parameter(Mandatory = $true)][string]$Context)
+
+  $schtasksPath = Join-Path $env:SystemRoot "System32\schtasks.exe"
+  if (-not (Test-Path -LiteralPath $schtasksPath -PathType Leaf)) {
+    throw "Could not verify the legacy NGTManager startup task during $Context."
+  }
+
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $schtasksPath
+  $startInfo.Arguments = '/Query /TN "NGT Management System"'
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $process = [System.Diagnostics.Process]::new()
+  try {
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+      throw "Could not query the legacy NGTManager startup task during $Context."
+    }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $null = $stdoutTask.GetAwaiter().GetResult()
+    $null = $stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+  } finally {
+    $process.Dispose()
+  }
+
+  if ($exitCode -eq 0) {
+    throw "$Context has the legacy NGTManager startup task registered."
+  }
+}
+
 if (Test-Path -LiteralPath $installRoot) {
   throw "The disposable user already has an NGTManager directory."
 }
 Assert-NoNgtStartupRegistration -Context "The disposable user already"
-& schtasks.exe /Query /TN "NGT Management System" *> $null
-if ($LASTEXITCODE -eq 0) {
-  throw "The disposable user already has the legacy NGTManager startup task."
-}
+Assert-NoLegacyNgtStartupTask -Context "initial installer check"
 foreach ($port in @(3000, 55432, 55433)) {
   if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
     throw "Installer acceptance port $port is already in use."
@@ -236,10 +269,7 @@ try {
     throw "NGTManager did not report a committed installation of the verified release."
   }
   Assert-NoNgtStartupRegistration -Context "NGTManager"
-  & schtasks.exe /Query /TN "NGT Management System" *> $null
-  if ($LASTEXITCODE -eq 0) {
-    throw "NGTManager left the legacy startup task registered."
-  }
+  Assert-NoLegacyNgtStartupTask -Context "installation"
   if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
     throw "A silent first install unexpectedly started the application."
   }
@@ -538,10 +568,7 @@ try {
           throw "The uninstaller did not retain the business database and manager state."
         }
         Assert-NoNgtStartupRegistration -Context "The uninstaller"
-        & schtasks.exe /Query /TN "NGT Management System" *> $null
-        if ($LASTEXITCODE -eq 0) {
-          throw "The uninstaller left the legacy NGTManager startup task registered."
-        }
+        Assert-NoLegacyNgtStartupTask -Context "uninstallation"
       } catch {
         $cleanupSafe = $false
         $cleanupMessage = [regex]::Replace([string]$_.Exception.Message, "[\r\n]+", " ")
