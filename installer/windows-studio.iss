@@ -528,6 +528,7 @@ begin
   AvailableWidth := BrandProgressTrack.ClientWidth;
   BrandProgressFill.Left := 0;
   BrandProgressFill.Width := (AvailableWidth * BrandProgressPosition) div 1000;
+  ApplyRoundedCard(BrandProgressFill);
 end;
 
 procedure SetBrandProgressActive;
@@ -548,6 +549,7 @@ begin
   if SegmentWidth < ScaleX(48) then SegmentWidth := ScaleX(48);
   Travel := AvailableWidth + SegmentWidth;
   BrandProgressFill.Width := SegmentWidth;
+  ApplyRoundedCard(BrandProgressFill);
   BrandProgressFill.Left := ((GetTickCount64 - BrandProgressAnimationTick) div 6) mod Travel - SegmentWidth;
 end;
 
