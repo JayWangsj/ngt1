@@ -561,7 +561,9 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("total_item_count");
     expect(manager).toContain("total_bytes");
     expect(manager).toContain("verify_release_for_startup");
-    expect(manager).toContain('launch_managed_browser("http://127.0.0.1:3000")');
+    expect(manager).toContain(
+      'launch_managed_browser("http://127.0.0.1:3000")',
+    );
     expect(manager).toContain(
       '("ProgramFiles", "Google/Chrome/Application/chrome.exe")',
     );
@@ -632,7 +634,9 @@ describe("Windows persistent startup", () => {
     );
     expect(installer).toContain("BrandProgressFill.Width :=");
     expect(installer).toContain("CreateRoundRectRgn");
-    expect(installer).toContain("WizardForm.WizardBitmapImage.Visible := False");
+    expect(installer).toContain(
+      "WizardForm.WizardBitmapImage.Visible := False",
+    );
     expect(installer).toContain('Description: "{cm:OpenNGTManager}"');
     expect(installer).not.toContain("SetTimer(0, 0, 250");
     expect(installer).toContain("GetSpaceOnDisk64");
@@ -881,26 +885,32 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("open_browser_after_health: bool");
   });
 
-  it("holds the browser window until startup UI completes and fails closed on tray exit", async () => {
+  it("ends startup before creating the browser and fails closed on tray exit", async () => {
     const manager = await readFile("tools/ngt-updater/src/manager.rs", "utf8");
     expect(manager).toContain("PROVISIONAL_BROWSER_WINDOW");
-    expect(manager).toContain("manager.browser.window.provisional");
-    expect(manager).toContain("manager.browser.window.hidden_until_ready");
     expect(manager).toContain("manager.browser.window.confirmed");
     expect(manager).toContain("manager.startup.ui_completed");
-    const startupStart = manager.indexOf("let browser_ready = match open_browser(true)");
-    const startupEnd = manager.indexOf("if open_browser_after_health", startupStart + 20);
-    const startupFlow = manager.slice(startupStart, startupEnd);
-    expect(startupFlow.indexOf("open_browser(true)")).toBeLessThan(
-      startupFlow.indexOf("complete_and_hide_runtime_ui()"),
+    const start = manager.indexOf("fn open_browser()");
+    const flow = manager.slice(
+      start,
+      manager.indexOf("fn close_managed_browser_window", start),
     );
-    expect(startupFlow.indexOf("complete_and_hide_runtime_ui()")).toBeLessThan(
-      startupFlow.indexOf("show_managed_browser_window(window)"),
+    expect(flow.indexOf("complete_and_hide_runtime_ui()")).toBeLessThan(
+      flow.indexOf("launch_managed_browser("),
     );
+    expect(flow).not.toContain("hold_browser_until_ready");
+    const identify = manager.slice(
+      manager.indexOf("fn identify_browser_window"),
+      manager.indexOf("fn queue_browser_open"),
+    );
+    expect(identify).not.toContain("hold_browser_until_ready");
     expect(manager).toContain("RUNTIME_UI_HIDE_MESSAGE");
     expect(manager).not.toContain("SetTimer(window, 2, 300");
     const closeStart = manager.indexOf("fn close_managed_browser_window");
-    const closeEnd = manager.indexOf("fn wait_for_runtime_and_open", closeStart);
+    const closeEnd = manager.indexOf(
+      "fn wait_for_runtime_and_open",
+      closeStart,
+    );
     const closeWindow = manager.slice(closeStart, closeEnd);
     expect(closeWindow).toContain("BROWSER_WINDOW_IDENTITY_UNCONFIRMED");
     expect(closeWindow).toContain("return false;");
