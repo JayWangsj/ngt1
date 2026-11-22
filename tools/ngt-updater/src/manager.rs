@@ -3225,11 +3225,15 @@ fn update_runtime_ui_phase(phase: usize) {
     let window = RUNTIME_UI_WINDOW.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
     if !window.is_null() {
         unsafe {
-            windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
+            let mut result = 0usize;
+            windows_sys::Win32::UI::WindowsAndMessaging::SendMessageTimeoutW(
                 window,
                 RUNTIME_UI_PHASE_MESSAGE,
                 phase,
                 0,
+                windows_sys::Win32::UI::WindowsAndMessaging::SMTO_ABORTIFHUNG,
+                1_000,
+                &mut result,
             );
         }
     }
@@ -3242,8 +3246,8 @@ fn complete_and_hide_runtime_ui() -> bool {
         IsWindowVisible, SendMessageTimeoutW, SMTO_ABORTIFHUNG,
     };
     let window = RUNTIME_UI_WINDOW.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND;
-    if window.is_null() {
-        return true;
+    if window.is_null() || TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
+        return false;
     }
     let send = |message, wparam| unsafe {
         let mut result = 0usize;
@@ -3262,21 +3266,25 @@ fn complete_and_hide_runtime_ui() -> bool {
     }
     unsafe { UpdateWindow(window) };
     thread::sleep(Duration::from_millis(300));
+    if TRAY_EXIT_REQUESTED.load(Ordering::SeqCst) {
+        return false;
+    }
     send(RUNTIME_UI_HIDE_MESSAGE, 0) && unsafe { IsWindowVisible(window) == 0 }
 }
 
 #[cfg(windows)]
 fn signal_existing_runtime_ui(message: u32) -> bool {
+    signal_runtime_ui_class("NGTManager.RuntimeUi", message)
+}
+
+#[cfg(windows)]
+fn signal_runtime_ui_class(class_name: &str, message: u32) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW};
-    let class: Vec<u16> = "NGTManager.RuntimeUi"
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
+    let class: Vec<u16> = class_name.encode_utf16().chain(Some(0)).collect();
     for _ in 0..20 {
         let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
         if !window.is_null() {
-            unsafe { PostMessageW(window, message, 0, 0) };
-            return true;
+            return unsafe { PostMessageW(window, message, 0, 0) != 0 };
         }
         thread::sleep(Duration::from_millis(50));
     }
@@ -8482,10 +8490,10 @@ fn wait_for_runtime_and_open(root: &Path) -> Result<String, String> {
             return Err("NGTManager is in maintenance. Try opening it after the current operation finishes.".to_owned());
         }
         if health_matches(&client, &config.version) {
-            return if open_browser(false)? {
-                Ok("NGTManager is open.".to_owned())
+            return if signal_existing_runtime_ui(RUNTIME_UI_OPEN_MESSAGE) {
+                Ok("NGTManager open request sent to the running manager.".to_owned())
             } else {
-                Err("The NGTManager browser window could not be confirmed. Use the tray menu to retry.".to_owned())
+                Err("The running NGTManager window could not receive the open request. Retry from the tray.".to_owned())
             };
         }
         if !runtime_is_active(root)? {
@@ -9718,6 +9726,171 @@ mod tests {
             .contains("integrity verification"));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_handoff_requires_owner_and_hides_a_real_win32_window() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        assert_eq!(RUNTIME_UI_WINDOW.load(Ordering::SeqCst), 0);
+        assert!(!complete_and_hide_runtime_ui());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let owner = std::thread::spawn(move || unsafe {
+            let instance =
+                windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+            let class_name: Vec<u16> = format!("NGTManager.HandoffTest.{}", unique_id())
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            let mut class: WNDCLASSW = std::mem::zeroed();
+            class.lpfnWndProc = Some(session_end_window_proc);
+            class.hInstance = instance;
+            class.lpszClassName = class_name.as_ptr();
+            assert_ne!(RegisterClassW(&class), 0);
+            let window = CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                std::ptr::null(),
+                WS_POPUP | WS_VISIBLE,
+                -32000,
+                -32000,
+                16,
+                16,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null(),
+            );
+            assert!(!window.is_null());
+            sender
+                .send((
+                    window as isize,
+                    windows_sys::Win32::System::Threading::GetCurrentThreadId(),
+                ))
+                .unwrap();
+            let mut message = std::mem::zeroed();
+            while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            DestroyWindow(window);
+            UnregisterClassW(class_name.as_ptr(), instance);
+        });
+        let (window, thread_id) = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let previous_healthy = RUNTIME_HEALTHY.load(Ordering::SeqCst);
+        RUNTIME_UI_WINDOW.store(window, Ordering::SeqCst);
+        assert_ne!(unsafe { IsWindowVisible(window as _) }, 0);
+        update_runtime_ui_phase(RUNTIME_UI_PHASE_HEALTH);
+        let completed = complete_and_hide_runtime_ui();
+        let mut result = 0usize;
+        unsafe {
+            SendMessageTimeoutW(
+                window as _,
+                RUNTIME_UI_SHOW_MESSAGE,
+                0,
+                0,
+                SMTO_ABORTIFHUNG,
+                1_000,
+                &mut result,
+            )
+        };
+        let hidden = unsafe { IsWindowVisible(window as _) } == 0;
+        RUNTIME_UI_WINDOW.store(0, Ordering::SeqCst);
+        unsafe { PostThreadMessageW(thread_id, WM_QUIT, 0, 0) };
+        owner.join().unwrap();
+        RUNTIME_HEALTHY.store(previous_healthy, Ordering::SeqCst);
+        assert!(
+            completed,
+            "startup handoff was not acknowledged by the owner thread"
+        );
+        assert!(hidden, "startup window remained visible after the handoff");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_open_request_crosses_processes_to_the_window_owner() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        const CHILD_TARGET: &str = "NGT_TEST_UI_TARGET";
+        if let Ok(class_name) = std::env::var(CHILD_TARGET) {
+            assert!(signal_runtime_ui_class(
+                &class_name,
+                RUNTIME_UI_OPEN_MESSAGE
+            ));
+            return;
+        }
+        static REQUESTS: AtomicU64 = AtomicU64::new(0);
+        unsafe extern "system" fn owner_proc(
+            window: windows_sys::Win32::Foundation::HWND,
+            message: u32,
+            wparam: usize,
+            lparam: isize,
+        ) -> isize {
+            if message == RUNTIME_UI_OPEN_MESSAGE {
+                REQUESTS.fetch_add(1, Ordering::SeqCst);
+                return 0;
+            }
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+        let class_name = format!("NGTManager.OpenRequestTest.{}", unique_id());
+        let owner_class = class_name.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let owner = std::thread::spawn(move || unsafe {
+            let instance =
+                windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+            let wide: Vec<u16> = owner_class.encode_utf16().chain(Some(0)).collect();
+            let mut class: WNDCLASSW = std::mem::zeroed();
+            class.lpfnWndProc = Some(owner_proc);
+            class.hInstance = instance;
+            class.lpszClassName = wide.as_ptr();
+            assert_ne!(RegisterClassW(&class), 0);
+            let window = CreateWindowExW(
+                0,
+                wide.as_ptr(),
+                std::ptr::null(),
+                WS_POPUP,
+                -32000,
+                -32000,
+                16,
+                16,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null(),
+            );
+            assert!(!window.is_null());
+            sender
+                .send(windows_sys::Win32::System::Threading::GetCurrentThreadId())
+                .unwrap();
+            let mut message = std::mem::zeroed();
+            while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            DestroyWindow(window);
+            UnregisterClassW(wide.as_ptr(), instance);
+        });
+        let thread_id = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "manager::tests::runtime_open_request_crosses_processes_to_the_window_owner",
+                "--nocapture",
+            ])
+            .env(CHILD_TARGET, class_name)
+            .output()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while REQUESTS.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        unsafe { PostThreadMessageW(thread_id, WM_QUIT, 0, 0) };
+        owner.join().unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 1);
     }
 
     #[cfg(windows)]
