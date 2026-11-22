@@ -321,9 +321,12 @@ describe("Windows persistent startup", () => {
     expect(acceptance).toContain(
       '$startupNames = @("NGTManager", "NGT Management System")',
     );
-    expect(acceptance).toContain(
-      '& schtasks.exe /Query /TN "NGT Management System"',
-    );
+    expect(acceptance).toContain("function Assert-NoLegacyNgtStartupTask {");
+    expect(acceptance).toContain("$startInfo.RedirectStandardError = $true");
+    expect(acceptance).toContain("$process.ExitCode");
+    expect(
+      acceptance.match(/Assert-NoLegacyNgtStartupTask -Context /g),
+    ).toHaveLength(3);
   });
 
   it("uses one native startup window and tray owner for open and exit", async () => {
