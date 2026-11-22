@@ -97,6 +97,11 @@ type
     Time: DWORD;
     Point: TWindowsPoint;
   end;
+  TDesktopMonitorInfo = record
+    Size: DWORD;
+    Monitor, Work: TRect;
+    Flags: DWORD;
+  end;
   TButtonDrawItem = record
     ControlType, ControlId, ItemId, Action, State: Cardinal;
     Window, DC: THandle;
@@ -152,6 +157,7 @@ var
   BrandProgressPosition: Integer;
   BrandProgressAnimationTick: Int64;
   DesktopLayoutReady: Boolean;
+  ActiveBrandPage: Integer;
   ReadyCard: TPanel;
   ReadyHeading: TNewStaticText;
   ReadyDescription: TNewStaticText;
@@ -269,8 +275,10 @@ begin
       FillRect(Item.DC, Bounds, ClearBrush);
       DeleteObject(ClearBrush);
       if not Button.Enabled then Brush := CreateSolidBrush($00E9E7E1)
+      else if (Item.State and $0001) <> 0 then Brush := CreateSolidBrush($00B0DCEB)
       else if Primary then Brush := CreateSolidBrush($002DC6F4)
-      else Brush := CreateSolidBrush($00F0F8FD);
+      else if (Item.State and $0040) <> 0 then Brush := CreateSolidBrush($00E7F3FA)
+      else Brush := CreateSolidBrush($00F7FAFB);
       Pen := CreatePen(0, ScaleX(1), $0060A5C2);
       OldBrush := SelectObject(Item.DC, Brush);
       OldPen := SelectObject(Item.DC, Pen);
@@ -281,7 +289,8 @@ begin
       Text := Button.Caption;
       DrawText(Item.DC, Text, Length(Text), Bounds, $0001 or $0004 or $0020);
       SelectObject(Item.DC, OldFont);
-      if (Item.State and $0010) <> 0 then
+      if ((Item.State and $0010) <> 0) and ((Item.State and $0200) = 0) and
+         ((SendMessage(Button.Handle, $0129, 0, 0) and 1) = 0) then
       begin
         Bounds.Left := Bounds.Left + ScaleX(4); Bounds.Top := Bounds.Top + ScaleY(4);
         Bounds.Right := Bounds.Right - ScaleX(4); Bounds.Bottom := Bounds.Bottom - ScaleY(4);
@@ -308,12 +317,31 @@ end;
 function SystemParametersInfo(Action, Param: UINT; var Area: TRect; Flags: UINT): BOOL;
   external 'SystemParametersInfoW@user32.dll stdcall';
 
+function MonitorFromWindow(Wnd: HWND; Flags: DWORD): THandle;
+  external 'MonitorFromWindow@user32.dll stdcall';
+function GetDesktopMonitorInfo(Monitor: THandle; var Info: TDesktopMonitorInfo): BOOL;
+  external 'GetMonitorInfoW@user32.dll stdcall';
+
+function DesktopWorkArea(Wnd: HWND; var Area: TRect): Boolean;
+var
+  Info: TDesktopMonitorInfo;
+begin
+  Info.Size := SizeOf(Info);
+  Result := GetDesktopMonitorInfo(MonitorFromWindow(Wnd, 2), Info);
+  if Result then Area := Info.Work
+  else Result := SystemParametersInfo(48, 0, Area, 0);
+end;
+
 procedure ApplyRoundedCard(Panel: TPanel); forward;
+#ifdef DesktopUiTest
+procedure RunDesktopUiSelfTests; forward;
+#endif
 
 procedure LayoutDesktopWizard(Sender: TObject);
 var
   Area: TRect;
   PageWidth, PageHeight, LeftEdge, ContentWidth, ColumnWidth, I: Integer;
+  ShowBrandRail: Boolean;
 begin
   if not DesktopLayoutReady then Exit;
   WizardForm.OuterNotebook.SetBounds(0, 0, WizardForm.ClientWidth, WizardForm.ClientHeight - ScaleY(60));
@@ -324,11 +352,9 @@ begin
   FinishCard.SetBounds(0, 0, PageWidth, PageHeight);
   ReadyCard.SetBounds(0, 0, PageWidth, PageHeight);
   LeftEdge := ScaleX(208);
-  InstallRail.Visible := PageWidth >= ScaleX(640);
-  FinishRail.Visible := InstallRail.Visible;
-  ReadyRail.Visible := InstallRail.Visible;
-  if not InstallRail.Visible then LeftEdge := ScaleX(24);
-  if InstallRail.Visible then
+  ShowBrandRail := PageWidth >= ScaleX(640);
+  if not ShowBrandRail then LeftEdge := ScaleX(24);
+  if ShowBrandRail then
   begin
     InstallBrandImage.Parent := InstallRail;
     InstallBrandImage.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
@@ -350,17 +376,17 @@ begin
     FinishBrandLabel.Parent := FinishCard;
     FinishBrandLabel.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
   end;
-  InstallEyebrowLabel.Visible := InstallRail.Visible;
+  InstallEyebrowLabel.Visible := ShowBrandRail;
   ContentWidth := PageWidth - LeftEdge - ScaleX(24);
-  ReadyRail.Height := PageHeight;
+  ReadyRail.Height := WizardForm.ClientHeight;
   ReadyStage.Left := LeftEdge;
   ReadyEyebrow.Left := LeftEdge;
-  ReadyEyebrow.Visible := ReadyRail.Visible;
+  ReadyEyebrow.Visible := ShowBrandRail;
   ReadyHeading.Left := LeftEdge + ScaleX(64);
   ReadyHeading.Width := ContentWidth - ScaleX(64);
   ReadyDescription.Left := ReadyHeading.Left;
   ReadyDescription.Width := ReadyHeading.Width;
-  if ReadyRail.Visible then
+  if ShowBrandRail then
   begin
     ReadyBrand.Parent := ReadyRail;
     ReadyBrand.SetBounds(ScaleX(35), ScaleY(26), ScaleX(48), ScaleY(48));
@@ -374,8 +400,8 @@ begin
     ReadyProduct.Parent := ReadyCard;
     ReadyProduct.SetBounds(ScaleX(68), ScaleY(10), ScaleX(220), ScaleY(28));
   end;
-  InstallRail.Height := PageHeight;
-  FinishRail.Height := PageHeight;
+  InstallRail.Height := WizardForm.ClientHeight;
+  FinishRail.Height := WizardForm.ClientHeight;
   InstallEyebrowLabel.Left := LeftEdge;
   InstallStageIconPanel.Left := LeftEdge;
   WizardForm.StatusLabel.Left := LeftEdge + ScaleX(56);
@@ -410,8 +436,19 @@ begin
   WizardForm.FinishedLabel.Width := ContentWidth - ScaleX(64);
   FinishInfo.Left := LeftEdge;
   FinishInfo.Width := ContentWidth;
-  WizardForm.RunList.Left := LeftEdge + ScaleX(16);
+  WizardForm.RunList.Left := ScaleX(16);
   WizardForm.RunList.Width := ContentWidth - ScaleX(32);
+  InstallRail.Visible := ShowBrandRail and (ActiveBrandPage = wpInstalling);
+  FinishRail.Visible := ShowBrandRail and (ActiveBrandPage = wpFinished);
+  ReadyRail.Visible := ShowBrandRail and (ActiveBrandPage = wpReady);
+  InstallRailBackground.Height := InstallRail.Height;
+  FinishRailBackground.Height := FinishRail.Height;
+  if InstallRail.Visible then InstallRail.BringToFront;
+  if FinishRail.Visible then FinishRail.BringToFront;
+  if ReadyRail.Visible then ReadyRail.BringToFront;
+  WizardForm.Bevel.Left := 0;
+  if ShowBrandRail then WizardForm.Bevel.Left := ScaleX(180);
+  WizardForm.Bevel.Width := WizardForm.ClientWidth - WizardForm.Bevel.Left;
   WizardForm.Bevel.Top := WizardForm.ClientHeight - ScaleY(60);
   WizardForm.CancelButton.Top := WizardForm.ClientHeight - ScaleY(44);
   WizardForm.CancelButton.Left := WizardForm.ClientWidth - WizardForm.CancelButton.Width - ScaleX(20);
@@ -419,7 +456,7 @@ begin
   WizardForm.NextButton.Left := WizardForm.CancelButton.Left - WizardForm.NextButton.Width - ScaleX(8);
   WizardForm.BackButton.Top := WizardForm.CancelButton.Top;
   WizardForm.BackButton.Left := WizardForm.NextButton.Left - WizardForm.BackButton.Width - ScaleX(8);
-  if SystemParametersInfo(48, 0, Area, 0) then
+  if DesktopWorkArea(WizardForm.Handle, Area) then
   begin
     if WizardForm.Width > (Area.Right - Area.Left) * 9 div 10 then
       WizardForm.Width := (Area.Right - Area.Left) * 9 div 10;
@@ -465,9 +502,12 @@ end;
 procedure ApplyRoundedCard(Panel: TPanel);
 var
   Region: THandle;
+  Diameter: Integer;
 begin
+  Diameter := ScaleX(28);
+  if Diameter > Panel.Height then Diameter := Panel.Height;
   Region := CreateRoundRectRgn(0, 0, Panel.Width + 1, Panel.Height + 1,
-    ScaleX(28), ScaleY(28));
+    Diameter, Diameter);
   if Region <> 0 then
     SetWindowRgn(Panel.Handle, Region, True);
 end;
@@ -483,7 +523,8 @@ begin
   end;
   if Value > Total then Value := Total;
   BrandProgressDeterminate := True;
-  BrandProgressPosition := (Value * 1000) div Total;
+  if (Value * 1000) div Total > BrandProgressPosition then
+    BrandProgressPosition := (Value * 1000) div Total;
   AvailableWidth := BrandProgressTrack.ClientWidth;
   BrandProgressFill.Left := 0;
   BrandProgressFill.Width := (AvailableWidth * BrandProgressPosition) div 1000;
@@ -491,8 +532,8 @@ end;
 
 procedure SetBrandProgressActive;
 begin
+  if BrandProgressDeterminate then BrandProgressAnimationTick := GetTickCount64;
   BrandProgressDeterminate := False;
-  BrandProgressAnimationTick := GetTickCount64;
 end;
 
 procedure AnimateBrandProgress;
@@ -551,7 +592,7 @@ begin
   InstallCard.Color := clWhite;
 
   InstallRail := TPanel.Create(WizardForm);
-  InstallRail.Parent := InstallCard;
+  InstallRail.Parent := WizardForm;
   InstallRail.SetBounds(0, 0, ScaleX(180), InstallCard.ClientHeight);
   InstallRail.BevelOuter := bvNone;
   InstallRail.ParentBackground := False;
@@ -561,6 +602,7 @@ begin
   InstallRailBackground.Parent := InstallRail;
   InstallRailBackground.SetBounds(0, 0, InstallRail.ClientWidth, InstallRail.ClientHeight);
   InstallRailBackground.Stretch := True;
+  InstallRailBackground.Align := alClient;
   InstallRailBackground.Bitmap.LoadFromFile(ExpandConstant('{tmp}\ngt-studio-installer-rail.bmp'));
 
   InstallBrandImage := TBitmapImage.Create(WizardForm);
@@ -782,7 +824,7 @@ begin
   FinishCard.Color := clWhite;
 
   FinishRail := TPanel.Create(WizardForm);
-  FinishRail.Parent := FinishCard;
+  FinishRail.Parent := WizardForm;
   FinishRail.SetBounds(0, 0, ScaleX(180), FinishCard.ClientHeight);
   FinishRail.BevelOuter := bvNone;
   FinishRail.ParentBackground := False;
@@ -792,6 +834,7 @@ begin
   FinishRailBackground.Parent := FinishRail;
   FinishRailBackground.SetBounds(0, 0, FinishRail.ClientWidth, FinishRail.ClientHeight);
   FinishRailBackground.Stretch := True;
+  FinishRailBackground.Align := alClient;
   FinishRailBackground.Bitmap.Assign(InstallRailBackground.Bitmap);
 
   FinishBrandImage := TBitmapImage.Create(WizardForm);
@@ -851,8 +894,9 @@ begin
   FinishInfo.Color := $00EAF6FB;
   ApplyRoundedCard(FinishInfo);
 
-  WizardForm.RunList.Parent := FinishCard;
-  WizardForm.RunList.SetBounds(ScaleX(224), ScaleY(146), ContentWidth - ScaleX(84), ScaleY(34));
+  WizardForm.RunList.Parent := FinishInfo;
+  WizardForm.RunList.Color := FinishInfo.Color;
+  WizardForm.RunList.SetBounds(ScaleX(16), ScaleY(14), ContentWidth - ScaleX(84), ScaleY(34));
   ReadyCard := TPanel.Create(WizardForm);
   ReadyCard.Parent := WizardForm.ReadyPage;
   ReadyCard.SetBounds(0, 0, WizardForm.ReadyPage.ClientWidth, WizardForm.ReadyPage.ClientHeight);
@@ -860,7 +904,7 @@ begin
   ReadyCard.ParentBackground := False;
   ReadyCard.Color := clWhite;
   ReadyRail := TPanel.Create(WizardForm);
-  ReadyRail.Parent := ReadyCard;
+  ReadyRail.Parent := WizardForm;
   ReadyRail.SetBounds(0, 0, ScaleX(180), ReadyCard.Height);
   ReadyRail.BevelOuter := bvNone;
   ReadyRail.ParentBackground := False;
@@ -869,6 +913,7 @@ begin
   ReadyBackground.Parent := ReadyRail;
   ReadyBackground.SetBounds(0, 0, ReadyRail.Width, ReadyRail.Height);
   ReadyBackground.Stretch := True;
+  ReadyBackground.Align := alClient;
   ReadyBackground.Bitmap.Assign(InstallRailBackground.Bitmap);
   ReadyBrand := TBitmapImage.Create(WizardForm);
   ReadyBrand.Parent := ReadyRail;
@@ -964,7 +1009,7 @@ begin
     Form.Caption := 'NGTManager';
     Form.Color := $00F7FAFB;
     Form.Font.Name := 'Segoe UI';
-    if SystemParametersInfo(48, 0, WorkArea, 0) then
+    if DesktopWorkArea(Form.Handle, WorkArea) then
       if Form.Width > (WorkArea.Right - WorkArea.Left) * 9 div 10 then
         Form.Width := (WorkArea.Right - WorkArea.Left) * 9 div 10;
     Form.BorderIcons := [biSystemMenu];
@@ -1087,6 +1132,7 @@ begin
       ParamStr(0) + IntToStr(Random(2147483647))), 1, 32);
   WizardForm.BorderIcons := [biSystemMenu, biMinimize];
   ApplyDesktopTheme;
+  ActiveBrandPage := wpReady;
   DesktopLayoutReady := True;
   WizardForm.OnResize := @LayoutDesktopWizard;
   LayoutDesktopWizard(WizardForm);
@@ -1096,6 +1142,9 @@ begin
     UseBrandButton(WizardForm.NextButton);
     UseBrandButton(WizardForm.CancelButton);
   end;
+#ifdef DesktopUiTest
+  RunDesktopUiSelfTests;
+#endif
 end;
 
 function PhaseDescription(const Phase: String): String;
@@ -1191,6 +1240,12 @@ begin
   TotalBytes := TakeField(Fields);
   if MessageOperationId <> AttemptId then
     exit;
+  if CurrentPhase <> Phase then
+  begin
+    BrandProgressDeterminate := False;
+    BrandProgressPosition := 0;
+    BrandProgressAnimationTick := GetTickCount64;
+  end;
   CurrentPhase := Phase;
   UpdateStageIcon(Phase);
   PhaseElapsedSeconds := StrToIntDef(PhaseElapsed, 0);
@@ -1473,6 +1528,8 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  ActiveBrandPage := CurPageID;
+  LayoutDesktopWizard(WizardForm);
   if OriginalWizardProc <> 0 then
   begin
     UseBrandButton(WizardForm.NextButton);
@@ -1676,3 +1733,7 @@ begin
     Result := False;
   end;
 end;
+
+#ifdef DesktopUiTest
+#include "tests/desktop-ui-selftest.iss"
+#endif
