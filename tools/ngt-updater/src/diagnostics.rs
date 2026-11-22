@@ -1371,7 +1371,10 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
                             | "installer.install.completed"
                             | "installer.registration.completed"
                     );
-                if event.severity == "info" && !installer_timing {
+                if event.severity == "info"
+                    && !installer_timing
+                    && !is_desktop_lifecycle_event(&event)
+                {
                     return Ok(());
                 }
                 if event.event_code == "diagnostics.detail.unavailable" {
@@ -2035,6 +2038,15 @@ fn event_group_hash(
     hasher.finish()
 }
 
+fn is_desktop_lifecycle_event(event: &DiagnosticEvent) -> bool {
+    event.component == Component::Manager
+        && (event.event_code.starts_with("manager.browser.")
+            || event.event_code.starts_with("manager.startup.")
+            || event.event_code == "manager.build"
+            || event.event_code == "runtime.startup.lightweight_verification.completed"
+            || event.event_code.starts_with("runtime.shutdown."))
+}
+
 fn same_event_group(first: &DiagnosticEvent, next: &DiagnosticEvent) -> bool {
     let first_operation = if first.operation_id == "none" {
         first.process_start_id.as_str()
@@ -2047,6 +2059,7 @@ fn same_event_group(first: &DiagnosticEvent, next: &DiagnosticEvent) -> bool {
         next.operation_id.as_str()
     };
     first.component == next.component
+        && !is_desktop_lifecycle_event(first)
         && first.event_code == next.event_code
         && first.error_code == next.error_code
         && first.phase == next.phase
@@ -2457,6 +2470,15 @@ mod tests {
             "runtime",
             "none",
         );
+        for _ in 0..2 {
+            logs.record(
+                Component::Manager,
+                "info",
+                "manager.browser.window.confirmed",
+                "browser-window",
+                "none",
+            );
+        }
         logs.record_with_metrics(
             Component::Installer,
             "info",
@@ -2488,6 +2510,12 @@ mod tests {
         export_diagnostics(&root, &output).unwrap();
         let contents = fs::read_to_string(&output).unwrap();
         assert!(!contents.contains("manager.state"));
+        assert_eq!(
+            contents
+                .matches("\"eventCode\":\"manager.browser.window.confirmed\"")
+                .count(),
+            2
+        );
         assert!(contents.contains("installer.phase.completed"));
         assert!(contents.contains("\"phaseBytes\":8192"));
         assert!(contents.contains("diagnostics.recording_incomplete"));

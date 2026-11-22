@@ -561,14 +561,14 @@ describe("Windows persistent startup", () => {
     expect(manager).toContain("total_item_count");
     expect(manager).toContain("total_bytes");
     expect(manager).toContain("verify_release_for_startup");
-    expect(manager).toContain('"--app=http://127.0.0.1:3000"');
+    expect(manager).toContain('launch_managed_browser("http://127.0.0.1:3000")');
     expect(manager).toContain(
       '("ProgramFiles", "Google/Chrome/Application/chrome.exe")',
     );
     expect(manager).toContain(
       '("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe")',
     );
-    expect(manager).not.toContain('"--new-window"');
+    expect(manager.split("#[cfg(test)]")[0]).not.toContain('"--new-window"');
     expect(manager).not.toContain('args(["/C", "start"');
     expect(manager).toContain("SendMessageTimeoutW");
     expect(manager).toContain("GetProcessTimes");
