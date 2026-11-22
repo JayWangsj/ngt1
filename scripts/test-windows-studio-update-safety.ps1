@@ -27,6 +27,8 @@ try {
   $releaseFiles = @(
     ".next/standalone/server.js",
     "assets/ngt-studio.ico",
+    "assets/ngt-studio-light.ico",
+    "assets/ngt-studio-dark.ico",
     "scripts/start.mjs",
     "scripts/windows-db.mjs",
     "scripts/postgres-runtime.mjs",
