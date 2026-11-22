@@ -1323,9 +1323,55 @@ struct SnapshotGaps {
     more_detail_sources: bool,
 }
 
+fn installation_state_summary(root: &Path) -> serde_json::Value {
+    let read = || -> Option<serde_json::Value> {
+        let state = root.join("state");
+        let metadata = fs::symlink_metadata(&state).ok()?;
+        if !metadata.is_dir() || is_reparse(&metadata) {
+            return None;
+        }
+        let file = open_snapshot_file(&state.join("transaction.json")).ok()?;
+        let metadata = file.metadata().ok()?;
+        if !metadata.is_file() || is_reparse(&metadata) || metadata.len() > 16 * 1024 {
+            return None;
+        }
+        serde_json::from_reader(file.take(16 * 1024)).ok()
+    };
+    let Some(state) = read() else {
+        return serde_json::json!({"transactionState": "unavailable"});
+    };
+    let mut safe = serde_json::Map::new();
+    safe.insert("transactionState".to_owned(), "available".into());
+    for key in ["operationId", "operation", "stage"] {
+        if let Some(value) = state[key].as_str() {
+            safe.insert(key.to_owned(), safe_field(value, 64, "invalid").into());
+        }
+    }
+    if let Some(version) = state["formatVersion"].as_u64() {
+        safe.insert("formatVersion".to_owned(), version.into());
+    }
+    for key in [
+        "migrationStarted",
+        "databaseWasPresent",
+        "databaseInitializationOwned",
+        "restoreVerified",
+    ] {
+        if let Some(value) = state[key].as_bool() {
+            safe.insert(key.to_owned(), value.into());
+        }
+    }
+    // Paths, previousConfig and free-form failure text never leave the machine.
+    safe.insert(
+        "failureRecorded".to_owned(),
+        (!state["failure"].is_null()).into(),
+    );
+    serde_json::Value::Object(safe)
+}
+
 /// Creates a bounded, redacted diagnostics file without overwriting any path.
 pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
     let output = validate_output_path(root, output)?;
+    let installation_state = installation_state_summary(root);
     let (mut events, mut details, gaps) = capture_log_snapshot(root);
     let mut output_file = OpenOptions::new()
         .write(true)
@@ -1346,6 +1392,8 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
         };
         budget.append(b"NGTManager diagnostic export v1\n")?;
         budget.append(format!("Exported UTC: {}\n\n", utc_now()).as_bytes())?;
+        budget.append(b"INSTALLATION STATE (paths and raw error text omitted)\n")?;
+        budget.append(format!("Transaction snapshot: {installation_state}\n\n").as_bytes())?;
         budget.append(b"FAILURE EVENTS\n")?;
         events.sort_by(|a, b| a.name.cmp(&b.name));
         let mut event_groups: HashMap<u64, Vec<DiagnosticEvent>> = HashMap::new();
@@ -2222,7 +2270,13 @@ fn safe_record_counts(counts: BTreeMap<String, u32>) -> BTreeMap<String, u32> {
 
 fn safe_detail_category(line: &[u8]) -> Option<&'static str> {
     let text = String::from_utf8_lossy(line).to_ascii_lowercase();
-    if text.contains("eaddrinuse") || text.contains("address already in use") {
+    if text.contains("release file inventory differs from its manifest") {
+        Some("RELEASE_INVENTORY_MISMATCH")
+    } else if text.contains("release file failed integrity verification") {
+        Some("RELEASE_FILE_HASH_MISMATCH")
+    } else if text.contains("release verification exceeded its time limit") {
+        Some("RELEASE_VERIFICATION_TIMEOUT")
+    } else if text.contains("eaddrinuse") || text.contains("address already in use") {
         Some("PORT_IN_USE")
     } else if text.contains("access is denied")
         || text.contains("permission denied")
@@ -2455,6 +2509,44 @@ mod tests {
         assert!(event.contains("diagnostic.unknown"));
         assert!(!event.contains("secret"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn export_unifies_safe_transaction_state_and_release_failure_reason() {
+        let root = temp_root("safe-install-state");
+        fs::create_dir_all(root.join("state")).unwrap();
+        fs::write(
+            root.join("state/transaction.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "formatVersion": 3, "operationId": "previous-attempt", "operation": "update",
+                "stage": "committed", "migrationStarted": true, "databaseWasPresent": true,
+                "restoreVerified": false, "failure": null,
+                "candidateRelease": "C:\\private-customer\\release", "previousConfig": {"private": "secret"}
+            })).unwrap(),
+        ).unwrap();
+        let logs =
+            LogSession::start(&root, "current-attempt", "2.0.25", LogOwner::Manager).unwrap();
+        logs.detail(Component::Installer, b"Release file inventory differs from its manifest (unexpected: C:\\private-customer\\secret.txt).\n");
+        logs.record(
+            Component::Installer,
+            "error",
+            "installer.operation.failed",
+            "installed-release-check",
+            "RELEASE_INVENTORY_MISMATCH",
+        );
+        drop(logs);
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        export_diagnostics(&root, &output).unwrap();
+        let text = fs::read_to_string(&output).unwrap();
+        assert!(text.contains("INSTALLATION STATE"));
+        assert!(text.contains("\"stage\":\"committed\""));
+        assert!(text.contains("\"migrationStarted\":true"));
+        assert!(text.contains("safe error category: RELEASE_INVENTORY_MISMATCH"));
+        assert!(!text.contains("private-customer"));
+        assert!(!text.contains("secret"));
+        fs::remove_file(output).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

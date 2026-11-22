@@ -1522,6 +1522,15 @@ fn set_operation_id(root: &Path, operation_id: &str) {
 }
 
 fn failure_code(message: &str) -> String {
+    if message.starts_with("Release file inventory differs from its manifest") {
+        return "RELEASE_INVENTORY_MISMATCH".to_owned();
+    }
+    if message.starts_with("Release file failed integrity verification") {
+        return "RELEASE_FILE_HASH_MISMATCH".to_owned();
+    }
+    if message.starts_with("Release verification exceeded its time limit") {
+        return "RELEASE_VERIFICATION_TIMEOUT".to_owned();
+    }
     for (marker, prefix) in [("(os error ", "WIN32_"), ("(exit ", "EXIT_")] {
         if let Some(code) = message
             .split_once(marker)
@@ -1677,6 +1686,7 @@ fn record_command_failure(root: &Path, arguments: &[String], message: &str) -> O
                 DiagnosticComponent::Manager
             };
             let code = failure_code(message);
+            logger.detail(component, format!("{message}\n").as_bytes());
             return Some(logger.record(component, "error", "runtime.start.failed", &phase, &code));
         }
         let installer_command = arguments.first().is_some_and(|command| {
@@ -1723,6 +1733,7 @@ fn record_command_failure(root: &Path, arguments: &[String], message: &str) -> O
             )
         };
         let code = failure_code(message);
+        logger.detail(component, format!("{message}\n").as_bytes());
         return Some(logger.record(component, "error", event_code, phase, &code));
     } else {
         // Keep a safe breadcrumb when the structured logger itself is unavailable.
@@ -9714,8 +9725,12 @@ pub fn main() -> std::process::ExitCode {
     let result = run(&arguments);
     if let Err(message) = &result {
         let diagnostic_id = if let Ok(root) = stable_root() {
-            if let Ok(Some(transaction)) = read_transaction_if_exists(&root) {
-                set_operation_id(&root, &transaction.operation_id);
+            let explicit_install_attempt =
+                arguments.len() >= 3 && matches!(arguments[0].as_str(), "install" | "update");
+            if !explicit_install_attempt {
+                if let Ok(Some(transaction)) = read_transaction_if_exists(&root) {
+                    set_operation_id(&root, &transaction.operation_id);
+                }
             }
             record_command_failure(&root, &arguments, message)
         } else {
