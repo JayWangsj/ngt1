@@ -65,7 +65,7 @@ jobs:
     name: Disposable Windows online-update acceptance
     needs: [qualify, build]
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 65
     permissions:
       # GitHub exposes draft releases only to users with push access.
       contents: write

@@ -7,6 +7,8 @@ param(
   [switch]$AuthMatrixOnly
 )
 $ErrorActionPreference = "Stop"
+$DebugPreference = "SilentlyContinue"
+Set-PSDebug -Off
 . (Join-Path $PSScriptRoot "windows-studio-acceptance-coordinator.ps1")
 
 function Get-NgtAcceptanceSha256([string]$Value) {
@@ -367,6 +369,14 @@ $authProbeStdoutPath = Join-Path $isolatedTemp "auth-probe.stdout"
 $authProbeStderrPath = Join-Path $isolatedTemp "auth-probe.stderr"
 $authProbeExitCodePath = Join-Path $isolatedTemp "auth-probe.exit-code"
 $authProbeCommandPath = Join-Path $authProbeRoot "auth-probe.cmd"
+$acceptanceProgressPath = if ($Acceptance -eq "online-update") {
+  Join-Path $isolatedTemp "acceptance.progress.json"
+} else {
+  $null
+}
+if ($acceptanceProgressPath) {
+  $parameters["AcceptanceProgressPath"] = $acceptanceProgressPath
+}
 $commandPath = Join-Path $env:SystemRoot "System32\cmd.exe"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $ghExecutablePath = $null
@@ -490,8 +500,9 @@ try {
     -RedirectStandardOutput "\\.\NUL" -RedirectStandardError "NUL" -WindowStyle Hidden -PassThru
   $processHandle = Get-NgtAcceptanceProcessHandle -Process $process
 
-  $acceptanceDeadline = (Get-Date).AddMinutes(110)
-  $nextProgress = (Get-Date).AddMinutes(1)
+  $acceptanceTimeoutMinutes = if ($Acceptance -eq "online-update") { 55 } else { 110 }
+  $acceptanceDeadline = (Get-Date).AddMinutes($acceptanceTimeoutMinutes)
+  $nextProgress = (Get-Date).AddSeconds(30)
   $authProbeCompleted = ($Acceptance -ne "production-update")
   while (-not $process.WaitForExit(1000)) {
     if (-not $authProbeCompleted -and (Test-Path -LiteralPath $authProbeReadyPath -PathType Leaf)) {
@@ -557,14 +568,27 @@ try {
       } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Timed-out acceptance process termination" -ErrorRecord $_ }
       $timeoutOutcome = Get-NgtAcceptanceProcessOutcome -Acceptance $Acceptance `
         -StdoutPath $stdoutPath -StderrPath $stderrPath -ResultPath $resultPath `
-        -ProcessExitCode $processExitCode -Secrets $diagnosticSecrets -TimedOut
+        -ProcessExitCode $processExitCode -TimeoutMinutes $acceptanceTimeoutMinutes -Secrets $diagnosticSecrets -TimedOut
       $capturedStdout = $timeoutOutcome.Stdout
       $capturedStderr = $timeoutOutcome.Stderr
       throw $timeoutOutcome.FailureMessage
     }
     if ((Get-Date) -ge $nextProgress) {
-      Write-Output "The standard-user acceptance is still running."
-      $nextProgress = (Get-Date).AddMinutes(1)
+      $progressSummary = $null
+      if ($acceptanceProgressPath -and (Test-Path -LiteralPath $acceptanceProgressPath -PathType Leaf)) {
+        try {
+          $progress = Get-Content -LiteralPath $acceptanceProgressPath -Raw | ConvertFrom-Json
+          if ($progress.phase -and $progress.stage) {
+            $progressSummary = "{0}/{1}, stage elapsed {2}s" -f [string]$progress.phase, [string]$progress.stage, [int]$progress.elapsedSeconds
+          }
+        } catch { }
+      }
+      if ($progressSummary) {
+        Write-Output "The standard-user $Acceptance acceptance is running: $progressSummary."
+      } else {
+        Write-Output "The standard-user $Acceptance acceptance is running; its current phase has not reported yet."
+      }
+      $nextProgress = (Get-Date).AddSeconds(30)
     }
   }
   $processExitCode = Get-NgtAcceptanceProcessExitCode -Process $process

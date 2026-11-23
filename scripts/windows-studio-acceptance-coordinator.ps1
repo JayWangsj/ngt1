@@ -111,6 +111,7 @@ function Get-NgtAcceptanceProcessOutcome {
     [Parameter(Mandatory = $true)][string]$StderrPath,
     [Parameter(Mandatory = $true)][string]$ResultPath,
     [Parameter(Mandatory = $true)][AllowNull()][object]$ProcessExitCode,
+    [int]$TimeoutMinutes = 110,
     [string[]]$Secrets = @(),
     [switch]$TimedOut
   )
@@ -128,7 +129,7 @@ function Get-NgtAcceptanceProcessOutcome {
   }
   $failureMessage = $null
   if ($TimedOut) {
-    $failureMessage = "The standard-user $Acceptance acceptance exceeded its 110-minute timeout."
+    $failureMessage = "The standard-user $Acceptance acceptance exceeded its $TimeoutMinutes-minute timeout."
     if ($resultFailure) { $failureMessage += " Exit result: $resultFailure" }
   } elseif ($null -eq $ProcessExitCode) {
     $failureMessage = "The standard-user $Acceptance acceptance process exit code is unavailable."

@@ -80,7 +80,7 @@ jobs:
     name: Release Ready online-update acceptance
     needs: build
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v5
         with:

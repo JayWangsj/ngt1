@@ -511,8 +511,8 @@ exit [int]$config.exitCode
 
   $timeout = Get-NgtAcceptanceProcessOutcome -Acceptance "test" `
     -StdoutPath $nonzero.StdoutPath -StderrPath $nonzero.StderrPath `
-    -ResultPath $nonzero.ResultPath -ProcessExitCode $nonzero.ProcessExitCode -TimedOut
-  Assert-NgtAcceptanceTest (-not $timeout.Succeeded -and $timeout.FailureMessage -match "timeout") `
+    -ResultPath $nonzero.ResultPath -ProcessExitCode $nonzero.ProcessExitCode -TimeoutMinutes 55 -TimedOut
+  Assert-NgtAcceptanceTest (-not $timeout.Succeeded -and $timeout.FailureMessage -match "55-minute timeout") `
     "A timed-out acceptance did not fail explicitly."
   Assert-NgtAcceptanceTest ($timeout.ChildExitCode -eq 17 -and $timeout.ProcessExitCode -eq 17) `
     "The timeout diagnostic discarded available child or process exit codes."

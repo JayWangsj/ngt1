@@ -6,9 +6,31 @@ param(
   [switch]$OnlineUpdateAcceptance,
   [switch]$ProductionUpdaterAcceptance,
   [string]$CandidateDirectory = "",
-  [string]$AcceptanceUpdaterPath = ""
+  [string]$AcceptanceUpdaterPath = "",
+  [string]$AcceptanceProgressPath = ""
 )
 $ErrorActionPreference = "Stop"
+
+function Write-NgtAcceptanceProgress {
+  param(
+    [string]$Phase,
+    [string]$Stage,
+    [DateTime]$StageStartedAt,
+    [string[]]$CompletedStages = @()
+  )
+
+  if ([string]::IsNullOrWhiteSpace($AcceptanceProgressPath)) { return }
+  try {
+    $record = [ordered]@{
+      phase = $Phase
+      stage = $Stage
+      elapsedSeconds = [int][math]::Max(0, [math]::Floor(([DateTime]::UtcNow - $StageStartedAt).TotalSeconds))
+      completedStages = @($CompletedStages)
+      updatedAt = [DateTime]::UtcNow.ToString("o")
+    }
+    [System.IO.File]::WriteAllText($AcceptanceProgressPath, ($record | ConvertTo-Json -Depth 4 -Compress), [System.Text.UTF8Encoding]::new($false))
+  } catch { }
+}
 
 function Wait-NgtInstallerProcess(
   [System.Diagnostics.Process]$Process,
@@ -196,6 +218,8 @@ $previousTestApiUrl = $env:NGT_TEST_RELEASE_API_URL
 $updateServerProcess = $null
 $managerUninstallFailure = $null
 $businessSnapshotPath = Join-Path $env:RUNNER_TEMP "ngt-manager-online-update-business.json"
+$acceptanceStageStartedAt = [DateTime]::UtcNow
+Write-NgtAcceptanceProgress -Phase "candidate-installation" -Stage "preparing" -StageStartedAt $acceptanceStageStartedAt
 try {
   if ($OnlineUpdateAcceptance -and $ProductionUpdaterAcceptance) {
     throw "Online-update and production-updater acceptance modes are mutually exclusive."
@@ -227,6 +251,8 @@ try {
     }
   }
   $installationAttempted = $true
+  $acceptanceStageStartedAt = [DateTime]::UtcNow
+  Write-NgtAcceptanceProgress -Phase "candidate-installation" -Stage "running-installer" -StageStartedAt $acceptanceStageStartedAt
   Write-Output "Starting the verified Windows installer; progress will be reported from its install logs."
   $installer = Start-Process -FilePath $installerPath `
     -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installerLog") `
@@ -236,6 +262,7 @@ try {
   if ($installer.ExitCode -ne 0) {
     throw "The Windows installer exited with code $($installer.ExitCode)."
   }
+  Write-NgtAcceptanceProgress -Phase "candidate-installation" -Stage "complete" -StageStartedAt $acceptanceStageStartedAt
 
   $configurationPath = Join-Path $installRoot "state\studio.json"
   if (-not (Test-Path -LiteralPath $configurationPath -PathType Leaf)) {
@@ -570,11 +597,15 @@ try {
     }
 
     $businessCode = "CI-UPDATE-" + [guid]::NewGuid().ToString("N")
+    $acceptanceStageStartedAt = [DateTime]::UtcNow
+    Write-NgtAcceptanceProgress -Phase "online-update" -Stage "seeding-business-data" -StageStartedAt $acceptanceStageStartedAt
     Invoke-NgtBusinessDataProbe -ReleaseRoot $releaseRoot -Action "seed" `
       -Code $businessCode -SnapshotPath $businessSnapshotPath
 
     $updateStatusPath = Join-Path $installRoot "state\update-status.json"
     $updateId = [guid]::NewGuid().ToString()
+    $acceptanceStageStartedAt = [DateTime]::UtcNow
+    Write-NgtAcceptanceProgress -Phase "online-update" -Stage "reserving-update" -StageStartedAt $acceptanceStageStartedAt
     $reserveCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("reserve-update", $updateId, $ExpectedVersion) -WorkingDirectory $installRoot
     $reserveExitCode = $reserveCommand.ExitCode
     $reserveText = $reserveCommand.Text
@@ -600,6 +631,8 @@ try {
       throw "NGTManager could not reserve the exact-SHA online update (exit code $reserveExitCode; $failureDetails)."
     }
     $previousStartUpdateHeadless = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
+    $acceptanceStageStartedAt = [DateTime]::UtcNow
+    Write-NgtAcceptanceProgress -Phase "online-update" -Stage "starting-updater" -StageStartedAt $acceptanceStageStartedAt
     try {
       $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
       $startCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("start-update", $updateId) -WorkingDirectory $installRoot
@@ -621,13 +654,25 @@ try {
       throw "NGTManager could not start the Rust online updater."
     }
 
-    $updateDeadline = [DateTime]::UtcNow.AddMinutes(90)
+    $updateDeadline = [DateTime]::UtcNow.AddMinutes(20)
     $updateStatus = $null
+    $lastReportedUpdateStage = ""
+    $nextProgressWriteAt = [DateTime]::UtcNow
     do {
       if (Test-Path -LiteralPath $updateStatusPath -PathType Leaf) {
         try { $updateStatus = Get-Content -LiteralPath $updateStatusPath -Raw | ConvertFrom-Json } catch { }
       }
       if ($updateStatus -and $updateStatus.updateId -eq $updateId) {
+        $reportedUpdateStage = "{0}/{1}" -f [string]$updateStatus.status, [string]$updateStatus.stage
+        if ($reportedUpdateStage -ne $lastReportedUpdateStage) {
+          $lastReportedUpdateStage = $reportedUpdateStage
+          $acceptanceStageStartedAt = [DateTime]::UtcNow
+          $nextProgressWriteAt = [DateTime]::UtcNow
+        }
+        if ([DateTime]::UtcNow -ge $nextProgressWriteAt) {
+          Write-NgtAcceptanceProgress -Phase "online-update" -Stage $reportedUpdateStage -StageStartedAt $acceptanceStageStartedAt -CompletedStages @($updateStatus.completedStages)
+          $nextProgressWriteAt = [DateTime]::UtcNow.AddSeconds(10)
+        }
         if ($updateStatus.status -eq "failed" -or $updateStatus.status -eq "interrupted") {
           throw "The Rust online updater failed at stage $($updateStatus.stage)."
         }
@@ -638,8 +683,11 @@ try {
     } while ([DateTime]::UtcNow -lt $updateDeadline)
     if (-not $updateStatus -or $updateStatus.updateId -ne $updateId -or $updateStatus.status -ne "complete" -or
         $updateStatus.buildCommit -ine $env:GITHUB_SHA -or $updateStatus.actualVersion -ne $ExpectedVersion) {
-      throw "The Rust online updater did not complete with the exact candidate version and commit."
+      $lastStage = if ($lastReportedUpdateStage) { $lastReportedUpdateStage } else { "no matching update state" }
+      throw "The Rust online updater did not complete within 20 minutes (last stage: $lastStage)."
     }
+    $acceptanceStageStartedAt = [DateTime]::UtcNow
+    Write-NgtAcceptanceProgress -Phase "online-update" -Stage "checking-updater-exit" -StageStartedAt $acceptanceStageStartedAt -CompletedStages @($updateStatus.completedStages)
 
     $processDeadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
@@ -657,6 +705,8 @@ try {
     } while ([DateTime]::UtcNow -lt $processDeadline)
     if ($processActive) { throw "The Rust online updater did not release its process lease." }
 
+    $acceptanceStageStartedAt = [DateTime]::UtcNow
+    Write-NgtAcceptanceProgress -Phase "online-update" -Stage "verifying-business-data" -StageStartedAt $acceptanceStageStartedAt -CompletedStages @($updateStatus.completedStages)
     $clearUpdateCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("clear-update-lock", $updateId, "complete") -WorkingDirectory $installRoot
     if ($clearUpdateCommand.ExitCode -ne 0) {
       throw "NGTManager could not clear the completed online-update lock."
@@ -679,6 +729,7 @@ try {
     }
     Invoke-NgtBusinessDataProbe -ReleaseRoot $releaseRoot -Action "verify" `
       -Code $businessCode -SnapshotPath $businessSnapshotPath
+    Write-NgtAcceptanceProgress -Phase "online-update" -Stage "complete" -StageStartedAt $acceptanceStageStartedAt -CompletedStages @($updateStatus.completedStages)
   } else {
     $releaseManagerPath = Join-Path $releaseRoot "tools\NGTManager.exe"
     $repairArguments = 'repair "{0}"' -f $releaseRoot
