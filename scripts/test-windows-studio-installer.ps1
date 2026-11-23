@@ -185,6 +185,7 @@ $installationAttempted = $false
 $cleanupSafe = $true
 $cleanupProblems = New-Object 'System.Collections.Generic.List[string]'
 $installerLog = Join-Path $env:RUNNER_TEMP "installer.log"
+$activeManagerInstallerLog = Join-Path $env:RUNNER_TEMP "active-manager-reinstall.log"
 $managerLog = Join-Path $installRoot "logs\manager.log"
 $managerPath = Join-Path $installRoot "tools\NGTManager.exe"
 $managerRunStdout = Join-Path $installRoot "logs\acceptance-manager-run.stdout.log"
@@ -277,6 +278,27 @@ try {
   if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
     throw "A silent first install unexpectedly started the application."
   }
+  $activeUpgradeBaselineVersion = $null
+  if (-not $OnlineUpdateAcceptance -and -not $ProductionUpdaterAcceptance) {
+    $versionParts = $ExpectedVersion.Split(".")
+    if ($versionParts.Count -ne 3 -or [int]$versionParts[2] -lt 1) {
+      throw "Active-manager installer acceptance requires a three-part patch version above zero."
+    }
+    $activeUpgradeBaselineVersion = "{0}.{1}.{2}" -f $versionParts[0], $versionParts[1], ([int]$versionParts[2] - 1)
+    $configuration.version = $activeUpgradeBaselineVersion
+    $metadata.version = $activeUpgradeBaselineVersion
+    [System.IO.File]::WriteAllText(
+      $configurationPath,
+      (($configuration | ConvertTo-Json -Depth 8) + [Environment]::NewLine),
+      [System.Text.UTF8Encoding]::new($false)
+    )
+    [System.IO.File]::WriteAllText(
+      $metadataPath,
+      (($metadata | ConvertTo-Json -Depth 8) + [Environment]::NewLine),
+      [System.Text.UTF8Encoding]::new($false)
+    )
+    Write-Output "Prepared the disposable installed version $activeUpgradeBaselineVersion for the active-manager overwrite acceptance."
+  }
   $previousHeadlessAcceptance = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
   try {
     $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
@@ -315,6 +337,66 @@ try {
       "The NGTManager run process remained active but health was not confirmed."
     }
     throw "The installed Studio did not report the exact candidate version and commit as healthy. $runState"
+  }
+
+  if ($activeUpgradeBaselineVersion) {
+    $baselineRunStatePath = Join-Path $installRoot "state\runtime\run-state.json"
+    $baselineRunState = Get-Content -LiteralPath $baselineRunStatePath -Raw | ConvertFrom-Json
+    $baselineRunId = [string]$baselineRunState.runId
+    $previousHeadlessAcceptance = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
+    try {
+      $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
+      $activeManagerInstaller = Start-Process -FilePath $installerPath `
+        -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$activeManagerInstallerLog") `
+        -WindowStyle Hidden -PassThru
+    } finally {
+      if ($null -eq $previousHeadlessAcceptance) {
+        Remove-Item Env:\NGT_MANAGER_ACCEPTANCE_HEADLESS -ErrorAction SilentlyContinue
+      } else {
+        $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = $previousHeadlessAcceptance
+      }
+    }
+    Wait-NgtInstallerProcess -Process $activeManagerInstaller `
+      -Description "Installer over a running NGTManager" -TimeoutMinutes 30 `
+      -ProgressPaths @($activeManagerInstallerLog, $managerLog)
+    if ($activeManagerInstaller.ExitCode -ne 0) {
+      throw "The installer over a running NGTManager exited with code $($activeManagerInstaller.ExitCode)."
+    }
+    $managerRunProcess.Refresh()
+    if (-not $managerRunProcess.HasExited -or $managerRunProcess.ExitCode -ne 0) {
+      throw "The previously running NGTManager did not exit cleanly during the installer handoff."
+    }
+
+    $configuration = Get-Content -LiteralPath $configurationPath -Raw | ConvertFrom-Json
+    $releaseRoot = [System.IO.Path]::GetFullPath([string]$configuration.activeRelease)
+    $metadataPath = Join-Path $releaseRoot "studio-release.json"
+    $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    if ([string]$metadata.version -ne $ExpectedVersion -or [string]$metadata.commit -ine $env:GITHUB_SHA) {
+      throw "The active-manager overwrite did not commit the exact candidate release."
+    }
+
+    $health = $null
+    $newRunState = $null
+    for ($attempt = 0; $attempt -lt 180; $attempt++) {
+      try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health" -TimeoutSec 5
+        $newRunState = Get-Content -LiteralPath $baselineRunStatePath -Raw | ConvertFrom-Json
+        if ([string]$health.status -eq "ok" -and
+            [string]$health.currentVersion -eq $ExpectedVersion -and
+            [string]$health.buildCommit -ieq $env:GITHUB_SHA -and
+            [string]$newRunState.runId -ne $baselineRunId -and
+            [string]$newRunState.phase -eq "running") { break }
+      } catch { }
+      Start-Sleep -Seconds 1
+    }
+    if (-not $health -or [string]$health.status -ne "ok" -or
+        [string]$health.currentVersion -ne $ExpectedVersion -or
+        [string]$health.buildCommit -ine $env:GITHUB_SHA -or
+        -not $newRunState -or [string]$newRunState.runId -eq $baselineRunId -or
+        [string]$newRunState.phase -ne "running") {
+      throw "The installer did not restart the previously active runtime on the exact candidate."
+    }
+    Write-Output "Installer safely stopped and restarted the active NGTManager on the exact candidate."
   }
 
   if ($OnlineUpdateAcceptance -or $ProductionUpdaterAcceptance) {
@@ -530,14 +612,21 @@ try {
   try {
     $runtimeDiagnosticsPath = Join-Path $env:RUNNER_TEMP "acceptance-runtime-diagnostics.log"
     if (Test-Path -LiteralPath $managerPath -PathType Leaf) {
+      $installerLogForDiagnostics = if (Test-Path -LiteralPath $activeManagerInstallerLog -PathType Leaf) {
+        $activeManagerInstallerLog
+      } else {
+        $installerLog
+      }
       $runtimeDiagnostics = Invoke-NgtManagerCommand -ManagerPath $managerPath `
-        -Arguments @("diagnose-export", $runtimeDiagnosticsPath) -WorkingDirectory $installRoot
+        -Arguments @("diagnose-export", $runtimeDiagnosticsPath, $installerLogForDiagnostics) `
+        -WorkingDirectory $installRoot
       if ($runtimeDiagnostics.ExitCode -ne 0) {
         Write-Warning "The installed manager could not export its structured diagnostics."
       }
     }
     $diagnosticSources = @(
       $installerLog,
+      $activeManagerInstallerLog,
       $managerLog,
       $managerRunStdout,
       $managerRunStderr,
@@ -549,8 +638,9 @@ try {
     $diagnosticSources += Join-Path $installRoot "state\runtime\candidate-run.json"
     $diagnosticSources += Join-Path $installRoot "state\runtime\run-state.json"
     $diagnosticSources += @(Get-ChildItem -LiteralPath (Join-Path $installRoot "logs") -File -Filter "update-*.log" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
-    if (Test-Path -LiteralPath $installerLog -PathType Leaf) {
-      $attemptLog = Get-Content -LiteralPath $installerLog -Raw -ErrorAction SilentlyContinue
+    foreach ($logPath in @($installerLog, $activeManagerInstallerLog)) {
+      if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) { continue }
+      $attemptLog = Get-Content -LiteralPath $logPath -Raw -ErrorAction SilentlyContinue
       $attemptMatch = [regex]::Match($attemptLog, 'NGTManager install attempt ID: (?<id>[A-Za-z0-9-]{1,64})')
       if ($attemptMatch.Success) {
         $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)

@@ -6690,7 +6690,7 @@ fn install_package(
     match result {
         Ok(config) => {
             drop(_operation_lock);
-            if restart_runtime && requested_operation == "update" {
+            if restart_runtime {
                 if let Err(error) = launch_manager(&root, "run") {
                     log_line(
                         &root,
@@ -9382,6 +9382,15 @@ fn run(args: &[String]) -> Result<String, String> {
                 .map_err(|_| "Unable to create the diagnostic export.".to_owned())?;
             Ok("Diagnostic export created.".to_owned())
         }
+        [command, output, installer_log] if command == "diagnose-export" => {
+            diagnostics::export_diagnostics_with_installer_log(
+                &stable_root()?,
+                Path::new(output),
+                Some(Path::new(installer_log)),
+            )
+            .map_err(|_| "Unable to create the diagnostic export.".to_owned())?;
+            Ok("Diagnostic export created.".to_owned())
+        }
         [command, request_id] if command == "memory-sample-start" => {
             start_memory_sample(&stable_root()?, request_id)
         }
@@ -9506,7 +9515,7 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             Ok("Installer registration result was recorded.".to_owned())
         }
-        _ => Err("Usage: NGTManager.exe status | preflight <package> | install <package> [operationId] | update <package> [operationId] | repair <package> | reserve-update <id> <version> | start-update <id> | clear-update-lock <id> <complete|retry> | run | open | stop | recover | diagnose | diagnose-export <outputPath> | memory-sample-start <requestId> | memory-sample-save <requestId> <taskId> | memory-sample-retry-save <requestId> | memory-sample-external <rootPid> <outputDirectory> <warmupSeconds> <durationSeconds> <intervalSeconds> | update-process <id> | uninstall | verify-release <path> | check-space <path> <bytes> | record-installer-registration <id> <elapsedMs> <complete|incomplete>".to_owned()),
+        _ => Err("Usage: NGTManager.exe status | preflight <package> | install <package> [operationId] | update <package> [operationId] | repair <package> | reserve-update <id> <version> | start-update <id> | clear-update-lock <id> <complete|retry> | run | open | stop | recover | diagnose | diagnose-export <outputPath> [installerLogPath] | memory-sample-start <requestId> | memory-sample-save <requestId> <taskId> | memory-sample-retry-save <requestId> | memory-sample-external <rootPid> <outputDirectory> <warmupSeconds> <durationSeconds> <intervalSeconds> | update-process <id> | uninstall | verify-release <path> | check-space <path> <bytes> | record-installer-registration <id> <elapsedMs> <complete|incomplete>".to_owned()),
     }
 }
 

@@ -6,6 +6,7 @@ $statusPath = Join-Path $testRoot "update-status.json"
 $runStatePath = Join-Path $testRoot "run-state.json"
 $candidateRunPath = Join-Path $testRoot "candidate-run.json"
 $runtimeDiagnosticsPath = Join-Path $testRoot "acceptance-runtime-diagnostics.log"
+$activeManagerInstallerPath = Join-Path $testRoot "active-manager-reinstall.log"
 $managerRunOutputPath = Join-Path $testRoot "acceptance-manager-run.stdout.log"
 $outputPath = Join-Path $testRoot "sanitized"
 $acceptanceOutputPath = Join-Path $testRoot "installer-acceptance-sanitized"
@@ -35,13 +36,14 @@ try {
   [System.IO.File]::WriteAllText($runStatePath, '{"phase":"startup-failed"}')
   [System.IO.File]::WriteAllText($candidateRunPath, '{"phase":"completed"}')
   [System.IO.File]::WriteAllText($runtimeDiagnosticsPath, "runtime startup failure: token=private-value`n")
+  [System.IO.File]::WriteAllText($activeManagerInstallerPath, "Error: active installer failure: token=private-value`n")
   [System.IO.File]::WriteAllText($managerRunOutputPath, "manager run failed: token=private-value`n")
   $runtimeAcceptanceOutputPath = Join-Path $testRoot "runtime-acceptance-sanitized"
   & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `
     -Stage installer-acceptance -Tag v2.0.16 -Commit ("a" * 40) -Version 2.0.16 `
-    -SourcePaths @($runStatePath, $candidateRunPath, $runtimeDiagnosticsPath, $managerRunOutputPath) `
+    -SourcePaths @($runStatePath, $candidateRunPath, $runtimeDiagnosticsPath, $activeManagerInstallerPath, $managerRunOutputPath) `
     -OutputDirectory $runtimeAcceptanceOutputPath
-  foreach ($fileName in @("run-state.json", "candidate-run.json", "acceptance-runtime-diagnostics.log", "acceptance-manager-run.stdout.log")) {
+  foreach ($fileName in @("run-state.json", "candidate-run.json", "acceptance-runtime-diagnostics.log", "active-manager-reinstall.log", "acceptance-manager-run.stdout.log")) {
     $captured = Get-Content -LiteralPath (Join-Path $runtimeAcceptanceOutputPath $fileName) -Raw
     if ($captured -match "private-value") {
       throw "Installer acceptance diagnostics exposed a protected token in $fileName."

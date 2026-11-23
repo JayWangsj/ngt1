@@ -1,7 +1,7 @@
 {
   "name": "ngt-riparazioni",
-  "version": "2.0.25",
-  "windowsPrereleaseVersion": "2.0.25",
+  "version": "2.0.26",
+  "windowsPrereleaseVersion": "2.0.26",
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",

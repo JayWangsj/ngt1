@@ -1534,7 +1534,8 @@ begin
   Result := '';
   DiagnosticPath := ExpandConstant('{userdocs}\NGTManager-diagnostics-' + AttemptId + '.txt');
   if FileExists(DiagnosticPath) or (not FileExists(ManagerPath)) then exit;
-  Started := Exec(ManagerPath, 'diagnose-export "' + DiagnosticPath + '"',
+  Started := Exec(ManagerPath, 'diagnose-export "' + DiagnosticPath + '" "' +
+    ExpandConstant('{log}') + '"',
     ExtractFileDir(ManagerPath), SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if Started and (ResultCode = 0) and FileExists(DiagnosticPath) then
     Result := DiagnosticPath;

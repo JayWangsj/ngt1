@@ -24,7 +24,7 @@ tags, Draft Releases, public Releases, or GitHub repository refs. The formal
 tagged-release workflow retains the exact-SHA Verify MVP, Release Ready,
 publication, and asset-integrity gates.
 
-## Workshop qualification for v2.0.25
+## Workshop qualification for v2.0.26
 
 The `windowsPrereleaseVersion` entry in package.json holds this exact version's
 verified assets in a private Draft. It does not publish a prerelease. Use the
@@ -40,6 +40,12 @@ after workshop qualification.
   verify the active version, database and Windows registration. Run the legacy
   updater handoff separately. Keep the actual business JSON in the workshop's
   isolated environment and record the import outcome and business reconciliation.
+- Also run the v2.0.26 installer while the currently installed NGTManager runtime
+  and business window are still open. Do not close the app first. Confirm the
+  installer safely stops the active runtime, completes the replacement, and
+  returns with the new version healthy. If installation fails, confirm the one
+  NGTManager diagnostics export contains both structured manager diagnostics
+  and the sanitized Inno Setup log excerpt.
 - Interrupt preparation, migration, database recovery and Windows registration
   separately. Compare the operation ID, version, backup and terminal result.
   Check drag/minimize responsiveness throughout installation and record three

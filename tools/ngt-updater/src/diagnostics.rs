@@ -5,7 +5,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
@@ -1370,6 +1370,15 @@ fn installation_state_summary(root: &Path) -> serde_json::Value {
 
 /// Creates a bounded, redacted diagnostics file without overwriting any path.
 pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
+    export_diagnostics_with_installer_log(root, output, None)
+}
+
+/// Creates the standard diagnostics file and adds a sanitized Inno Setup log excerpt.
+pub fn export_diagnostics_with_installer_log(
+    root: &Path,
+    output: &Path,
+    installer_log: Option<&Path>,
+) -> io::Result<()> {
     let output = validate_output_path(root, output)?;
     let installation_state = installation_state_summary(root);
     let (mut events, mut details, gaps) = capture_log_snapshot(root);
@@ -1550,6 +1559,15 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
             budget.note_omitted_detail(&source, lines as u64);
             budget.append_detail(&source, summary.as_bytes())?;
         }
+        if let Some(installer_log) = installer_log {
+            budget
+                .append(b"\nINNO SETUP LOG EXCERPT (bounded; paths and credentials redacted)\n")?;
+            let excerpt = installer_log_excerpt(installer_log);
+            budget.append(excerpt.as_bytes())?;
+            if !excerpt.ends_with('\n') {
+                budget.append(b"\n")?;
+            }
+        }
         for source in gaps.event_sources {
             budget.add_event_source(&source);
         }
@@ -1568,6 +1586,146 @@ pub fn export_diagnostics(root: &Path, output: &Path) -> io::Result<()> {
         let _ = fs::remove_file(&output);
     }
     export_result
+}
+
+fn installer_log_excerpt(path: &Path) -> String {
+    const MAX_SOURCE_BYTES: u64 = 1024 * 1024;
+    const MAX_EXCERPT_BYTES: usize = 24 * 1024;
+    const MAX_EXCERPT_LINES: usize = 80;
+
+    let unavailable = "Installer log was unavailable or outside the temporary directory.\n";
+    let Ok(source_metadata) = fs::symlink_metadata(path) else {
+        return unavailable.to_owned();
+    };
+    if !source_metadata.is_file()
+        || is_reparse(&source_metadata)
+        || !path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("log"))
+    {
+        return unavailable.to_owned();
+    }
+    let Ok(temp_root) = fs::canonicalize(std::env::temp_dir()) else {
+        return unavailable.to_owned();
+    };
+    let Ok(canonical_path) = fs::canonicalize(path) else {
+        return unavailable.to_owned();
+    };
+    if !canonical_path.starts_with(temp_root) {
+        return unavailable.to_owned();
+    }
+    let Ok(mut file) = open_snapshot_file(&canonical_path) else {
+        return unavailable.to_owned();
+    };
+    let Ok(metadata) = file.metadata() else {
+        return unavailable.to_owned();
+    };
+    if !metadata.is_file() || is_reparse(&metadata) {
+        return unavailable.to_owned();
+    }
+
+    let truncated = metadata.len() > MAX_SOURCE_BYTES;
+    let start = metadata.len().saturating_sub(MAX_SOURCE_BYTES);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return unavailable.to_owned();
+    }
+    let mut bytes = Vec::with_capacity((metadata.len() - start) as usize);
+    if file.read_to_end(&mut bytes).is_err() {
+        return unavailable.to_owned();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = VecDeque::new();
+    for line in text.lines().skip(usize::from(truncated)) {
+        let lower = line.to_ascii_lowercase();
+        let relevant = [
+            "ngtmanager",
+            "error",
+            "failed",
+            "failure",
+            "exception",
+            "unable",
+            "cannot",
+            "denied",
+            "rollback",
+            "cancel",
+            "warning",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle));
+        if !relevant {
+            continue;
+        }
+        let safe = sanitize_installer_log_line(line);
+        lines.push_back(safe);
+        while lines.len() > MAX_EXCERPT_LINES {
+            lines.pop_front();
+        }
+    }
+    drop(text);
+
+    let mut excerpt = String::new();
+    if truncated {
+        excerpt.push_str("Older installer log content omitted.\n");
+    }
+    if lines.is_empty() {
+        excerpt.push_str("No installer failure breadcrumbs were found.\n");
+    } else {
+        for line in lines {
+            if excerpt.len().saturating_add(line.len() + 1) > MAX_EXCERPT_BYTES {
+                break;
+            }
+            excerpt.push_str(&line);
+            excerpt.push('\n');
+        }
+    }
+    excerpt
+}
+
+fn sanitize_installer_log_line(line: &str) -> String {
+    let lower = line.to_ascii_lowercase();
+    if let Some(offset) = [
+        "password",
+        "secret",
+        "token",
+        "authorization",
+        "bearer ",
+        "private key",
+        "github_pat_",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+    ]
+    .iter()
+    .filter_map(|needle| lower.find(needle))
+    .min()
+    {
+        let prefix = line[..offset].trim_end();
+        return if prefix.is_empty() {
+            "[credential-bearing text redacted]".to_owned()
+        } else {
+            format!("{prefix} [credential-bearing text redacted]")
+        };
+    }
+    if let Some(offset) = windows_absolute_path_offset(line) {
+        return format!("{} [path redacted]", line[..offset].trim_end());
+    }
+    if let Some(offset) = line.find("://") {
+        return format!("{} [URL redacted]", line[..offset].trim_end());
+    }
+    line.chars().take(512).collect()
+}
+
+fn windows_absolute_path_offset(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    (0..bytes.len().saturating_sub(2)).find(|index| {
+        (bytes[*index].is_ascii_alphabetic()
+            && bytes[*index + 1] == b':'
+            && matches!(bytes[*index + 2], b'\\' | b'/'))
+            || (bytes[*index] == b'\\' && bytes[*index + 1] == b'\\')
+    })
 }
 
 fn validate_output_path(root: &Path, output: &Path) -> io::Result<PathBuf> {
@@ -2547,6 +2705,39 @@ mod tests {
         assert!(!text.contains("secret"));
         fs::remove_file(output).unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn export_appends_a_bounded_redacted_inno_setup_log_excerpt() {
+        let root = temp_root("inno-unified");
+        let inno_log = temp_root("inno-source").with_extension("log");
+        let output =
+            std::env::temp_dir().join(format!("NGTManager-diagnostics-{}.txt", unique_test_id()));
+        fs::write(
+            &inno_log,
+            concat!(
+                "NGTManager install attempt ID: attempt-42\n",
+                "Error: Failed to copy C:\\Users\\SJ\\AppData\\Local\\Temp\\private file.exe\n",
+                "Error: invalid token=private-value\n",
+                "Progress: this unimportant line is omitted\n",
+                "NGTManager core failed or did not produce a success result; attempt=attempt-42.\n"
+            ),
+        )
+        .unwrap();
+
+        export_diagnostics_with_installer_log(&root, &output, Some(&inno_log)).unwrap();
+        let report = fs::read_to_string(&output).unwrap();
+        assert!(report.contains("INNO SETUP LOG EXCERPT"));
+        assert!(report.contains("NGTManager install attempt ID: attempt-42"));
+        assert!(report.contains("Error: Failed to copy [path redacted]"));
+        assert!(report.contains("Error: invalid [credential-bearing text redacted]"));
+        assert!(report.contains("NGTManager core failed"));
+        assert!(!report.contains("C:\\Users\\SJ"));
+        assert!(!report.contains("private-value"));
+        assert!(!report.contains("unimportant line"));
+
+        fs::remove_file(output).unwrap();
+        fs::remove_file(inno_log).unwrap();
     }
 
     #[test]
