@@ -371,7 +371,7 @@ try {
       throw "The previously running NGTManager remained alive 30 seconds after the installer handoff."
     }
     $managerRunProcess.Refresh()
-    $baselineRunProcessExitTimeUtc = $managerRunProcess.ExitTime.ToUniversalTime()
+    $baselineRunProcessExitObservedAtUtc = [DateTime]::UtcNow
     $managerRunExitCode = $null
     try { $managerRunExitCode = $managerRunProcess.ExitCode } catch { }
     if ($null -eq $managerRunExitCode) {
@@ -435,7 +435,7 @@ try {
         )
         [Math]::Abs($eventStartUnixNanoseconds - $baselineRunProcessStartUnixNanoseconds) -le [decimal]30000000000 -and
           [long]$_.shutdownUtcTicks -ge $baselineRunProcessStartTimeUtc.Ticks -and
-          [long]$_.shutdownUtcTicks -le $baselineRunProcessExitTimeUtc.Ticks
+          [long]$_.shutdownUtcTicks -le $baselineRunProcessExitObservedAtUtc.Ticks
       } |
       Sort-Object { [long]$_.shutdownUtcTicks } |
       Select-Object -Last 1)
