@@ -186,6 +186,11 @@ $cleanupSafe = $true
 $cleanupProblems = New-Object 'System.Collections.Generic.List[string]'
 $installerLog = Join-Path $env:RUNNER_TEMP "installer.log"
 $managerLog = Join-Path $installRoot "logs\manager.log"
+$managerPath = Join-Path $installRoot "tools\NGTManager.exe"
+$managerRunStdout = Join-Path $installRoot "logs\acceptance-manager-run.stdout.log"
+$managerRunStderr = Join-Path $installRoot "logs\acceptance-manager-run.stderr.log"
+$managerRunProcess = $null
+$managerRunExitCode = $null
 $previousTestApiUrl = $env:NGT_TEST_RELEASE_API_URL
 $updateServerProcess = $null
 $managerUninstallFailure = $null
@@ -252,7 +257,6 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot "runtime\node.exe"))) {
     throw "The installed release is missing its verified Node runtime."
   }
-  $managerPath = Join-Path $installRoot "tools\NGTManager.exe"
   $statusCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("status") -WorkingDirectory $installRoot
   $statusResult = $statusCommand.Text
   $statusExitCode = $statusCommand.ExitCode
@@ -273,7 +277,9 @@ try {
   if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
     throw "A silent first install unexpectedly started the application."
   }
-  Start-Process -FilePath $managerPath -ArgumentList "run" -WorkingDirectory $installRoot -WindowStyle Hidden
+  $managerRunProcess = Start-Process -FilePath $managerPath -ArgumentList "run" `
+    -WorkingDirectory $installRoot -RedirectStandardOutput $managerRunStdout `
+    -RedirectStandardError $managerRunStderr -WindowStyle Hidden -PassThru
 
   $health = $null
   for ($attempt = 0; $attempt -lt 180; $attempt++) {
@@ -283,12 +289,22 @@ try {
           [string]$health.currentVersion -eq [string]$metadata.version -and
           [string]$health.buildCommit -ieq $env:GITHUB_SHA) { break }
     } catch { }
+    $managerRunProcess.Refresh()
+    if ($managerRunProcess.HasExited) {
+      $managerRunExitCode = $managerRunProcess.ExitCode
+      break
+    }
     Start-Sleep -Seconds 1
   }
   if (-not $health -or [string]$health.status -ne "ok" -or
       [string]$health.currentVersion -ne [string]$metadata.version -or
       [string]$health.buildCommit -ine $env:GITHUB_SHA) {
-    throw "The installed Studio did not report the exact candidate version and commit as healthy."
+    $runState = if ($null -ne $managerRunExitCode) {
+      "The NGTManager run process exited with code $managerRunExitCode before health was confirmed."
+    } else {
+      "The NGTManager run process remained active but health was not confirmed."
+    }
+    throw "The installed Studio did not report the exact candidate version and commit as healthy. $runState"
   }
 
   if ($OnlineUpdateAcceptance -or $ProductionUpdaterAcceptance) {
@@ -502,9 +518,20 @@ try {
   if ($primaryFailureMessage.Length -gt 400) { $primaryFailureMessage = $primaryFailureMessage.Substring(0, 400) }
   if ($primaryFailureMessage) { $cleanupProblems.Add("primary failure: $primaryFailureMessage") }
   try {
+    $runtimeDiagnosticsPath = Join-Path $env:RUNNER_TEMP "acceptance-runtime-diagnostics.log"
+    if (Test-Path -LiteralPath $managerPath -PathType Leaf) {
+      $runtimeDiagnostics = Invoke-NgtManagerCommand -ManagerPath $managerPath `
+        -Arguments @("diagnose-export", $runtimeDiagnosticsPath) -WorkingDirectory $installRoot
+      if ($runtimeDiagnostics.ExitCode -ne 0) {
+        Write-Warning "The installed manager could not export its structured diagnostics."
+      }
+    }
     $diagnosticSources = @(
       $installerLog,
-      (Join-Path $installRoot "logs\manager.log"),
+      $managerLog,
+      $managerRunStdout,
+      $managerRunStderr,
+      $runtimeDiagnosticsPath,
       (Join-Path $installRoot "logs\database.log"),
       (Join-Path $installRoot "logs\application.log")
     )
@@ -550,8 +577,24 @@ try {
   if ($null -eq $previousTestApiUrl) { Remove-Item Env:\NGT_TEST_RELEASE_API_URL -ErrorAction SilentlyContinue }
   else { $env:NGT_TEST_RELEASE_API_URL = $previousTestApiUrl }
   if ($installationAttempted) {
+    $allowInnoUninstall = $true
+    if ((Test-Path -LiteralPath $managerPath -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json") -PathType Leaf)) {
+      try {
+        $runtimeStop = Invoke-NgtManagerCommand -ManagerPath $managerPath `
+          -Arguments @("stop") -WorkingDirectory $installRoot
+        if ($runtimeStop.ExitCode -ne 0) {
+          throw "NGTManager did not confirm a safe runtime stop."
+        }
+      } catch {
+        $allowInnoUninstall = $false
+        $cleanupSafe = $false
+        $cleanupProblems.Add("runtime-stop-unconfirmed")
+        Write-Warning "Installer acceptance could not confirm a safe runtime stop; the installation was retained."
+      }
+    }
     $uninstaller = Join-Path $installRoot "uninstall\unins000.exe"
-    if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+    if ($allowInnoUninstall -and (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
       try {
         $uninstallerLog = Join-Path $env:RUNNER_TEMP "uninstaller.log"
         $uninstallProcess = Start-Process -FilePath $uninstaller `
@@ -585,7 +628,7 @@ try {
         $cleanupProblems.Add("uninstaller: $cleanupMessage")
         Write-Warning ("Installer acceptance cleanup failed: " + $cleanupMessage)
       }
-    } elseif (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json")) {
+    } elseif ($allowInnoUninstall -and (Test-Path -LiteralPath (Join-Path $installRoot "state\studio.json"))) {
       $cleanupSafe = $false
       $cleanupProblems.Add("missing-uninstaller")
       Write-Warning "Installer acceptance could not find its uninstaller; retained the isolated installation."
