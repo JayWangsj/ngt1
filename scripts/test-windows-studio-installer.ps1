@@ -381,17 +381,48 @@ try {
     } elseif ($managerRunExitCode -ne 0) {
       throw "The previously running NGTManager exited with code $managerRunExitCode during the installer handoff."
     }
-    $handoffRunStatePath = Join-Path $installRoot "state\runtime\run-state.json"
-    $handoffRunState = Get-Content -LiteralPath $handoffRunStatePath -Raw | ConvertFrom-Json
-    if ([string]$handoffRunState.phase -ne "completed" -or
-        [string]::IsNullOrWhiteSpace([string]$handoffRunState.endedAtUtc) -or
-        $null -eq $handoffRunState.applicationExitCode -or
-        $null -eq $handoffRunState.databaseExitCode -or
-        [int]$handoffRunState.applicationExitCode -notin @(0, 143) -or
-        [int]$handoffRunState.databaseExitCode -ne 0) {
-      throw "The active-manager installer handoff did not confirm clean application and database shutdown."
+    $activeManagerInstallerText = Get-Content -LiteralPath $activeManagerInstallerLog -Raw
+    $handoffOperationMatch = [regex]::Match($activeManagerInstallerText, 'NGT_PROGRESS\|(?<id>[a-fA-F0-9]{32})\|')
+    if (-not $handoffOperationMatch.Success) {
+      throw "The active-manager installer log did not identify its shutdown operation."
     }
-
+    $handoffOperationId = $handoffOperationMatch.Groups["id"].Value
+    $eventsDirectory = Join-Path $installRoot "logs\diagnostics\events"
+    $shutdownEvents = @(
+      Get-ChildItem -LiteralPath $eventsDirectory -Filter "events-manager-db-*.jsonl" -File -ErrorAction Stop |
+        ForEach-Object {
+          foreach ($eventLine in Get-Content -LiteralPath $_.FullName) {
+            $event = $null
+            try { $event = $eventLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+            if ([string]$event.operationId -eq $handoffOperationId -and
+                [string]$event.processStartId -eq $baselineRunId -and
+                [string]$event.component -eq "manager") {
+              $event
+            }
+          }
+        }
+    )
+    $applicationStop = @($shutdownEvents |
+      Where-Object { $_.eventCode -eq "runtime.shutdown.phase.completed" -and $_.phase -eq "application" } |
+      Sort-Object { [long]$_.processSequence } | Select-Object -Last 1)
+    $databaseStop = @($shutdownEvents |
+      Where-Object { $_.eventCode -eq "runtime.shutdown.phase.completed" -and $_.phase -eq "database" } |
+      Sort-Object { [long]$_.processSequence } | Select-Object -Last 1)
+    $finalStop = @($shutdownEvents |
+      Where-Object { $_.eventCode -eq "runtime.shutdown.completed" -and $_.phase -eq "final" } |
+      Sort-Object { [long]$_.processSequence } | Select-Object -Last 1)
+    if ($applicationStop.Count -ne 1 -or $databaseStop.Count -ne 1 -or $finalStop.Count -ne 1) {
+      throw "The active-manager installer handoff did not record all shutdown phases for the original manager process."
+    }
+    foreach ($shutdownEvent in @($applicationStop[0], $databaseStop[0], $finalStop[0])) {
+      if ([string]$shutdownEvent.severity -ne "info" -or [string]$shutdownEvent.errorCode -ne "none") {
+        throw "The active-manager installer handoff recorded an unsuccessful shutdown phase."
+      }
+    }
+    if ([long]$applicationStop[0].processSequence -ge [long]$databaseStop[0].processSequence -or
+        [long]$databaseStop[0].processSequence -ge [long]$finalStop[0].processSequence) {
+      throw "The active-manager installer handoff did not stop the application before the database."
+    }
     $configuration = Get-Content -LiteralPath $configurationPath -Raw | ConvertFrom-Json
     $releaseRoot = [System.IO.Path]::GetFullPath([string]$configuration.activeRelease)
     $metadataPath = Join-Path $releaseRoot "studio-release.json"
@@ -525,7 +556,18 @@ try {
       }
       throw "NGTManager could not reserve the exact-SHA online update (exit code $reserveExitCode; $failureDetails)."
     }
-    $startCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("start-update", $updateId) -WorkingDirectory $installRoot
+    $previousStartUpdateHeadless = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
+    try {
+      $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
+      $startCommand = Invoke-NgtManagerCommand -ManagerPath $managerPath -Arguments @("start-update", $updateId) -WorkingDirectory $installRoot
+    } finally {
+      if ($null -eq $previousStartUpdateHeadless) {
+        Remove-Item Env:\NGT_MANAGER_ACCEPTANCE_HEADLESS -ErrorAction SilentlyContinue
+      } else {
+        $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = $previousStartUpdateHeadless
+      }
+    }
+
     $startExitCode = $startCommand.ExitCode
     $startText = $startCommand.Text
     $startStatus = $null
