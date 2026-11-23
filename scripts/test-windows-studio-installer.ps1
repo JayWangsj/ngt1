@@ -395,33 +395,60 @@ try {
             $event = $null
             try { $event = $eventLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             if ([string]$event.operationId -eq $handoffOperationId -and
-                [string]$event.processStartId -eq $baselineRunId -and
                 [string]$event.component -eq "manager") {
+              $eventUtcMatch = [regex]::Match($eventLine, '"utcTime"\s*:\s*"(?<value>[^"]+)"')
+              if (-not $eventUtcMatch.Success) {
+                throw "A manager shutdown event did not contain a valid UTC timestamp."
+              }
+              $eventUtcTicks = [DateTimeOffset]::Parse(
+                $eventUtcMatch.Groups["value"].Value,
+                [Globalization.CultureInfo]::InvariantCulture
+              ).UtcDateTime.Ticks
+              $event | Add-Member -MemberType NoteProperty -Name "shutdownUtcTicks" -Value $eventUtcTicks -Force
               $event
             }
           }
         }
     )
     $applicationStop = @($shutdownEvents |
-      Where-Object { $_.eventCode -eq "runtime.shutdown.phase.completed" -and $_.phase -eq "application" } |
-      Sort-Object { [long]$_.processSequence } | Select-Object -Last 1)
+      Where-Object {
+        $_.eventCode -eq "runtime.shutdown.phase.completed" -and
+        $_.phase -eq "application" -and
+        [string]$_.processStartId -eq $baselineRunId
+      } |
+      Sort-Object { [long]$_.shutdownUtcTicks } |
+      Select-Object -Last 1)
+    if ($applicationStop.Count -ne 1) {
+      throw "The active-manager installer handoff did not record application shutdown for the original manager process."
+    }
+    $applicationStoppedAt = [long]$applicationStop[0].shutdownUtcTicks
     $databaseStop = @($shutdownEvents |
-      Where-Object { $_.eventCode -eq "runtime.shutdown.phase.completed" -and $_.phase -eq "database" } |
-      Sort-Object { [long]$_.processSequence } | Select-Object -Last 1)
+      Where-Object {
+        $_.eventCode -eq "runtime.shutdown.phase.completed" -and
+        $_.phase -eq "database" -and
+        [long]$_.shutdownUtcTicks -gt $applicationStoppedAt
+      } |
+      Sort-Object { [long]$_.shutdownUtcTicks } |
+      Select-Object -First 1)
+    if ($databaseStop.Count -ne 1) {
+      throw "The active-manager installer handoff did not record database shutdown after application shutdown."
+    }
+    $databaseStoppedAt = [long]$databaseStop[0].shutdownUtcTicks
     $finalStop = @($shutdownEvents |
-      Where-Object { $_.eventCode -eq "runtime.shutdown.completed" -and $_.phase -eq "final" } |
-      Sort-Object { [long]$_.processSequence } | Select-Object -Last 1)
-    if ($applicationStop.Count -ne 1 -or $databaseStop.Count -ne 1 -or $finalStop.Count -ne 1) {
-      throw "The active-manager installer handoff did not record all shutdown phases for the original manager process."
+      Where-Object {
+        $_.eventCode -eq "runtime.shutdown.completed" -and
+        $_.phase -eq "final" -and
+        [long]$_.shutdownUtcTicks -gt $databaseStoppedAt
+      } |
+      Sort-Object { [long]$_.shutdownUtcTicks } |
+      Select-Object -First 1)
+    if ($finalStop.Count -ne 1) {
+      throw "The active-manager installer handoff did not record final shutdown after database shutdown."
     }
     foreach ($shutdownEvent in @($applicationStop[0], $databaseStop[0], $finalStop[0])) {
       if ([string]$shutdownEvent.severity -ne "info" -or [string]$shutdownEvent.errorCode -ne "none") {
         throw "The active-manager installer handoff recorded an unsuccessful shutdown phase."
       }
-    }
-    if ([long]$applicationStop[0].processSequence -ge [long]$databaseStop[0].processSequence -or
-        [long]$databaseStop[0].processSequence -ge [long]$finalStop[0].processSequence) {
-      throw "The active-manager installer handoff did not stop the application before the database."
     }
     $configuration = Get-Content -LiteralPath $configurationPath -Raw | ConvertFrom-Json
     $releaseRoot = [System.IO.Path]::GetFullPath([string]$configuration.activeRelease)
