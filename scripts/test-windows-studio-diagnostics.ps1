@@ -8,6 +8,8 @@ $candidateRunPath = Join-Path $testRoot "candidate-run.json"
 $runtimeDiagnosticsPath = Join-Path $testRoot "acceptance-runtime-diagnostics.log"
 $activeManagerInstallerPath = Join-Path $testRoot "active-manager-reinstall.log"
 $managerRunOutputPath = Join-Path $testRoot "acceptance-manager-run.stdout.log"
+$managerLogPath = Join-Path $testRoot "manager.log"
+$updateLogPath = Join-Path $testRoot "update-1234567890abcdef.log"
 $outputPath = Join-Path $testRoot "sanitized"
 $acceptanceOutputPath = Join-Path $testRoot "installer-acceptance-sanitized"
 $writer = $null
@@ -16,22 +18,29 @@ try {
   $bytes = [System.Text.Encoding]::UTF8.GetBytes("first failure: token=private-value`n")
   $writer.Write($bytes, 0, $bytes.Length)
   $writer.Flush()
+  [System.IO.File]::WriteAllText($updateLogPath, "FAILED validating: manager startup failed for C:\Users\private-user\AppData\Local\NGTManager token=private-value`n")
   & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `
     -Stage online-update -Tag v2.0.16 -Commit ("a" * 40) -Version 2.0.16 `
-    -Message "failed at database: token=private-value" -SourcePaths @($logPath) -OutputDirectory $outputPath
+    -Message "failed at database: token=private-value" -SourcePaths @($logPath, $updateLogPath) -OutputDirectory $outputPath
   $sanitized = Get-Content -LiteralPath (Join-Path $outputPath "application.log") -Raw
+  $sanitizedUpdate = Get-Content -LiteralPath (Join-Path $outputPath "update-1234567890abcdef.log") -Raw
   $summary = Get-Content -LiteralPath (Join-Path $outputPath "summary.json") -Raw | ConvertFrom-Json
   if ($sanitized -notmatch "first failure" -or $sanitized -match "private-value" -or
+      $sanitizedUpdate -notmatch "manager startup failed" -or $sanitizedUpdate -match "private-value|private-user" -or
       $summary.message -match "private-value" -or $summary.commit -ne ("a" * 40)) {
-    throw "A live diagnostic log was not retained and sanitized correctly."
+    throw "A unified updater diagnostic log was not retained and sanitized correctly."
   }
+  [System.IO.File]::WriteAllText($managerLogPath, "updated manager startup error: C:\Users\private-user\AppData\Local\NGTManager token=private-value`n")
   [System.IO.File]::WriteAllText($statusPath, '{"status":"failed","message":"token=private-value"}')
   & (Join-Path $PSScriptRoot "write-windows-studio-diagnostics.ps1") `
     -Stage installer-acceptance -Tag v2.0.16 -Commit ("a" * 40) -Version 2.0.16 `
-    -SourcePaths @($statusPath) -OutputDirectory $acceptanceOutputPath
+    -SourcePaths @($statusPath, $managerLogPath, $updateLogPath) -OutputDirectory $acceptanceOutputPath
   $sanitizedStatus = Get-Content -LiteralPath (Join-Path $acceptanceOutputPath "update-status.json") -Raw
-  if ($sanitizedStatus -notmatch '"status":"failed"' -or $sanitizedStatus -match "private-value") {
-    throw "The installer acceptance did not retain and sanitize the online update status."
+  $sanitizedManagerLog = Get-Content -LiteralPath (Join-Path $acceptanceOutputPath "manager.log") -Raw
+  if ($sanitizedStatus -notmatch '"status":"failed"' -or $sanitizedStatus -match "private-value" -or
+      $sanitizedManagerLog -notmatch "updated manager startup error" -or $sanitizedManagerLog -match "private-value|private-user" -or
+      -not (Test-Path -LiteralPath (Join-Path $acceptanceOutputPath "update-1234567890abcdef.log") -PathType Leaf)) {
+    throw "The installer acceptance did not retain and sanitize the unified update diagnostics."
   }
   [System.IO.File]::WriteAllText($runStatePath, '{"phase":"startup-failed"}')
   [System.IO.File]::WriteAllText($candidateRunPath, '{"phase":"completed"}')

@@ -366,8 +366,30 @@ try {
       throw "The previously running NGTManager remained alive 30 seconds after the installer handoff."
     }
     $managerRunProcess.Refresh()
-    if ($managerRunProcess.ExitCode -ne 0) {
-      throw "The previously running NGTManager exited with code $($managerRunProcess.ExitCode) during the installer handoff."
+    $managerRunExitCode = $null
+    try { $managerRunExitCode = $managerRunProcess.ExitCode } catch { }
+    if ($null -eq $managerRunExitCode) {
+      $managerRunOutput = if (Test-Path -LiteralPath $managerRunStdout -PathType Leaf) {
+        Get-Content -LiteralPath $managerRunStdout -Raw
+      } else {
+        ""
+      }
+      $cleanStopConfirmed = @($managerRunOutput -split "`r?`n" | ForEach-Object { $_.Trim() }) -contains "NGTManager stopped."
+      if (-not $cleanStopConfirmed) {
+        throw "The previously running NGTManager exited, but its exit code was unavailable and the log did not confirm a clean stop."
+      }
+    } elseif ($managerRunExitCode -ne 0) {
+      throw "The previously running NGTManager exited with code $managerRunExitCode during the installer handoff."
+    }
+    $handoffRunStatePath = Join-Path $installRoot "state\runtime\run-state.json"
+    $handoffRunState = Get-Content -LiteralPath $handoffRunStatePath -Raw | ConvertFrom-Json
+    if ([string]$handoffRunState.phase -ne "completed" -or
+        [string]::IsNullOrWhiteSpace([string]$handoffRunState.endedAtUtc) -or
+        $null -eq $handoffRunState.applicationExitCode -or
+        $null -eq $handoffRunState.databaseExitCode -or
+        [int]$handoffRunState.applicationExitCode -notin @(0, 143) -or
+        [int]$handoffRunState.databaseExitCode -ne 0) {
+      throw "The active-manager installer handoff did not confirm clean application and database shutdown."
     }
 
     $configuration = Get-Content -LiteralPath $configurationPath -Raw | ConvertFrom-Json

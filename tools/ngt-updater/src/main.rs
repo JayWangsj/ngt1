@@ -1268,13 +1268,32 @@ fn verify_installed_release(args: &Args, client: &Client, log_path: &Path) -> Re
             "The updated NGTManager manager executable is not a regular file.",
         ));
     }
+    let manager_log_path = args.install_root.join("logs").join("manager.log");
+    let manager_stderr = match fs::symlink_metadata(&manager_log_path) {
+        Ok(metadata) if metadata.is_file() && !is_reparse(&metadata) => {
+            OpenOptions::new().append(true).open(&manager_log_path).ok()
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(&manager_log_path)
+            .ok(),
+        _ => None,
+    };
+    let manager_stderr_attached = manager_stderr.is_some();
     let mut command = Command::new(&manager_path);
     command
         .arg("run")
         .current_dir(&args.install_root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(manager_stderr.map_or_else(Stdio::null, Stdio::from));
+    if !manager_stderr_attached {
+        append_log(
+            log_path,
+            "The updated manager stderr could not be attached to the shared manager log.",
+        )?;
+    }
     hide_console(&mut command);
     let mut manager_process = command.spawn().map_err(|_| {
         UpdateError::new(

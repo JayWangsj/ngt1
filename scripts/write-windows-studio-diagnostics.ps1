@@ -21,6 +21,7 @@ function Protect-DiagnosticText([string]$Text) {
   $safe = [regex]::Replace($safe, 'github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]{20,}', '[REDACTED TOKEN]')
   $safe = [regex]::Replace($safe, "(?i)(postgres(?:ql)?://)[^:/\s]+:[^@/\s]+@", '$1[REDACTED]@')
   $safe = [regex]::Replace($safe, "(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]")
+  $safe = [regex]::Replace($safe, '(?i)([A-Z]:\\Users\\)[^\\/\r\n]+', '$1[REDACTED]')
   if ($safe.Length -gt 700000) { $safe = $safe.Substring($safe.Length - 700000) }
   return $safe
 }
@@ -53,11 +54,12 @@ foreach ($sourcePath in $SourcePaths) {
       if ((Split-Path -Leaf $sourcePath) -eq "online-update.log") { "online-update.log" }
       elseif ((Split-Path -Leaf $sourcePath) -eq "update-status.json") { "update-status.json" }
       elseif ((Split-Path -Leaf $sourcePath) -match '^update-.+\.inno\.log$') { "online-installer.inno.log" }
+      elseif ((Split-Path -Leaf $sourcePath) -match '^update-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
       elseif ((Split-Path -Leaf $sourcePath) -in @("manual-upgrade-installer.log", "manual-repair-installer.log", "install-preflight.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
       else { $null }
     }
     "installer-acceptance" {
-      if ((Split-Path -Leaf $sourcePath) -in @("installer.log", "active-manager-reinstall.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log", "acceptance-manager-run.stdout.log", "acceptance-manager-run.stderr.log", "acceptance-runtime-diagnostics.log", "candidate-run.json", "run-state.json", "update-status.json") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
+      if ((Split-Path -Leaf $sourcePath) -in @("installer.log", "active-manager-reinstall.log", "install.log", "install-stages.log", "studio-database.log", "studio-database.error.log", "supervisor.error.log", "manager.log", "database.log", "database.error.log", "application.log", "application.error.log", "acceptance-manager-run.stdout.log", "acceptance-manager-run.stderr.log", "acceptance-runtime-diagnostics.log", "candidate-run.json", "run-state.json", "update-status.json") -or (Split-Path -Leaf $sourcePath) -match '^migration-[A-Za-z0-9-]+\.log$' -or (Split-Path -Leaf $sourcePath) -match '^update-[A-Za-z0-9-]+\.log$') { Split-Path -Leaf $sourcePath }
       else { $null }
     }
   }
