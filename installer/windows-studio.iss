@@ -1301,11 +1301,18 @@ begin
   DesktopLayoutReady := True;
   WizardForm.OnResize := @LayoutDesktopWizard;
   LayoutDesktopWizard(WizardForm);
-  OriginalWizardProc := SetWindowLong(WizardForm.Handle, -4, CreateCallback(@BrandButtonWindowProc));
-  if not HighContrastActive then
+#ifdef DesktopUiTest
+  if True then
+#else
+  if not WizardSilent then
+#endif
   begin
-    UseBrandButton(WizardForm.NextButton);
-    UseBrandButton(WizardForm.CancelButton);
+    OriginalWizardProc := SetWindowLong(WizardForm.Handle, -4, CreateCallback(@BrandButtonWindowProc));
+    if not HighContrastActive then
+    begin
+      UseBrandButton(WizardForm.NextButton);
+      UseBrandButton(WizardForm.CancelButton);
+    end;
   end;
 #ifdef DesktopUiTest
   RunDesktopUiSelfTests;

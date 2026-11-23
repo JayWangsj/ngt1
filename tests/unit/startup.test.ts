@@ -844,6 +844,23 @@ describe("Windows persistent startup", () => {
     expect(installer).toContain("MsgBox(Failure, mbCriticalError, MB_OK)");
   });
 
+  it("skips custom Inno window callbacks in silent installer runs", async () => {
+    const installer = await readFile("installer/windows-studio.iss", "utf8");
+    const initializeStart = installer.indexOf("procedure InitializeWizard;");
+    const initializeEnd = installer.indexOf(
+      "\nfunction PhaseDescription",
+      initializeStart,
+    );
+    const initialize = installer.slice(initializeStart, initializeEnd);
+    expect(initialize).toContain(
+      "#ifdef DesktopUiTest\n  if True then\n#else\n  if not WizardSilent then\n#endif\n  begin",
+    );
+    expect(initialize.indexOf("if not WizardSilent then")).toBeLessThan(
+      initialize.indexOf("OriginalWizardProc := SetWindowLong"),
+    );
+    expect(initialize).toContain("RunDesktopUiSelfTests;");
+  });
+
   it("ships fixed Chinese and Italian installer resources with shared brand color", async () => {
     const [installer, manager, styles, chinese, license] = await Promise.all([
       readFile("installer/windows-studio.iss", "utf8"),
