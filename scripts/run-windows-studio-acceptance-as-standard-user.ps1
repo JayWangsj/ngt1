@@ -579,7 +579,12 @@ try {
         try {
           $progress = Get-Content -LiteralPath $acceptanceProgressPath -Raw | ConvertFrom-Json
           if ($progress.phase -and $progress.stage) {
-            $progressSummary = "{0}/{1}, stage elapsed {2}s" -f [string]$progress.phase, [string]$progress.stage, [int]$progress.elapsedSeconds
+            $stageElapsedSeconds = [int]$progress.elapsedSeconds
+            try {
+              $stageStartedAt = [DateTime]::Parse([string]$progress.updatedAt).ToUniversalTime()
+              $stageElapsedSeconds = [int][Math]::Max(0, [Math]::Floor(([DateTime]::UtcNow - $stageStartedAt).TotalSeconds))
+            } catch { }
+            $progressSummary = "{0}/{1}, stage elapsed {2}s" -f [string]$progress.phase, [string]$progress.stage, $stageElapsedSeconds
           }
         } catch { }
       }
@@ -743,7 +748,15 @@ try {
       if ($entry.Recursive) { $icaclsArguments += @("/T", "/C") }
       $icaclsArguments += "/Q"
       & (Join-Path $env:SystemRoot "System32\icacls.exe") @icaclsArguments | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "icacls returned exit code $LASTEXITCODE while removing the acceptance user ACL." }
+      if ($LASTEXITCODE -ne 0) {
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new(
+          [InvalidOperationException]::new("icacls returned exit code $LASTEXITCODE while removing the acceptance user ACL."),
+          "WorkspaceAclCleanupFailed",
+          [System.Management.Automation.ErrorCategory]::PermissionDenied,
+          $entry.Path
+        )
+        Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Workspace ACL cleanup" -ErrorRecord $errorRecord
+      }
     } catch { Add-NgtAcceptanceCleanupFailure -Failures $cleanupFailures -Step "Workspace ACL cleanup" -ErrorRecord $_ }
   }
   if ($user) {

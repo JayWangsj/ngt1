@@ -73,7 +73,8 @@ function Invoke-NgtManagerCommand {
   param(
     [Parameter(Mandatory = $true)][string]$ManagerPath,
     [Parameter(Mandatory = $true)][string[]]$Arguments,
-    [Parameter(Mandatory = $true)][string]$WorkingDirectory
+    [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+    [int]$TimeoutSeconds = 30
   )
 
   $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -90,7 +91,16 @@ function Invoke-NgtManagerCommand {
     if (-not $process.Start()) { throw "NGTManager command did not start." }
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+      & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
+      if (-not $process.WaitForExit(5000)) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        if (-not $process.WaitForExit(5000)) {
+          throw "NGTManager command '$($Arguments[0])' exceeded its ${TimeoutSeconds}-second timeout and could not be stopped."
+        }
+      }
+      throw "NGTManager command '$($Arguments[0])' exceeded its ${TimeoutSeconds}-second timeout."
+    }
     $process.WaitForExit()
     $stdout = $stdoutTask.GetAwaiter().GetResult()
     $stderr = $stderrTask.GetAwaiter().GetResult()
