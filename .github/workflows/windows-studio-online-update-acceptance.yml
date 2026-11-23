@@ -59,7 +59,7 @@ jobs:
   online-update-acceptance:
     name: Isolated Windows silent online-update acceptance
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v5
         with:
