@@ -13,7 +13,7 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, ExitStatus};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -437,7 +437,7 @@ fn run(args: &Args) -> Result<()> {
     )?;
 
     write_progress(args, "validating", "validating", json!({}))?;
-    let build_commit = verify_installed_release(args, &client)?;
+    let build_commit = verify_installed_release(args, &client, &log_path)?;
     append_log(
         &log_path,
         "Installed release and application health verified.",
@@ -1221,7 +1221,7 @@ fn hide_console(command: &mut Command) {
     let _ = command;
 }
 
-fn verify_installed_release(args: &Args, client: &Client) -> Result<String> {
+fn verify_installed_release(args: &Args, client: &Client, log_path: &Path) -> Result<String> {
     let config: InstallConfig = read_json(&args.install_root.join("state").join("studio.json"))?;
     let active_release = canonical(&config.active_release)?;
     let release_directory = canonical(&args.install_root.join("releases"))?;
@@ -1244,25 +1244,74 @@ fn verify_installed_release(args: &Args, client: &Client) -> Result<String> {
             "The active application release is missing its build commit identity.",
         ));
     }
+    if health_reports_release(client, &args.target_version, &metadata.commit) {
+        append_log(
+            log_path,
+            "The installed runtime already reports the target release.",
+        )?;
+        return Ok(metadata.commit);
+    }
+    append_log(
+        log_path,
+        "Starting the installed manager after the installer exited.",
+    )?;
+    let manager_path = args.install_root.join("tools").join("NGTManager.exe");
+    let manager_metadata = fs::symlink_metadata(&manager_path).map_err(|_| {
+        UpdateError::new(
+            "validating",
+            "The updated NGTManager manager executable is missing.",
+        )
+    })?;
+    if !manager_metadata.is_file() || is_reparse(&manager_metadata) {
+        return Err(UpdateError::new(
+            "validating",
+            "The updated NGTManager manager executable is not a regular file.",
+        ));
+    }
+    let mut command = Command::new(&manager_path);
+    command
+        .arg("run")
+        .current_dir(&args.install_root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    let mut manager_process = command.spawn().map_err(|_| {
+        UpdateError::new(
+            "validating",
+            "The updated NGTManager runtime could not be started.",
+        )
+    })?;
+    append_log(
+        log_path,
+        &format!(
+            "Started the installed manager process {}.",
+            manager_process.id()
+        ),
+    )?;
     let deadline = Instant::now() + Duration::from_secs(10 * 60);
     let mut delay = Duration::from_secs(1);
     while Instant::now() < deadline {
-        if let Ok(response) = client
-            .get("http://127.0.0.1:3000/api/health")
-            .timeout(Duration::from_secs(10))
-            .send()
-        {
-            if response.status().is_success() {
-                if let Ok(body) = response.json::<Value>() {
-                    if body["status"] == "ok"
-                        && body["currentVersion"] == args.target_version
-                        && body["buildCommit"]
-                            .as_str()
-                            .is_some_and(|commit| commit.eq_ignore_ascii_case(&metadata.commit))
-                    {
-                        return Ok(metadata.commit);
-                    }
-                }
+        if health_reports_release(client, &args.target_version, &metadata.commit) {
+            append_log(
+                log_path,
+                "The installed manager reached the target release health check.",
+            )?;
+            return Ok(metadata.commit);
+        }
+        if let Some(status) = manager_process.try_wait().map_err(|_| {
+            UpdateError::new(
+                "validating",
+                "The updated NGTManager runtime startup could not be monitored.",
+            )
+        })? {
+            if !status.success() {
+                let message = format!(
+                    "The updated NGTManager runtime exited with code {} before becoming healthy.",
+                    exit_code(&status)
+                );
+                let _ = append_log(log_path, &message);
+                return Err(UpdateError::new("validating", message));
             }
         }
         thread::sleep(delay);
@@ -1275,6 +1324,25 @@ fn verify_installed_release(args: &Args, client: &Client) -> Result<String> {
             args.target_version, metadata.commit
         ),
     ))
+}
+
+fn health_reports_release(client: &Client, version: &str, commit: &str) -> bool {
+    client
+        .get("http://127.0.0.1:3000/api/health")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .ok()
+        .filter(|response| response.status().is_success())
+        .and_then(|response| response.json::<Value>().ok())
+        .is_some_and(|body| health_document_reports_release(&body, version, commit))
+}
+
+fn health_document_reports_release(body: &Value, version: &str, commit: &str) -> bool {
+    body["status"] == "ok"
+        && body["currentVersion"] == version
+        && body["buildCommit"]
+            .as_str()
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(commit))
 }
 
 fn ensure_installer_succeeded(args: &Args, installer: &ExitStatus) -> Result<()> {
@@ -2151,6 +2219,31 @@ fn is_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn updated_runtime_health_must_match_version_and_commit() {
+        let expected = json!({
+            "status": "ok",
+            "currentVersion": "2.0.26",
+            "buildCommit": "ABC123"
+        });
+        assert!(health_document_reports_release(
+            &expected, "2.0.26", "abc123"
+        ));
+        assert!(!health_document_reports_release(
+            &expected, "2.0.25", "abc123"
+        ));
+        assert!(!health_document_reports_release(
+            &expected,
+            "2.0.26",
+            "different"
+        ));
+        assert!(!health_document_reports_release(
+            &json!({"status":"ok"}),
+            "2.0.26",
+            "abc123"
+        ));
+    }
 
     #[test]
     fn completes_the_previous_update_step_once_on_stage_change() {

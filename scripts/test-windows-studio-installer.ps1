@@ -362,9 +362,12 @@ try {
     if ($activeManagerInstaller.ExitCode -ne 0) {
       throw "The installer over a running NGTManager exited with code $($activeManagerInstaller.ExitCode)."
     }
+    if (-not $managerRunProcess.WaitForExit(30000)) {
+      throw "The previously running NGTManager remained alive 30 seconds after the installer handoff."
+    }
     $managerRunProcess.Refresh()
-    if (-not $managerRunProcess.HasExited -or $managerRunProcess.ExitCode -ne 0) {
-      throw "The previously running NGTManager did not exit cleanly during the installer handoff."
+    if ($managerRunProcess.ExitCode -ne 0) {
+      throw "The previously running NGTManager exited with code $($managerRunProcess.ExitCode) during the installer handoff."
     }
 
     $configuration = Get-Content -LiteralPath $configurationPath -Raw | ConvertFrom-Json

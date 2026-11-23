@@ -6519,14 +6519,6 @@ fn install_package(
             if installed_release_is_retry(config, &preflight.manifest)? {
                 remove_legacy_autostart(&root)?;
                 drop(_operation_lock);
-                if requested_operation == "update" && !runtime_is_active(&root)? {
-                    if let Err(error) = launch_manager(&root, "run") {
-                        log_line(
-                            &root,
-                            &format!("Unable to start the committed release: {error}"),
-                        );
-                    }
-                }
                 progress.finish("complete");
                 return Ok(format!(
                     "NGTManager v{} is already installed; setup registration was retried without reinstalling data.",
@@ -6690,7 +6682,7 @@ fn install_package(
     match result {
         Ok(config) => {
             drop(_operation_lock);
-            if restart_runtime {
+            if should_restart_runtime_after_install(requested_operation, restart_runtime) {
                 if let Err(error) = launch_manager(&root, "run") {
                     log_line(
                         &root,
@@ -6722,6 +6714,13 @@ fn install_package(
             Err(error)
         }
     }
+}
+
+fn should_restart_runtime_after_install(
+    requested_operation: &str,
+    runtime_was_active: bool,
+) -> bool {
+    runtime_was_active && requested_operation != "update"
 }
 
 fn activate_candidate(candidate_stage: &Path, final_release: &Path) -> Result<(), String> {
@@ -9818,6 +9817,14 @@ pub fn main() -> std::process::ExitCode {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn online_update_leaves_runtime_restart_to_the_updater() {
+        assert!(!should_restart_runtime_after_install("update", true));
+        assert!(should_restart_runtime_after_install("install", true));
+        assert!(should_restart_runtime_after_install("repair", true));
+        assert!(!should_restart_runtime_after_install("install", false));
+    }
 
     #[cfg(windows)]
     #[test]
