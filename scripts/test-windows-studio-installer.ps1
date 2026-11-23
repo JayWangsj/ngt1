@@ -682,8 +682,18 @@ try {
   } else {
     $releaseManagerPath = Join-Path $releaseRoot "tools\NGTManager.exe"
     $repairArguments = 'repair "{0}"' -f $releaseRoot
-    $repair = Start-Process -FilePath $releaseManagerPath -ArgumentList $repairArguments `
-      -WindowStyle Hidden -PassThru
+    $previousHeadlessAcceptance = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
+    try {
+      $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
+      $repair = Start-Process -FilePath $releaseManagerPath -ArgumentList $repairArguments `
+        -WindowStyle Hidden -PassThru
+    } finally {
+      if ($null -eq $previousHeadlessAcceptance) {
+        Remove-Item Env:\NGT_MANAGER_ACCEPTANCE_HEADLESS -ErrorAction SilentlyContinue
+      } else {
+        $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = $previousHeadlessAcceptance
+      }
+    }
     Wait-NgtInstallerProcess -Process $repair -Description "NGTManager repair" `
       -TimeoutMinutes 30 -ProgressPaths @($managerLog)
     if ($repair.ExitCode -ne 0) {

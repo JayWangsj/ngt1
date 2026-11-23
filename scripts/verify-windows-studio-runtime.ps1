@@ -36,7 +36,20 @@ $handler.UseProxy = $false
 $client = [System.Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(20)
 try {
-  $healthResponse = $client.GetAsync([uri]::new($baseUri, "/api/health")).GetAwaiter().GetResult()
+  $healthResponse = $null
+  do {
+    try {
+      $healthResponse = $client.GetAsync([uri]::new($baseUri, "/api/health")).GetAwaiter().GetResult()
+    } catch {
+      if ((Get-Date) -ge $deadline) {
+        throw "The local NGTManager runtime did not become available within three minutes."
+      }
+      Start-Sleep -Milliseconds 500
+    }
+  } while ($null -eq $healthResponse -and (Get-Date) -lt $deadline)
+  if (-not $healthResponse) {
+    throw "The local NGTManager runtime did not become available within three minutes."
+  }
   try {
     $health = $healthResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
     if ($healthResponse.StatusCode -ne [System.Net.HttpStatusCode]::OK -or
