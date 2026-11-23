@@ -7956,7 +7956,14 @@ fn run_supervisor(
     WINDOWS_SESSION_END_TICK.store(0, Ordering::SeqCst);
     RUNTIME_HEALTHY.store(false, Ordering::SeqCst);
     TRAY_EXIT_REQUESTED.store(false, Ordering::SeqCst);
-    let _session_notifier = SessionEndNotifier::start(&root, open_browser_after_health)?;
+    let headless_acceptance = std::env::var("NGT_MANAGER_ACCEPTANCE_HEADLESS")
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    let _session_notifier = if headless_acceptance {
+        None
+    } else {
+        Some(SessionEndNotifier::start(&root, open_browser_after_health)?)
+    };
     update_runtime_ui_phase(RUNTIME_UI_PHASE_CHECKING);
     let operation_lock = match operation_lock {
         Some(lock) => {

@@ -277,9 +277,19 @@ try {
   if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
     throw "A silent first install unexpectedly started the application."
   }
-  $managerRunProcess = Start-Process -FilePath $managerPath -ArgumentList "run" `
-    -WorkingDirectory $installRoot -RedirectStandardOutput $managerRunStdout `
-    -RedirectStandardError $managerRunStderr -WindowStyle Hidden -PassThru
+  $previousHeadlessAcceptance = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
+  try {
+    $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
+    $managerRunProcess = Start-Process -FilePath $managerPath -ArgumentList "run" `
+      -WorkingDirectory $installRoot -RedirectStandardOutput $managerRunStdout `
+      -RedirectStandardError $managerRunStderr -WindowStyle Hidden -PassThru
+  } finally {
+    if ($null -eq $previousHeadlessAcceptance) {
+      Remove-Item Env:\NGT_MANAGER_ACCEPTANCE_HEADLESS -ErrorAction SilentlyContinue
+    } else {
+      $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = $previousHeadlessAcceptance
+    }
+  }
 
   $health = $null
   for ($attempt = 0; $attempt -lt 180; $attempt++) {
