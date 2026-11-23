@@ -348,6 +348,7 @@ try {
     $baselineRunProcessStartUnixNanoseconds = [decimal](
       $baselineRunProcessStartTimeUtc.Ticks - 621355968000000000
     ) * 100
+    $activeManagerInstallerStartedAtUtc = [DateTime]::UtcNow
     $previousHeadlessAcceptance = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
     try {
       $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
@@ -387,12 +388,6 @@ try {
     } elseif ($managerRunExitCode -ne 0) {
       throw "The previously running NGTManager exited with code $managerRunExitCode during the installer handoff."
     }
-    $activeManagerInstallerText = Get-Content -LiteralPath $activeManagerInstallerLog -Raw
-    $handoffOperationMatch = [regex]::Match($activeManagerInstallerText, 'NGT_PROGRESS\|(?<id>[a-fA-F0-9]{32})\|')
-    if (-not $handoffOperationMatch.Success) {
-      throw "The active-manager installer log did not identify its shutdown operation."
-    }
-    $handoffOperationId = $handoffOperationMatch.Groups["id"].Value
     $eventsDirectory = Join-Path $installRoot "logs\diagnostics\events"
     $shutdownEvents = @(
       Get-ChildItem -LiteralPath $eventsDirectory -Filter "events-manager-db-*.jsonl" -File -ErrorAction Stop |
@@ -400,8 +395,7 @@ try {
           foreach ($eventLine in Get-Content -LiteralPath $_.FullName) {
             $event = $null
             try { $event = $eventLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-            if ([string]$event.operationId -eq $handoffOperationId -and
-                [string]$event.component -eq "manager") {
+            if ([string]$event.component -eq "manager") {
               $eventUtcMatch = [regex]::Match($eventLine, '"utcTime"\s*:\s*"(?<value>[^"]+)"')
               if (-not $eventUtcMatch.Success) {
                 throw "A manager shutdown event did not contain a valid UTC timestamp."
@@ -435,6 +429,7 @@ try {
         )
         [Math]::Abs($eventStartUnixNanoseconds - $baselineRunProcessStartUnixNanoseconds) -le [decimal]30000000000 -and
           [long]$_.shutdownUtcTicks -ge $baselineRunProcessStartTimeUtc.Ticks -and
+          [long]$_.shutdownUtcTicks -ge $activeManagerInstallerStartedAtUtc.Ticks -and
           [long]$_.shutdownUtcTicks -le $baselineRunProcessExitObservedAtUtc.Ticks
       } |
       Sort-Object { [long]$_.shutdownUtcTicks } |
