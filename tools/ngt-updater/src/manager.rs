@@ -651,23 +651,29 @@ fn windows_replace(source: &Path, destination: &Path) -> Result<(), String> {
         .encode_wide()
         .chain(Some(0))
         .collect();
-    let result = unsafe {
-        ReplaceFileW(
-            destination.as_ptr(),
-            source.as_ptr(),
-            std::ptr::null(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-        )
-    };
-    if result == 0 {
-        Err(format!(
-            "Unable to atomically replace operation state: {}",
-            std::io::Error::last_os_error()
-        ))
-    } else {
-        Ok(())
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let result = unsafe {
+            ReplaceFileW(
+                destination.as_ptr(),
+                source.as_ptr(),
+                std::ptr::null(),
+                1,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if result != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if is_lock_contention(&error) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        return Err(format!(
+            "Unable to atomically replace operation state: {error}"
+        ));
     }
 }
 
@@ -10117,6 +10123,40 @@ mod tests {
 
         assert_eq!(fs::read(&destination).unwrap(), br#"{"phase":"running"}"#);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_state_replace_retries_a_temporary_destination_lock() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = std::env::temp_dir().join(format!("ngt-atomic-replace-{}", unique_id()));
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("run-state.json");
+        let temporary = root.join(".run-state.json.tmp");
+        fs::write(&destination, b"old").unwrap();
+        fs::write(&temporary, b"new").unwrap();
+        let held_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(&destination)
+            .unwrap();
+        let release_lock = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            drop(held_file);
+        });
+
+        let started = Instant::now();
+        let replacement = windows_replace(&temporary, &destination);
+        let elapsed = started.elapsed();
+        release_lock.join().unwrap();
+
+        assert!(replacement.is_ok(), "replacement failed: {replacement:?}");
+        assert!(elapsed >= Duration::from_millis(200));
+        assert_eq!(fs::read(&destination).unwrap(), b"new");
+        assert!(!temporary.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]
