@@ -343,6 +343,11 @@ try {
     $baselineRunStatePath = Join-Path $installRoot "state\runtime\run-state.json"
     $baselineRunState = Get-Content -LiteralPath $baselineRunStatePath -Raw | ConvertFrom-Json
     $baselineRunId = [string]$baselineRunState.runId
+    $baselineRunProcessId = [int]$managerRunProcess.Id
+    $baselineRunProcessStartTimeUtc = $managerRunProcess.StartTime.ToUniversalTime()
+    $baselineRunProcessStartUnixNanoseconds = [decimal](
+      $baselineRunProcessStartTimeUtc.Ticks - 621355968000000000
+    ) * 100
     $previousHeadlessAcceptance = $env:NGT_MANAGER_ACCEPTANCE_HEADLESS
     try {
       $env:NGT_MANAGER_ACCEPTANCE_HEADLESS = "1"
@@ -366,6 +371,7 @@ try {
       throw "The previously running NGTManager remained alive 30 seconds after the installer handoff."
     }
     $managerRunProcess.Refresh()
+    $baselineRunProcessExitTimeUtc = $managerRunProcess.ExitTime.ToUniversalTime()
     $managerRunExitCode = $null
     try { $managerRunExitCode = $managerRunProcess.ExitCode } catch { }
     if ($null -eq $managerRunExitCode) {
@@ -412,14 +418,29 @@ try {
     )
     $applicationStop = @($shutdownEvents |
       Where-Object {
-        $_.eventCode -eq "runtime.shutdown.phase.completed" -and
-        $_.phase -eq "application" -and
-        [string]$_.processStartId -eq $baselineRunId
+        if ($_.eventCode -ne "runtime.shutdown.phase.completed" -or $_.phase -ne "application") {
+          return $false
+        }
+        $processStartIdentity = [regex]::Match(
+          [string]$_.processStartId,
+          '^(?<processId>\d+)-(?<unixNanoseconds>\d+)$'
+        )
+        if (-not $processStartIdentity.Success -or
+            [int]$processStartIdentity.Groups["processId"].Value -ne $baselineRunProcessId) {
+          return $false
+        }
+        $eventStartUnixNanoseconds = [decimal]::Parse(
+          $processStartIdentity.Groups["unixNanoseconds"].Value,
+          [Globalization.CultureInfo]::InvariantCulture
+        )
+        [Math]::Abs($eventStartUnixNanoseconds - $baselineRunProcessStartUnixNanoseconds) -le [decimal]30000000000 -and
+          [long]$_.shutdownUtcTicks -ge $baselineRunProcessStartTimeUtc.Ticks -and
+          [long]$_.shutdownUtcTicks -le $baselineRunProcessExitTimeUtc.Ticks
       } |
       Sort-Object { [long]$_.shutdownUtcTicks } |
       Select-Object -Last 1)
     if ($applicationStop.Count -ne 1) {
-      throw "The active-manager installer handoff did not record application shutdown for the original manager process."
+      throw "The active-manager installer handoff did not record application shutdown for the original manager process identity."
     }
     $applicationStoppedAt = [long]$applicationStop[0].shutdownUtcTicks
     $databaseStop = @($shutdownEvents |
