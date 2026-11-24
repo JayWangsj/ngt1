@@ -85,28 +85,93 @@ function Invoke-NgtManagerCommand {
   $startInfo.CreateNoWindow = $true
   $startInfo.RedirectStandardOutput = $true
   $startInfo.RedirectStandardError = $true
+  $commandId = [guid]::NewGuid().ToString("N")
+  $stdoutSource = "NgtManagerCommandStdout-$commandId"
+  $stderrSource = "NgtManagerCommandStderr-$commandId"
+  $stdoutLines = [System.Collections.Generic.List[string]]::new()
+  $stderrLines = [System.Collections.Generic.List[string]]::new()
+  $stdoutSubscription = $null
+  $stderrSubscription = $null
   $process = [System.Diagnostics.Process]::new()
+  $outputReadStarted = $false
+  $errorReadStarted = $false
   try {
     $process.StartInfo = $startInfo
+    $stdoutSubscription = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived `
+      -SourceIdentifier $stdoutSource
+    $stderrSubscription = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived `
+      -SourceIdentifier $stderrSource
     if (-not $process.Start()) { throw "NGTManager command did not start." }
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-      & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
-      if (-not $process.WaitForExit(5000)) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    $process.BeginOutputReadLine()
+    $outputReadStarted = $true
+    $process.BeginErrorReadLine()
+    $errorReadStarted = $true
+    $commandStartedAt = [DateTime]::UtcNow
+    if ($Arguments.Count -gt 0 -and $Arguments[0] -eq "start-update") {
+      Write-NgtAcceptanceProgress -Phase "online-update" -Stage "starting-updater/waiting-for-manager" -StageStartedAt $commandStartedAt
+    }
+    $commandDeadline = $commandStartedAt.AddSeconds($TimeoutSeconds)
+    while (-not $process.WaitForExit(100)) {
+      $events = @(
+        Get-Event -SourceIdentifier $stdoutSource -ErrorAction SilentlyContinue
+        Get-Event -SourceIdentifier $stderrSource -ErrorAction SilentlyContinue
+      )
+      foreach ($eventRecord in $events) {
+        if ($null -ne $eventRecord.SourceEventArgs.Data) {
+          if ($eventRecord.SourceIdentifier -eq $stdoutSource) { $stdoutLines.Add($eventRecord.SourceEventArgs.Data) }
+          else { $stderrLines.Add($eventRecord.SourceEventArgs.Data) }
+        }
+        Remove-Event -EventIdentifier $eventRecord.EventIdentifier -ErrorAction SilentlyContinue
+      }
+      if ([DateTime]::UtcNow -ge $commandDeadline -and -not $process.HasExited) {
+        & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F | Out-Null
         if (-not $process.WaitForExit(5000)) {
-          throw "NGTManager command '$($Arguments[0])' exceeded its ${TimeoutSeconds}-second timeout and could not be stopped."
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          if (-not $process.WaitForExit(5000)) {
+            throw "NGTManager command '$($Arguments[0])' exceeded its ${TimeoutSeconds}-second timeout and could not be stopped."
+          }
+        }
+        throw "NGTManager command '$($Arguments[0])' exceeded its ${TimeoutSeconds}-second timeout."
+      }
+    }
+    $process.Refresh()
+    if ($Arguments.Count -gt 0 -and $Arguments[0] -eq "start-update") {
+      Write-NgtAcceptanceProgress -Phase "online-update" -Stage "starting-updater/reading-manager-result" -StageStartedAt ([DateTime]::UtcNow)
+    }
+    $drainDeadline = [DateTime]::UtcNow.AddMilliseconds(500)
+    $stableSamples = 0
+    while ([DateTime]::UtcNow -lt $drainDeadline -and $stableSamples -lt 3) {
+      $events = @(
+        Get-Event -SourceIdentifier $stdoutSource -ErrorAction SilentlyContinue
+        Get-Event -SourceIdentifier $stderrSource -ErrorAction SilentlyContinue
+      )
+      if ($events.Count -eq 0) { $stableSamples++ }
+      else {
+        $stableSamples = 0
+        foreach ($eventRecord in $events) {
+          if ($null -ne $eventRecord.SourceEventArgs.Data) {
+            if ($eventRecord.SourceIdentifier -eq $stdoutSource) { $stdoutLines.Add($eventRecord.SourceEventArgs.Data) }
+            else { $stderrLines.Add($eventRecord.SourceEventArgs.Data) }
+          }
+          Remove-Event -EventIdentifier $eventRecord.EventIdentifier -ErrorAction SilentlyContinue
         }
       }
-      throw "NGTManager command '$($Arguments[0])' exceeded its ${TimeoutSeconds}-second timeout."
+      Start-Sleep -Milliseconds 50
     }
-    $process.WaitForExit()
-    $stdout = $stdoutTask.GetAwaiter().GetResult()
-    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $stdout = [string]::Join([Environment]::NewLine, $stdoutLines)
+    $stderr = [string]::Join([Environment]::NewLine, $stderrLines)
     $text = (@($stdout, $stderr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
     return [pscustomobject]@{ ExitCode = [int]$process.ExitCode; Text = $text.Trim() }
   } finally {
+    if ($outputReadStarted) { try { $process.CancelOutputRead() } catch { } }
+    if ($errorReadStarted) { try { $process.CancelErrorRead() } catch { } }
+    foreach ($sourceIdentifier in @($stdoutSource, $stderrSource)) {
+      foreach ($eventRecord in @(Get-Event -SourceIdentifier $sourceIdentifier -ErrorAction SilentlyContinue)) {
+        Remove-Event -EventIdentifier $eventRecord.EventIdentifier -ErrorAction SilentlyContinue
+      }
+    }
+    if ($stdoutSubscription) { Unregister-Event -SourceIdentifier $stdoutSource -ErrorAction SilentlyContinue }
+    if ($stderrSubscription) { Unregister-Event -SourceIdentifier $stderrSource -ErrorAction SilentlyContinue }
     $process.Dispose()
   }
 }

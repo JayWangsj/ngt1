@@ -135,6 +135,52 @@ $passwordPlain = "fake-password"
 $diagnosticPath = Join-Path $testRoot "diagnostics\acceptance-failure.json"
 try {
   New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+  $installerTestPath = Join-Path $PSScriptRoot "test-windows-studio-installer.ps1"
+  $installerTokens = $null
+  $installerErrors = $null
+  $installerAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $installerTestPath,
+    [ref]$installerTokens,
+    [ref]$installerErrors
+  )
+  Assert-NgtAcceptanceTest ($installerErrors.Count -eq 0) "The installer acceptance script did not parse."
+  $managerCommandDefinition = $installerAst.Find({
+      param($node)
+      $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq "Invoke-NgtManagerCommand"
+    }, $true)
+  Assert-NgtAcceptanceTest ($null -ne $managerCommandDefinition) `
+    "The bounded manager-command helper was not found in the installer acceptance script."
+  Invoke-Expression $managerCommandDefinition.Extent.Text
+  $childStartedPath = Join-Path $testRoot "inherited-output-child-started.txt"
+  $childCompletedPath = Join-Path $testRoot "inherited-output-child-completed.txt"
+  $childScriptPath = Join-Path $testRoot "inherited-output-child.ps1"
+  $childScriptText = '[System.IO.File]::WriteAllText("{0}", "started"); Start-Sleep -Seconds 2; [System.IO.File]::WriteAllText("{1}", "completed")' -f `
+    $childStartedPath, $childCompletedPath
+  [System.IO.File]::WriteAllText($childScriptPath, $childScriptText, [System.Text.UTF8Encoding]::new($false))
+  $childCommand = 'start "" /b "{0}" -NoProfile -File "{1}" & echo manager-command-complete' -f `
+    $powerShellPath, $childScriptPath
+  $managerCommandElapsed = [System.Diagnostics.Stopwatch]::StartNew()
+  $managerCommand = Invoke-NgtManagerCommand -ManagerPath $env:ComSpec `
+    -Arguments @("/d", "/c", $childCommand) -WorkingDirectory $testRoot -TimeoutSeconds 10
+  $managerCommandElapsed.Stop()
+  $childStartDeadline = [DateTime]::UtcNow.AddSeconds(1)
+  while (-not (Test-Path -LiteralPath $childStartedPath -PathType Leaf) -and [DateTime]::UtcNow -lt $childStartDeadline) {
+    Start-Sleep -Milliseconds 50
+  }
+  Assert-NgtAcceptanceTest (Test-Path -LiteralPath $childStartedPath -PathType Leaf) `
+    "The inherited-output child process did not start."
+  Assert-NgtAcceptanceTest ($managerCommand.ExitCode -eq 0 -and $managerCommand.Text -match "manager-command-complete") `
+    "The manager command did not return its captured output."
+  Assert-NgtAcceptanceTest ($managerCommandElapsed.Elapsed.TotalSeconds -lt 1.5) `
+    "The manager command waited for a child that inherited its output handles."
+  $childCompletionDeadline = [DateTime]::UtcNow.AddSeconds(5)
+  while (-not (Test-Path -LiteralPath $childCompletedPath -PathType Leaf) -and [DateTime]::UtcNow -lt $childCompletionDeadline) {
+    Start-Sleep -Milliseconds 50
+  }
+  Assert-NgtAcceptanceTest (Test-Path -LiteralPath $childCompletedPath -PathType Leaf) `
+    "The inherited-output child process did not complete during the bounded-capture regression."
+
   $statusPath = Join-Path $testRoot "online-update-status.json"
   $progress = New-NgtOnlineUpdateTestStatus -Status "running" -Stage "checking"
   $complete = New-NgtOnlineUpdateTestStatus -Status "complete" -Stage "complete" -ActualVersion "2.0.23"
